@@ -51,7 +51,8 @@ export function formatWatermarkTime(isoTime: string): string {
   try {
     const date = new Date(isoTime);
     // Format as YYYY-MM-DD HH:MM in Europe/Amsterdam timezone
-    return date.toLocaleString('en-CA', {
+    // Using nl-NL locale for European formatting
+    return date.toLocaleString('nl-NL', {
       timeZone: 'Europe/Amsterdam',
       year: 'numeric',
       month: '2-digit',
