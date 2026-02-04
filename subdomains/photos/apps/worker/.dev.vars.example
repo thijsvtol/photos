@@ -1,0 +1,13 @@
+# Example environment configuration
+# Copy this to .dev.vars for local development
+
+# Cookie secret for signing session cookies
+# Generate with: openssl rand -base64 32
+EVENT_COOKIE_SECRET=your-random-secret-here-change-me
+
+# Optional: Admin shared secret for development
+# In production, use Cloudflare Access instead
+ADMIN_SHARED_SECRET=your-admin-secret-here
+
+# Environment
+ENVIRONMENT=development
