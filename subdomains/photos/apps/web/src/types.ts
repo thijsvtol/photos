@@ -22,6 +22,7 @@ export interface CreateEventRequest {
   slug?: string;
 }
 
+// Upload queue item for in-memory state management
 export interface UploadQueueItem {
   id: string;
   eventSlug: string;
@@ -32,4 +33,7 @@ export interface UploadQueueItem {
   photoId?: string;
   uploadId?: string;
   parts?: Array<{ partNumber: number; etag: string }>;
+  captureTime?: string;
+  width?: number;
+  height?: number;
 }

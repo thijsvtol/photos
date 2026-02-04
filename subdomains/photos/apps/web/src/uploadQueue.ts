@@ -1,53 +1,58 @@
-import Dexie, { Table } from 'dexie';
 import type { UploadQueueItem } from './types';
 
-class UploadDatabase extends Dexie {
-  uploads!: Table<UploadQueueItem, string>;
+// In-memory upload queue management
+// Note: This simplified version uses memory instead of IndexedDB
+// Files are not persisted across page reloads
 
-  constructor() {
-    super('PhotosUploadQueue');
-    this.version(1).stores({
-      uploads: 'id, eventSlug, status',
-    });
-  }
-}
+const uploadQueue: UploadQueueItem[] = [];
 
-export const db = new UploadDatabase();
-
-// Queue management functions
 export const addToQueue = async (item: UploadQueueItem): Promise<void> => {
-  await db.uploads.add(item);
+  uploadQueue.push(item);
 };
 
 export const updateQueueItem = async (id: string, updates: Partial<UploadQueueItem>): Promise<void> => {
-  await db.uploads.update(id, updates);
+  const index = uploadQueue.findIndex(item => item.id === id);
+  if (index !== -1) {
+    uploadQueue[index] = { ...uploadQueue[index], ...updates };
+  }
 };
 
 export const removeFromQueue = async (id: string): Promise<void> => {
-  await db.uploads.delete(id);
+  const index = uploadQueue.findIndex(item => item.id === id);
+  if (index !== -1) {
+    uploadQueue.splice(index, 1);
+  }
 };
 
 export const getQueueItems = async (eventSlug?: string): Promise<UploadQueueItem[]> => {
   if (eventSlug) {
-    return await db.uploads.where('eventSlug').equals(eventSlug).toArray();
+    return uploadQueue.filter(item => item.eventSlug === eventSlug);
   }
-  return await db.uploads.toArray();
+  return [...uploadQueue];
 };
 
 export const getPendingUploads = async (eventSlug?: string): Promise<UploadQueueItem[]> => {
-  const query = db.uploads.where('status').anyOf(['pending', 'uploading']);
+  const items = uploadQueue.filter(item => 
+    item.status === 'pending' || item.status === 'uploading'
+  );
   if (eventSlug) {
-    return await query.and(item => item.eventSlug === eventSlug).toArray();
+    return items.filter(item => item.eventSlug === eventSlug);
   }
-  return await query.toArray();
+  return items;
 };
 
 export const clearCompletedUploads = async (eventSlug?: string): Promise<void> => {
-  const query = db.uploads.where('status').equals('completed');
-  if (eventSlug) {
-    const items = await query.and(item => item.eventSlug === eventSlug).toArray();
-    await Promise.all(items.map(item => db.uploads.delete(item.id)));
-  } else {
-    await query.delete();
-  }
+  const indices: number[] = [];
+  uploadQueue.forEach((item, index) => {
+    if (item.status === 'completed' && (!eventSlug || item.eventSlug === eventSlug)) {
+      indices.push(index);
+    }
+  });
+  // Remove in reverse order to maintain indices
+  indices.reverse().forEach(index => uploadQueue.splice(index, 1));
 };
+
+// Expose queue for debugging
+if (typeof window !== 'undefined') {
+  (window as any).__uploadQueue = uploadQueue;
+}

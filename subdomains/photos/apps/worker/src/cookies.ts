@@ -32,6 +32,20 @@ async function verify(value: string, signature: string, secret: string): Promise
 }
 
 /**
+ * Base64 encode a string (works in Workers)
+ */
+function base64Encode(str: string): string {
+  return btoa(str);
+}
+
+/**
+ * Base64 decode a string (works in Workers)
+ */
+function base64Decode(str: string): string {
+  return atob(str);
+}
+
+/**
  * Creates a signed session cookie for an event
  */
 export async function createEventCookie(
@@ -46,7 +60,7 @@ export async function createEventCookie(
   
   const value = JSON.stringify(session);
   const signature = await sign(value, secret);
-  const cookieValue = `${Buffer.from(value).toString('base64')}.${signature}`;
+  const cookieValue = `${base64Encode(value)}.${signature}`;
   
   // Session-only cookie (no Max-Age/Expires)
   return `ev_${eventSlug}=${cookieValue}; HttpOnly; Secure; SameSite=Lax; Path=/`;
@@ -65,7 +79,7 @@ export async function verifyEventCookie(
       return null;
     }
     
-    const value = Buffer.from(encodedValue, 'base64').toString('utf-8');
+    const value = base64Decode(encodedValue);
     const isValid = await verify(value, signature, secret);
     
     if (!isValid) {

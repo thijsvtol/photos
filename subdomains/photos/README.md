@@ -20,7 +20,7 @@ A full-stack photo gallery application built with React + Vite + Tailwind (front
 ### Admin Features
 - 🎯 Event creation with auto-generated slugs
 - 📤 Drag & drop photo upload
-- 🔄 Resilient upload with IndexedDB queue
+- 🔄 In-memory upload queue (persists during current session)
 - 📦 Multipart upload to R2 for large files
 - 📊 EXIF metadata extraction (capture time, dimensions)
 - 🏷️ Automatic event date inference from photos
@@ -282,7 +282,7 @@ photos-storage/
 2. **ZIP Generation**: Returns individual download URLs instead of actual ZIP file
 3. **Derivative Generation**: Preview and IG versions need to be generated (requires image processing)
 4. **Thumbnail Optimization**: Could add smaller thumbnails for gallery grid
-5. **Progress Persistence**: Upload progress persists in IndexedDB but doesn't survive browser crashes during active uploads
+5. **Upload Queue Persistence**: Upload state is kept in memory and lost on page reload/navigation
 
 ## Troubleshooting
 
@@ -311,7 +311,7 @@ photos-storage/
 ## Development Tips
 
 - Use `wrangler tail` to see Worker logs in real-time
-- Check IndexedDB in browser DevTools to see upload queue
+- Check browser console `__uploadQueue` to debug upload queue state
 - Use browser Network tab to debug API calls
 - Test with various JPEG files to ensure EXIF extraction works
 
