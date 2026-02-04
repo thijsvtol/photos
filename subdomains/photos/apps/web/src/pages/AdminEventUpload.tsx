@@ -147,7 +147,11 @@ const AdminEventUpload: React.FC = () => {
           throw new Error(`Failed to upload part ${partNumber}`);
         }
         
-        const etag = response.headers.get('ETag')?.replace(/"/g, '') || '';
+        const etag = response.headers.get('ETag')?.replace(/"/g, '');
+        if (!etag) {
+          throw new Error(`Missing ETag in response for part ${partNumber}`);
+        }
+        
         parts.push({ partNumber, etag });
         
         // Update progress

@@ -1,7 +1,7 @@
 import { Hono } from 'hono';
 import { cors } from 'hono/cors';
-import type { Env, Event, Photo } from './types';
-import { getEventSession } from './cookies';
+import type { Env, Event, Photo } from '../types';
+import { getEventSession } from '../cookies';
 
 const app = new Hono<{ Bindings: Env }>();
 

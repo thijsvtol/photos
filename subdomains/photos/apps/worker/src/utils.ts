@@ -46,6 +46,7 @@ export function generateSlug(name: string): string {
 
 /**
  * Generates a unique slug by appending a number if needed
+ * Maximum 100 attempts to prevent infinite loops
  */
 export async function generateUniqueSlug(
   db: D1Database,
@@ -53,8 +54,9 @@ export async function generateUniqueSlug(
 ): Promise<string> {
   let slug = generateSlug(baseName);
   let counter = 1;
+  const maxAttempts = 100;
   
-  while (true) {
+  while (counter <= maxAttempts) {
     const existing = await db
       .prepare('SELECT id FROM events WHERE slug = ?')
       .bind(slug)
@@ -67,4 +69,7 @@ export async function generateUniqueSlug(
     slug = `${generateSlug(baseName)}-${counter}`;
     counter++;
   }
+  
+  // If we've exhausted attempts, throw an error
+  throw new Error(`Unable to generate unique slug after ${maxAttempts} attempts`);
 }

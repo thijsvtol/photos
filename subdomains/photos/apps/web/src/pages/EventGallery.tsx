@@ -24,9 +24,11 @@ const EventGallery: React.FC = () => {
 
   useEffect(() => {
     // Load selected photos from localStorage
-    const stored = localStorage.getItem(`favorites_${slug}`);
-    if (stored) {
-      setSelectedPhotos(new Set(JSON.parse(stored)));
+    if (slug) {
+      const stored = localStorage.getItem(`favorites_${slug}`);
+      if (stored) {
+        setSelectedPhotos(new Set(JSON.parse(stored)));
+      }
     }
   }, [slug]);
 

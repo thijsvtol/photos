@@ -52,7 +52,7 @@ export const clearCompletedUploads = async (eventSlug?: string): Promise<void> =
   indices.reverse().forEach(index => uploadQueue.splice(index, 1));
 };
 
-// Expose queue for debugging
-if (typeof window !== 'undefined') {
+// Expose queue for debugging in development only
+if (typeof window !== 'undefined' && import.meta.env.DEV) {
   (window as any).__uploadQueue = uploadQueue;
 }
