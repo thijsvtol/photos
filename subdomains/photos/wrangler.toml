@@ -1,0 +1,37 @@
+name = "photos-worker"
+main = "apps/worker/src/index.ts"
+compatibility_date = "2024-01-01"
+
+# D1 Database binding
+[[d1_databases]]
+binding = "DB"
+database_name = "photos-db"
+database_id = "" # Set this after creating the D1 database
+
+# R2 Storage binding
+[[r2_buckets]]
+binding = "PHOTOS_BUCKET"
+bucket_name = "photos-storage"
+
+# Environment variables and secrets
+# Set these via: wrangler secret put <NAME>
+[vars]
+ENVIRONMENT = "development"
+
+# Secrets (set via wrangler secret put):
+# - EVENT_COOKIE_SECRET: Secret for signing event session cookies
+# - ADMIN_SHARED_SECRET: Optional secret for admin API in development
+
+# Routes for production deployment
+# Uncomment and configure for your domain
+# routes = [
+#   { pattern = "photos.thijsvtol.nl/*", zone_name = "thijsvtol.nl" }
+# ]
+
+# Development configuration
+[env.development]
+name = "photos-worker-dev"
+
+# Production configuration
+[env.production]
+name = "photos-worker"
