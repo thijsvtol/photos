@@ -199,7 +199,7 @@ npm run build
 
 2. **Configure Cloudflare Pages** to serve from `photos.thijsvtol.nl`
 
-3. **Important**: The `apps/web/public/_routes.json` file ensures that only `/api/*` and `/media/*` routes are handled by the Worker, while all other routes (including `/`) are served by Cloudflare Pages. This file is automatically included in the build output.
+3. **Important**: The `apps/web/public/_routes.json` file disables Pages Functions (excludes all routes) so that Cloudflare Pages serves only static assets for the React SPA. The standalone Worker, deployed separately via wrangler, handles `/api/*` and `/media/*` routes through the zone-level routes configured in `wrangler.toml`. This file is automatically included in the build output.
 
 ### 7. Set Up Cloudflare Access (Admin Protection)
 
