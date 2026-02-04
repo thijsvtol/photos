@@ -12,8 +12,7 @@ const EventGallery: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [loginError, setLoginError] = useState<string | null>(null);
-  const [fromDate, setFromDate] = useState('');
-  const [toDate, setToDate] = useState('');
+  const [sortBy, setSortBy] = useState('date_desc');
   const [selectedPhotos, setSelectedPhotos] = useState<Set<string>>(new Set());
 
   useEffect(() => {
@@ -45,14 +44,25 @@ const EventGallery: React.FC = () => {
       const eventData = await getEvent(slug!);
       setEvent(eventData);
       
-      // Try to load photos (will fail if not authenticated)
-      try {
-        const photoData = await getPhotos(slug!);
-        setPhotos(photoData);
-        setAuthenticated(true);
-      } catch {
-        // Not authenticated yet
-        setAuthenticated(false);
+      // If event doesn't require password, load photos immediately
+      if (!eventData.requires_password) {
+        try {
+          const photoData = await getPhotos(slug!, sortBy);
+          setPhotos(photoData);
+          setAuthenticated(true);
+        } catch (err) {
+          console.error('Failed to load photos for public event:', err);
+        }
+      } else {
+        // Try to load photos (will succeed if already authenticated)
+        try {
+          const photoData = await getPhotos(slug!, sortBy);
+          setPhotos(photoData);
+          setAuthenticated(true);
+        } catch {
+          // Not authenticated yet
+          setAuthenticated(false);
+        }
       }
       
       setError(null);
@@ -79,16 +89,19 @@ const EventGallery: React.FC = () => {
 
   const loadPhotos = async () => {
     try {
-      const photoData = await getPhotos(slug!, fromDate || undefined, toDate || undefined);
+      const photoData = await getPhotos(slug!, sortBy);
       setPhotos(photoData);
     } catch (err) {
       console.error(err);
     }
   };
 
-  const applyFilters = () => {
-    loadPhotos();
-  };
+  // Reload photos when sort changes
+  useEffect(() => {
+    if (authenticated && slug) {
+      loadPhotos();
+    }
+  }, [sortBy]);
 
   const toggleSelection = (photoId: string) => {
     const newSelected = new Set(selectedPhotos);
@@ -153,7 +166,7 @@ const EventGallery: React.FC = () => {
     );
   }
 
-  if (!authenticated) {
+  if (!authenticated && event?.requires_password) {
     return (
       <div className="min-h-screen bg-gray-50 flex items-center justify-center">
         <div className="max-w-md w-full bg-white rounded-lg shadow-md p-8">
@@ -194,45 +207,39 @@ const EventGallery: React.FC = () => {
 
   return (
     <div className="min-h-screen bg-gray-50">
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        <div className="mb-8">
-          <Link to="/events" className="text-blue-600 hover:text-blue-700 mb-4 inline-block">
+      <div className="max-w-7xl mx-auto px-3 sm:px-4 lg:px-8 py-4 sm:py-8">
+        <div className="mb-6 sm:mb-8">
+          <Link to="/events" className="text-blue-600 hover:text-blue-700 mb-3 sm:mb-4 inline-block text-sm sm:text-base">
             ← Back to Events
           </Link>
-          <h1 className="text-4xl font-bold text-gray-900">{event?.name}</h1>
+          <h1 className="text-3xl sm:text-4xl font-bold text-gray-900">{event?.name}</h1>
+          {event && !event.requires_password && (
+            <span className="inline-block mt-2 px-2 py-1 text-xs bg-green-100 text-green-800 rounded-full">
+              Public Gallery
+            </span>
+          )}
         </div>
 
-        {/* Filters */}
-        <div className="bg-white rounded-lg shadow p-4 mb-6">
-          <div className="flex flex-wrap gap-4 items-end">
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">From Date</label>
-              <input
-                type="date"
-                value={fromDate}
-                onChange={(e) => setFromDate(e.target.value)}
-                className="px-3 py-2 border border-gray-300 rounded-lg"
-              />
+        {/* Sort Options - Mobile optimized */}
+        <div className="bg-white rounded-lg shadow p-3 sm:p-4 mb-6">
+          <div className="flex flex-col sm:flex-row flex-wrap gap-3 sm:gap-4 sm:items-center">
+            <div className="flex-1 sm:flex-none">
+              <label className="block text-sm font-medium text-gray-700 mb-1">Sort by</label>
+              <select
+                value={sortBy}
+                onChange={(e) => setSortBy(e.target.value)}
+                className="w-full sm:w-auto px-3 py-2 border border-gray-300 rounded-lg text-sm bg-white"
+              >
+                <option value="date_desc">Date (Newest First)</option>
+                <option value="date_asc">Date (Oldest First)</option>
+                <option value="name_asc">Name (A-Z)</option>
+                <option value="name_desc">Name (Z-A)</option>
+              </select>
             </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">To Date</label>
-              <input
-                type="date"
-                value={toDate}
-                onChange={(e) => setToDate(e.target.value)}
-                className="px-3 py-2 border border-gray-300 rounded-lg"
-              />
-            </div>
-            <button
-              onClick={applyFilters}
-              className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition"
-            >
-              Apply Filters
-            </button>
             {selectedPhotos.size > 0 && (
               <button
                 onClick={downloadSelected}
-                className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition ml-auto"
+                className="w-full sm:w-auto px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition sm:ml-auto text-sm font-medium"
               >
                 Download Selected ({selectedPhotos.size})
               </button>
@@ -246,50 +253,59 @@ const EventGallery: React.FC = () => {
             <p className="text-gray-600">No photos found.</p>
           </div>
         ) : (
-          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
+          <div className="grid grid-cols-1 min-[400px]:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-2 sm:gap-4">
             {photos.map((photo) => (
               <div key={photo.id} className="relative group bg-white rounded-lg overflow-hidden shadow-md">
-                <Link to={`/p/${slug}/${photo.id}`}>
+                <Link to={`/p/${slug}/${photo.id}`} className="block">
                   <img
                     src={getPreviewUrl(slug!, photo.id)}
                     alt={photo.original_filename}
-                    className="w-full h-64 object-cover"
+                    className="w-full h-48 sm:h-64 object-cover"
                     loading="lazy"
                   />
                 </Link>
                 <div className="p-2">
-                  <div className="flex justify-between items-center">
+                  <div className="flex flex-col sm:flex-row justify-between items-stretch sm:items-center gap-2">
                     <button
                       onClick={() => toggleSelection(photo.id)}
-                      className={`px-2 py-1 rounded text-sm ${
+                      className={`px-2 py-1 rounded text-xs sm:text-sm ${
                         selectedPhotos.has(photo.id)
                           ? 'bg-blue-600 text-white'
-                          : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
+                          : 'bg-gray-200 text-gray-700 hover:bg-gray-300 active:bg-gray-400'
                       }`}
                     >
-                      {selectedPhotos.has(photo.id) ? '✓ Selected' : 'Select'}
+                      {selectedPhotos.has(photo.id) ? '✓' : 'Select'}
                     </button>
-                    <div className="flex gap-2">
+                    <div className="flex gap-1 sm:gap-2">
                       <a
                         href={getOriginalUrl(slug!, photo.id)}
                         download
-                        className="px-2 py-1 bg-blue-600 text-white rounded text-sm hover:bg-blue-700"
+                        className="flex-1 sm:flex-none px-2 py-1 bg-blue-600 text-white rounded text-xs sm:text-sm hover:bg-blue-700 active:bg-blue-800 text-center flex items-center justify-center gap-1"
                         onClick={(e) => e.stopPropagation()}
                       >
+                        <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                        </svg>
                         Original
                       </a>
                       <a
                         href={getIgUrl(slug!, photo.id)}
                         download
-                        className="px-2 py-1 bg-purple-600 text-white rounded text-sm hover:bg-purple-700"
+                        className="flex-1 sm:flex-none px-2 py-1 bg-purple-600 text-white rounded text-xs sm:text-sm hover:bg-purple-700 active:bg-purple-800 text-center flex items-center justify-center gap-1"
                         onClick={(e) => e.stopPropagation()}
                       >
-                        IG
+                        <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                        </svg>
+                        Small
                       </a>
                     </div>
                   </div>
-                  <p className="text-xs text-gray-500 mt-2">
+                  <p className="text-xs text-gray-500 mt-2 hidden sm:block">
                     {new Date(photo.capture_time).toLocaleString()}
+                  </p>
+                  <p className="text-xs text-gray-500 mt-1 sm:hidden">
+                    {new Date(photo.capture_time).toLocaleDateString()}
                   </p>
                 </div>
               </div>

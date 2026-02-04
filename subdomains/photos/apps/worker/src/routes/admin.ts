@@ -2,6 +2,7 @@ import { Hono } from 'hono';
 import { ulid } from 'ulid';
 import type { Env, CreateEventRequest, StartUploadRequest, CompleteUploadRequest } from '../types';
 import { generateSalt, hashPassword, generateUniqueSlug } from '../utils';
+import { generateThumbnails } from '../imageProcessing';
 
 const app = new Hono<{ Bindings: Env }>();
 
@@ -27,23 +28,27 @@ app.use('/*', async (c, next) => {
 });
 
 /**
- * POST /api/admin/events
+ * POST /events
  * Creates a new event
  */
-app.post('/api/admin/events', async (c) => {
+app.post('/events', async (c) => {
   try {
     const body = await c.req.json<CreateEventRequest>();
     
-    if (!body.name || !body.password) {
-      return c.json({ error: 'Name and password are required' }, 400);
+    if (!body.name) {
+      return c.json({ error: 'Name is required' }, 400);
     }
     
     // Generate slug
     const slug = body.slug || await generateUniqueSlug(c.env.DB, body.name);
     
-    // Generate password hash
-    const salt = generateSalt();
-    const hash = await hashPassword(body.password, salt);
+    // Generate password hash if password provided
+    let salt = null;
+    let hash = null;
+    if (body.password) {
+      salt = generateSalt();
+      hash = await hashPassword(body.password, salt);
+    }
     
     // Insert event
     const result = await c.env.DB
@@ -69,10 +74,10 @@ app.post('/api/admin/events', async (c) => {
 });
 
 /**
- * POST /api/admin/events/:slug/uploads/start
+ * POST /events/:slug/uploads/start
  * Starts a multipart upload for a photo
  */
-app.post('/api/admin/events/:slug/uploads/start', async (c) => {
+app.post('/events/:slug/uploads/start', async (c) => {
   const slug = c.req.param('slug');
   
   try {
@@ -99,8 +104,17 @@ app.post('/api/admin/events/:slug/uploads/start', async (c) => {
     // Store photo metadata in database
     const captureTime = body.captureTime || new Date().toISOString();
     await c.env.DB
-      .prepare('INSERT INTO photos (id, event_id, original_filename, capture_time, width, height) VALUES (?, ?, ?, ?, ?, ?)')
-      .bind(body.photoId, event.id, body.filename, captureTime, body.width || null, body.height || null)
+      .prepare(`INSERT INTO photos (
+        id, event_id, original_filename, capture_time, width, height,
+        iso, aperture, shutter_speed, focal_length, camera_make, camera_model, lens_model
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+      .bind(
+        body.photoId, event.id, body.filename, captureTime, 
+        body.width || null, body.height || null,
+        body.iso || null, body.aperture || null, body.shutterSpeed || null,
+        body.focalLength || null, body.cameraMake || null, body.cameraModel || null,
+        body.lensModel || null
+      )
       .run();
     
     // Update event inferred date if this is the earliest photo
@@ -128,43 +142,49 @@ app.post('/api/admin/events/:slug/uploads/start', async (c) => {
 });
 
 /**
- * POST /api/admin/events/:slug/uploads/:photoId/parts
- * Gets a presigned URL for uploading a part
+ * PUT /events/:slug/uploads/:photoId/parts/:partNumber
+ * Uploads a part directly to R2
  */
-app.post('/api/admin/events/:slug/uploads/:photoId/parts', async (c) => {
+app.put('/events/:slug/uploads/:photoId/parts/:partNumber', async (c) => {
   const slug = c.req.param('slug');
   const photoId = c.req.param('photoId');
+  const partNumber = parseInt(c.req.param('partNumber'));
   
   try {
-    const body = await c.req.json<{ uploadId: string; partNumber: number }>();
+    const uploadId = c.req.header('X-Upload-Id');
     
-    if (!body.uploadId || !body.partNumber) {
-      return c.json({ error: 'uploadId and partNumber are required' }, 400);
+    if (!uploadId) {
+      return c.json({ error: 'X-Upload-Id header is required' }, 400);
+    }
+    
+    if (isNaN(partNumber) || partNumber < 1) {
+      return c.json({ error: 'Invalid part number' }, 400);
     }
     
     const key = `original/${slug}/${photoId}.jpg`;
     
-    // Get multipart upload
-    const upload = c.env.PHOTOS_BUCKET.resumeMultipartUpload(key, body.uploadId);
+    // Get the body as ArrayBuffer
+    const body = await c.req.arrayBuffer();
     
-    // Generate presigned URL for this part
-    const uploadedPart = await upload.uploadPart(body.partNumber);
+    // Resume multipart upload and upload this part
+    const upload = c.env.PHOTOS_BUCKET.resumeMultipartUpload(key, uploadId);
+    const uploadedPart = await upload.uploadPart(partNumber, body);
     
     return c.json({
-      uploadUrl: uploadedPart.uploadUrl,
-      partNumber: body.partNumber,
+      partNumber,
+      etag: uploadedPart.etag,
     });
   } catch (error) {
-    console.error('Error getting part URL:', error);
-    return c.json({ error: 'Failed to get upload URL' }, 500);
+    console.error('Error uploading part:', error);
+    return c.json({ error: 'Failed to upload part' }, 500);
   }
 });
 
 /**
- * POST /api/admin/events/:slug/uploads/:photoId/complete
+ * POST /events/:slug/uploads/:photoId/complete
  * Completes a multipart upload
  */
-app.post('/api/admin/events/:slug/uploads/:photoId/complete', async (c) => {
+app.post('/events/:slug/uploads/:photoId/complete', async (c) => {
   const slug = c.req.param('slug');
   const photoId = c.req.param('photoId');
   
@@ -181,10 +201,56 @@ app.post('/api/admin/events/:slug/uploads/:photoId/complete', async (c) => {
     const upload = c.env.PHOTOS_BUCKET.resumeMultipartUpload(key, body.uploadId);
     await upload.complete(body.parts);
     
+    // Generate thumbnails asynchronously (don't wait for completion)
+    c.executionCtx.waitUntil(generateThumbnails(c.env.PHOTOS_BUCKET, slug, photoId));
+    
     return c.json({ success: true, message: 'Upload completed successfully' });
   } catch (error) {
     console.error('Error completing upload:', error);
     return c.json({ error: 'Failed to complete upload' }, 500);
+  }
+});
+
+/**
+ * POST /events/:slug/regenerate-thumbnails
+ * Regenerates thumbnails for all photos in an event
+ */
+app.post('/events/:slug/regenerate-thumbnails', async (c) => {
+  const slug = c.req.param('slug');
+  
+  try {
+    // Get all photos for this event
+    const event = await c.env.DB
+      .prepare('SELECT id FROM events WHERE slug = ?')
+      .bind(slug)
+      .first<{ id: number }>();
+    
+    if (!event) {
+      return c.json({ error: 'Event not found' }, 404);
+    }
+    
+    const photos = await c.env.DB
+      .prepare('SELECT id FROM photos WHERE event_id = ?')
+      .bind(event.id)
+      .all<{ id: string }>();
+    
+    if (!photos.results || photos.results.length === 0) {
+      return c.json({ message: 'No photos found for this event' }, 200);
+    }
+    
+    // Generate thumbnails for each photo asynchronously
+    for (const photo of photos.results) {
+      c.executionCtx.waitUntil(generateThumbnails(c.env.PHOTOS_BUCKET, slug, photo.id));
+    }
+    
+    return c.json({ 
+      success: true, 
+      message: `Regenerating thumbnails for ${photos.results.length} photos`,
+      count: photos.results.length
+    });
+  } catch (error) {
+    console.error('Error regenerating thumbnails:', error);
+    return c.json({ error: 'Failed to regenerate thumbnails' }, 500);
   }
 });
 

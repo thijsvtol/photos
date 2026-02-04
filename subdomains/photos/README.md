@@ -58,47 +58,60 @@ cd subdomains/photos/apps/web
 npm install
 ```
 
-### 2. Set Up D1 Database Locally
+### 2. Set Up D1 Database
 
 ```bash
 cd subdomains/photos
 
-# Create local D1 database
-wrangler d1 create photos-db-local --local
+# Create D1 database (if not already created)
+wrangler d1 create photos-db
 
-# Run migrations
-wrangler d1 execute photos-db-local --local --file=./migrations/001_init.sql
+# The command above will output a database_id - copy it and add it to wrangler.toml
+# Update the database_id in wrangler.toml under [[d1_databases]]
+
+# Run migrations locally (for development)
+wrangler d1 execute photos-db --local --file=./migrations/001_init.sql
+
+# Or run migrations on remote database (for production)
+wrangler d1 execute photos-db --file=./migrations/001_init.sql
 ```
 
-### 3. Set Up R2 Bucket Locally
+### 3. Set Up R2 Bucket
 
-For local development, Wrangler will simulate R2 using local storage.
+For **local development**, you don't need to create an R2 bucket - Wrangler will automatically simulate R2 storage locally.
 
+For **production deployment**, you need to:
+1. Enable R2 in your Cloudflare Dashboard (Settings → R2)
+2. Create the bucket:
 ```bash
-# Create R2 bucket (for production)
 wrangler r2 bucket create photos-storage
 ```
 
-### 4. Configure Secrets
+### 4. Configure Local Secrets
+
+For local development, create a `.dev.vars` file in the same directory as `wrangler.toml`:
 
 ```bash
-cd subdomains/photos/apps/worker
+cd subdomains/photos
 
-# Set cookie secret for local development
-wrangler secret put EVENT_COOKIE_SECRET --env development
-# Enter a random string (e.g., generated with: openssl rand -base64 32)
+# Create .dev.vars file with your secrets
+cat > .dev.vars << 'EOF'
+# Required: Secret for signing event session cookies
+EVENT_COOKIE_SECRET=dev-secret-change-in-production-123456789
 
-# Optional: Set admin secret for development
-wrangler secret put ADMIN_SHARED_SECRET --env development
-# Enter a secret password for admin access
+# Optional: Shared secret for admin API in development
+# ADMIN_SHARED_SECRET=your-admin-secret
+EOF
 ```
+
+> **Note**: The `.dev.vars` file should be gitignored and never committed to version control.
 
 ### 5. Start Development Servers
 
 **Terminal 1 - Worker:**
 ```bash
-cd subdomains/photos/apps/worker
-npm run dev
+cd subdomains/photos
+npm --prefix apps/worker run dev
 # Worker runs on http://localhost:8787
 ```
 

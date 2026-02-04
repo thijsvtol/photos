@@ -29,6 +29,11 @@ app.post('/api/events/:slug/login', async (c) => {
       return c.json({ error: 'Event not found' }, 404);
     }
     
+    // If event has no password, allow access
+    if (!event.password_salt || !event.password_hash) {
+      return c.json({ error: 'This event is not password protected' }, 400);
+    }
+    
     // Verify password
     const isValid = await verifyPassword(body.password, event.password_salt, event.password_hash);
     

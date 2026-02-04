@@ -12,8 +12,8 @@ export interface Event {
   id: number;
   slug: string;
   name: string;
-  password_salt: string;
-  password_hash: string;
+  password_salt: string | null;
+  password_hash: string | null;
   inferred_date: string | null;
   created_at: string;
 }
@@ -26,12 +26,19 @@ export interface Photo {
   uploaded_at: string;
   width: number | null;
   height: number | null;
+  iso: number | null;
+  aperture: string | null;
+  shutter_speed: string | null;
+  focal_length: string | null;
+  camera_make: string | null;
+  camera_model: string | null;
+  lens_model: string | null;
 }
 
 // API Request/Response Types
 export interface CreateEventRequest {
   name: string;
-  password: string;
+  password?: string;
   slug?: string;
 }
 
@@ -45,6 +52,13 @@ export interface StartUploadRequest {
   captureTime?: string;
   width?: number;
   height?: number;
+  iso?: number;
+  aperture?: string;
+  shutterSpeed?: string;
+  focalLength?: string;
+  cameraMake?: string;
+  cameraModel?: string;
+  lensModel?: string;
 }
 
 export interface UploadPartRequest {

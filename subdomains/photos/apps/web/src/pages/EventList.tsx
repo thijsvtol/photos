@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { getEvents } from '../api';
+import { getEvents, getPreviewUrl } from '../api';
 import type { Event } from '../types';
 
 const EventList: React.FC = () => {
@@ -34,12 +34,12 @@ const EventList: React.FC = () => {
 
   return (
     <div className="min-h-screen bg-gray-50">
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        <div className="flex justify-between items-center mb-8">
-          <h1 className="text-4xl font-bold text-gray-900">Photo Events</h1>
+      <div className="max-w-7xl mx-auto px-3 sm:px-4 lg:px-8 py-4 sm:py-8">
+        <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-6 sm:mb-8">
+          <h1 className="text-3xl sm:text-4xl font-bold text-gray-900">Photo Events</h1>
           <Link
             to="/admin"
-            className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition"
+            className="w-full sm:w-auto text-center px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition text-sm sm:text-base"
           >
             Admin
           </Link>
@@ -65,17 +65,43 @@ const EventList: React.FC = () => {
         )}
 
         {!loading && !error && events.length > 0 && (
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-6">
             {events.map((event) => (
               <Link
                 key={event.id}
                 to={`/events/${event.slug}`}
-                className="bg-white rounded-lg shadow-md hover:shadow-lg transition p-6"
+                className="bg-white rounded-lg shadow-md hover:shadow-lg active:shadow-xl transition overflow-hidden"
               >
-                <h2 className="text-2xl font-semibold text-gray-900 mb-2">{event.name}</h2>
-                <p className="text-gray-600 mb-4">{formatDate(event.inferred_date)}</p>
-                <div className="text-blue-600 hover:text-blue-700 font-medium">
-                  View Gallery →
+                {/* Preview Image for Public Events */}
+                {!event.requires_password && event.preview_photo_id && (
+                  <div className="relative w-full h-48 sm:h-56 bg-gray-200">
+                    <img
+                      src={getPreviewUrl(event.slug, event.preview_photo_id)}
+                      alt={event.name}
+                      className="w-full h-full object-cover"
+                      loading="lazy"
+                    />
+                    <div className="absolute top-2 right-2">
+                      <span className="px-2 py-1 text-xs bg-green-100 text-green-800 rounded-full backdrop-blur-sm bg-opacity-90">
+                        Public
+                      </span>
+                    </div>
+                  </div>
+                )}
+                
+                <div className="p-4 sm:p-6">
+                  <div className="flex items-start justify-between mb-2">
+                    <h2 className="text-xl sm:text-2xl font-semibold text-gray-900">{event.name}</h2>
+                    {!event.requires_password && !event.preview_photo_id && (
+                      <span className="ml-2 px-2 py-1 text-xs bg-green-100 text-green-800 rounded-full whitespace-nowrap">
+                        Public
+                      </span>
+                    )}
+                  </div>
+                  <p className="text-gray-600 mb-3 sm:mb-4 text-sm sm:text-base">{formatDate(event.inferred_date)}</p>
+                  <div className="text-blue-600 hover:text-blue-700 font-medium text-sm sm:text-base">
+                    View Gallery →
+                  </div>
                 </div>
               </Link>
             ))}

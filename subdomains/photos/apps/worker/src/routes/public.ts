@@ -20,10 +20,26 @@ app.use('/*', cors({
 app.get('/api/events', async (c) => {
   try {
     const events = await c.env.DB
-      .prepare('SELECT id, slug, name, inferred_date, created_at FROM events ORDER BY inferred_date DESC, created_at DESC')
+      .prepare('SELECT id, slug, name, inferred_date, created_at, (password_hash IS NOT NULL) as requires_password FROM events ORDER BY inferred_date DESC, created_at DESC')
       .all<Omit<Event, 'password_salt' | 'password_hash'>>();
     
-    return c.json({ events: events.results || [] });
+    // For public events, add a preview photo ID
+    const eventsWithPreviews = await Promise.all(
+      (events.results || []).map(async (event) => {
+        if (!event.requires_password) {
+          // Get the first photo for this event as preview
+          const photo = await c.env.DB
+            .prepare('SELECT id FROM photos WHERE event_id = ? ORDER BY capture_time ASC LIMIT 1')
+            .bind(event.id)
+            .first<{ id: string }>();
+          
+          return { ...event, preview_photo_id: photo?.id || null };
+        }
+        return { ...event, preview_photo_id: null };
+      })
+    );
+    
+    return c.json({ events: eventsWithPreviews });
   } catch (error) {
     console.error('Error fetching events:', error);
     return c.json({ error: 'Failed to fetch events' }, 500);
@@ -39,7 +55,7 @@ app.get('/api/events/:slug', async (c) => {
   
   try {
     const event = await c.env.DB
-      .prepare('SELECT id, slug, name, inferred_date, created_at FROM events WHERE slug = ?')
+      .prepare('SELECT id, slug, name, inferred_date, created_at, (password_hash IS NOT NULL) as requires_password FROM events WHERE slug = ?')
       .bind(slug)
       .first<Omit<Event, 'password_salt' | 'password_hash'>>();
     
@@ -56,50 +72,54 @@ app.get('/api/events/:slug', async (c) => {
 
 /**
  * GET /api/events/:slug/photos
- * Returns photos for an event (requires authentication)
- * Supports query params: from (ISO date), to (ISO date)
+ * Returns photos for an event (requires authentication if password protected)
+ * Supports query params: sort (date_asc, date_desc, name_asc, name_desc)
  */
 app.get('/api/events/:slug/photos', async (c) => {
   const slug = c.req.param('slug');
-  const from = c.req.query('from');
-  const to = c.req.query('to');
-  
-  // Check authentication
-  const isAuthenticated = await getEventSession(c.req.raw, slug, c.env.EVENT_COOKIE_SECRET);
-  if (!isAuthenticated) {
-    return c.json({ error: 'Authentication required' }, 401);
-  }
+  const sort = c.req.query('sort') || 'date_desc';
   
   try {
-    // Get event
+    // Get event to check if password protected
     const event = await c.env.DB
-      .prepare('SELECT id FROM events WHERE slug = ?')
+      .prepare('SELECT id, password_hash FROM events WHERE slug = ?')
       .bind(slug)
-      .first<{ id: number }>();
+      .first<{ id: number; password_hash: string | null }>();
     
     if (!event) {
       return c.json({ error: 'Event not found' }, 404);
     }
     
-    // Build query with optional date filters
-    let query = 'SELECT id, event_id, original_filename, capture_time, uploaded_at, width, height FROM photos WHERE event_id = ?';
-    const params: any[] = [event.id];
-    
-    if (from) {
-      query += ' AND capture_time >= ?';
-      params.push(from);
+    // Check authentication only if password protected
+    if (event.password_hash) {
+      const isAuthenticated = await getEventSession(c.req.raw, slug, c.env.EVENT_COOKIE_SECRET);
+      if (!isAuthenticated) {
+        return c.json({ error: 'Authentication required' }, 401);
+      }
     }
     
-    if (to) {
-      query += ' AND capture_time <= ?';
-      params.push(to);
+    // Build query with sorting
+    let orderBy = 'capture_time DESC'; // default
+    switch (sort) {
+      case 'date_asc':
+        orderBy = 'capture_time ASC';
+        break;
+      case 'date_desc':
+        orderBy = 'capture_time DESC';
+        break;
+      case 'name_asc':
+        orderBy = 'original_filename ASC';
+        break;
+      case 'name_desc':
+        orderBy = 'original_filename DESC';
+        break;
     }
     
-    query += ' ORDER BY capture_time DESC';
+    const query = `SELECT * FROM photos WHERE event_id = ? ORDER BY ${orderBy}`;
     
     const photos = await c.env.DB
       .prepare(query)
-      .bind(...params)
+      .bind(event.id)
       .all<Photo>();
     
     return c.json({ photos: photos.results || [] });
@@ -111,27 +131,29 @@ app.get('/api/events/:slug/photos', async (c) => {
 
 /**
  * GET /api/events/:slug/photos/:photoId
- * Returns single photo details (requires authentication)
+ * Returns single photo details (requires authentication if password protected)
  */
 app.get('/api/events/:slug/photos/:photoId', async (c) => {
   const slug = c.req.param('slug');
   const photoId = c.req.param('photoId');
   
-  // Check authentication
-  const isAuthenticated = await getEventSession(c.req.raw, slug, c.env.EVENT_COOKIE_SECRET);
-  if (!isAuthenticated) {
-    return c.json({ error: 'Authentication required' }, 401);
-  }
-  
   try {
-    // Get event
+    // Get event to check if password protected
     const event = await c.env.DB
-      .prepare('SELECT id FROM events WHERE slug = ?')
+      .prepare('SELECT id, password_hash FROM events WHERE slug = ?')
       .bind(slug)
-      .first<{ id: number }>();
+      .first<{ id: number; password_hash: string | null }>();
     
     if (!event) {
       return c.json({ error: 'Event not found' }, 404);
+    }
+    
+    // Check authentication only if password protected
+    if (event.password_hash) {
+      const isAuthenticated = await getEventSession(c.req.raw, slug, c.env.EVENT_COOKIE_SECRET);
+      if (!isAuthenticated) {
+        return c.json({ error: 'Authentication required' }, 401);
+      }
     }
     
     // Get photo

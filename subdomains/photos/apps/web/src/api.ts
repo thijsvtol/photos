@@ -21,10 +21,9 @@ export const loginToEvent = async (slug: string, password: string): Promise<void
   await api.post(`/events/${slug}/login`, { password });
 };
 
-export const getPhotos = async (slug: string, from?: string, to?: string): Promise<Photo[]> => {
+export const getPhotos = async (slug: string, sort?: string): Promise<Photo[]> => {
   const params = new URLSearchParams();
-  if (from) params.append('from', from);
-  if (to) params.append('to', to);
+  if (sort) params.append('sort', sort);
   
   const response = await api.get<{ photos: Photo[] }>(`/events/${slug}/photos?${params.toString()}`);
   return response.data.photos;
@@ -56,26 +55,44 @@ export const startUpload = async (
   filename: string,
   captureTime?: string,
   width?: number,
-  height?: number
+  height?: number,
+  iso?: number,
+  aperture?: string,
+  shutterSpeed?: string,
+  focalLength?: string,
+  cameraMake?: string,
+  cameraModel?: string,
+  lensModel?: string
 ): Promise<{ uploadId: string; key: string }> => {
   const response = await api.post(
     `/admin/events/${slug}/uploads/start`,
-    { photoId, filename, captureTime, width, height },
+    { 
+      photoId, filename, captureTime, width, height,
+      iso, aperture, shutterSpeed, focalLength,
+      cameraMake, cameraModel, lensModel
+    },
     { headers: { 'X-Admin-Access': '1' } }
   );
   return response.data;
 };
 
-export const getPartUploadUrl = async (
+export const uploadPart = async (
   slug: string,
   photoId: string,
   uploadId: string,
-  partNumber: number
-): Promise<{ uploadUrl: string; partNumber: number }> => {
-  const response = await api.post(
-    `/admin/events/${slug}/uploads/${photoId}/parts`,
-    { uploadId, partNumber },
-    { headers: { 'X-Admin-Access': '1' } }
+  partNumber: number,
+  chunk: Blob
+): Promise<{ partNumber: number; etag: string }> => {
+  const response = await api.put(
+    `/admin/events/${slug}/uploads/${photoId}/parts/${partNumber}`,
+    chunk,
+    { 
+      headers: { 
+        'X-Admin-Access': '1',
+        'X-Upload-Id': uploadId,
+        'Content-Type': 'application/octet-stream',
+      } 
+    }
   );
   return response.data;
 };
@@ -91,6 +108,15 @@ export const completeUpload = async (
     { uploadId, parts },
     { headers: { 'X-Admin-Access': '1' } }
   );
+};
+
+export const regenerateThumbnails = async (slug: string): Promise<{ count: number }> => {
+  const response = await api.post(
+    `/admin/events/${slug}/regenerate-thumbnails`,
+    {},
+    { headers: { 'X-Admin-Access': '1' } }
+  );
+  return response.data;
 };
 
 // Helper functions

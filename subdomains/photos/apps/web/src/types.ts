@@ -4,6 +4,8 @@ export interface Event {
   name: string;
   inferred_date: string | null;
   created_at: string;
+  requires_password: boolean;
+  preview_photo_id: string | null;
 }
 
 export interface Photo {
@@ -14,11 +16,18 @@ export interface Photo {
   uploaded_at: string;
   width: number | null;
   height: number | null;
+  iso: number | null;
+  aperture: string | null;
+  shutter_speed: string | null;
+  focal_length: string | null;
+  camera_make: string | null;
+  camera_model: string | null;
+  lens_model: string | null;
 }
 
 export interface CreateEventRequest {
   name: string;
-  password: string;
+  password?: string;
   slug?: string;
 }
 
@@ -37,4 +46,11 @@ export interface UploadQueueItem {
   captureTime?: string;
   width?: number;
   height?: number;
+  iso?: number;
+  aperture?: string;
+  shutterSpeed?: string;
+  focalLength?: string;
+  cameraMake?: string;
+  cameraModel?: string;
+  lensModel?: string;
 }

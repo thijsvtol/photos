@@ -2,7 +2,7 @@ import React, { useEffect, useState, useCallback } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { ulid } from 'ulid';
 import ExifReader from 'exifreader';
-import { getEvent, startUpload, getPartUploadUrl, completeUpload } from '../api';
+import { getEvent, startUpload, uploadPart, completeUpload, regenerateThumbnails } from '../api';
 import { addToQueue, updateQueueItem, getQueueItems, getPendingUploads } from '../uploadQueue';
 import type { Event, UploadQueueItem } from '../types';
 
@@ -14,6 +14,7 @@ const AdminEventUpload: React.FC = () => {
   const [queueItems, setQueueItems] = useState<UploadQueueItem[]>([]);
   const [isDragging, setIsDragging] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [isRegenerating, setIsRegenerating] = useState(false);
 
   useEffect(() => {
     if (slug) {
@@ -56,7 +57,36 @@ const AdminEventUpload: React.FC = () => {
     }
   };
 
-  const extractExifData = async (file: File): Promise<{ captureTime?: string; width?: number; height?: number }> => {
+  const parseExifDate = (exifDate: string): string | undefined => {
+    try {
+      // EXIF date format: "YYYY:MM:DD HH:MM:SS"
+      // Convert to ISO format: "YYYY-MM-DDTHH:MM:SS"
+      const cleaned = exifDate.replace(/^(\d{4}):(\d{2}):(\d{2})/, '$1-$2-$3');
+      const date = new Date(cleaned);
+      
+      // Validate the date
+      if (isNaN(date.getTime())) {
+        return undefined;
+      }
+      
+      return date.toISOString();
+    } catch {
+      return undefined;
+    }
+  };
+
+  const extractExifData = async (file: File): Promise<{ 
+    captureTime?: string; 
+    width?: number; 
+    height?: number;
+    iso?: number;
+    aperture?: string;
+    shutterSpeed?: string;
+    focalLength?: string;
+    cameraMake?: string;
+    cameraModel?: string;
+    lensModel?: string;
+  }> => {
     try {
       const buffer = await file.arrayBuffer();
       const tags = ExifReader.load(buffer);
@@ -64,11 +94,25 @@ const AdminEventUpload: React.FC = () => {
       const captureTime = tags.DateTimeOriginal?.description;
       const width = tags.PixelXDimension?.value || tags['Image Width']?.value;
       const height = tags.PixelYDimension?.value || tags['Image Height']?.value;
+      const iso = tags.ISOSpeedRatings?.value;
+      const aperture = tags.FNumber?.description;
+      const shutterSpeed = tags.ExposureTime?.description;
+      const focalLength = tags.FocalLength?.description;
+      const cameraMake = tags.Make?.description;
+      const cameraModel = tags.Model?.description;
+      const lensModel = tags.LensModel?.description;
       
       return {
-        captureTime: captureTime ? new Date(captureTime).toISOString() : undefined,
+        captureTime: captureTime ? parseExifDate(captureTime) : undefined,
         width: typeof width === 'number' ? width : undefined,
         height: typeof height === 'number' ? height : undefined,
+        iso: typeof iso === 'number' ? iso : undefined,
+        aperture: aperture || undefined,
+        shutterSpeed: shutterSpeed || undefined,
+        focalLength: focalLength || undefined,
+        cameraMake: cameraMake || undefined,
+        cameraModel: cameraModel || undefined,
+        lensModel: lensModel || undefined,
       };
     } catch (err) {
       console.error('Failed to extract EXIF:', err);
@@ -115,7 +159,14 @@ const AdminEventUpload: React.FC = () => {
         item.file.name,
         item.captureTime,
         item.width,
-        item.height
+        item.height,
+        item.iso,
+        item.aperture,
+        item.shutterSpeed,
+        item.focalLength,
+        item.cameraMake,
+        item.cameraModel,
+        item.lensModel
       );
       
       await updateQueueItem(item.id, { uploadId });
@@ -129,28 +180,14 @@ const AdminEventUpload: React.FC = () => {
         const end = Math.min(start + CHUNK_SIZE, item.file.size);
         const chunk = item.file.slice(start, end);
         
-        // Get presigned URL
-        const { uploadUrl } = await getPartUploadUrl(
+        // Upload part directly to worker
+        const { etag } = await uploadPart(
           item.eventSlug,
           item.photoId!,
           uploadId,
-          partNumber
+          partNumber,
+          chunk
         );
-        
-        // Upload part
-        const response = await fetch(uploadUrl, {
-          method: 'PUT',
-          body: chunk,
-        });
-        
-        if (!response.ok) {
-          throw new Error(`Failed to upload part ${partNumber}`);
-        }
-        
-        const etag = response.headers.get('ETag')?.replace(/"/g, '');
-        if (!etag) {
-          throw new Error(`Missing ETag in response for part ${partNumber}`);
-        }
         
         parts.push({ partNumber, etag });
         
@@ -206,6 +243,23 @@ const AdminEventUpload: React.FC = () => {
     }
   };
 
+  const handleRegenerateThumbnails = async () => {
+    if (!slug) return;
+    
+    setIsRegenerating(true);
+    setError(null);
+    
+    try {
+      const result = await regenerateThumbnails(slug);
+      alert(`Regenerating thumbnails for ${result.count} photos. This may take a few moments.`);
+    } catch (err) {
+      setError('Failed to regenerate thumbnails');
+      console.error(err);
+    } finally {
+      setIsRegenerating(false);
+    }
+  };
+
   return (
     <div className="min-h-screen bg-gray-50">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
@@ -213,8 +267,19 @@ const AdminEventUpload: React.FC = () => {
           <Link to="/admin" className="text-blue-600 hover:text-blue-700 mb-4 inline-block">
             ← Back to Admin
           </Link>
-          <h1 className="text-4xl font-bold text-gray-900">{event?.name}</h1>
-          <p className="text-gray-600 mt-2">Upload photos to this event</p>
+          <div className="flex justify-between items-start">
+            <div>
+              <h1 className="text-4xl font-bold text-gray-900">{event?.name}</h1>
+              <p className="text-gray-600 mt-2">Upload photos to this event</p>
+            </div>
+            <button
+              onClick={handleRegenerateThumbnails}
+              disabled={isRegenerating}
+              className="px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition disabled:bg-gray-400 disabled:cursor-not-allowed"
+            >
+              {isRegenerating ? 'Regenerating...' : '🔄 Regenerate Thumbnails'}
+            </button>
+          </div>
         </div>
 
         {error && (

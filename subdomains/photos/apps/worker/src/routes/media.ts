@@ -8,23 +8,52 @@ const app = new Hono<{ Bindings: Env }>();
  * GET /media/:slug/preview/:photoId.jpg
  * Serves watermarked preview image (requires authentication)
  */
-app.get('/media/:slug/preview/:photoId.jpg', async (c) => {
+app.get('/media/:slug/preview/:photoId', async (c) => {
   const slug = c.req.param('slug');
-  const photoId = c.req.param('photoId');
+  const photoId = c.req.param('photoId').replace(/\.jpg$/, '');
   
-  // Check authentication
-  const isAuthenticated = await getEventSession(c.req.raw, slug, c.env.EVENT_COOKIE_SECRET);
-  if (!isAuthenticated) {
-    return c.json({ error: 'Authentication required' }, 401);
-  }
+  console.log(`[MEDIA] Request for preview: ${slug}/${photoId}`);
   
   try {
-    const key = `preview/${slug}/${photoId}.jpg`;
-    const object = await c.env.PHOTOS_BUCKET.get(key);
+    // Check if event is password protected
+    const event = await c.env.DB
+      .prepare('SELECT password_hash FROM events WHERE slug = ?')
+      .bind(slug)
+      .first<{ password_hash: string | null }>();
+    
+    if (!event) {
+      return c.json({ error: 'Event not found' }, 404);
+    }
+    
+    // Check authentication only if password protected
+    if (event.password_hash) {
+      const isAuthenticated = await getEventSession(c.req.raw, slug, c.env.EVENT_COOKIE_SECRET);
+      console.log(`[MEDIA] Authentication status: ${isAuthenticated}`);
+      
+      if (!isAuthenticated) {
+        return c.json({ error: 'Authentication required' }, 401);
+      }
+    } else {
+      console.log(`[MEDIA] Event is not password protected, allowing access`);
+    }
+    // Try to get the preview version
+    let key = `preview/${slug}/${photoId}.jpg`;
+    console.log(`[MEDIA] Trying to get: ${key}`);
+    let object = await c.env.PHOTOS_BUCKET.get(key);
+    
+    // If preview doesn't exist, fall back to original
+    if (!object) {
+      console.log(`[MEDIA] Preview not found, trying original`);
+      key = `original/${slug}/${photoId}.jpg`;
+      object = await c.env.PHOTOS_BUCKET.get(key);
+    }
     
     if (!object) {
+      console.log(`[MEDIA] Neither preview nor original found for ${photoId}`);
       return c.json({ error: 'Photo not found' }, 404);
     }
+    
+    console.log(`[MEDIA] Found image at ${key}, size: ${object.size} bytes`);
     
     return new Response(object.body, {
       headers: {
@@ -33,7 +62,7 @@ app.get('/media/:slug/preview/:photoId.jpg', async (c) => {
       },
     });
   } catch (error) {
-    console.error('Error serving preview:', error);
+    console.error('[MEDIA] Error serving preview:', error);
     return c.json({ error: 'Failed to serve photo' }, 500);
   }
 });
@@ -42,19 +71,37 @@ app.get('/media/:slug/preview/:photoId.jpg', async (c) => {
  * GET /media/:slug/ig/:photoId.jpg
  * Serves Instagram-ready watermarked image (requires authentication)
  */
-app.get('/media/:slug/ig/:photoId.jpg', async (c) => {
+app.get('/media/:slug/ig/:photoId', async (c) => {
   const slug = c.req.param('slug');
-  const photoId = c.req.param('photoId');
-  
-  // Check authentication
-  const isAuthenticated = await getEventSession(c.req.raw, slug, c.env.EVENT_COOKIE_SECRET);
-  if (!isAuthenticated) {
-    return c.json({ error: 'Authentication required' }, 401);
-  }
+  const photoId = c.req.param('photoId').replace(/\.jpg$/, '');
   
   try {
-    const key = `ig/${slug}/${photoId}.jpg`;
-    const object = await c.env.PHOTOS_BUCKET.get(key);
+    // Check if event is password protected
+    const event = await c.env.DB
+      .prepare('SELECT password_hash FROM events WHERE slug = ?')
+      .bind(slug)
+      .first<{ password_hash: string | null }>();
+    
+    if (!event) {
+      return c.json({ error: 'Event not found' }, 404);
+    }
+    
+    // Check authentication only if password protected
+    if (event.password_hash) {
+      const isAuthenticated = await getEventSession(c.req.raw, slug, c.env.EVENT_COOKIE_SECRET);
+      if (!isAuthenticated) {
+        return c.json({ error: 'Authentication required' }, 401);
+      }
+    }
+    // Try to get the Instagram version
+    let key = `ig/${slug}/${photoId}.jpg`;
+    let object = await c.env.PHOTOS_BUCKET.get(key);
+    
+    // If IG version doesn't exist, fall back to original
+    if (!object) {
+      key = `original/${slug}/${photoId}.jpg`;
+      object = await c.env.PHOTOS_BUCKET.get(key);
+    }
     
     if (!object) {
       return c.json({ error: 'Photo not found' }, 404);
@@ -77,25 +124,27 @@ app.get('/media/:slug/ig/:photoId.jpg', async (c) => {
  * Serves original full-resolution image (requires authentication)
  * Sets Content-Disposition with renamed filename
  */
-app.get('/media/:slug/original/:photoId.jpg', async (c) => {
+app.get('/media/:slug/original/:photoId', async (c) => {
   const slug = c.req.param('slug');
-  const photoId = c.req.param('photoId');
-  
-  // Check authentication
-  const isAuthenticated = await getEventSession(c.req.raw, slug, c.env.EVENT_COOKIE_SECRET);
-  if (!isAuthenticated) {
-    return c.json({ error: 'Authentication required' }, 401);
-  }
+  const photoId = c.req.param('photoId').replace(/\.jpg$/, '');
   
   try {
-    // Get photo metadata for filename
+    // Get event to check if password protected
     const event = await c.env.DB
-      .prepare('SELECT id FROM events WHERE slug = ?')
+      .prepare('SELECT id, password_hash FROM events WHERE slug = ?')
       .bind(slug)
-      .first<{ id: number }>();
+      .first<{ id: number; password_hash: string | null }>();
     
     if (!event) {
       return c.json({ error: 'Event not found' }, 404);
+    }
+    
+    // Check authentication only if password protected
+    if (event.password_hash) {
+      const isAuthenticated = await getEventSession(c.req.raw, slug, c.env.EVENT_COOKIE_SECRET);
+      if (!isAuthenticated) {
+        return c.json({ error: 'Authentication required' }, 401);
+      }
     }
     
     const photo = await c.env.DB
