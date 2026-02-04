@@ -199,6 +199,8 @@ npm run build
 
 2. **Configure Cloudflare Pages** to serve from `photos.thijsvtol.nl`
 
+3. **Important**: The `apps/web/public/_routes.json` file ensures that only `/api/*` and `/media/*` routes are handled by the Worker, while all other routes (including `/`) are served by Cloudflare Pages. This file is automatically included in the build output.
+
 ### 7. Set Up Cloudflare Access (Admin Protection)
 
 1. Go to Cloudflare Dashboard > Zero Trust > Access
