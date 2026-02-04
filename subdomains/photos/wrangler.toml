@@ -23,12 +23,6 @@ ENVIRONMENT = "development"
 # - EVENT_COOKIE_SECRET: Secret for signing event session cookies
 # - ADMIN_SHARED_SECRET: Optional secret for admin API in development
 
-# Routes for production deployment
-# Uncomment and configure for your domain
-# routes = [
-#   { pattern = "photos.thijsvtol.nl/*", zone_name = "thijsvtol.nl" }
-# ]
-
 # Development configuration
 [env.development]
 name = "photos-worker-dev"
@@ -36,3 +30,19 @@ name = "photos-worker-dev"
 # Production configuration
 [env.production]
 name = "photos-worker"
+routes = [
+  { pattern = "photos.thijsvtol.nl/api/*", zone_name = "thijsvtol.nl" },
+  { pattern = "photos.thijsvtol.nl/media/*", zone_name = "thijsvtol.nl" }
+]
+
+[env.production.vars]
+ENVIRONMENT = "production"
+
+[[env.production.d1_databases]]
+binding = "DB"
+database_name = "photos-db"
+database_id = "45a56052-5385-463d-bc79-7ddc20307f53"
+
+[[env.production.r2_buckets]]
+binding = "PHOTOS_BUCKET"
+bucket_name = "photos-storage"
