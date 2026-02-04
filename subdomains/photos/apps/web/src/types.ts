@@ -22,7 +22,8 @@ export interface CreateEventRequest {
   slug?: string;
 }
 
-// Upload queue item for in-memory state management
+// Upload queue item for persistence in IndexedDB
+// Note: File objects can be stored in IndexedDB directly
 export interface UploadQueueItem {
   id: string;
   eventSlug: string;

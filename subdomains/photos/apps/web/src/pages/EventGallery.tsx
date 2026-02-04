@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { useParams, Link } from 'react-router-dom';
-import { getEvent, getPhotos, loginToEvent, getPreviewUrl, getOriginalUrl, getIgUrl } from '../api';
+import { getEvent, getPhotos, loginToEvent, getPreviewUrl, getOriginalUrl, getIgUrl, requestZip } from '../api';
 import type { Event, Photo } from '../types';
 
 const EventGallery: React.FC = () => {
@@ -100,23 +100,36 @@ const EventGallery: React.FC = () => {
     setSelectedPhotos(newSelected);
   };
 
-  const downloadSelected = () => {
+  const downloadSelected = async () => {
     const selected = Array.from(selectedPhotos);
+    if (selected.length === 0) {
+      alert('No photos selected');
+      return;
+    }
+    
     if (selected.length > 50) {
       alert('Maximum 50 photos can be downloaded at once');
       return;
     }
     
-    // Download each photo individually
-    selected.forEach(photoId => {
-      const url = getOriginalUrl(slug!, photoId);
+    try {
+      // Request ZIP file from server
+      const zipBlob = await requestZip(slug!, selected);
+      
+      // Create download link
+      const url = window.URL.createObjectURL(zipBlob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = `${photoId}.jpg`;
+      const timestamp = new Date().toISOString().split('T')[0];
+      a.download = `${slug}_${timestamp}.zip`;
       document.body.appendChild(a);
       a.click();
       document.body.removeChild(a);
-    });
+      window.URL.revokeObjectURL(url);
+    } catch (error) {
+      console.error('Error downloading ZIP:', error);
+      alert('Failed to download ZIP file');
+    }
   };
 
   if (loading) {

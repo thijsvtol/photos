@@ -117,7 +117,7 @@ subdomains/photos/
 - `POST /api/events/:slug/login` - Authenticate with password
 - `GET /api/events/:slug/photos` - List photos (requires auth)
 - `GET /api/events/:slug/photos/:photoId` - Get photo details
-- `POST /api/events/:slug/zip` - Request batch download
+- `POST /api/events/:slug/zip` - Generate and download ZIP file (requires auth)
 
 ### Media Endpoints (Password Gated)
 - `GET /media/:slug/preview/:photoId.jpg` - Watermarked preview
@@ -167,21 +167,31 @@ CREATE TABLE photos (
 4. **CORS Configuration**: Same-origin credentials support
 5. **Input Validation**: All API endpoints validate inputs
 
-## Known Limitations & Future Work
+## Recent Improvements (v1.1)
+
+### Implemented Features
+1. **ZIP Generation**: Server-side ZIP creation with fflate
+   - Actual ZIP file generation instead of URL lists
+   - Supports up to 50 photos per download
+   - Automatic filename generation with event and timestamp
+
+2. **Upload Queue Persistence**: IndexedDB-backed storage
+   - Upload state persists across page reloads
+   - Automatic resume of pending uploads
+   - Files stored in browser database
+
+3. **Image Processing Utilities**: Foundation for watermarking
+   - Dimension calculation for aspect-ratio-preserving resize
+   - Watermark text generation with Europe/Amsterdam timezone
+   - Ready for integration with image processing service
+
+## Remaining Future Work
 
 ### Not Yet Implemented
-1. **Image Processing**: Watermarking and derivative generation
-   - Need to add watermark text to preview/IG versions
-   - Need to generate resized derivatives (2000px, 1080px)
+1. **Actual Image Processing**: Watermarking and derivative generation
+   - Need to integrate with image manipulation service
+   - Options: Cloudflare Images API, external service, or WASM library
    - See IMAGE_PROCESSING.md for implementation options
-
-2. **ZIP Generation**: Currently returns individual URLs
-   - Could implement server-side ZIP generation
-   - Or client-side ZIP creation with JSZip
-
-3. **Upload Queue Persistence**: Currently in-memory only
-   - Could add IndexedDB for cross-session persistence
-   - Trade-off: complexity vs. resilience
 
 ### Enhancements
 - Thumbnail optimization for gallery grid

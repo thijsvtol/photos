@@ -14,17 +14,17 @@ A full-stack photo gallery application built with React + Vite + Tailwind (front
 - ⬇️ Multiple download options:
   - Original full-resolution JPEG
   - Instagram-ready (max 1080px)
-  - Batch download selected photos (max 50)
+  - Batch download selected photos as ZIP (max 50)
 - ⭐ Local favorites/selection (stored in browser)
 
 ### Admin Features
 - 🎯 Event creation with auto-generated slugs
 - 📤 Drag & drop photo upload
-- 🔄 In-memory upload queue (persists during current session)
+- 🔄 Persistent upload queue with IndexedDB (survives page reloads)
 - 📦 Multipart upload to R2 for large files
 - 📊 EXIF metadata extraction (capture time, dimensions)
 - 🏷️ Automatic event date inference from photos
-- 💧 Watermark generation (to be implemented via image processing)
+- 💧 Image processing utilities (watermarking ready for implementation)
 
 ## Architecture
 
@@ -278,11 +278,9 @@ photos-storage/
 
 ## Known Limitations & Future Enhancements
 
-1. **Watermarking**: Currently not implemented. Needs image processing service or Worker with image manipulation
-2. **ZIP Generation**: Returns individual download URLs instead of actual ZIP file
-3. **Derivative Generation**: Preview and IG versions need to be generated (requires image processing)
-4. **Thumbnail Optimization**: Could add smaller thumbnails for gallery grid
-5. **Upload Queue Persistence**: Upload state is kept in memory and lost on page reload/navigation
+1. **Watermarking**: Image processing utilities implemented, ready for integration with actual image manipulation service
+2. **Derivative Generation**: Preview and IG versions need to be generated (requires image processing service integration)
+3. **Thumbnail Optimization**: Could add smaller thumbnails for gallery grid
 
 ## Troubleshooting
 
@@ -311,7 +309,7 @@ photos-storage/
 ## Development Tips
 
 - Use `wrangler tail` to see Worker logs in real-time
-- Check browser console `__uploadQueue` to debug upload queue state
+- Check browser IndexedDB (Application tab in DevTools) to see upload queue state
 - Use browser Network tab to debug API calls
 - Test with various JPEG files to ensure EXIF extraction works
 

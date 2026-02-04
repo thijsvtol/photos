@@ -35,8 +35,10 @@ export const getPhoto = async (slug: string, photoId: string): Promise<Photo> =>
   return response.data.photo;
 };
 
-export const requestZip = async (slug: string, photoIds: string[]): Promise<any> => {
-  const response = await api.post(`/events/${slug}/zip`, { photoIds });
+export const requestZip = async (slug: string, photoIds: string[]): Promise<Blob> => {
+  const response = await api.post(`/events/${slug}/zip`, { photoIds }, {
+    responseType: 'blob'
+  });
   return response.data;
 };
 
