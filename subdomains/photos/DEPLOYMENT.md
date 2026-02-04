@@ -103,6 +103,10 @@ routes = [
 
 # Configure Cloudflare Pages custom domain:
 # - Add photos.thijsvtol.nl
+
+# Note: The apps/web/public/_routes.json file configures which routes
+# go to the Worker (/api/* and /media/*) vs. Pages (everything else).
+# This file is automatically included in the build output.
 ```
 
 ### 6. Set Up Cloudflare Access
