@@ -104,8 +104,10 @@ routes = [
 # Configure Cloudflare Pages custom domain:
 # - Add photos.thijsvtol.nl
 
-# Note: The apps/web/public/_routes.json file configures which routes
-# go to the Worker (/api/* and /media/*) vs. Pages (everything else).
+# Note: The apps/web/public/_routes.json file disables Pages Functions
+# (excludes all routes) so that Pages serves only static assets.
+# The standalone Worker (deployed via wrangler) handles /api/* and /media/*
+# through the routes configured in wrangler.toml at the zone level.
 # This file is automatically included in the build output.
 ```
 
