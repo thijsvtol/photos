@@ -7,6 +7,7 @@ const Navbar: React.FC = () => {
   const location = useLocation();
   const navigate = useNavigate();
   const isAdmin = localStorage.getItem('isAdmin') === 'true';
+  const isOnAdminPage = location.pathname.startsWith('/admin');
   
   const isActive = (path: string) => {
     if (path === '/events') {
@@ -54,17 +55,6 @@ const Navbar: React.FC = () => {
               <Heart className="w-4 h-4" />
               <span className="hidden sm:inline">Favorites</span>
             </Link>
-
-            {isAdmin && (
-              <button
-                onClick={handleLogout}
-                className="flex items-center gap-2 px-3 py-2 rounded-lg transition-colors text-sm font-medium text-red-600 hover:bg-red-50"
-                title="Logout"
-              >
-                <LogOut className="w-4 h-4" />
-                <span className="hidden sm:inline">Logout</span>
-              </button>
-            )}
             
             <Link to="/map" className={linkClass('/map')}>
               <MapPin className="w-4 h-4" />
@@ -75,6 +65,17 @@ const Navbar: React.FC = () => {
               <Settings className="w-4 h-4" />
               <span className="hidden sm:inline">Admin</span>
             </Link>
+
+            {(isAdmin || isOnAdminPage) && (
+              <button
+                onClick={handleLogout}
+                className="flex items-center gap-2 px-3 py-2 rounded-lg transition-colors text-sm font-medium text-red-600 hover:bg-red-50"
+                title="Logout"
+              >
+                <LogOut className="w-4 h-4" />
+                <span className="hidden sm:inline">Logout</span>
+              </button>
+            )}
           </div>
         </div>
       </div>
