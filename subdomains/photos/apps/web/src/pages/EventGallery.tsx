@@ -287,12 +287,12 @@ const EventGallery: React.FC = () => {
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3 sm:gap-4">
             {photos.map((photo) => (
               <div key={photo.id} className="relative group bg-white rounded-lg overflow-hidden shadow-md flex flex-col">
-                <Link to={`/p/${slug}/${photo.id}`} className="block relative aspect-square overflow-hidden">
+                <Link to={`/p/${slug}/${photo.id}`} className="block relative overflow-hidden" style={{ aspectRatio: '16/9' }}>
                   <ProgressiveImage
                     src={getPreviewUrl(slug!, photo.id)}
                     blurDataUrl={photo.blur_placeholder}
                     alt={photo.original_filename}
-                    className="w-full h-full object-cover"
+                    className="w-full h-full object-cover object-center"
                     loading="lazy"
                   />
                   {/* User favorite indicator */}
