@@ -26,7 +26,7 @@ app.get('/api/events', async (c) => {
     // For public events, add a preview photo ID
     const eventsWithPreviews = await Promise.all(
       (events.results || []).map(async (event) => {
-        if (!event.requires_password) {
+        if (!(event as any).requires_password) {
           // Get the first photo for this event as preview
           const photo = await c.env.DB
             .prepare('SELECT id FROM photos WHERE event_id = ? ORDER BY capture_time ASC LIMIT 1')

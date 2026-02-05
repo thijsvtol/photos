@@ -404,4 +404,409 @@ app.post('/events/:slug/tags', async (c) => {
   }
 });
 
+/**
+ * GET /stats
+ * Get overall admin statistics
+ */
+app.get('/stats', async (c) => {
+  try {
+    // Get total events
+    const eventsResult = await c.env.DB
+      .prepare('SELECT COUNT(*) as count FROM events')
+      .first<{ count: number }>();
+    
+    // Get total photos
+    const photosResult = await c.env.DB
+      .prepare('SELECT COUNT(*) as count FROM photos')
+      .first<{ count: number }>();
+    
+    // Get total favorites
+    const favoritesResult = await c.env.DB
+      .prepare('SELECT SUM(favorites_count) as total FROM photos')
+      .first<{ total: number | null }>();
+    
+    // Estimate storage (rough calculation: width * height * 3 bytes per pixel / 3 for JPEG compression)
+    const storageResult = await c.env.DB
+      .prepare('SELECT SUM(COALESCE(width, 0) * COALESCE(height, 0) * 1.0) as pixels FROM photos')
+      .first<{ pixels: number | null }>();
+    
+    const storageBytes = storageResult?.pixels ? (storageResult.pixels * 3 / 3) : 0;
+    
+    // Get public/private event counts
+    const publicEventsResult = await c.env.DB
+      .prepare('SELECT COUNT(*) as count FROM events WHERE password_hash IS NULL')
+      .first<{ count: number }>();
+    
+    const privateEventsResult = await c.env.DB
+      .prepare('SELECT COUNT(*) as count FROM events WHERE password_hash IS NOT NULL')
+      .first<{ count: number }>();
+    
+    return c.json({
+      totalEvents: eventsResult?.count || 0,
+      totalPhotos: photosResult?.count || 0,
+      totalFavorites: favoritesResult?.total || 0,
+      storageBytes: Math.round(storageBytes),
+      publicEvents: publicEventsResult?.count || 0,
+      privateEvents: privateEventsResult?.count || 0,
+    });
+  } catch (error) {
+    console.error('Error fetching stats:', error);
+    return c.json({ error: 'Failed to fetch stats' }, 500);
+  }
+});
+
+/**
+ * GET /events/:slug/stats
+ * Get event-specific statistics
+ */
+app.get('/events/:slug/stats', async (c) => {
+  const slug = c.req.param('slug');
+  
+  try {
+    // Get event ID
+    const event = await c.env.DB
+      .prepare('SELECT id FROM events WHERE slug = ?')
+      .bind(slug)
+      .first<{ id: number }>();
+    
+    if (!event) {
+      return c.json({ error: 'Event not found' }, 404);
+    }
+    
+    // Get photo count
+    const photoCountResult = await c.env.DB
+      .prepare('SELECT COUNT(*) as count FROM photos WHERE event_id = ?')
+      .bind(event.id)
+      .first<{ count: number }>();
+    
+    // Get photos with GPS
+    const gpsCountResult = await c.env.DB
+      .prepare('SELECT COUNT(*) as count FROM photos WHERE event_id = ? AND latitude IS NOT NULL AND longitude IS NOT NULL')
+      .bind(event.id)
+      .first<{ count: number }>();
+    
+    // Get top favorited photos
+    const topFavorites = await c.env.DB
+      .prepare('SELECT id, original_filename, favorites_count FROM photos WHERE event_id = ? ORDER BY favorites_count DESC LIMIT 5')
+      .bind(event.id)
+      .all();
+    
+    // Get featured photo count
+    const featuredCountResult = await c.env.DB
+      .prepare('SELECT COUNT(*) as count FROM photos WHERE event_id = ? AND is_featured = 1')
+      .bind(event.id)
+      .first<{ count: number }>();
+    
+    // Get total favorites for this event
+    const totalFavoritesResult = await c.env.DB
+      .prepare('SELECT SUM(favorites_count) as total FROM photos WHERE event_id = ?')
+      .bind(event.id)
+      .first<{ total: number | null }>();
+    
+    // Get camera models used
+    const cameraModels = await c.env.DB
+      .prepare('SELECT DISTINCT camera_model, COUNT(*) as count FROM photos WHERE event_id = ? AND camera_model IS NOT NULL GROUP BY camera_model ORDER BY count DESC')
+      .bind(event.id)
+      .all();
+    
+    return c.json({
+      photoCount: photoCountResult?.count || 0,
+      photosWithGPS: gpsCountResult?.count || 0,
+      photosWithoutGPS: (photoCountResult?.count || 0) - (gpsCountResult?.count || 0),
+      featuredCount: featuredCountResult?.count || 0,
+      totalFavorites: totalFavoritesResult?.total || 0,
+      topFavorites: topFavorites.results || [],
+      cameraModels: cameraModels.results || [],
+    });
+  } catch (error) {
+    console.error('Error fetching event stats:', error);
+    return c.json({ error: 'Failed to fetch event stats' }, 500);
+  }
+});
+
+/**
+ * PUT /events/:slug
+ * Update event details
+ */
+app.put('/events/:slug', async (c) => {
+  const slug = c.req.param('slug');
+  
+  try {
+    const { name, password, description } = await c.req.json<{
+      name?: string;
+      password?: string;
+      description?: string;
+    }>();
+    
+    // Get event
+    const event = await c.env.DB
+      .prepare('SELECT id, password_salt FROM events WHERE slug = ?')
+      .bind(slug)
+      .first<{ id: number; password_salt: string | null }>();
+    
+    if (!event) {
+      return c.json({ error: 'Event not found' }, 404);
+    }
+    
+    // Build update query dynamically
+    const updates: string[] = [];
+    const values: any[] = [];
+    
+    if (name !== undefined) {
+      updates.push('name = ?');
+      values.push(name);
+    }
+    
+    if (description !== undefined) {
+      updates.push('description = ?');
+      values.push(description);
+    }
+    
+    if (password !== undefined) {
+      if (password === '') {
+        // Remove password
+        updates.push('password_hash = NULL', 'password_salt = NULL');
+      } else {
+        // Set new password
+        const salt = generateSalt();
+        const hash = await hashPassword(password, salt);
+        updates.push('password_hash = ?', 'password_salt = ?');
+        values.push(hash, salt);
+      }
+    }
+    
+    if (updates.length === 0) {
+      return c.json({ error: 'No updates provided' }, 400);
+    }
+    
+    // Add event ID for WHERE clause
+    values.push(event.id);
+    
+    await c.env.DB
+      .prepare(`UPDATE events SET ${updates.join(', ')} WHERE id = ?`)
+      .bind(...values)
+      .run();
+    
+    return c.json({ success: true });
+  } catch (error) {
+    console.error('Error updating event:', error);
+    return c.json({ error: 'Failed to update event' }, 500);
+  }
+});
+
+/**
+ * DELETE /events/:slug
+ * Delete event and all associated photos
+ */
+app.delete('/events/:slug', async (c) => {
+  const slug = c.req.param('slug');
+  
+  try {
+    // Get event and all photos
+    const event = await c.env.DB
+      .prepare('SELECT id FROM events WHERE slug = ?')
+      .bind(slug)
+      .first<{ id: number }>();
+    
+    if (!event) {
+      return c.json({ error: 'Event not found' }, 404);
+    }
+    
+    // Get all photo IDs for R2 cleanup
+    const photos = await c.env.DB
+      .prepare('SELECT id FROM photos WHERE event_id = ?')
+      .bind(event.id)
+      .all<{ id: string }>();
+    
+    // Delete from R2 (original, preview, ig sizes)
+    for (const photo of photos.results || []) {
+      try {
+        await c.env.PHOTOS_BUCKET.delete(`${slug}/original/${photo.id}.jpg`);
+        await c.env.PHOTOS_BUCKET.delete(`${slug}/preview/${photo.id}.jpg`);
+        await c.env.PHOTOS_BUCKET.delete(`${slug}/ig/${photo.id}.jpg`);
+      } catch (err) {
+        console.error(`Failed to delete photo ${photo.id} from R2:`, err);
+        // Continue even if R2 delete fails
+      }
+    }
+    
+    // Delete photos from database (cascade handled by foreign key)
+    await c.env.DB
+      .prepare('DELETE FROM photos WHERE event_id = ?')
+      .bind(event.id)
+      .run();
+    
+    // Delete event tags
+    await c.env.DB
+      .prepare('DELETE FROM event_tags WHERE event_id = ?')
+      .bind(event.id)
+      .run();
+    
+    // Delete event
+    await c.env.DB
+      .prepare('DELETE FROM events WHERE id = ?')
+      .bind(event.id)
+      .run();
+    
+    return c.json({ success: true, deletedPhotos: photos.results?.length || 0 });
+  } catch (error) {
+    console.error('Error deleting event:', error);
+    return c.json({ error: 'Failed to delete event' }, 500);
+  }
+});
+
+/**
+ * DELETE /photos/:photoId
+ * Delete a single photo
+ */
+app.delete('/photos/:photoId', async (c) => {
+  const photoId = c.req.param('photoId');
+  
+  try {
+    // Get photo and event slug
+    const photo = await c.env.DB
+      .prepare(`
+        SELECT p.id, e.slug
+        FROM photos p
+        JOIN events e ON p.event_id = e.id
+        WHERE p.id = ?
+      `)
+      .bind(photoId)
+      .first<{ id: string; slug: string }>();
+    
+    if (!photo) {
+      return c.json({ error: 'Photo not found' }, 404);
+    }
+    
+    // Delete from R2
+    try {
+      await c.env.PHOTOS_BUCKET.delete(`${photo.slug}/original/${photo.id}.jpg`);
+      await c.env.PHOTOS_BUCKET.delete(`${photo.slug}/preview/${photo.id}.jpg`);
+      await c.env.PHOTOS_BUCKET.delete(`${photo.slug}/ig/${photo.id}.jpg`);
+    } catch (err) {
+      console.error(`Failed to delete photo ${photo.id} from R2:`, err);
+      // Continue to delete from database even if R2 fails
+    }
+    
+    // Delete from database
+    await c.env.DB
+      .prepare('DELETE FROM photos WHERE id = ?')
+      .bind(photoId)
+      .run();
+    
+    return c.json({ success: true });
+  } catch (error) {
+    console.error('Error deleting photo:', error);
+    return c.json({ error: 'Failed to delete photo' }, 500);
+  }
+});
+
+/**
+ * POST /tags
+ * Create a new tag
+ */
+app.post('/tags', async (c) => {
+  try {
+    const { name, slug, description } = await c.req.json<{
+      name: string;
+      slug?: string;
+      description?: string;
+    }>();
+    
+    if (!name) {
+      return c.json({ error: 'Name is required' }, 400);
+    }
+    
+    // Generate slug if not provided
+    const tagSlug = slug || name.toLowerCase().replace(/[^a-z0-9]+/g, '-');
+    
+    const result = await c.env.DB
+      .prepare('INSERT INTO tags (name, slug, description) VALUES (?, ?, ?) RETURNING *')
+      .bind(name, tagSlug, description || null)
+      .first();
+    
+    return c.json({ tag: result });
+  } catch (error) {
+    console.error('Error creating tag:', error);
+    return c.json({ error: 'Failed to create tag' }, 500);
+  }
+});
+
+/**
+ * PUT /tags/:id
+ * Update a tag
+ */
+app.put('/tags/:id', async (c) => {
+  const tagId = parseInt(c.req.param('id'));
+  
+  try {
+    const { name, slug, description } = await c.req.json<{
+      name?: string;
+      slug?: string;
+      description?: string;
+    }>();
+    
+    const updates: string[] = [];
+    const values: any[] = [];
+    
+    if (name !== undefined) {
+      updates.push('name = ?');
+      values.push(name);
+    }
+    
+    if (slug !== undefined) {
+      updates.push('slug = ?');
+      values.push(slug);
+    }
+    
+    if (description !== undefined) {
+      updates.push('description = ?');
+      values.push(description);
+    }
+    
+    if (updates.length === 0) {
+      return c.json({ error: 'No updates provided' }, 400);
+    }
+    
+    values.push(tagId);
+    
+    await c.env.DB
+      .prepare(`UPDATE tags SET ${updates.join(', ')} WHERE id = ?`)
+      .bind(...values)
+      .run();
+    
+    return c.json({ success: true });
+  } catch (error) {
+    console.error('Error updating tag:', error);
+    return c.json({ error: 'Failed to update tag' }, 500);
+  }
+});
+
+/**
+ * DELETE /tags/:id
+ * Delete a tag
+ */
+app.delete('/tags/:id', async (c) => {
+  const tagId = parseInt(c.req.param('id'));
+  
+  try {
+    // Delete event_tags associations
+    await c.env.DB
+      .prepare('DELETE FROM event_tags WHERE tag_id = ?')
+      .bind(tagId)
+      .run();
+    
+    // Delete tag
+    await c.env.DB
+      .prepare('DELETE FROM tags WHERE id = ?')
+      .bind(tagId)
+      .run();
+    
+    return c.json({ success: true });
+  } catch (error) {
+    console.error('Error deleting tag:', error);
+    return c.json({ error: 'Failed to delete tag' }, 500);
+  }
+});
+
 export default app;

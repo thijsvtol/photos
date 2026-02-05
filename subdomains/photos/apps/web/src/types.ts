@@ -14,6 +14,8 @@ export interface Event {
   requires_password: boolean;
   preview_photo_id: string | null;
   tags?: Tag[];
+  description?: string | null;
+  is_archived?: boolean;
 }
 
 export interface Photo {
@@ -42,6 +44,43 @@ export interface CreateEventRequest {
   name: string;
   password?: string;
   slug?: string;
+}
+
+export interface UpdateEventRequest {
+  name?: string;
+  password?: string;
+  description?: string;
+}
+
+export interface AdminStats {
+  totalEvents: number;
+  totalPhotos: number;
+  totalFavorites: number;
+  storageBytes: number;
+  publicEvents: number;
+  privateEvents: number;
+}
+
+export interface EventStats {
+  photoCount: number;
+  photosWithGPS: number;
+  photosWithoutGPS: number;
+  featuredCount: number;
+  totalFavorites: number;
+  topFavorites: Array<{ id: string; original_filename: string; favorites_count: number }>;
+  cameraModels: Array<{ camera_model: string; count: number }>;
+}
+
+export interface CreateTagRequest {
+  name: string;
+  slug?: string;
+  description?: string;
+}
+
+export interface UpdateTagRequest {
+  name?: string;
+  slug?: string;
+  description?: string;
 }
 
 // Upload queue item for persistence in IndexedDB

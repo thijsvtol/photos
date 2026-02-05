@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { useParams, Link } from 'react-router-dom';
+import { useParams, Link, useLocation } from 'react-router-dom';
 import { Heart, Star } from 'lucide-react';
 import Masonry from 'react-masonry-css';
 import Navbar from '../components/Navbar';
@@ -9,6 +9,8 @@ import type { Event, Photo } from '../types';
 
 const EventGallery: React.FC = () => {
   const { slug } = useParams<{ slug: string }>();
+  const location = useLocation();
+  const isAdminView = location.pathname.startsWith('/admin');
   const [event, setEvent] = useState<Event | null>(null);
   const [photos, setPhotos] = useState<Photo[]>([]);
   const [authenticated, setAuthenticated] = useState(false);
@@ -335,17 +337,19 @@ const EventGallery: React.FC = () => {
                       >
                         {selectedPhotos.has(photo.id) ? '✓' : 'Select'}
                       </button>
-                      <button
-                        onClick={() => toggleFeatured(photo.id, photo.is_featured || false)}
-                        className={`px-2 py-1 rounded text-xs sm:text-sm flex items-center gap-1 ${
-                          photo.is_featured
-                            ? 'bg-yellow-500 text-white'
-                            : 'bg-gray-200 text-gray-700 hover:bg-gray-300 active:bg-gray-400'
-                        }`}
-                        title={photo.is_featured ? 'Remove from featured' : 'Mark as featured'}
-                      >
-                        <Star className={`w-3 h-3 ${photo.is_featured ? 'fill-white' : ''}`} />
-                      </button>
+                      {isAdminView && (
+                        <button
+                          onClick={() => toggleFeatured(photo.id, photo.is_featured || false)}
+                          className={`px-2 py-1 rounded text-xs sm:text-sm flex items-center gap-1 ${
+                            photo.is_featured
+                              ? 'bg-yellow-500 text-white'
+                              : 'bg-gray-200 text-gray-700 hover:bg-gray-300 active:bg-gray-400'
+                          }`}
+                          title={photo.is_featured ? 'Remove from featured' : 'Mark as featured'}
+                        >
+                          <Star className={`w-3 h-3 ${photo.is_featured ? 'fill-white' : ''}`} />
+                        </button>
+                      )}
                     </div>
                     <div className="flex gap-1 sm:gap-2">
                       <a

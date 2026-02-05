@@ -6,10 +6,9 @@ import { MapContainer, TileLayer, Marker, useMapEvents } from 'react-leaflet';
 import 'leaflet/dist/leaflet.css';
 import L from 'leaflet';
 import Navbar from '../components/Navbar';
-import TagManager from '../components/TagManager';
-import { getEvent, startUpload, uploadPart, completeUpload, regenerateThumbnails, setEventLocation } from '../api';
+import { getEvent, startUpload, uploadPart, completeUpload, regenerateThumbnails, setEventLocation, getEventStats, getPreviewUrl } from '../api';
 import { addToQueue, updateQueueItem, getQueueItems, getPendingUploads } from '../uploadQueue';
-import type { Event, UploadQueueItem } from '../types';
+import type { Event, UploadQueueItem, EventStats } from '../types';
 
 // Fix Leaflet marker icons
 delete (L.Icon.Default.prototype as any)._getIconUrl;
@@ -24,6 +23,7 @@ const CHUNK_SIZE = 5 * 1024 * 1024; // 5MB chunks
 const AdminEventUpload: React.FC = () => {
   const { slug } = useParams<{ slug: string }>();
   const [event, setEvent] = useState<Event | null>(null);
+  const [stats, setStats] = useState<EventStats | null>(null);
   const [queueItems, setQueueItems] = useState<UploadQueueItem[]>([]);
   const [isDragging, setIsDragging] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -34,6 +34,7 @@ const AdminEventUpload: React.FC = () => {
   useEffect(() => {
     if (slug) {
       loadEvent();
+      loadStats();
       loadQueue();
       // Resume any pending uploads
       resumePendingUploads();
@@ -47,6 +48,15 @@ const AdminEventUpload: React.FC = () => {
     } catch (err) {
       setError('Failed to load event');
       console.error(err);
+    }
+  };
+
+  const loadStats = async () => {
+    try {
+      const statsData = await getEventStats(slug!);
+      setStats(statsData);
+    } catch (err) {
+      console.error('Failed to load stats:', err);
     }
   };
 
@@ -376,10 +386,76 @@ const AdminEventUpload: React.FC = () => {
           </div>
         )}
 
-        {/* Tag Management */}
-        {event && (
+        {/* Event Analytics */}
+        {stats && (
           <div className="mb-8">
-            <TagManager eventSlug={slug!} initialTags={event.tags} />
+            <div className="bg-white rounded-lg shadow-md p-6">
+              <h2 className="text-xl font-semibold text-gray-900 mb-4">📊 Event Analytics</h2>
+              
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
+                <div className="bg-blue-50 rounded-lg p-4">
+                  <div className="text-2xl font-bold text-blue-900">{stats.photoCount}</div>
+                  <div className="text-sm text-blue-700">Total Photos</div>
+                </div>
+                <div className="bg-green-50 rounded-lg p-4">
+                  <div className="text-2xl font-bold text-green-900">{stats.photosWithGPS}</div>
+                  <div className="text-sm text-green-700">With GPS Data</div>
+                </div>
+                <div className="bg-yellow-50 rounded-lg p-4">
+                  <div className="text-2xl font-bold text-yellow-900">{stats.featuredCount}</div>
+                  <div className="text-sm text-yellow-700">Featured Photos</div>
+                </div>
+                <div className="bg-red-50 rounded-lg p-4">
+                  <div className="text-2xl font-bold text-red-900">{stats.totalFavorites}</div>
+                  <div className="text-sm text-red-700">Total Favorites</div>
+                </div>
+              </div>
+
+              {stats.topFavorites && stats.topFavorites.length > 0 && (
+                <div className="mb-6">
+                  <h3 className="text-lg font-semibold text-gray-900 mb-3">⭐ Top Favorited Photos</h3>
+                  <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-3">
+                    {stats.topFavorites.map((photo) => (
+                      <div key={photo.id} className="relative group">
+                        <img
+                          src={getPreviewUrl(slug!, photo.id)}
+                          alt={photo.original_filename}
+                          className="w-full aspect-square object-cover rounded-lg shadow"
+                        />
+                        <div className="absolute bottom-0 left-0 right-0 bg-black bg-opacity-75 text-white px-2 py-1 rounded-b-lg text-xs">
+                          ❤️ {photo.favorites_count}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {stats.cameraModels && stats.cameraModels.length > 0 && (
+                <div>
+                  <h3 className="text-lg font-semibold text-gray-900 mb-3">📷 Cameras Used</h3>
+                  <div className="flex flex-wrap gap-2">
+                    {stats.cameraModels.map((camera, index) => (
+                      <span
+                        key={index}
+                        className="px-3 py-1 bg-gray-100 text-gray-700 rounded-full text-sm"
+                      >
+                        {camera.camera_model} ({camera.count})
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              <div className="mt-6">
+                <Link
+                  to={`/admin/events/${slug}/photos`}
+                  className="inline-block px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition"
+                >
+                  🖼️ Manage All Photos
+                </Link>
+              </div>
+            </div>
           </div>
         )}
 

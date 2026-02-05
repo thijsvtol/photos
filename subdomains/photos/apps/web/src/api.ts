@@ -1,5 +1,5 @@
 import axios from 'axios';
-import type { Event, Photo, CreateEventRequest, Tag } from './types';
+import type { Event, Photo, CreateEventRequest, Tag, AdminStats, EventStats, UpdateEventRequest, CreateTagRequest, UpdateTagRequest } from './types';
 
 const api = axios.create({
   baseURL: '/api',
@@ -186,4 +186,60 @@ export const setEventLocation = async (slug: string, latitude: number, longitude
   });
   if (!response.ok) throw new Error('Failed to set event location');
   return response.json();
+};
+
+// Admin Stats API
+export const getAdminStats = async (): Promise<AdminStats> => {
+  const response = await api.get<AdminStats>('/admin/stats', {
+    headers: { 'X-Admin-Access': '1' },
+  });
+  return response.data;
+};
+
+export const getEventStats = async (slug: string): Promise<EventStats> => {
+  const response = await api.get<EventStats>(`/admin/events/${slug}/stats`, {
+    headers: { 'X-Admin-Access': '1' },
+  });
+  return response.data;
+};
+
+// Event Management API
+export const updateEvent = async (slug: string, data: UpdateEventRequest): Promise<void> => {
+  await api.put(`/admin/events/${slug}`, data, {
+    headers: { 'X-Admin-Access': '1' },
+  });
+};
+
+export const deleteEvent = async (slug: string): Promise<{ success: boolean; deletedPhotos: number }> => {
+  const response = await api.delete<{ success: boolean; deletedPhotos: number }>(`/admin/events/${slug}`, {
+    headers: { 'X-Admin-Access': '1' },
+  });
+  return response.data;
+};
+
+// Photo Management API
+export const deletePhoto = async (photoId: string): Promise<void> => {
+  await api.delete(`/admin/photos/${photoId}`, {
+    headers: { 'X-Admin-Access': '1' },
+  });
+};
+
+// Tag Management API
+export const createTag = async (data: CreateTagRequest): Promise<Tag> => {
+  const response = await api.post<{ tag: Tag }>('/admin/tags', data, {
+    headers: { 'X-Admin-Access': '1' },
+  });
+  return response.data.tag;
+};
+
+export const updateTag = async (id: number, data: UpdateTagRequest): Promise<void> => {
+  await api.put(`/admin/tags/${id}`, data, {
+    headers: { 'X-Admin-Access': '1' },
+  });
+};
+
+export const deleteTag = async (id: number): Promise<void> => {
+  await api.delete(`/admin/tags/${id}`, {
+    headers: { 'X-Admin-Access': '1' },
+  });
 };
