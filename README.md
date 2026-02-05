@@ -8,10 +8,11 @@ The repository is organized into subdomains, each containing its own application
 
 ```
 /
-├── infrastructure/       # Infrastructure as Code configuration
-│   ├── cloudflare-config.json  # Cloudflare resource definitions
-│   ├── deploy.sh         # Automated deployment script
-│   ├── status.sh         # Infrastructure status checker
+├── infrastructure/       # Infrastructure as Code (Terraform)
+│   ├── main.tf           # Terraform configuration
+│   ├── variables.tf      # Input variables
+│   ├── outputs.tf        # Output values
+│   ├── run-migrations.sh # Database migration script
 │   └── README.md         # Infrastructure documentation
 ├── subdomains/
 │   └── photos/           # photos.thijsvtol.nl - Photo gallery application
@@ -51,37 +52,39 @@ Each subdomain has its own development setup. Refer to the subdomain's README fo
 
 ## Infrastructure as Code
 
-All Cloudflare resources are now managed as code! No more clicking through the UI.
+All Cloudflare resources are managed with **Terraform** - industry-standard infrastructure as code.
 
 **Quick Start:**
 ```bash
 cd infrastructure
-./deploy.sh
+terraform init
+terraform plan
+terraform apply
 ```
 
 This automatically provisions:
 - ✅ R2 bucket for photo storage
-- ✅ D1 database with migrations
-- ✅ Worker deployment
-- ✅ DNS and routing configuration
+- ✅ D1 database
+- ✅ Worker routes and configuration
+- ✅ DNS records
+
+**Benefits:**
+- 90% less code than custom bash scripts
+- Native state management
+- Automatic dependency resolution
+- Built-in drift detection
 
 See [infrastructure/README.md](./infrastructure/README.md) for complete documentation.
 
-**Check Infrastructure Status:**
-```bash
-cd infrastructure
-./status.sh
-```
-
 **GitHub Actions:**
-Automatic deployments on push to `main` branch. Manual workflows available for migrations and full provisioning.
+Automatic worker deployments on push to `main` branch. Manual Terraform workflows available for infrastructure provisioning.
 
 ## Deployment
 
 Each subdomain is deployed independently:
 - **Photos**: Cloudflare Pages (frontend) + Cloudflare Workers (backend)
 
-All infrastructure is defined in `infrastructure/cloudflare-config.json` and deployed via `infrastructure/deploy.sh` or GitHub Actions.
+All infrastructure is managed with Terraform in `infrastructure/` directory.
 
 ## License
 

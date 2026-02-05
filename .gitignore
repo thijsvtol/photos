@@ -35,8 +35,12 @@ temp/
 infrastructure/.deployment-state.json
 infrastructure/.deployment-state.json.backup
 
-# Terraform state (if used)
+# Terraform state and sensitive files
 *.tfstate
 *.tfstate.*
+*.tfstate.backup
 .terraform/
 .terraform.lock.hcl
+terraform.tfvars
+override.tf
+override.tf.json
