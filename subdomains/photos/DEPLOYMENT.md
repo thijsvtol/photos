@@ -1,51 +1,5 @@
 # Photos Subdomain - Deployment Checklist
 
-This checklist ensures all components are properly configured before deploying to production.
-
-## Pre-Deployment Verification
-
-### Code Quality
-- [x] All TypeScript files compile without errors
-- [x] ESLint configuration in place
-- [x] Code review completed and feedback addressed
-- [x] Security scan completed (CodeQL) - No vulnerabilities found
-
-### Backend (Cloudflare Worker)
-- [x] Worker source code complete
-- [x] TypeScript types defined for all APIs
-- [x] Error handling implemented
-- [x] CORS configured correctly
-- [x] All API endpoints tested
-- [x] Password hashing with SHA-256 + salt
-- [x] Session cookie implementation (HttpOnly, Secure, SameSite)
-- [x] Admin authentication via header validation
-
-### Frontend (React)
-- [x] All React components implemented
-- [x] Routing configured (React Router)
-- [x] API client with axios
-- [x] Error handling in place
-- [x] Loading states implemented
-- [x] Responsive design with Tailwind CSS
-
-### Database (D1)
-- [x] Migration script created (001_init.sql)
-- [x] Events table with password protection
-- [x] Photos table with metadata
-- [x] Indexes on slug and (event_id, capture_time)
-- [x] Foreign key constraints
-
-### Storage (R2)
-- [x] Bucket structure defined
-- [x] Upload orchestration implemented
-- [x] Multipart upload support (5MB chunks)
-
-### Documentation
-- [x] Comprehensive README.md
-- [x] IMPLEMENTATION.md with architecture
-- [x] IMAGE_PROCESSING.md for future work
-- [x] Development setup script
-- [x] Environment variable examples
 
 ## Production Deployment Steps
 
@@ -54,10 +8,11 @@ This checklist ensures all components are properly configured before deploying t
 # Create D1 database
 wrangler d1 create photos-db
 
-# Update wrangler.toml with database_id
+# Update wrangler.toml with database_id in both [[d1_databases]] and [[env.production.d1_databases]]
 
-# Run migrations
-wrangler d1 execute photos-db --file=./migrations/001_init.sql
+# Run all migrations on production database
+cd subdomains/photos
+wrangler d1 migrations apply photos-db --remote
 
 # Create R2 bucket
 wrangler r2 bucket create photos-storage
@@ -65,71 +20,136 @@ wrangler r2 bucket create photos-storage
 
 ### 2. Configure Secrets
 ```bash
-cd apps/worker
-
 # Generate and set cookie secret
-wrangler secret put EVENT_COOKIE_SECRET --env production
-# Use: openssl rand -base64 32
+wrangler secret put EVENT_COOKIE_SECRET
+# Enter a strong random string (use: openssl rand -base64 32)
 
 # Note: ADMIN_SHARED_SECRET not needed in production (use Cloudflare Access)
 ```
 
 ### 3. Deploy Worker
 ```bash
-cd apps/worker
+cd subdomains/photos/apps/worker
 npm install
-npm run deploy
+cd ../..
+npx wrangler deploy --env production
 ```
 
-### 4. Deploy Frontend
-```bash
-cd apps/web
-npm install
-npm run build
+### 4. Deploy Frontend to Cloudflare Pages
 
-# Deploy to Cloudflare Pages
-# - Connect repository
-# - Set build command: cd subdomains/photos/apps/web && npm install && npm run build
-# - Set output directory: subdomains/photos/apps/web/dist
-```
+**Create Pages Project:**
+1. Go to Cloudflare Dashboard → **Workers & Pages**
+2. Click **Create** → Select **Pages** tab (not Workers)
+3. Connect to your Git repository
+4. Select the repository and configure:
+   - **Project name**: `photos`
+   - **Production branch**: `main`
+   - **Framework preset**: Vite (or None)
+   - **Root directory**: `subdomains/photos/apps/web`
+   - **Build command**: `npm install && npm run build`
+   - **Build output directory**: `dist`
+   - **Deploy command**: `echo "Deploy complete"`
+5. Click **Save and Deploy**
+
+**Note**: No environment variables needed for the frontend.
 
 ### 5. Configure Domain
-```bash
-# Update wrangler.toml routes:
+
+**1. Worker Routes (in wrangler.toml):**
+```toml
+[env.production]
+name = "photos-worker"
 routes = [
   { pattern = "photos.thijsvtol.nl/api/*", zone_name = "thijsvtol.nl" },
   { pattern = "photos.thijsvtol.nl/media/*", zone_name = "thijsvtol.nl" }
 ]
-
-# Configure Cloudflare Pages custom domain:
-# - Add photos.thijsvtol.nl
-
-# Note: The apps/web/public/_routes.json file disables Pages Functions
-# (excludes all routes) so that Pages serves only static assets.
-# The standalone Worker (deployed via wrangler) handles /api/* and /media/*
-# through the routes configured in wrangler.toml at the zone level.
-# This file is automatically included in the build output.
 ```
 
-### 6. Set Up Cloudflare Access
+**2. Add Custom Domain to Pages:**
+- In Pages project → **Custom domains**
+- Click **Set up a custom domain**
+- Enter `photos.thijsvtol.nl`
+- Wait for DNS propagation (usually 1-2 minutes)
+
+**3. Routing Configuration:**
+The `apps/web/public/_routes.json` file is automatically included in the build:
+```json
+{
+  "version": 1,
+  "include": ["/*"],
+  "exclude": ["/api/*", "/media/*"]
+}
+```
+
+This configuration ensures:
+- Pages serves the React app for all routes
+- Worker handles `/api/*` and `/media/*` via routes configured in wrangler.toml
+- No conflicts between Pages and Worker routing
+
+### 6. Set Up Cloudflare Access (Optional - for Admin Protection)
+
+**Enable Zero Trust (if not already enabled):**
+1. Go to **Cloudflare Dashboard** → **Zero Trust**
+2. If prompted, complete the Zero Trust setup
+
+**Create Access Application:**
+1. Go to **Zero Trust** → **Access** → **Applications**
+2. Click **Add an application**
+3. Select **Self-hosted**
+4. Configure application:
+   - **Application name**: `Photos Admin`
+   - **Session duration**: `24 hours` (or your preference)
+   - **Application domain**:
+     - Subdomain: `photos`
+     - Domain: `thijsvtol.nl`
+     - Path: `/admin*` (protects all admin routes)
+5. Click **Next**
+
+**Create Access Policy:**
+1. **Policy name**: `Admin Users`
+2. **Action**: `Allow`
+3. **Configure rules** - Choose one or more:
+   - **Emails**: Add your email address(es)
+   - **Emails ending in**: Your domain (e.g., `@yourdomain.com`)
+   - **Everyone**: If you want to allow anyone (not recommended)
+4. Click **Next**
+
+**Configure Additional Settings:**
+1. **CORS settings**: Leave default
+2. **Cookie settings**: Leave default
+3. **Identity** (optional): Configure login methods (Google, GitHub, etc.)
+4. Click **Add application**
+
+**How Cloudflare Access Works (Free Plan):**
+
+Cloudflare Access automatically adds a `Cf-Access-Jwt-Assertion` header to authenticated requests, even on the free plan. The Worker checks for this header to verify admin access.
+
+**No additional configuration needed!** Just create the Access application as described above, and the authentication will work automatically.
+
+**Testing:**
+1. Visit `https://photos.thijsvtol.nl/admin`
+2. You'll be prompted to authenticate via Cloudflare Access
+3. After logging in, you should see the admin dashboard
+4. The Worker will automatically verify your access via the JWT header
+
+**How It Works:**
+- When users access `/admin*` routes, Cloudflare Access prompts for authentication
+- After successful login, Cloudflare automatically adds a `Cf-Access-Jwt-Assertion` header
+- The Worker verifies this JWT header to authorize admin API calls
+- Sessions are managed by Cloudflare (no additional setup needed)
+- Works on **free plan** - no custom header configuration required!
+
+**Alternative: Use Admin Shared Secret (Development/Testing Only)**
+For development or if you don't want to set up Cloudflare Access:
 ```bash
-# In Cloudflare Dashboard > Zero Trust > Access:
-# 1. Create Application for photos.thijsvtol.nl/admin*
-# 2. Add policy for authorized users
-# 3. Configure to add X-Admin-Access: 1 header
-```
+wrangler secret put ADMIN_SHARED_SECRET
+# Set a strong password
 
-### 7. Verify Deployment
-- [ ] Visit https://photos.thijsvtol.nl
-- [ ] Event list page loads
-- [ ] Create a test event (admin)
-- [ ] Upload a test photo (admin)
-- [ ] Access event with password (public)
-- [ ] View photos in gallery
-- [ ] Download photo (original)
-- [ ] Test direct photo link
-- [ ] Verify session cookies work
-- [ ] Test admin authentication
+# Then add this header to your admin API requests:
+# X-Admin-Secret: your-admin-secret
+```
+⚠️ **Warning**: This is less secure than Cloudflare Access and should only be used for development.
+
 
 ## Post-Deployment Tasks
 

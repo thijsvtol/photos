@@ -10,18 +10,22 @@ const app = new Hono<{ Bindings: Env }>();
  * Admin authentication middleware
  */
 app.use('/*', async (c, next) => {
-  // Check for admin access header (used in development or with Cloudflare Access)
-  const adminHeader = c.req.header('X-Admin-Access');
+  // Check for Cloudflare Access JWT (automatically added on free plan)
+  const accessJwt = c.req.header('Cf-Access-Jwt-Assertion');
   
   // In development, check for optional shared secret
-  if (c.env.ENVIRONMENT === 'development' && c.env.ADMIN_SHARED_SECRET) {
-    const authHeader = c.req.header('Authorization');
-    if (authHeader !== `Bearer ${c.env.ADMIN_SHARED_SECRET}`) {
+  if (c.env.ENVIRONMENT === 'development') {
+    const adminSecret = c.req.header('X-Admin-Secret');
+    if (c.env.ADMIN_SHARED_SECRET && adminSecret !== c.env.ADMIN_SHARED_SECRET) {
       return c.json({ error: 'Unauthorized' }, 401);
     }
-  } else if (!adminHeader || adminHeader !== '1') {
-    // In production, rely on Cloudflare Access + header check
-    return c.json({ error: 'Unauthorized - Admin access required' }, 401);
+  } else {
+    // In production, check for Cloudflare Access JWT
+    if (!accessJwt) {
+      return c.json({ error: 'Unauthorized - Admin access required' }, 401);
+    }
+    // Note: For better security, you could verify the JWT signature here
+    // using your Cloudflare Access team domain's public keys
   }
   
   await next();

@@ -5,25 +5,30 @@ A full-stack photo gallery application built with React + Vite + Tailwind (front
 ## Features
 
 ### Public Features
-- 📋 Event list page with all available photo galleries
-- 🔐 Per-event password protection
+- 📋 Event list page with preview images for public events
+- 🔐 Optional per-event password protection
 - 🖼️ Gallery view with watermarked preview images
-- 📅 Time-based photo sorting by EXIF capture time
-- 🔍 Date range filtering
+- 📅 Photo sorting by date (asc/desc) or filename (asc/desc)
 - 📷 Direct photo links with password protection (`/p/:eventSlug/:photoId`)
+- 🎯 Photo navigation without page reload (pushState)
+- ⌨️ Keyboard navigation (arrow keys, Escape)
+- 📱 Mobile-friendly with swipe gestures
+- 📸 Full EXIF data display (camera, lens, settings)
 - ⬇️ Multiple download options:
   - Original full-resolution JPEG
-  - Instagram-ready (max 1080px)
+  - Small (1080px max)
   - Batch download selected photos as ZIP (max 50)
 - ⭐ Local favorites/selection (stored in browser)
 
 ### Admin Features
-- 🎯 Event creation with auto-generated slugs
+- 🎯 Event creation with optional passwords
+- 🔗 Auto-generated URL-friendly slugs
 - 📤 Drag & drop photo upload
 - 🔄 Persistent upload queue with IndexedDB (survives page reloads)
 - 📦 Multipart upload to R2 for large files
-- 📊 EXIF metadata extraction (capture time, dimensions)
+- 📊 EXIF metadata extraction (capture time, dimensions, camera, lens, settings)
 - 🏷️ Automatic event date inference from photos
+- 🖼️ Preview image selection for events
 - 💧 Image processing utilities (watermarking ready for implementation)
 
 ## Architecture
@@ -70,10 +75,10 @@ wrangler d1 create photos-db
 # Update the database_id in wrangler.toml under [[d1_databases]]
 
 # Run migrations locally (for development)
-wrangler d1 execute photos-db --local --file=./migrations/001_init.sql
+wrangler d1 migrations apply photos-db --local
 
 # Or run migrations on remote database (for production)
-wrangler d1 execute photos-db --file=./migrations/001_init.sql
+wrangler d1 migrations apply photos-db --remote
 ```
 
 ### 3. Set Up R2 Bucket
@@ -139,10 +144,11 @@ cd subdomains/photos
 # Create production database
 wrangler d1 create photos-db
 
-# Copy the database_id from output and update wrangler.toml
+# Copy the database_id from output and update both [[d1_databases]] and [[env.production.d1_databases]]
+# in wrangler.toml with the same database_id
 
-# Run migrations
-wrangler d1 execute photos-db --file=./migrations/001_init.sql
+# Run migrations on production database
+wrangler d1 migrations apply photos-db --remote
 ```
 
 ### 2. Create R2 Bucket
@@ -154,11 +160,9 @@ wrangler r2 bucket create photos-storage
 ### 3. Set Production Secrets
 
 ```bash
-cd subdomains/photos/apps/worker
-
 # Set cookie secret
-wrangler secret put EVENT_COOKIE_SECRET --env production
-# Enter a strong random string
+wrangler secret put EVENT_COOKIE_SECRET
+# Enter a strong random string (use: openssl rand -base64 32)
 
 # Admin access is handled by Cloudflare Access (see below)
 ```
@@ -167,39 +171,58 @@ wrangler secret put EVENT_COOKIE_SECRET --env production
 
 ```bash
 cd subdomains/photos/apps/worker
-npm run deploy
+npm install
+cd ../..
+npx wrangler deploy --env production
 ```
 
 ### 5. Deploy Frontend to Cloudflare Pages
 
-```bash
-cd subdomains/photos/apps/web
-npm run build
-# Output is in dist/
+**Create Pages Project:**
+1. Go to Cloudflare Dashboard → **Workers & Pages**
+2. Click **Create** → Select **Pages** tab
+3. Connect to your Git repository
+4. Configure build settings:
+   - **Project name**: `photos` (or your choice)
+   - **Production branch**: `main` (or your default branch)
+   - **Root directory**: `subdomains/photos/apps/web`
+   - **Build command**: `npm install && npm run build`
+   - **Build output directory**: `dist`
+   - **Deploy command**: `echo "Deploy complete"`
+5. Save and Deploy
 
-# Deploy to Cloudflare Pages
-# 1. Go to Cloudflare Dashboard > Pages
-# 2. Create a new project
-# 3. Connect to your repository
-# 4. Configure build:
-#    - Build command: cd subdomains/photos/apps/web && npm install && npm run build
-#    - Build output directory: subdomains/photos/apps/web/dist
-# 5. Set environment variable: VITE_API_URL to your worker URL
+**Important**: The `apps/web/public/_routes.json` file configures routing:
+```json
+{
+  "version": 1,
+  "include": ["/*"],
+  "exclude": ["/api/*", "/media/*"]
+}
 ```
+This tells Pages to serve all routes except `/api/*` and `/media/*`, which are handled by the Worker.
 
 ### 6. Configure Domain and Routes
 
-1. **Update wrangler.toml** with your domain:
+1. **Add routes to wrangler.toml** (should already be configured):
    ```toml
+   [env.production]
+   name = "photos-worker"
    routes = [
      { pattern = "photos.thijsvtol.nl/api/*", zone_name = "thijsvtol.nl" },
      { pattern = "photos.thijsvtol.nl/media/*", zone_name = "thijsvtol.nl" }
    ]
    ```
 
-2. **Configure Cloudflare Pages** to serve from `photos.thijsvtol.nl`
+2. **Add custom domain to Pages**:
+   - In Pages project → **Custom domains**
+   - Click **Set up a custom domain**
+   - Enter `photos.thijsvtol.nl`
+   - Wait for DNS to propagate
 
-3. **Important**: The `apps/web/public/_routes.json` file disables Pages Functions (excludes all routes) so that Cloudflare Pages serves only static assets for the React SPA. The standalone Worker, deployed separately via wrangler, handles `/api/*` and `/media/*` routes through the zone-level routes configured in `wrangler.toml`. This file is automatically included in the build output.
+3. **How it works**:
+   - Pages serves the React app at `photos.thijsvtol.nl`
+   - Worker handles `photos.thijsvtol.nl/api/*` and `photos.thijsvtol.nl/media/*` via routes
+   - `_routes.json` prevents Pages from interfering with Worker routes
 
 ### 7. Set Up Cloudflare Access (Admin Protection)
 
@@ -221,8 +244,9 @@ npm run build
 - `id`: Primary key (auto-increment)
 - `slug`: Unique event identifier (URL-friendly)
 - `name`: Event name
-- `password_salt`: Random salt for password hashing
-- `password_hash`: SHA-256 hash of salted password
+- `password_salt`: Optional random salt for password hashing (nullable)
+- `password_hash`: Optional SHA-256 hash of salted password (nullable)
+- `preview_photo_id`: Optional ID of photo to use as preview (nullable)
 - `inferred_date`: Earliest photo capture date (YYYY-MM-DD)
 - `created_at`: Event creation timestamp
 
@@ -234,6 +258,13 @@ npm run build
 - `uploaded_at`: Upload timestamp
 - `width`: Image width in pixels
 - `height`: Image height in pixels
+- `camera_make`: Camera manufacturer (nullable)
+- `camera_model`: Camera model (nullable)
+- `lens_model`: Lens model (nullable)
+- `focal_length`: Focal length in mm (nullable)
+- `aperture`: Aperture f-number (nullable)
+- `shutter_speed`: Shutter speed (nullable)
+- `iso`: ISO sensitivity (nullable)
 
 ## R2 Storage Layout
 
