@@ -5,31 +5,72 @@ A full-stack photo gallery application built with React + Vite + Tailwind (front
 ## Features
 
 ### Public Features
-- 📋 Event list page with preview images for public events
-- 🔐 Optional per-event password protection
-- 🖼️ Gallery view with watermarked preview images
-- 📅 Photo sorting by date (asc/desc) or filename (asc/desc)
-- 📷 Direct photo links with password protection (`/p/:eventSlug/:photoId`)
-- 🎯 Photo navigation without page reload (pushState)
-- ⌨️ Keyboard navigation (arrow keys, Escape)
-- 📱 Mobile-friendly with swipe gestures
-- 📸 Full EXIF data display (camera, lens, settings)
-- ⬇️ Multiple download options:
+- 🏠 **Landing Page**: Featured photo slideshow with auto-rotation
+- 📋 **Event List**: Browse all public events with preview images and tags
+- 🔐 **Password Protection**: Optional per-event password protection
+- 🖼️ **Gallery View**: Masonry layout with watermarked preview images
+- 📅 **Photo Sorting**: By date (asc/desc), filename (asc/desc), or featured status
+- 🏷️ **Tag Filtering**: Browse events by tags (e.g., "Schaatsen", "Skeeleren")
+- 📷 **Direct Photo Links**: Share individual photos with `/p/:eventSlug/:photoId`
+- 🎯 **Photo Navigation**: Seamless browsing without page reload (pushState)
+- ⌨️ **Keyboard Navigation**: Arrow keys, Escape to close
+- 📱 **Mobile-Friendly**: Touch gestures and responsive design
+- 📸 **EXIF Metadata**: Full camera, lens, and settings display
+- 🗺️ **Map View**: Browse all photos with GPS coordinates on interactive map
+- ⬇️ **Download Options**:
   - Original full-resolution JPEG
   - Small (1080px max)
   - Batch download selected photos as ZIP (max 50)
-- ⭐ Local favorites/selection (stored in browser)
+- ⭐ **Favorites**: Local favorites/selection (stored in browser)
+- 🔍 **My Favorites**: Dedicated page to view all favorited photos
 
 ### Admin Features
-- 🎯 Event creation with optional passwords
-- 🔗 Auto-generated URL-friendly slugs
-- 📤 Drag & drop photo upload
-- 🔄 Persistent upload queue with IndexedDB (survives page reloads)
-- 📦 Multipart upload to R2 for large files
-- 📊 EXIF metadata extraction (capture time, dimensions, camera, lens, settings)
-- 🏷️ Automatic event date inference from photos
-- 🖼️ Preview image selection for events
-- 💧 Image processing utilities (watermarking ready for implementation)
+
+#### Dashboard (`/admin`)
+- 📊 **Analytics Cards**: Total events, photos, storage usage, favorites
+- 📈 **Public/Private Split**: Track event visibility at a glance
+- 🎯 **Event Management**: Create, edit, and delete events
+- 🏷️ **Tag System**: Assign tags to events from edit modal
+- 🗑️ **Safe Deletion**: Confirmation modals for all destructive actions
+- 📝 **Event Details**: Edit name, description, password, and tags
+- 🔗 **Quick Access**: Direct links to upload, photo manager, and public gallery
+
+#### Photo Upload (`/admin/events/:slug/upload`)
+- 📤 **Drag & Drop**: Upload multiple photos at once
+- 🔄 **Persistent Queue**: IndexedDB-backed upload queue survives page reloads
+- 📦 **Multipart Upload**: Efficient large file uploads to R2
+- 📊 **EXIF Extraction**: Automatic metadata extraction (camera, lens, settings, GPS)
+- 📈 **Event Analytics**:
+  - Photo count and GPS coverage
+  - Top 5 favorited photos with thumbnails
+  - Camera models used
+  - Featured photo count
+- 🗺️ **GPS Location Setter**: Interactive map to set event location
+- 🔄 **Bulk Thumbnail Regen**: Regenerate all thumbnails for an event
+- 🖼️ **Photo Manager Link**: Quick access to manage all photos
+
+#### Photo Manager (`/admin/events/:slug/photos`)
+- 🎯 **Grid View**: Visual overview of all event photos
+- ☑️ **Bulk Selection**: Checkbox selection with Select All/Deselect All
+- ⭐ **Featured Toggle**: Mark photos as featured (shows on landing page)
+- 🗑️ **Bulk Delete**: Delete multiple selected photos at once
+- 👁️ **Preview Modal**: Preview photo before deleting
+- 🏷️ **Featured Badge**: Visual indicator for featured photos
+- 💝 **Favorite Count**: See how many users favorited each photo
+
+#### Tag Manager (`/admin/tags`)
+- 🏷️ **Tag CRUD**: Create, edit, and delete tags
+- 📊 **Usage Stats**: See how many events use each tag
+- 🔗 **Auto-Slugs**: Automatic URL-friendly slug generation
+- 📝 **Descriptions**: Add descriptions to tags for context
+- ⚠️ **Safe Deletion**: Warns before deleting tags in use
+
+#### Technical Features
+- 🔐 **Cloudflare Access**: Secure admin authentication
+- 🔒 **Admin-Only APIs**: X-Admin-Access header validation
+- 🎨 **Responsive Design**: Works on desktop, tablet, and mobile
+- ✅ **Real-time Feedback**: Success/error messages for all actions
+- 🚀 **Optimized Performance**: Efficient queries and caching
 
 ## Architecture
 
@@ -51,6 +92,17 @@ subdomains/photos/
 
 ## Local Development Setup
 
+### Quick Start with Setup Script
+
+```bash
+cd subdomains/photos
+./setup-dev.sh
+```
+
+This will install all dependencies and show you the next steps.
+
+### Manual Setup
+
 ### 1. Install Dependencies
 
 ```bash
@@ -63,23 +115,31 @@ cd subdomains/photos/apps/web
 npm install
 ```
 
-### 2. Set Up D1 Database
+### 2. Set Up D1 Database (Local)
 
 ```bash
 cd subdomains/photos
 
-# Create D1 database (if not already created)
-wrangler d1 create photos-db
+# Create local D1 database
+wrangler d1 create photos-db-local
 
-# The command above will output a database_id - copy it and add it to wrangler.toml
-# Update the database_id in wrangler.toml under [[d1_databases]]
+# Run ALL migrations in order (important!)
+wrangler d1 execute photos-db-local --local --file=./migrations/001_init.sql
+wrangler d1 execute photos-db-local --local --file=./migrations/002_add_exif_data.sql
+wrangler d1 execute photos-db-local --local --file=./migrations/003_optional_passwords.sql
+wrangler d1 execute photos-db-local --local --file=./migrations/004_enhanced_features.sql
+wrangler d1 execute photos-db-local --local --file=./migrations/002_admin_improvements.sql
 
-# Run migrations locally (for development)
-wrangler d1 migrations apply photos-db --local
-
-# Or run migrations on remote database (for production)
-wrangler d1 migrations apply photos-db --remote
+# Or run them all at once:
+for file in ./migrations/*.sql; do wrangler d1 execute photos-db-local --local --file="$file"; done
 ```
+
+**Note**: The migrations add critical features:
+- `001_init.sql`: Base schema (events, photos)
+- `002_add_exif_data.sql`: EXIF metadata columns
+- `003_optional_passwords.sql`: Optional password support
+- `004_enhanced_features.sql`: GPS, favorites, featured flag, tags, blur placeholders
+- `002_admin_improvements.sql`: Event descriptions and archive flag
 
 ### 3. Set Up R2 Bucket
 
@@ -130,9 +190,70 @@ npm run dev
 
 ### 6. Access the Application
 
-- Public site: http://localhost:3000
-- Admin dashboard: http://localhost:3000/admin
-- Worker API: http://localhost:8787
+- **Public site**: http://localhost:3000
+- **Admin dashboard**: http://localhost:3000/admin
+- **Worker API**: http://localhost:8787 (direct access)
+
+---
+
+## Running the Application
+
+### Local Development
+
+Once setup is complete, you need **two terminal windows** running simultaneously:
+
+**Terminal 1 - Worker (Backend API)**:
+```bash
+cd subdomains/photos/apps/worker
+npm run dev
+```
+- Runs on http://localhost:8787
+- Handles all `/api/*` and `/media/*` requests
+- Auto-reloads on code changes
+- Access to local D1 and simulated R2 storage
+
+**Terminal 2 - Web App (Frontend)**:
+```bash
+cd subdomains/photos/apps/web
+npm run dev
+```
+- Runs on http://localhost:3000
+- Proxies API requests to worker on port 8787
+- Hot module replacement (instant updates)
+- React DevTools compatible
+
+**Using the Admin Panel Locally**:
+
+In development, admin access uses a shared secret:
+
+1. Set the `ADMIN_SHARED_SECRET` in `.dev.vars` (e.g., `dev-secret-123`)
+2. Add `X-Admin-Secret: dev-secret-123` header to requests
+3. Or use browser extension to add the header
+4. The admin pages will automatically include this header
+
+**Development Workflow**:
+
+1. Start both terminals (worker + web)
+2. Create an event at http://localhost:3000/admin
+3. Upload photos to the event
+4. Mark some photos as featured
+5. View the public gallery and landing page
+
+### Testing Production Build Locally
+
+**Build the frontend**:
+```bash
+cd subdomains/photos/apps/web
+npm run build
+npm run preview  # Serves the production build
+```
+
+**Test the worker locally**:
+```bash
+cd subdomains/photos/apps/worker
+npm run build
+wrangler dev  # Uses production-like environment
+```
 
 ## Production Deployment
 
@@ -144,11 +265,22 @@ cd subdomains/photos
 # Create production database
 wrangler d1 create photos-db
 
-# Copy the database_id from output and update both [[d1_databases]] and [[env.production.d1_databases]]
-# in wrangler.toml with the same database_id
+# Copy the database_id from output and update wrangler.toml
+# Update both [[d1_databases]] and [[env.production.d1_databases]] with the same database_id
 
-# Run migrations on production database
-wrangler d1 migrations apply photos-db --remote
+# Run ALL migrations on production database (in order!)
+wrangler d1 execute photos-db --remote --file=./migrations/001_init.sql
+wrangler d1 execute photos-db --remote --file=./migrations/002_add_exif_data.sql
+wrangler d1 execute photos-db --remote --file=./migrations/003_optional_passwords.sql
+wrangler d1 execute photos-db --remote --file=./migrations/004_enhanced_features.sql
+wrangler d1 execute photos-db --remote --file=./migrations/002_admin_improvements.sql
+
+# Or run them all at once:
+for file in ./migrations/*.sql; do wrangler d1 execute photos-db --remote --file="$file"; done
+
+# Verify migrations were successful:
+wrangler d1 execute photos-db --remote --command "SELECT name FROM sqlite_master WHERE type='table';"
+# Should show: events, photos, tags, event_tags tables
 ```
 
 ### 2. Create R2 Bucket
@@ -226,17 +358,39 @@ This tells Pages to serve all routes except `/api/*` and `/media/*`, which are h
 
 ### 7. Set Up Cloudflare Access (Admin Protection)
 
-1. Go to Cloudflare Dashboard > Zero Trust > Access
-2. Create an Application:
-   - Name: "Photos Admin"
-   - Subdomain: photos.thijsvtol.nl
-   - Path: `/admin*`
-3. Add a Policy:
-   - Name: "Admin Access"
-   - Action: Allow
-   - Include: Emails ending in your domain, or specific email addresses
-4. The worker checks for `X-Admin-Access: 1` header
-5. Cloudflare Access automatically adds this header for authenticated users
+**Configure Cloudflare Access**:
+
+1. Go to **Cloudflare Dashboard** → **Zero Trust** → **Access** → **Applications**
+2. Click **Add an application** → Select **Self-hosted**
+3. Configure application:
+   - **Application name**: Photos Admin
+   - **Session Duration**: 24 hours (or your preference)
+   - **Application domain**:
+     - Subdomain: `photos`
+     - Domain: `thijsvtol.nl`
+     - Path: `/admin*` (protects all admin routes)
+4. Click **Next**
+5. Add a Policy:
+   - **Policy name**: Admin Access
+   - **Action**: Allow
+   - **Configure rules**:
+     - Include: Emails ending in `@yourdomain.com`
+     - Or: Include specific email addresses
+6. Click **Next** → **Add application**
+
+**How it works**:
+- Users visiting `/admin*` must authenticate via Cloudflare Access
+- Cloudflare adds `Cf-Access-Jwt-Assertion` header for authenticated users
+- Worker validates this header and sets `X-Admin-Access: 1`
+- Admin API endpoints require this header
+
+**Accessing Admin in Production**:
+
+1. Visit https://photos.thijsvtol.nl/admin
+2. Cloudflare Access will prompt for authentication
+3. Log in with your authorized email
+4. You'll be redirected to the admin dashboard
+5. Session lasts 24 hours (or configured duration)
 
 ## Database Schema
 
@@ -248,6 +402,8 @@ This tells Pages to serve all routes except `/api/*` and `/media/*`, which are h
 - `password_hash`: Optional SHA-256 hash of salted password (nullable)
 - `preview_photo_id`: Optional ID of photo to use as preview (nullable)
 - `inferred_date`: Earliest photo capture date (YYYY-MM-DD)
+- `description`: Optional event description (nullable) **NEW**
+- `is_archived`: Boolean flag for archived events (default: 0) **NEW**
 - `created_at`: Event creation timestamp
 
 ### Photos Table
@@ -265,6 +421,22 @@ This tells Pages to serve all routes except `/api/*` and `/media/*`, which are h
 - `aperture`: Aperture f-number (nullable)
 - `shutter_speed`: Shutter speed (nullable)
 - `iso`: ISO sensitivity (nullable)
+- `latitude`: GPS latitude (nullable) **NEW**
+- `longitude`: GPS longitude (nullable) **NEW**
+- `favorites_count`: Number of times favorited (default: 0) **NEW**
+- `blur_placeholder`: Base64 tiny blurred placeholder (nullable) **NEW**
+- `is_featured`: Boolean flag for featured photos (default: 0) **NEW**
+
+### Tags Table **NEW**
+- `id`: Primary key (auto-increment)
+- `name`: Tag name (unique)
+- `slug`: URL-friendly slug (unique)
+- `created_at`: Tag creation timestamp
+
+### Event_Tags Table (Junction) **NEW**
+- `event_id`: Foreign key to events
+- `tag_id`: Foreign key to tags
+- Primary key: (event_id, tag_id)
 
 ## R2 Storage Layout
 
@@ -285,25 +457,54 @@ photos-storage/
 
 ### Public API
 
+**Events**:
 - `GET /api/events` - List all events
 - `GET /api/events/:slug` - Get event details
+- `GET /api/events/by-tag/:tagSlug` - Get events by tag **NEW**
 - `POST /api/events/:slug/login` - Authenticate to event
+
+**Photos**:
 - `GET /api/events/:slug/photos` - List photos (requires auth)
 - `GET /api/events/:slug/photos/:photoId` - Get photo details (requires auth)
+- `GET /api/photos/featured` - Get featured photos for landing page **NEW**
+- `GET /api/photos/most-favorited` - Get most favorited photos **NEW**
+- `GET /api/photos/with-gps` - Get all photos with GPS coordinates **NEW**
 - `POST /api/events/:slug/zip` - Request batch download (requires auth)
+
+**Tags**:
+- `GET /api/tags` - List all tags **NEW**
 
 ### Media Endpoints (Password Gated)
 
-- `GET /media/:slug/preview/:photoId.jpg` - Watermarked preview
-- `GET /media/:slug/ig/:photoId.jpg` - Instagram-ready
-- `GET /media/:slug/original/:photoId.jpg` - Full resolution
+- `GET /media/:slug/preview/:photoId.jpg` - Watermarked preview (2000px max)
+- `GET /media/:slug/ig/:photoId.jpg` - Instagram-ready (1080px max)
+- `GET /media/:slug/original/:photoId.jpg` - Full resolution original
 
-### Admin API
+### Admin API (Requires Admin Access)
 
+**Dashboard & Stats**:
+- `GET /api/admin/stats` - Get dashboard statistics **NEW**
+- `GET /api/admin/events/:slug/stats` - Get event-specific analytics **NEW**
+
+**Event Management**:
 - `POST /api/admin/events` - Create event
+- `PUT /api/admin/events/:slug` - Update event (name, description, password) **NEW**
+- `DELETE /api/admin/events/:slug` - Delete event with cascade **NEW**
+- `POST /api/admin/events/:slug/tags` - Set event tags **NEW**
+- `POST /api/admin/events/:slug/location` - Set event GPS location
+- `POST /api/admin/events/:slug/regenerate-thumbnails` - Regenerate all thumbnails
+
+**Photo Management**:
 - `POST /api/admin/events/:slug/uploads/start` - Start multipart upload
-- `POST /api/admin/events/:slug/uploads/:photoId/parts` - Get part upload URL
+- `POST /api/admin/events/:slug/uploads/:photoId/parts/:partNumber` - Upload part
 - `POST /api/admin/events/:slug/uploads/:photoId/complete` - Complete upload
+- `DELETE /api/admin/photos/:photoId` - Delete single photo **NEW**
+- `POST /api/admin/photos/:photoId/featured` - Toggle featured status **NEW**
+
+**Tag Management**:
+- `POST /api/admin/tags` - Create new tag **NEW**
+- `PUT /api/admin/tags/:id` - Update tag **NEW**
+- `DELETE /api/admin/tags/:id` - Delete tag **NEW**
 
 ## Environment Variables & Secrets
 
@@ -330,34 +531,130 @@ photos-storage/
 
 ## Troubleshooting
 
-### Worker not connecting to D1
-- Ensure database_id in wrangler.toml matches your D1 database
-- Check that migrations have been run
-- Verify bindings in wrangler dev output
+### Database Issues
 
-### Upload failing
+**Worker not connecting to D1**:
+- Ensure `database_id` in wrangler.toml matches your D1 database
+- Check that ALL migrations have been run (5 total)
+- Verify bindings in `wrangler dev` output
+- Run: `wrangler d1 execute photos-db-local --local --command "SELECT name FROM sqlite_master WHERE type='table';"`
+  - Should show: events, photos, tags, event_tags
+
+**Missing columns error**:
+- You probably didn't run all migrations
+- Run each migration file in order (see setup instructions)
+- Common missing columns: `is_featured`, `description`, `latitude`, `favorites_count`
+
+### Upload Issues
+
+**Upload failing**:
 - Check browser console for CORS errors
 - Verify R2 bucket exists and is bound correctly
 - Check that files are valid JPEG images
 - Ensure multipart upload is supported by R2 binding
+- Check network tab for 413 errors (file too large)
 
-### Admin access denied
-- In development: Check ADMIN_SHARED_SECRET is set correctly
-- In production: Verify Cloudflare Access is configured
-- Ensure `X-Admin-Access: 1` header is being sent
+**Upload queue not persisting**:
+- Check IndexedDB in browser DevTools → Application tab
+- Should see `PhotoUploadQueue` database
+- Clear IndexedDB and try again if corrupted
 
-### Photos not showing
-- Verify event password is correct
+### Admin Access Issues
+
+**Admin access denied in development**:
+- Check `.dev.vars` file exists in project root
+- Verify `ADMIN_SHARED_SECRET` is set
+- Check browser Network tab for `X-Admin-Secret` header
+- Try clearing browser cache and cookies
+
+**Admin access denied in production**:
+- Verify Cloudflare Access is configured for `/admin*` path
+- Check you're logged in with authorized email
+- Look for `Cf-Access-Jwt-Assertion` header in Network tab
+- Ensure `X-Admin-Access: 1` header is being sent to API
+- Check worker logs: `wrangler tail --env production`
+
+### Photo Display Issues
+
+**Photos not showing in gallery**:
+- Verify event password is correct (if private event)
 - Check browser cookies are enabled
 - Look for authentication errors in browser console
 - Ensure photos exist in R2 storage
+- Check Network tab for 403/404 errors on image requests
+
+**Featured photos not showing on landing page**:
+- Verify photos are marked as featured (⭐ badge in photo manager)
+- Check that featured photos are in PUBLIC events (no password)
+- Run: `wrangler d1 execute photos-db --remote --command "SELECT COUNT(*) FROM photos WHERE is_featured = 1;"`
+- Landing page falls back to recent photos if no featured photos exist
+
+**Tags not showing**:
+- Check that migration 004 was run (creates tags table)
+- Verify tags exist: `wrangler d1 execute photos-db --remote --command "SELECT * FROM tags;"`
+- Create default tags via admin tag manager
+
+### Performance Issues
+
+**Slow photo loading**:
+- Check R2 bucket is in same region as worker
+- Verify thumbnails are being generated (not serving originals)
+- Check browser Network tab for slow requests
+- Consider enabling Cloudflare Cache for `/media/*` routes
+
+**Admin dashboard slow**:
+- Large number of photos can slow down stats queries
+- Check D1 query performance in worker logs
+- Consider adding database indexes (already included in migrations)
+
+### Common Errors
+
+**"No events found"**:
+- Database is empty - create an event in admin dashboard
+- Or check that events are public (for event list page)
+
+**"Failed to load photos"**:
+- Event might not exist
+- Event might be password-protected (need to login first)
+- Check worker logs for database errors
+
+**"Upload failed" or "Network error"**:
+- Worker might not be running
+- R2 binding might be misconfigured
+- Check CORS headers in worker response
 
 ## Development Tips
 
+**Debugging**:
 - Use `wrangler tail` to see Worker logs in real-time
-- Check browser IndexedDB (Application tab in DevTools) to see upload queue state
-- Use browser Network tab to debug API calls
+- Add `--env production` to tail production worker: `wrangler tail --env production`
+- Check browser IndexedDB (Application → Storage) to see upload queue state
+- Use browser Network tab to debug API calls and check headers
+- React DevTools extension for component debugging
+
+**Testing**:
 - Test with various JPEG files to ensure EXIF extraction works
+- Test with photos with/without GPS data
+- Test with different camera makes/models
+- Test password-protected events
+- Test admin features with multiple events and photos
+
+**Database Management**:
+- Query local database: `wrangler d1 execute photos-db-local --local --command "SELECT * FROM events;"`
+- Query production database: `wrangler d1 execute photos-db --remote --command "SELECT * FROM events;"`
+- Export database: `wrangler d1 export photos-db --remote --output=backup.sql`
+- Check table schema: `wrangler d1 execute photos-db --remote --command "PRAGMA table_info(photos);"`
+
+**Performance**:
+- Use `wrangler dev --remote` to test against production D1/R2 (faster than local)
+- Monitor D1 query performance in worker logs
+- Check R2 bandwidth usage in Cloudflare dashboard
+
+**Workflow Tips**:
+- Create test events with different configurations (public, private, tagged)
+- Keep a set of test photos with various EXIF data
+- Use browser profiles for testing public vs admin views
+- Test mobile responsiveness with browser DevTools device emulation
 
 ## License
 
