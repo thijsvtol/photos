@@ -17,11 +17,16 @@ app.use('/*', async (c, next) => {
   // Check for admin secret header (fallback authentication)
   const adminSecret = c.req.header('X-Admin-Secret');
   
+  // Debug logging
+  console.log('Admin auth check - hasJWT:', !!accessJwt);
+  console.log('Admin auth check - hasAdminSecret:', !!adminSecret);
+  console.log('Admin auth check - hasSharedSecretConfigured:', !!c.env.ADMIN_SHARED_SECRET);
+  console.log('Admin auth check - environment:', c.env.ENVIRONMENT);
+  
   // Allow access if either Cloudflare Access JWT or valid admin secret is present
   if (accessJwt) {
     // Cloudflare Access JWT present - allow access
-    // Note: For better security, you could verify the JWT signature here
-    // using your Cloudflare Access team domain's public keys
+    console.log('Authenticated via Cloudflare Access JWT');
     await next();
     return;
   }
@@ -29,12 +34,14 @@ app.use('/*', async (c, next) => {
   // Check admin secret if configured
   if (c.env.ADMIN_SHARED_SECRET) {
     if (adminSecret === c.env.ADMIN_SHARED_SECRET) {
+      console.log('Authenticated via Admin Secret');
       await next();
       return;
     }
   }
   
   // No valid authentication found
+  console.log('Authentication failed - no valid JWT or admin secret');
   return c.json({ error: 'Unauthorized - Admin access required' }, 401);
 });
 
@@ -840,6 +847,7 @@ app.post('/events/:slug/geocode-photos', async (c) => {
         SELECT id, latitude, longitude
         FROM photos
         WHERE event_id = ? AND latitude IS NOT NULL AND longitude IS NOT NULL AND city IS NULL
+        ORDER BY latitude, longitude
       `)
       .bind(event.id)
       .all();
@@ -849,11 +857,53 @@ app.post('/events/:slug/geocode-photos', async (c) => {
     }
     
     let updated = 0;
+    let lastLat: number | null = null;
+    let lastLon: number | null = null;
+    let lastCity: string | null = null;
     
-    // Process each photo (with rate limiting)
+    // Helper function to calculate distance between two points in km
+    const getDistance = (lat1: number, lon1: number, lat2: number, lon2: number): number => {
+      const R = 6371; // Earth's radius in km
+      const dLat = (lat2 - lat1) * Math.PI / 180;
+      const dLon = (lon2 - lon1) * Math.PI / 180;
+      const a = Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+                Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
+                Math.sin(dLon / 2) * Math.sin(dLon / 2);
+      const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+      return R * c;
+    };
+    
+    // Process each photo (with smart caching and rate limiting)
     for (const photo of photos.results as any[]) {
-      const city = await getCityFromCoordinates(photo.latitude, photo.longitude);
+      let city: string | null = null;
       
+      // Check if coordinates are close to the last processed location (within 5km)
+      if (lastLat !== null && lastLon !== null && lastCity !== null) {
+        const distance = getDistance(lastLat, lastLon, photo.latitude, photo.longitude);
+        if (distance < 5) {
+          // Reuse the same city
+          city = lastCity;
+          console.log(`Reusing city "${city}" for photo ${photo.id} (${distance.toFixed(2)}km away)`);
+        }
+      }
+      
+      // If not close enough or no cached city, fetch from API
+      if (!city) {
+        city = await getCityFromCoordinates(photo.latitude, photo.longitude);
+        
+        if (city) {
+          // Update cache
+          lastLat = photo.latitude;
+          lastLon = photo.longitude;
+          lastCity = city;
+          console.log(`Fetched new city "${city}" for photo ${photo.id}`);
+        }
+        
+        // Rate limit: 1 request per second for Nominatim
+        await new Promise(resolve => setTimeout(resolve, 1100));
+      }
+      
+      // Update photo with city
       if (city) {
         await c.env.DB
           .prepare('UPDATE photos SET city = ? WHERE id = ?')
@@ -861,9 +911,6 @@ app.post('/events/:slug/geocode-photos', async (c) => {
           .run();
         updated++;
       }
-      
-      // Rate limit: 1 request per second for Nominatim
-      await new Promise(resolve => setTimeout(resolve, 1100));
     }
     
     return c.json({ 

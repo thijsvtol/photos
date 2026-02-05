@@ -1,7 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { useParams, Link, useLocation } from 'react-router-dom';
 import { Heart, Star } from 'lucide-react';
-import Masonry from 'react-masonry-css';
 import Navbar from '../components/Navbar';
 import Footer from '../components/Footer';
 import ProgressiveImage from '../components/ProgressiveImage';
@@ -285,32 +284,16 @@ const EventGallery: React.FC = () => {
             <p className="text-gray-600">No photos found.</p>
           </div>
         ) : (
-          <Masonry
-            breakpointCols={{
-              default: 4,
-              1536: 4,
-              1280: 3,
-              1024: 3,
-              768: 2,
-              400: 1
-            }}
-            className="flex -ml-2 sm:-ml-4 w-auto"
-            columnClassName="pl-2 sm:pl-4 bg-clip-padding"
-          >
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3 sm:gap-4">
             {photos.map((photo) => (
-              <div key={photo.id} className="mb-2 sm:mb-4 relative group bg-white rounded-lg overflow-hidden shadow-md">
-                <Link to={`/p/${slug}/${photo.id}`} className="block relative">
+              <div key={photo.id} className="relative group bg-white rounded-lg overflow-hidden shadow-md flex flex-col">
+                <Link to={`/p/${slug}/${photo.id}`} className="block relative aspect-square overflow-hidden">
                   <ProgressiveImage
                     src={getPreviewUrl(slug!, photo.id)}
                     blurDataUrl={photo.blur_placeholder}
                     alt={photo.original_filename}
-                    className="w-full object-cover"
+                    className="w-full h-full object-cover"
                     loading="lazy"
-                    style={{
-                      height: photo.height && photo.width 
-                        ? `${(photo.height / photo.width) * 100}%` 
-                        : 'auto'
-                    }}
                   />
                   {/* User favorite indicator */}
                   {userFavorites.has(photo.id) && (
@@ -386,7 +369,7 @@ const EventGallery: React.FC = () => {
                 </div>
               </div>
             ))}
-          </Masonry>
+          </div>
         )}
       </div>
       <Footer />
