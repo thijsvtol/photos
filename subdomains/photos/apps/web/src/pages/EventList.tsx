@@ -105,15 +105,15 @@ const EventList: React.FC = () => {
 
         {/* Tag filters */}
         {tags.length > 0 && (
-          <div className="mb-4">
-            <h3 className="text-sm font-medium text-gray-700 mb-2">Filter by Tag</h3>
+          <div className="mb-4 sm:mb-6">
+            <h3 className="text-sm font-semibold text-gray-700 mb-3">Filter by Tag</h3>
             <div className="flex flex-wrap gap-2">
               <button
                 onClick={() => filterByTag(null)}
-                className={`px-3 py-1.5 rounded-full text-sm font-medium transition ${
+                className={`px-4 py-2.5 rounded-full text-sm font-medium transition-all active:scale-95 ${
                   !selectedTag
-                    ? 'bg-blue-600 text-white'
-                    : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
+                    ? 'bg-blue-600 text-white shadow-md'
+                    : 'bg-gray-200 text-gray-700 hover:bg-gray-300 active:bg-gray-400'
                 }`}
               >
                 All Tags
@@ -122,10 +122,10 @@ const EventList: React.FC = () => {
                 <button
                   key={tag.id}
                   onClick={() => filterByTag(tag.slug)}
-                  className={`px-3 py-1.5 rounded-full text-sm font-medium transition ${
+                  className={`px-4 py-2.5 rounded-full text-sm font-medium transition-all active:scale-95 ${
                     selectedTag === tag.slug
-                      ? 'bg-blue-600 text-white'
-                      : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
+                      ? 'bg-blue-600 text-white shadow-md'
+                      : 'bg-gray-200 text-gray-700 hover:bg-gray-300 active:bg-gray-400'
                   }`}
                 >
                   {tag.name}
@@ -147,14 +147,14 @@ const EventList: React.FC = () => {
           if (cities.length > 0) {
             return (
               <div className="mb-6">
-                <h3 className="text-sm font-medium text-gray-700 mb-2">Filter by City</h3>
+                <h3 className="text-sm font-semibold text-gray-700 mb-3">Filter by City</h3>
                 <div className="flex flex-wrap gap-2">
                   <button
                     onClick={() => filterByCity(null)}
-                    className={`px-3 py-1.5 rounded-full text-sm font-medium transition ${
+                    className={`px-4 py-2.5 rounded-full text-sm font-medium transition-all active:scale-95 ${
                       !selectedCity
-                        ? 'bg-green-600 text-white'
-                        : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
+                        ? 'bg-green-600 text-white shadow-md'
+                        : 'bg-gray-200 text-gray-700 hover:bg-gray-300 active:bg-gray-400'
                     }`}
                   >
                     All Cities
@@ -163,10 +163,10 @@ const EventList: React.FC = () => {
                     <button
                       key={city}
                       onClick={() => filterByCity(city)}
-                      className={`px-3 py-1.5 rounded-full text-sm font-medium transition ${
+                      className={`px-4 py-2.5 rounded-full text-sm font-medium transition-all active:scale-95 ${
                         selectedCity === city
-                          ? 'bg-green-600 text-white'
-                          : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
+                          ? 'bg-green-600 text-white shadow-md'
+                          : 'bg-gray-200 text-gray-700 hover:bg-gray-300 active:bg-gray-400'
                       }`}
                     >
                       {city}
@@ -213,7 +213,7 @@ const EventList: React.FC = () => {
               <Link
                 key={event.id}
                 to={`/events/${event.slug}`}
-                className="mb-4 sm:mb-6 block bg-white rounded-lg shadow-md hover:shadow-lg active:shadow-xl transition overflow-hidden"
+                className="mb-4 sm:mb-6 block bg-white rounded-xl shadow-md hover:shadow-xl active:scale-[0.98] transition-all overflow-hidden"
               >
                 {/* Preview Image for Public Events */}
                 {!event.requires_password && event.preview_photo_id && (
@@ -257,8 +257,11 @@ const EventList: React.FC = () => {
                     </div>
                   )}
                   
-                  <div className="text-blue-600 hover:text-blue-700 font-medium text-sm sm:text-base">
-                    View Gallery →
+                  <div className="text-blue-600 hover:text-blue-700 font-semibold text-sm sm:text-base inline-flex items-center gap-1">
+                    View Gallery 
+                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                    </svg>
                   </div>
                 </div>
               </Link>

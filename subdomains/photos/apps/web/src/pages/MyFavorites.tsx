@@ -146,7 +146,7 @@ const MyFavorites: React.FC = () => {
             <button
               onClick={downloadAllFavorites}
               disabled={downloading}
-              className="w-full sm:w-auto px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition disabled:bg-gray-400 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+              className="w-full sm:w-auto px-6 py-3 bg-blue-600 text-white rounded-xl hover:bg-blue-700 active:scale-95 transition-all disabled:bg-gray-400 disabled:cursor-not-allowed disabled:active:scale-100 flex items-center justify-center gap-2 font-semibold shadow-md"
             >
               <Download className="w-5 h-5" />
               {downloading ? 'Downloading...' : 'Download All'}
@@ -168,13 +168,13 @@ const MyFavorites: React.FC = () => {
         )}
 
         {!loading && !error && photos.length === 0 && (
-          <div className="text-center py-12 bg-white rounded-lg shadow">
-            <Heart className="w-16 h-16 text-gray-300 mx-auto mb-4" />
-            <p className="text-gray-600 text-lg mb-2">No favorites yet</p>
-            <p className="text-gray-500 text-sm mb-6">Click the heart icon on photos to add them to your favorites</p>
+          <div className="text-center py-16 px-4 bg-white rounded-xl shadow-lg">
+            <Heart className="w-20 h-20 text-gray-300 mx-auto mb-4" />
+            <p className="text-gray-900 text-xl font-semibold mb-2">No favorites yet</p>
+            <p className="text-gray-500 text-base mb-8 max-w-md mx-auto">Click the heart icon on photos to add them to your favorites</p>
             <Link
               to="/events"
-              className="inline-block px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition"
+              className="inline-block px-8 py-4 bg-blue-600 text-white rounded-xl hover:bg-blue-700 active:scale-95 transition-all font-semibold shadow-md"
             >
               Browse Photos
             </Link>
@@ -195,7 +195,7 @@ const MyFavorites: React.FC = () => {
             columnClassName="pl-2 sm:pl-4 bg-clip-padding"
           >
             {photos.map((photo) => (
-              <div key={photo.id} className="mb-2 sm:mb-4 relative group bg-white rounded-lg overflow-hidden shadow-md">
+              <div key={photo.id} className="mb-2 sm:mb-4 relative group bg-white rounded-xl overflow-hidden shadow-md hover:shadow-lg active:scale-[0.98] transition-all">
                 <Link 
                   to={`/p/${photo.event_slug}/${photo.id}`} 
                   state={{ 
@@ -228,7 +228,7 @@ const MyFavorites: React.FC = () => {
                   </div>
                   <button
                     onClick={() => removeFavorite(photo.id)}
-                    className="ml-2 p-2 text-red-500 hover:bg-red-50 rounded-full transition"
+                    className="ml-2 p-2.5 text-red-500 hover:bg-red-50 active:bg-red-100 rounded-full transition-all"
                     title="Remove from favorites"
                   >
                     <Heart className="w-5 h-5 fill-current" />

@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { useParams, Link, useLocation } from 'react-router-dom';
-import { Heart, Star } from 'lucide-react';
+import { Heart, Star, Share2 } from 'lucide-react';
 import Navbar from '../components/Navbar';
 import Footer from '../components/Footer';
 import ProgressiveImage from '../components/ProgressiveImage';
@@ -21,6 +21,7 @@ const EventGallery: React.FC = () => {
   const [sortBy, setSortBy] = useState('date_desc');
   const [selectedPhotos, setSelectedPhotos] = useState<Set<string>>(new Set());
   const [userFavorites, setUserFavorites] = useState<Set<string>>(new Set());
+  const [showShareMenu, setShowShareMenu] = useState(false);
 
   useEffect(() => {
     if (slug) {
@@ -175,6 +176,71 @@ const EventGallery: React.FC = () => {
     }
   };
 
+  const shareEvent = async (platform?: string) => {
+    const url = `${window.location.origin}/events/${slug}`;
+    const text = `Check out ${event?.name} photo gallery`;
+    
+    // Use native share API on mobile if available and no platform specified
+    if (!platform && 'share' in navigator) {
+      try {
+        const shareData: any = {
+          title: event?.name || 'Photo Gallery',
+          text: text,
+          url: url,
+        };
+        
+        // Try to include a representative photo from the album
+        if (photos.length > 0) {
+          try {
+            // Use first photo or first featured photo as representative
+            const representativePhoto = photos.find(p => p.is_featured) || photos[0];
+            const imageUrl = getPreviewUrl(slug!, representativePhoto.id);
+            
+            const response = await fetch(imageUrl);
+            const blob = await response.blob();
+            const fileName = `${slug}-preview.jpg`;
+            const file = new File([blob], fileName, { type: blob.type });
+            
+            // Check if we can share files
+            if ((navigator as any).canShare && (navigator as any).canShare({ files: [file] })) {
+              shareData.files = [file];
+            }
+          } catch (err) {
+            console.log('Could not include photo in share, sharing URL only:', err);
+          }
+        }
+        
+        await (navigator as any).share(shareData);
+        setShowShareMenu(false);
+        return;
+      } catch (err) {
+        // User cancelled or share failed
+        if ((err as Error).name !== 'AbortError') {
+          console.error('Error sharing:', err);
+        }
+        return;
+      }
+    }
+    
+    // Fall back to platform-specific sharing
+    switch (platform) {
+      case 'twitter':
+        window.open(`https://twitter.com/intent/tweet?url=${encodeURIComponent(url)}&text=${encodeURIComponent(text)}`, '_blank');
+        break;
+      case 'facebook':
+        window.open(`https://www.facebook.com/sharer/sharer.php?u=${encodeURIComponent(url)}`, '_blank');
+        break;
+      case 'whatsapp':
+        window.open(`https://wa.me/?text=${encodeURIComponent(text + ' ' + url)}`, '_blank');
+        break;
+      case 'copy':
+        navigator.clipboard.writeText(url);
+        alert('Link copied to clipboard!');
+        break;
+    }
+    setShowShareMenu(false);
+  };
+
   if (loading) {
     return (
       <div className="min-h-screen bg-gray-50 flex items-center justify-center">
@@ -243,12 +309,63 @@ const EventGallery: React.FC = () => {
           <Link to="/events" className="text-blue-600 hover:text-blue-700 mb-3 sm:mb-4 inline-block text-sm sm:text-base">
             ← Back to Events
           </Link>
-          <h1 className="text-3xl sm:text-4xl font-bold text-gray-900">{event?.name}</h1>
-          {event && !event.requires_password && (
-            <span className="inline-block mt-2 px-2 py-1 text-xs bg-green-100 text-green-800 rounded-full">
-              Public Gallery
-            </span>
-          )}
+          <div className="flex justify-between items-start gap-4">
+            <div className="flex-1">
+              <h1 className="text-3xl sm:text-4xl font-bold text-gray-900">{event?.name}</h1>
+              {event && !event.requires_password && (
+                <span className="inline-block mt-2 px-2 py-1 text-xs bg-green-100 text-green-800 rounded-full">
+                  Public Gallery
+                </span>
+              )}
+            </div>
+            {/* Share button */}
+            <div className="relative">
+              <button
+                onClick={() => {
+                  if ('share' in navigator) {
+                    shareEvent();
+                  } else {
+                    setShowShareMenu(!showShareMenu);
+                  }
+                }}
+                className="px-3 py-2 sm:px-4 sm:py-2.5 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition flex items-center gap-2 text-sm font-medium"
+                aria-label="Share album"
+              >
+                <Share2 className="w-4 h-4 sm:w-5 sm:h-5" />
+                <span className="hidden sm:inline">Share</span>
+              </button>
+              
+              {/* Desktop share menu dropdown */}
+              {showShareMenu && !('share' in navigator) && (
+                <div className="absolute right-0 mt-2 w-48 bg-white rounded-lg shadow-xl border border-gray-200 overflow-hidden z-30">
+                  <button
+                    onClick={() => shareEvent('twitter')}
+                    className="w-full px-4 py-2 text-left text-gray-700 hover:bg-gray-100 transition flex items-center gap-2"
+                  >
+                    <span>🐦</span> Twitter
+                  </button>
+                  <button
+                    onClick={() => shareEvent('facebook')}
+                    className="w-full px-4 py-2 text-left text-gray-700 hover:bg-gray-100 transition flex items-center gap-2"
+                  >
+                    <span>📘</span> Facebook
+                  </button>
+                  <button
+                    onClick={() => shareEvent('whatsapp')}
+                    className="w-full px-4 py-2 text-left text-gray-700 hover:bg-gray-100 transition flex items-center gap-2"
+                  >
+                    <span>💬</span> WhatsApp
+                  </button>
+                  <button
+                    onClick={() => shareEvent('copy')}
+                    className="w-full px-4 py-2 text-left text-gray-700 hover:bg-gray-100 transition flex items-center gap-2"
+                  >
+                    <span>🔗</span> Copy Link
+                  </button>
+                </div>
+              )}
+            </div>
+          </div>
         </div>
 
         {/* Sort & Filter Options - Mobile optimized */}
@@ -270,9 +387,14 @@ const EventGallery: React.FC = () => {
             {selectedPhotos.size > 0 && (
               <button
                 onClick={downloadSelected}
-                className="w-full sm:w-auto px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition sm:ml-auto text-sm font-medium"
+                className="w-full sm:w-auto px-6 py-3 bg-green-600 text-white rounded-xl hover:bg-green-700 active:scale-95 transition-all sm:ml-auto text-sm font-semibold shadow-md flex items-center justify-center gap-2"
               >
-                Download Selected ({selectedPhotos.size})
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                </svg>
+                <span className="hidden sm:inline">Download Selected</span>
+                <span className="sm:hidden">Download</span>
+                <span>({selectedPhotos.size})</span>
               </button>
             )}
           </div>
@@ -310,28 +432,28 @@ const EventGallery: React.FC = () => {
                 </Link>
                 <div className="p-2">
                   <div className="flex flex-col sm:flex-row justify-between items-stretch sm:items-center gap-2">
-                    <div className="flex gap-1">
+                    <div className="flex gap-1 sm:gap-2">
                       <button
                         onClick={() => toggleSelection(photo.id)}
-                        className={`px-2 py-1 rounded text-xs sm:text-sm ${
+                        className={`px-3 py-2 rounded-lg text-xs sm:text-sm font-medium transition-all active:scale-95 ${
                           selectedPhotos.has(photo.id)
-                            ? 'bg-blue-600 text-white'
+                            ? 'bg-blue-600 text-white shadow-sm'
                             : 'bg-gray-200 text-gray-700 hover:bg-gray-300 active:bg-gray-400'
                         }`}
                       >
-                        {selectedPhotos.has(photo.id) ? '✓' : 'Select'}
+                        {selectedPhotos.has(photo.id) ? '✓ Selected' : 'Select'}
                       </button>
                       {isAdminView && (
                         <button
                           onClick={() => toggleFeatured(photo.id, photo.is_featured || false)}
-                          className={`px-2 py-1 rounded text-xs sm:text-sm flex items-center gap-1 ${
+                          className={`px-2 py-2 rounded-lg text-xs sm:text-sm flex items-center gap-1 transition-all active:scale-95 ${
                             photo.is_featured
-                              ? 'bg-yellow-500 text-white'
+                              ? 'bg-yellow-500 text-white shadow-sm'
                               : 'bg-gray-200 text-gray-700 hover:bg-gray-300 active:bg-gray-400'
                           }`}
                           title={photo.is_featured ? 'Remove from featured' : 'Mark as featured'}
                         >
-                          <Star className={`w-3 h-3 ${photo.is_featured ? 'fill-white' : ''}`} />
+                          <Star className={`w-3 h-3 sm:w-4 sm:h-4 ${photo.is_featured ? 'fill-white' : ''}`} />
                         </button>
                       )}
                     </div>
@@ -339,21 +461,22 @@ const EventGallery: React.FC = () => {
                       <a
                         href={getOriginalUrl(slug!, photo.id)}
                         download
-                        className="flex-1 sm:flex-none px-2 py-1 bg-blue-600 text-white rounded text-xs sm:text-sm hover:bg-blue-700 active:bg-blue-800 text-center flex items-center justify-center gap-1"
+                        className="flex-1 sm:flex-none px-3 py-2 bg-blue-600 text-white rounded-lg text-xs sm:text-sm hover:bg-blue-700 active:bg-blue-800 active:scale-95 transition-all text-center flex items-center justify-center gap-1.5 font-medium shadow-sm"
                         onClick={(e) => e.stopPropagation()}
                       >
-                        <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <svg className="w-3 h-3 sm:w-4 sm:h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
                         </svg>
-                        Original
+                        <span className="hidden sm:inline">Original</span>
+                        <span className="sm:hidden">Full</span>
                       </a>
                       <a
                         href={getIgUrl(slug!, photo.id)}
                         download
-                        className="flex-1 sm:flex-none px-2 py-1 bg-purple-600 text-white rounded text-xs sm:text-sm hover:bg-purple-700 active:bg-purple-800 text-center flex items-center justify-center gap-1"
+                        className="flex-1 sm:flex-none px-3 py-2 bg-purple-600 text-white rounded-lg text-xs sm:text-sm hover:bg-purple-700 active:bg-purple-800 active:scale-95 transition-all text-center flex items-center justify-center gap-1.5 font-medium shadow-sm"
                         onClick={(e) => e.stopPropagation()}
                       >
-                        <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <svg className="w-3 h-3 sm:w-4 sm:h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
                         </svg>
                         Small

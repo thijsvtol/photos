@@ -299,10 +299,49 @@ const PhotoDetail: React.FC = () => {
     }
   };
 
-  const sharePhoto = (platform: string) => {
+  const sharePhoto = async (platform?: string) => {
     const url = `${window.location.origin}/p/${slug}/${photoId}`;
     const text = `Check out this photo from ${event?.name}`;
     
+    // Use native share API on mobile if available and no platform specified
+    if (!platform && 'share' in navigator) {
+      try {
+        // Try to fetch and share the photo file
+        const imageUrl = getPreviewUrl(slug!, photo?.id || photoId!);
+        const shareData: any = {
+          title: event?.name || 'Photo',
+          text: text,
+          url: url,
+        };
+        
+        // Try to include the photo if canShare supports files
+        try {
+          const response = await fetch(imageUrl);
+          const blob = await response.blob();
+          const fileName = photo?.original_filename || 'photo.jpg';
+          const file = new File([blob], fileName, { type: blob.type });
+          
+          // Check if we can share files
+          if ((navigator as any).canShare && (navigator as any).canShare({ files: [file] })) {
+            shareData.files = [file];
+          }
+        } catch (err) {
+          console.log('Could not include photo file in share, sharing URL only:', err);
+        }
+        
+        await (navigator as any).share(shareData);
+        setShowShareMenu(false);
+        return;
+      } catch (err) {
+        // User cancelled or share failed, fall back to menu
+        if ((err as Error).name !== 'AbortError') {
+          console.error('Error sharing:', err);
+        }
+        return;
+      }
+    }
+    
+    // Fall back to platform-specific sharing
     switch (platform) {
       case 'twitter':
         window.open(`https://twitter.com/intent/tweet?url=${encodeURIComponent(url)}&text=${encodeURIComponent(text)}`, '_blank');
@@ -479,8 +518,8 @@ const PhotoDetail: React.FC = () => {
           ref={containerRef}
           className={`relative bg-black rounded-lg overflow-hidden ${isFullscreen ? 'fixed inset-0 z-50 rounded-none' : ''}`}
         >
-          {/* Action buttons */}
-          <div className="absolute top-4 right-4 z-20 flex gap-2 items-center">
+          {/* Action buttons - Desktop only */}
+          <div className="hidden md:flex absolute top-4 right-4 z-20 gap-2 items-center">
             {/* Favorite button */}
             <button
               onClick={toggleFavorite}
@@ -502,7 +541,7 @@ const PhotoDetail: React.FC = () => {
               
               {/* Share menu dropdown */}
               {showShareMenu && (
-                <div className="absolute right-0 mt-2 w-48 bg-gray-800 rounded-lg shadow-xl border border-gray-700 overflow-hidden">
+                <div className="absolute right-0 mt-2 w-48 bg-gray-800 rounded-lg shadow-xl border border-gray-700 overflow-hidden z-30">
                   <button
                     onClick={() => sharePhoto('twitter')}
                     className="w-full px-4 py-2 text-left text-white hover:bg-gray-700 transition flex items-center gap-2"
@@ -691,34 +730,125 @@ const PhotoDetail: React.FC = () => {
           </div>
         </div>
 
-        {/* Mobile download buttons */}
-        <div className="md:hidden mt-4 flex gap-2">
-          <a
-            href={getOriginalUrl(slug!, photo?.id || photoId!)}
-            download
-            className="flex-1 px-4 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition text-center font-medium flex items-center justify-center gap-2"
-          >
-            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
-            </svg>
-            Download Original
-          </a>
-          <a
-            href={getIgUrl(slug!, photo?.id || photoId!)}
-            download
-            className="flex-1 px-4 py-3 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition text-center font-medium flex items-center justify-center gap-2"
-          >
-            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
-            </svg>
-            Download Small
-          </a>
+        {/* Mobile Action Bar */}
+        <div className="md:hidden mt-4 space-y-3">
+          {/* Quick actions */}
+          <div className="flex gap-2 justify-center">
+            {/* Favorite button */}
+            <button
+              onClick={toggleFavorite}
+              className="px-4 py-2.5 bg-gray-800 text-white rounded-lg transition flex items-center gap-2 min-w-[110px] justify-center"
+              aria-label="Favorite"
+            >
+              <Heart className={`w-5 h-5 ${isFavorited ? 'fill-red-500 text-red-500' : ''}`} />
+              <span className="text-sm font-medium">{isFavorited ? 'Favorited' : 'Favorite'}</span>
+            </button>
+            
+            {/* Share button */}
+            <button
+              onClick={() => {
+                // Use native share on mobile if available
+                if ('share' in navigator) {
+                  sharePhoto();
+                } else {
+                  setShowShareMenu(!showShareMenu);
+                }
+              }}
+              className="px-4 py-2.5 bg-gray-800 text-white rounded-lg transition flex items-center gap-2 min-w-[110px] justify-center"
+              aria-label="Share"
+            >
+              <Share2 className="w-5 h-5" />
+              <span className="text-sm font-medium">Share</span>
+            </button>
+            
+            {/* Slideshow button */}
+            <button
+              onClick={toggleSlideshow}
+              className={`px-4 py-2.5 bg-gray-800 text-white rounded-lg transition flex items-center gap-2 min-w-[110px] justify-center ${
+                isSlideshow ? 'ring-2 ring-blue-500' : ''
+              }`}
+              aria-label="Slideshow"
+            >
+              {isSlideshow ? <Pause className="w-5 h-5" /> : <Play className="w-5 h-5" />}
+              <span className="text-sm font-medium">{isSlideshow ? 'Pause' : 'Play'}</span>
+            </button>
+          </div>
+          
+          {/* Download buttons */}
+          <div className="flex gap-2">
+            <a
+              href={getOriginalUrl(slug!, photo?.id || photoId!)}
+              download
+              className="flex-1 px-4 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 active:bg-blue-800 transition text-center font-medium flex items-center justify-center gap-2"
+            >
+              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+              </svg>
+              <span className="text-sm">Original</span>
+            </a>
+            <a
+              href={getIgUrl(slug!, photo?.id || photoId!)}
+              download
+              className="flex-1 px-4 py-3 bg-purple-600 text-white rounded-lg hover:bg-purple-700 active:bg-purple-800 transition text-center font-medium flex items-center justify-center gap-2"
+            >
+              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+              </svg>
+              <span className="text-sm">Small</span>
+            </a>
+          </div>
+          
+          {/* Navigation hint */}
+          <div className="text-center text-gray-400 text-sm">
+            ← Swipe to navigate →
+          </div>
         </div>
-        
-        {/* Navigation hint for mobile */}
-        <div className="md:hidden mt-4 text-center text-gray-400 text-sm">
-          ← Swipe to navigate →
-        </div>
+
+        {/* Mobile Share Menu Bottom Sheet - only shown if native share is not available */}
+        {showShareMenu && !('share' in navigator) && (
+          <div className="md:hidden fixed inset-0 bg-black/50 z-50" onClick={() => setShowShareMenu(false)}>
+            <div className="absolute bottom-0 left-0 right-0 bg-gray-800 rounded-t-2xl p-4" onClick={(e) => e.stopPropagation()}>
+              <div className="w-12 h-1 bg-gray-600 rounded-full mx-auto mb-4"></div>
+              <h3 className="text-white text-lg font-semibold mb-4">Share Photo</h3>
+              <div className="space-y-2">
+                <button
+                  onClick={() => sharePhoto('twitter')}
+                  className="w-full px-4 py-3 text-left text-white bg-gray-700 hover:bg-gray-600 active:bg-gray-500 rounded-lg transition flex items-center gap-3"
+                >
+                  <span className="text-2xl">🐦</span>
+                  <span>Share on Twitter</span>
+                </button>
+                <button
+                  onClick={() => sharePhoto('facebook')}
+                  className="w-full px-4 py-3 text-left text-white bg-gray-700 hover:bg-gray-600 active:bg-gray-500 rounded-lg transition flex items-center gap-3"
+                >
+                  <span className="text-2xl">📘</span>
+                  <span>Share on Facebook</span>
+                </button>
+                <button
+                  onClick={() => sharePhoto('whatsapp')}
+                  className="w-full px-4 py-3 text-left text-white bg-gray-700 hover:bg-gray-600 active:bg-gray-500 rounded-lg transition flex items-center gap-3"
+                >
+                  <span className="text-2xl">💬</span>
+                  <span>Share on WhatsApp</span>
+                </button>
+                <button
+                  onClick={() => sharePhoto('copy')}
+                  className="w-full px-4 py-3 text-left text-white bg-gray-700 hover:bg-gray-600 active:bg-gray-500 rounded-lg transition flex items-center gap-3"
+                >
+                  <span className="text-2xl">🔗</span>
+                  <span>Copy Link</span>
+                </button>
+              </div>
+              <button
+                onClick={() => setShowShareMenu(false)}
+                className="w-full mt-4 px-4 py-3 bg-gray-900 text-white rounded-lg font-medium"
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        )}
 
         {/* Details section - collapsible on mobile */}
         <div className={`mt-6 grid grid-cols-1 md:grid-cols-2 gap-4 ${showDetails ? 'block' : 'hidden md:grid'}`}>

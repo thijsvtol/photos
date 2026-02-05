@@ -90,24 +90,24 @@ export default function Landing() {
           <p className="text-xl md:text-2xl text-white mb-8 text-center px-4 drop-shadow-lg">
             Capturing moments in sports and nature
           </p>
-          <div className="flex flex-col sm:flex-row gap-3 sm:gap-4 w-full max-w-2xl px-4">
+          <div className="flex flex-col gap-3 sm:flex-row sm:gap-4 w-full max-w-2xl px-4">
             <Link
               to="/events"
-              className="bg-white/90 backdrop-blur-sm text-gray-900 px-6 sm:px-8 py-3 rounded-lg text-base sm:text-lg font-medium hover:bg-white transition-colors text-center flex-1"
+              className="bg-white/90 backdrop-blur-sm text-gray-900 px-6 sm:px-8 py-4 rounded-xl text-base sm:text-lg font-semibold hover:bg-white active:scale-95 transition-all text-center flex-1 shadow-lg"
             >
               View Galleries
             </Link>
             <Link
               to="/favorites"
-              className="bg-white/20 backdrop-blur-sm border border-white/30 text-white px-6 sm:px-8 py-3 rounded-lg text-base sm:text-lg font-medium hover:bg-white/30 transition-colors flex items-center justify-center gap-2 flex-1"
+              className="bg-white/20 backdrop-blur-sm border-2 border-white/40 text-white px-6 sm:px-8 py-4 rounded-xl text-base sm:text-lg font-semibold hover:bg-white/30 active:scale-95 transition-all flex items-center justify-center gap-2 flex-1 shadow-lg"
             >
-              <Heart className="w-5 h-5" /> My Favorites
+              <Heart className="w-5 h-5" /> <span>Favorites</span>
             </Link>
             <Link
               to="/map"
-              className="bg-white/20 backdrop-blur-sm border border-white/30 text-white px-6 sm:px-8 py-3 rounded-lg text-base sm:text-lg font-medium hover:bg-white/30 transition-colors flex items-center justify-center gap-2 flex-1"
+              className="bg-white/20 backdrop-blur-sm border-2 border-white/40 text-white px-6 sm:px-8 py-4 rounded-xl text-base sm:text-lg font-semibold hover:bg-white/30 active:scale-95 transition-all flex items-center justify-center gap-2 flex-1 shadow-lg"
             >
-              <MapPin className="w-5 h-5" /> Map
+              <MapPin className="w-5 h-5" /> <span>Map</span>
             </Link>
           </div>
         </div>
