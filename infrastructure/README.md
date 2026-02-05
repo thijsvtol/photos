@@ -160,7 +160,26 @@ wrangler d1 list --json | jq -r '.[] | select(.name=="photos-db") | .uuid'
 
 ### Import Script Example
 
-Create a file `import-resources.sh`:
+A ready-to-use import script is available: `import-resources.sh`
+
+```bash
+# 1. Edit the script and fill in your resource IDs
+nano import-resources.sh
+
+# 2. Make it executable (if not already)
+chmod +x import-resources.sh
+
+# 3. Run the import
+./import-resources.sh
+```
+
+The script will:
+- Import all resources with proper error handling
+- Skip resources where IDs aren't configured
+- Show clear status for each import operation
+- Provide next steps for verification
+
+Alternatively, create your own script or import manually:
 
 ```bash
 #!/bin/bash
@@ -193,6 +212,8 @@ terraform import cloudflare_record.photos_subdomain $ZONE_ID/$DNS_RECORD_ID
 
 echo "Import complete! Run 'terraform plan' to verify."
 ```
+
+The provided `import-resources.sh` script includes error handling and clear status messages.
 
 ### Troubleshooting Imports
 
@@ -228,6 +249,7 @@ infrastructure/
 ├── variables.tf             # Input variables
 ├── outputs.tf               # Output values
 ├── terraform.tfvars.example # Config template
+├── import-resources.sh      # Import script for existing resources
 ├── run-migrations.sh        # DB migrations
 └── .terraform-version       # Terraform version pin
 ```
