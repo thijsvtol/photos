@@ -188,8 +188,13 @@ setup_access_application() {
     echo "  3. Add paths: $(jq -r '.access.protected_paths[]' "$CONFIG_FILE" | tr '\n' ' ')"
     echo "  4. Configure allowed emails from cloudflare-config.json"
     
-    read -p "Press Enter once Access is configured..." || true
-    success "Access configuration marked as complete"
+    # Skip interactive prompt in CI/CD environments
+    if [[ -z "${CI:-}" ]] && [[ -t 0 ]]; then
+        read -p "Press Enter once Access is configured..." || true
+    else
+        info "Running in non-interactive mode - skipping confirmation"
+    fi
+    success "Access configuration noted"
 }
 
 # Display deployment summary

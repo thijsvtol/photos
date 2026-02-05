@@ -61,17 +61,25 @@ destroy_r2_bucket() {
     local bucket_name=$(jq -r '.storage.r2_bucket' "$CONFIG_FILE")
     
     if confirm_deletion "R2 Bucket: $bucket_name (ALL PHOTOS WILL BE LOST)"; then
-        info "Deleting all objects in bucket $bucket_name..."
-        
-        # List and delete all objects
         if wrangler r2 bucket list | grep -q "$bucket_name"; then
-            warn "Deleting objects... (this may take a while)"
-            # Note: Wrangler doesn't have bulk delete, would need API calls
-            warn "Manual cleanup required: Delete objects via dashboard first"
+            info "Deleting all objects in bucket $bucket_name..."
             
-            info "Deleting bucket $bucket_name..."
-            wrangler r2 bucket delete "$bucket_name" --force || warn "Bucket deletion failed (may not be empty)"
-            success "Bucket deleted"
+            # Attempt to list and delete objects
+            # Note: Wrangler CLI has limited bulk delete support
+            # For large buckets, use dashboard or API
+            local object_list=$(wrangler r2 object list "$bucket_name" 2>/dev/null || echo "")
+            
+            if [[ -n "$object_list" ]]; then
+                warn "Bucket contains objects. Attempting to delete..."
+                # This is a limitation - wrangler doesn't support bulk delete efficiently
+                # For production use, recommend using S3-compatible API or dashboard
+                warn "For buckets with many objects, delete via dashboard:"
+                warn "  https://dash.cloudflare.com → R2 → $bucket_name → Delete"
+            fi
+            
+            info "Attempting to delete bucket $bucket_name..."
+            wrangler r2 bucket delete "$bucket_name" --force || warn "Bucket deletion failed (may not be empty - delete objects first)"
+            success "Bucket deletion attempted"
         else
             warn "Bucket not found"
         fi
