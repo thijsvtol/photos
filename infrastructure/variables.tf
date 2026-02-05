@@ -47,7 +47,7 @@ variable "worker_name" {
 }
 
 variable "worker_compatibility_date" {
-  description = "Worker compatibility date"
+  description = "Worker compatibility date (matches wrangler.toml setting)"
   type        = string
-  default     = "2024-09-23"
+  default     = "2024-09-23" # Matches existing worker configuration
 }

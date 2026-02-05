@@ -1,5 +1,5 @@
 terraform {
-  required_version = ">= 1.0"
+  required_version = "~> 1.6.0"
   
   required_providers {
     cloudflare = {
@@ -60,8 +60,10 @@ resource "cloudflare_worker_script" "photos_worker" {
   compatibility_flags = ["nodejs_compat"]
 
   lifecycle {
+    # Worker content is deployed separately via wrangler CLI,
+    # so Terraform should ignore content changes to prevent
+    # drift detection conflicts during normal worker updates
     ignore_changes = [
-      # Worker content changes via wrangler, don't track here
       content,
     ]
   }
