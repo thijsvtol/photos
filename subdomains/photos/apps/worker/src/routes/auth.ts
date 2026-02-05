@@ -57,4 +57,22 @@ app.post('/api/events/:slug/login', async (c) => {
   }
 });
 
+/**
+ * POST /api/admin/logout
+ * Clears admin session
+ */
+app.post('/api/admin/logout', async (c) => {
+  try {
+    return new Response(JSON.stringify({ success: true }), {
+      status: 200,
+      headers: {
+        'Content-Type': 'application/json',
+      },
+    });
+  } catch (error) {
+    console.error('Error logging out:', error);
+    return c.json({ error: 'Failed to log out' }, 500);
+  }
+});
+
 export default app;

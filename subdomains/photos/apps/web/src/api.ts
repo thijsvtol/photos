@@ -21,6 +21,14 @@ export const loginToEvent = async (slug: string, password: string): Promise<void
   await api.post(`/events/${slug}/login`, { password });
 };
 
+export const adminLogout = async (): Promise<void> => {
+  await api.post('/admin/logout', {}, {
+    headers: { 'X-Admin-Access': '1' },
+  });
+  // Clear admin session from localStorage
+  localStorage.removeItem('isAdmin');
+};
+
 export const getPhotos = async (slug: string, sort?: string): Promise<Photo[]> => {
   const params = new URLSearchParams();
   if (sort) params.append('sort', sort);

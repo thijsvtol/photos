@@ -1,9 +1,12 @@
 import React from 'react';
-import { Link, useLocation } from 'react-router-dom';
-import { Camera, Heart, MapPin, LayoutGrid, Settings } from 'lucide-react';
+import { Link, useLocation, useNavigate } from 'react-router-dom';
+import { Camera, Heart, MapPin, LayoutGrid, Settings, LogOut } from 'lucide-react';
+import { adminLogout } from '../api';
 
 const Navbar: React.FC = () => {
   const location = useLocation();
+  const navigate = useNavigate();
+  const isAdmin = localStorage.getItem('isAdmin') === 'true';
   
   const isActive = (path: string) => {
     if (path === '/events') {
@@ -17,6 +20,16 @@ const Navbar: React.FC = () => {
     return isActive(path) 
       ? `${base} bg-blue-100 text-blue-700`
       : `${base} text-gray-600 hover:bg-gray-100`;
+  };
+
+  const handleLogout = async () => {
+    try {
+      await adminLogout();
+      navigate('/events');
+      window.location.reload(); // Reload to clear any cached admin state
+    } catch (error) {
+      console.error('Logout failed:', error);
+    }
   };
 
   return (
@@ -41,6 +54,17 @@ const Navbar: React.FC = () => {
               <Heart className="w-4 h-4" />
               <span className="hidden sm:inline">Favorites</span>
             </Link>
+
+            {isAdmin && (
+              <button
+                onClick={handleLogout}
+                className="flex items-center gap-2 px-3 py-2 rounded-lg transition-colors text-sm font-medium text-red-600 hover:bg-red-50"
+                title="Logout"
+              >
+                <LogOut className="w-4 h-4" />
+                <span className="hidden sm:inline">Logout</span>
+              </button>
+            )}
             
             <Link to="/map" className={linkClass('/map')}>
               <MapPin className="w-4 h-4" />
