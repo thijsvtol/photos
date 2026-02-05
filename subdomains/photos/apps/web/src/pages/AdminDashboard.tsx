@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
+import Navbar from '../components/Navbar';
 import { getEvents, createEvent } from '../api';
 import type { Event } from '../types';
 
@@ -58,8 +59,7 @@ const AdminDashboard: React.FC = () => {
   };
 
   return (
-    <div className="min-h-screen bg-gray-50">
-      <div className="max-w-7xl mx-auto px-3 sm:px-4 lg:px-8 py-4 sm:py-8">
+    <div className="min-h-screen bg-gray-50">      <Navbar />      <div className="max-w-7xl mx-auto px-3 sm:px-4 lg:px-8 py-4 sm:py-8">
         <div className="mb-6 sm:mb-8">
           <Link to="/events" className="text-blue-600 hover:text-blue-700 mb-3 sm:mb-4 inline-block text-sm sm:text-base">
             ← Back to Public View

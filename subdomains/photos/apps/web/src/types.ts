@@ -1,3 +1,10 @@
+export interface Tag {
+  id: number;
+  name: string;
+  slug: string;
+  description: string | null;
+}
+
 export interface Event {
   id: number;
   slug: string;
@@ -6,6 +13,7 @@ export interface Event {
   created_at: string;
   requires_password: boolean;
   preview_photo_id: string | null;
+  tags?: Tag[];
 }
 
 export interface Photo {
@@ -23,6 +31,11 @@ export interface Photo {
   camera_make: string | null;
   camera_model: string | null;
   lens_model: string | null;
+  latitude: number | null;
+  longitude: number | null;
+  favorites_count: number;
+  blur_placeholder: string | null;
+  is_featured: boolean;
 }
 
 export interface CreateEventRequest {

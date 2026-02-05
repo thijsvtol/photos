@@ -63,7 +63,17 @@ app.get('/api/events/:slug', async (c) => {
       return c.json({ error: 'Event not found' }, 404);
     }
     
-    return c.json({ event });
+    // Get tags for this event
+    const tags = await c.env.DB
+      .prepare(`
+        SELECT t.* FROM tags t
+        JOIN event_tags et ON t.id = et.tag_id
+        WHERE et.event_id = ?
+      `)
+      .bind(event.id)
+      .all();
+    
+    return c.json({ event: { ...event, tags: tags.results || [] } });
   } catch (error) {
     console.error('Error fetching event:', error);
     return c.json({ error: 'Failed to fetch event' }, 500);
@@ -170,6 +180,50 @@ app.get('/api/events/:slug/photos/:photoId', async (c) => {
   } catch (error) {
     console.error('Error fetching photo:', error);
     return c.json({ error: 'Failed to fetch photo' }, 500);
+  }
+});
+
+/**
+ * GET /api/tags
+ * Returns list of all tags
+ */
+app.get('/api/tags', async (c) => {
+  try {
+    const tags = await c.env.DB
+      .prepare('SELECT id, name, slug FROM tags ORDER BY name ASC')
+      .all();
+    
+    return c.json({ tags: tags.results || [] });
+  } catch (error) {
+    console.error('Error fetching tags:', error);
+    return c.json({ error: 'Failed to fetch tags' }, 500);
+  }
+});
+
+/**
+ * GET /api/events/by-tag/:tagSlug
+ * Returns events that have a specific tag
+ */
+app.get('/api/events/by-tag/:tagSlug', async (c) => {
+  const tagSlug = c.req.param('tagSlug');
+  
+  try {
+    const events = await c.env.DB
+      .prepare(`
+        SELECT DISTINCT e.id, e.slug, e.name, e.inferred_date, e.created_at, (e.password_hash IS NOT NULL) as requires_password
+        FROM events e
+        JOIN event_tags et ON e.id = et.event_id
+        JOIN tags t ON et.tag_id = t.id
+        WHERE t.slug = ?
+        ORDER BY e.inferred_date DESC, e.created_at DESC
+      `)
+      .bind(tagSlug)
+      .all();
+    
+    return c.json({ events: events.results || [] });
+  } catch (error) {
+    console.error('Error fetching events by tag:', error);
+    return c.json({ error: 'Failed to fetch events' }, 500);
   }
 });
 

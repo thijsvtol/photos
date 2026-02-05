@@ -2,9 +2,22 @@ import React, { useEffect, useState, useCallback } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { ulid } from 'ulid';
 import ExifReader from 'exifreader';
-import { getEvent, startUpload, uploadPart, completeUpload, regenerateThumbnails } from '../api';
+import { MapContainer, TileLayer, Marker, useMapEvents } from 'react-leaflet';
+import 'leaflet/dist/leaflet.css';
+import L from 'leaflet';
+import Navbar from '../components/Navbar';
+import TagManager from '../components/TagManager';
+import { getEvent, startUpload, uploadPart, completeUpload, regenerateThumbnails, setEventLocation } from '../api';
 import { addToQueue, updateQueueItem, getQueueItems, getPendingUploads } from '../uploadQueue';
 import type { Event, UploadQueueItem } from '../types';
+
+// Fix Leaflet marker icons
+delete (L.Icon.Default.prototype as any)._getIconUrl;
+L.Icon.Default.mergeOptions({
+  iconRetinaUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-icon-2x.png',
+  iconUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-icon.png',
+  shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-shadow.png',
+});
 
 const CHUNK_SIZE = 5 * 1024 * 1024; // 5MB chunks
 
@@ -15,6 +28,8 @@ const AdminEventUpload: React.FC = () => {
   const [isDragging, setIsDragging] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [isRegenerating, setIsRegenerating] = useState(false);
+  const [showLocationPicker, setShowLocationPicker] = useState(false);
+  const [selectedLocation, setSelectedLocation] = useState<[number, number] | null>(null);
 
   useEffect(() => {
     if (slug) {
@@ -86,6 +101,9 @@ const AdminEventUpload: React.FC = () => {
     cameraMake?: string;
     cameraModel?: string;
     lensModel?: string;
+    latitude?: number;
+    longitude?: number;
+    blurPlaceholder?: string;
   }> => {
     try {
       const buffer = await file.arrayBuffer();
@@ -102,6 +120,38 @@ const AdminEventUpload: React.FC = () => {
       const cameraModel = tags.Model?.description;
       const lensModel = tags.LensModel?.description;
       
+      // Extract GPS coordinates
+      let latitude: number | undefined;
+      let longitude: number | undefined;
+      if (tags.GPSLatitude && tags.GPSLongitude) {
+        latitude = parseFloat(tags.GPSLatitude.description);
+        longitude = parseFloat(tags.GPSLongitude.description);
+      }
+      
+      // Generate tiny blur placeholder (16x16)
+      let blurPlaceholder: string | undefined;
+      try {
+        const img = new Image();
+        const url = URL.createObjectURL(file);
+        await new Promise((resolve, reject) => {
+          img.onload = resolve;
+          img.onerror = reject;
+          img.src = url;
+        });
+        
+        const canvas = document.createElement('canvas');
+        canvas.width = 16;
+        canvas.height = 16;
+        const ctx = canvas.getContext('2d');
+        if (ctx) {
+          ctx.drawImage(img, 0, 0, 16, 16);
+          blurPlaceholder = canvas.toDataURL('image/jpeg', 0.3);
+        }
+        URL.revokeObjectURL(url);
+      } catch (err) {
+        console.error('Failed to generate blur placeholder:', err);
+      }
+      
       return {
         captureTime: captureTime ? parseExifDate(captureTime) : undefined,
         width: typeof width === 'number' ? width : undefined,
@@ -113,6 +163,9 @@ const AdminEventUpload: React.FC = () => {
         cameraMake: cameraMake || undefined,
         cameraModel: cameraModel || undefined,
         lensModel: lensModel || undefined,
+        latitude: latitude || undefined,
+        longitude: longitude || undefined,
+        blurPlaceholder: blurPlaceholder || undefined,
       };
     } catch (err) {
       console.error('Failed to extract EXIF:', err);
@@ -260,8 +313,35 @@ const AdminEventUpload: React.FC = () => {
     }
   };
 
+  const handleSetEventLocation = async () => {
+    if (!slug || !selectedLocation) return;
+    
+    try {
+      const [lat, lng] = selectedLocation;
+      const result = await setEventLocation(slug, lat, lng);
+      alert(`Successfully set GPS location for ${result.updated_count} photos without GPS data.`);
+      setShowLocationPicker(false);
+      setSelectedLocation(null);
+    } catch (err) {
+      setError('Failed to set event location');
+      console.error(err);
+    }
+  };
+
+  // Map click handler component
+  const LocationMarker: React.FC = () => {
+    useMapEvents({
+      click(e) {
+        setSelectedLocation([e.latlng.lat, e.latlng.lng]);
+      },
+    });
+    
+    return selectedLocation ? <Marker position={selectedLocation} /> : null;
+  };
+
   return (
     <div className="min-h-screen bg-gray-50">
+      <Navbar />
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
         <div className="mb-8">
           <Link to="/admin" className="text-blue-600 hover:text-blue-700 mb-4 inline-block">
@@ -272,19 +352,34 @@ const AdminEventUpload: React.FC = () => {
               <h1 className="text-4xl font-bold text-gray-900">{event?.name}</h1>
               <p className="text-gray-600 mt-2">Upload photos to this event</p>
             </div>
-            <button
-              onClick={handleRegenerateThumbnails}
-              disabled={isRegenerating}
-              className="px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition disabled:bg-gray-400 disabled:cursor-not-allowed"
-            >
-              {isRegenerating ? 'Regenerating...' : '🔄 Regenerate Thumbnails'}
-            </button>
+            <div className="flex gap-2">
+              <button
+                onClick={() => setShowLocationPicker(true)}
+                className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition"
+              >
+                📍 Set GPS Location
+              </button>
+              <button
+                onClick={handleRegenerateThumbnails}
+                disabled={isRegenerating}
+                className="px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition disabled:bg-gray-400 disabled:cursor-not-allowed"
+              >
+                {isRegenerating ? 'Regenerating...' : '🔄 Regenerate Thumbnails'}
+              </button>
+            </div>
           </div>
         </div>
 
         {error && (
           <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded mb-4">
             {error}
+          </div>
+        )}
+
+        {/* Tag Management */}
+        {event && (
+          <div className="mb-8">
+            <TagManager eventSlug={slug!} initialTags={event.tags} />
           </div>
         )}
 
@@ -365,6 +460,60 @@ const AdminEventUpload: React.FC = () => {
           )}
         </div>
       </div>
+
+      {/* GPS Location Picker Modal */}
+      {showLocationPicker && (
+        <div className="fixed inset-0 bg-black/75 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-lg max-w-4xl w-full h-[600px] flex flex-col">
+            <div className="p-4 border-b flex justify-between items-center">
+              <div>
+                <h2 className="text-xl font-bold">Set GPS Location for Event</h2>
+                <p className="text-sm text-gray-600 mt-1">
+                  Click on the map to select a location. This will update photos without GPS data.
+                </p>
+              </div>
+              <button onClick={() => setShowLocationPicker(false)} className="text-gray-600 hover:text-gray-900">
+                ✕
+              </button>
+            </div>
+            <div className="flex-1 relative">
+              <MapContainer
+                center={selectedLocation || [51.505, -0.09]}
+                zoom={13}
+                style={{ height: '100%', width: '100%' }}
+              >
+                <TileLayer
+                  attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+                  url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+                />
+                <LocationMarker />
+              </MapContainer>
+            </div>
+            <div className="p-4 border-t flex justify-between items-center">
+              <div className="text-sm text-gray-600">
+                {selectedLocation
+                  ? `Selected: ${selectedLocation[0].toFixed(6)}, ${selectedLocation[1].toFixed(6)}`
+                  : 'Click on the map to select a location'}
+              </div>
+              <div className="flex gap-2">
+                <button
+                  onClick={() => setShowLocationPicker(false)}
+                  className="px-4 py-2 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={handleSetEventLocation}
+                  disabled={!selectedLocation}
+                  className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:bg-gray-400 disabled:cursor-not-allowed"
+                >
+                  Set Location
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

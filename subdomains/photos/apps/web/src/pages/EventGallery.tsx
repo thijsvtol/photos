@@ -1,6 +1,10 @@
 import React, { useEffect, useState } from 'react';
 import { useParams, Link } from 'react-router-dom';
-import { getEvent, getPhotos, loginToEvent, getPreviewUrl, getOriginalUrl, getIgUrl, requestZip } from '../api';
+import { Heart, Star } from 'lucide-react';
+import Masonry from 'react-masonry-css';
+import Navbar from '../components/Navbar';
+import ProgressiveImage from '../components/ProgressiveImage';
+import { getEvent, getPhotos, loginToEvent, getPreviewUrl, getOriginalUrl, getIgUrl, requestZip, setPhotoFeatured } from '../api';
 import type { Event, Photo } from '../types';
 
 const EventGallery: React.FC = () => {
@@ -14,6 +18,7 @@ const EventGallery: React.FC = () => {
   const [loginError, setLoginError] = useState<string | null>(null);
   const [sortBy, setSortBy] = useState('date_desc');
   const [selectedPhotos, setSelectedPhotos] = useState<Set<string>>(new Set());
+  const [userFavorites, setUserFavorites] = useState<Set<string>>(new Set());
 
   useEffect(() => {
     if (slug) {
@@ -22,7 +27,17 @@ const EventGallery: React.FC = () => {
   }, [slug]);
 
   useEffect(() => {
-    // Load selected photos from localStorage
+    // Load user favorites from localStorage
+    const favoritesStr = localStorage.getItem('user_favorites');
+    if (favoritesStr) {
+      const favorites = JSON.parse(favoritesStr) as Array<{ photoId: string; slug: string; timestamp: number }>;
+      const favoriteIds = new Set(favorites.map(f => f.photoId));
+      setUserFavorites(favoriteIds);
+    }
+  }, []);
+
+  useEffect(() => {
+    // Load selected photos from localStorage (for download selection)
     if (slug) {
       const stored = localStorage.getItem(`favorites_${slug}`);
       if (stored) {
@@ -111,6 +126,19 @@ const EventGallery: React.FC = () => {
       newSelected.add(photoId);
     }
     setSelectedPhotos(newSelected);
+  };
+
+  const toggleFeatured = async (photoId: string, currentStatus: boolean) => {
+    try {
+      await setPhotoFeatured(photoId, !currentStatus);
+      // Update local state
+      setPhotos(photos.map(p => 
+        p.id === photoId ? { ...p, is_featured: !currentStatus } : p
+      ));
+    } catch (err) {
+      console.error('Failed to toggle featured status:', err);
+      alert('Failed to update featured status. You may need admin access.');
+    }
   };
 
   const downloadSelected = async () => {
@@ -207,6 +235,7 @@ const EventGallery: React.FC = () => {
 
   return (
     <div className="min-h-screen bg-gray-50">
+      <Navbar />
       <div className="max-w-7xl mx-auto px-3 sm:px-4 lg:px-8 py-4 sm:py-8">
         <div className="mb-6 sm:mb-8">
           <Link to="/events" className="text-blue-600 hover:text-blue-700 mb-3 sm:mb-4 inline-block text-sm sm:text-base">
@@ -253,29 +282,71 @@ const EventGallery: React.FC = () => {
             <p className="text-gray-600">No photos found.</p>
           </div>
         ) : (
-          <div className="grid grid-cols-1 min-[400px]:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-2 sm:gap-4">
+          <Masonry
+            breakpointCols={{
+              default: 4,
+              1536: 4,
+              1280: 3,
+              1024: 3,
+              768: 2,
+              400: 1
+            }}
+            className="flex -ml-2 sm:-ml-4 w-auto"
+            columnClassName="pl-2 sm:pl-4 bg-clip-padding"
+          >
             {photos.map((photo) => (
-              <div key={photo.id} className="relative group bg-white rounded-lg overflow-hidden shadow-md">
-                <Link to={`/p/${slug}/${photo.id}`} className="block">
-                  <img
+              <div key={photo.id} className="mb-2 sm:mb-4 relative group bg-white rounded-lg overflow-hidden shadow-md">
+                <Link to={`/p/${slug}/${photo.id}`} className="block relative">
+                  <ProgressiveImage
                     src={getPreviewUrl(slug!, photo.id)}
+                    blurDataUrl={photo.blur_placeholder}
                     alt={photo.original_filename}
-                    className="w-full h-48 sm:h-64 object-cover"
+                    className="w-full object-cover"
                     loading="lazy"
+                    style={{
+                      height: photo.height && photo.width 
+                        ? `${(photo.height / photo.width) * 100}%` 
+                        : 'auto'
+                    }}
                   />
+                  {/* User favorite indicator */}
+                  {userFavorites.has(photo.id) && (
+                    <div className="absolute top-2 right-2 bg-black/50 backdrop-blur-sm text-white p-1.5 rounded-full">
+                      <Heart className="w-4 h-4 fill-red-500 text-red-500" />
+                    </div>
+                  )}
+                  {/* Featured photo indicator */}
+                  {!!photo.is_featured && (
+                    <div className="absolute top-2 left-2 bg-yellow-500/90 backdrop-blur-sm text-white p-1.5 rounded-full">
+                      <Star className="w-4 h-4 fill-white" />
+                    </div>
+                  )}
                 </Link>
                 <div className="p-2">
                   <div className="flex flex-col sm:flex-row justify-between items-stretch sm:items-center gap-2">
-                    <button
-                      onClick={() => toggleSelection(photo.id)}
-                      className={`px-2 py-1 rounded text-xs sm:text-sm ${
-                        selectedPhotos.has(photo.id)
-                          ? 'bg-blue-600 text-white'
-                          : 'bg-gray-200 text-gray-700 hover:bg-gray-300 active:bg-gray-400'
-                      }`}
-                    >
-                      {selectedPhotos.has(photo.id) ? '✓' : 'Select'}
-                    </button>
+                    <div className="flex gap-1">
+                      <button
+                        onClick={() => toggleSelection(photo.id)}
+                        className={`px-2 py-1 rounded text-xs sm:text-sm ${
+                          selectedPhotos.has(photo.id)
+                            ? 'bg-blue-600 text-white'
+                            : 'bg-gray-200 text-gray-700 hover:bg-gray-300 active:bg-gray-400'
+                        }`}
+                      >
+                        {selectedPhotos.has(photo.id) ? '✓' : 'Select'}
+                      </button>
+                      <button
+                        onClick={() => toggleFeatured(photo.id, photo.is_featured || false)}
+                        className={`px-2 py-1 rounded text-xs sm:text-sm flex items-center gap-1 ${
+                          photo.is_featured
+                            ? 'bg-yellow-500 text-white'
+                            : 'bg-gray-200 text-gray-700 hover:bg-gray-300 active:bg-gray-400'
+                        }`}
+                        title={photo.is_featured ? 'Remove from featured' : 'Mark as featured'}
+                      >
+                        <Star className={`w-3 h-3 ${photo.is_featured ? 'fill-white' : ''}`} />
+                      </button>
+                    </div>
                     <div className="flex gap-1 sm:gap-2">
                       <a
                         href={getOriginalUrl(slug!, photo.id)}
@@ -310,7 +381,7 @@ const EventGallery: React.FC = () => {
                 </div>
               </div>
             ))}
-          </div>
+          </Masonry>
         )}
       </div>
     </div>

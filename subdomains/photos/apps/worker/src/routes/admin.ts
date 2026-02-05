@@ -110,14 +110,16 @@ app.post('/events/:slug/uploads/start', async (c) => {
     await c.env.DB
       .prepare(`INSERT INTO photos (
         id, event_id, original_filename, capture_time, width, height,
-        iso, aperture, shutter_speed, focal_length, camera_make, camera_model, lens_model
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+        iso, aperture, shutter_speed, focal_length, camera_make, camera_model, lens_model,
+        latitude, longitude, blur_placeholder
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
       .bind(
         body.photoId, event.id, body.filename, captureTime, 
         body.width || null, body.height || null,
         body.iso || null, body.aperture || null, body.shutterSpeed || null,
         body.focalLength || null, body.cameraMake || null, body.cameraModel || null,
-        body.lensModel || null
+        body.lensModel || null, body.latitude || null, body.longitude || null,
+        body.blurPlaceholder || null
       )
       .run();
     
@@ -255,6 +257,150 @@ app.post('/events/:slug/regenerate-thumbnails', async (c) => {
   } catch (error) {
     console.error('Error regenerating thumbnails:', error);
     return c.json({ error: 'Failed to regenerate thumbnails' }, 500);
+  }
+});
+
+/**
+ * POST /events/:slug/tags
+ * Add tags to an event
+ */
+app.post('/events/:slug/tags', async (c) => {
+  try {
+    const slug = c.req.param('slug');
+    const { tagIds } = await c.req.json<{ tagIds: number[] }>();
+    
+    // Get event ID
+    const event = await c.env.DB
+      .prepare('SELECT id FROM events WHERE slug = ?')
+      .bind(slug)
+      .first<{ id: number }>();
+    
+    if (!event) {
+      return c.json({ error: 'Event not found' }, 404);
+    }
+    
+    // Delete existing tags
+    await c.env.DB
+      .prepare('DELETE FROM event_tags WHERE event_id = ?')
+      .bind(event.id)
+      .run();
+    
+    // Insert new tags
+    for (const tagId of tagIds) {
+      await c.env.DB
+        .prepare('INSERT INTO event_tags (event_id, tag_id) VALUES (?, ?)')
+        .bind(event.id, tagId)
+        .run();
+    }
+    
+    return c.json({ success: true });
+  } catch (error) {
+    console.error('Error updating event tags:', error);
+    return c.json({ error: 'Failed to update tags' }, 500);
+  }
+});
+
+/**
+ * PUT /photos/:photoId/featured
+ * Toggle featured status of a photo
+ */
+app.put('/photos/:photoId/featured', async (c) => {
+  try {
+    const photoId = c.req.param('photoId');
+    const { isFeatured } = await c.req.json<{ isFeatured: boolean }>();
+    
+    await c.env.DB
+      .prepare('UPDATE photos SET is_featured = ? WHERE id = ?')
+      .bind(isFeatured ? 1 : 0, photoId)
+      .run();
+    
+    return c.json({ success: true, is_featured: isFeatured });
+  } catch (error) {
+    console.error('Error updating featured status:', error);
+    return c.json({ error: 'Failed to update featured status' }, 500);
+  }
+});
+
+/**
+ * PUT /events/:slug/location
+ * Set GPS location for all photos in an event that don't have GPS data
+ */
+app.put('/events/:slug/location', async (c) => {
+  try {
+    const slug = c.req.param('slug');
+    const { latitude, longitude } = await c.req.json<{ latitude: number; longitude: number }>();
+    
+    if (!latitude || !longitude) {
+      return c.json({ error: 'Latitude and longitude are required' }, 400);
+    }
+    
+    // First get the event_id from the slug
+    const event = await c.env.DB
+      .prepare('SELECT id FROM events WHERE slug = ?')
+      .bind(slug)
+      .first<{ id: number }>();
+    
+    if (!event) {
+      return c.json({ error: 'Event not found' }, 404);
+    }
+    
+    // Update photos that don't have GPS coordinates
+    const result = await c.env.DB
+      .prepare('UPDATE photos SET latitude = ?, longitude = ? WHERE event_id = ? AND (latitude IS NULL OR longitude IS NULL)')
+      .bind(latitude, longitude, event.id)
+      .run();
+    
+    return c.json({ success: true, updated_count: result.meta.changes });
+  } catch (error) {
+    console.error('Error setting event location:', error);
+    return c.json({ error: 'Failed to set event location' }, 500);
+  }
+});
+
+/**
+ * POST /events/:slug/tags
+ * Set tags for an event (replaces all existing tags)
+ */
+app.post('/events/:slug/tags', async (c) => {
+  const slug = c.req.param('slug');
+  
+  try {
+    const { tagIds } = await c.req.json<{ tagIds: number[] }>();
+    
+    if (!Array.isArray(tagIds)) {
+      return c.json({ error: 'Invalid tagIds format' }, 400);
+    }
+    
+    // Get event ID
+    const event = await c.env.DB
+      .prepare('SELECT id FROM events WHERE slug = ?')
+      .bind(slug)
+      .first<{ id: number }>();
+    
+    if (!event) {
+      return c.json({ error: 'Event not found' }, 404);
+    }
+    
+    // Delete existing tags
+    await c.env.DB
+      .prepare('DELETE FROM event_tags WHERE event_id = ?')
+      .bind(event.id)
+      .run();
+    
+    // Insert new tags
+    if (tagIds.length > 0) {
+      for (const tagId of tagIds) {
+        await c.env.DB
+          .prepare('INSERT INTO event_tags (event_id, tag_id) VALUES (?, ?)')
+          .bind(event.id, tagId)
+          .run();
+      }
+    }
+    
+    return c.json({ success: true });
+  } catch (error) {
+    console.error('Error setting event tags:', error);
+    return c.json({ error: 'Failed to set event tags' }, 500);
   }
 });
 

@@ -33,6 +33,22 @@ export interface Photo {
   camera_make: string | null;
   camera_model: string | null;
   lens_model: string | null;
+  latitude: number | null;
+  longitude: number | null;
+  favorites_count: number;
+  blur_placeholder: string | null;
+  is_featured: number;
+}
+
+export interface Tag {
+  id: number;
+  name: string;
+  slug: string;
+  created_at: string;
+}
+
+export interface EventWithTags extends Event {
+  tags?: Tag[];
 }
 
 // API Request/Response Types
@@ -59,6 +75,9 @@ export interface StartUploadRequest {
   cameraMake?: string;
   cameraModel?: string;
   lensModel?: string;
+  latitude?: number;
+  longitude?: number;
+  blurPlaceholder?: string;
 }
 
 export interface UploadPartRequest {

@@ -1,5 +1,5 @@
 import axios from 'axios';
-import type { Event, Photo, CreateEventRequest } from './types';
+import type { Event, Photo, CreateEventRequest, Tag } from './types';
 
 const api = axios.create({
   baseURL: '/api',
@@ -119,6 +119,41 @@ export const regenerateThumbnails = async (slug: string): Promise<{ count: numbe
   return response.data;
 };
 
+// Tags API
+export const getTags = async (): Promise<Tag[]> => {
+  const response = await api.get<{ tags: Tag[] }>('/tags');
+  return response.data.tags;
+};
+
+export const setEventTags = async (slug: string, tagIds: number[]): Promise<void> => {
+  await api.post(
+    `/admin/events/${slug}/tags`,
+    { tagIds },
+    { headers: { 'X-Admin-Access': '1' } }
+  );
+};
+
+export const getEventsByTag = async (tagSlug: string): Promise<Event[]> => {
+  const response = await api.get<{ events: Event[] }>(`/events/by-tag/${tagSlug}`);
+  return response.data.events;
+};
+
+// Favorites API
+export const incrementFavorite = async (photoId: string): Promise<{ favorites_count: number }> => {
+  const response = await api.post<{ favorites_count: number }>(`/photos/${photoId}/favorite`);
+  return response.data;
+};
+
+export const getMostFavorited = async (limit: number = 20): Promise<Photo[]> => {
+  const response = await api.get<{ photos: Photo[] }>(`/photos/most-favorited?limit=${limit}`);
+  return response.data.photos;
+};
+
+export const getFeaturedPhotos = async (limit: number = 10): Promise<Photo[]> => {
+  const response = await api.get<{ photos: Photo[] }>(`/photos/featured?limit=${limit}`);
+  return response.data.photos;
+};
+
 // Helper functions
 export const getPreviewUrl = (slug: string, photoId: string): string => {
   return `/media/${slug}/preview/${photoId}.jpg`;
@@ -130,4 +165,25 @@ export const getIgUrl = (slug: string, photoId: string): string => {
 
 export const getOriginalUrl = (slug: string, photoId: string): string => {
   return `/media/${slug}/original/${photoId}.jpg`;
+};
+
+export const setPhotoFeatured = async (photoId: string, isFeatured: boolean): Promise<void> => {
+  const response = await fetch(`/api/admin/photos/${photoId}/featured`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ isFeatured }),
+    credentials: 'include',
+  });
+  if (!response.ok) throw new Error('Failed to update featured status');
+};
+
+export const setEventLocation = async (slug: string, latitude: number, longitude: number): Promise<{ updated_count: number }> => {
+  const response = await fetch(`/api/admin/events/${slug}/location`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ latitude, longitude }),
+    credentials: 'include',
+  });
+  if (!response.ok) throw new Error('Failed to set event location');
+  return response.json();
 };
