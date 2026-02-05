@@ -1,6 +1,6 @@
 import React, { useEffect, useState, useRef } from 'react';
 import { useParams, Link, useNavigate, useLocation } from 'react-router-dom';
-import { Maximize, Minimize, Share2, X, Heart, Info } from 'lucide-react';
+import { Maximize, Minimize, Share2, X, Heart, Info, Play, Pause } from 'lucide-react';
 import Navbar from '../components/Navbar';
 import { getEvent, getPhoto, getPhotos, loginToEvent, getPreviewUrl, getOriginalUrl, getIgUrl } from '../api';
 import type { Event, Photo } from '../types';
@@ -24,9 +24,13 @@ const PhotoDetail: React.FC = () => {
   const [imageLoaded, setImageLoaded] = useState(false);
   const [isFavorited, setIsFavorited] = useState(false);
   const [showKeyboardHelp, setShowKeyboardHelp] = useState(false);
+  const [isSlideshow, setIsSlideshow] = useState(false);
+  const [slideshowSpeed, setSlideshowSpeed] = useState(3000); // milliseconds
+  const [showSlideshowSettings, setShowSlideshowSettings] = useState(false);
   const touchStartX = useRef<number | null>(null);
   const touchEndX = useRef<number | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
+  const slideshowTimerRef = useRef<number | null>(null);
 
   // Check if we came from favorites page
   const fromFavorites = location.state?.fromFavorites;
@@ -73,13 +77,34 @@ const PhotoDetail: React.FC = () => {
     }
   }, [photo]);
 
+  // Slideshow timer
+  useEffect(() => {
+    if (isSlideshow && imageLoaded) {
+      slideshowTimerRef.current = setTimeout(() => {
+        navigateToNext();
+      }, slideshowSpeed);
+    }
+    
+    return () => {
+      if (slideshowTimerRef.current) {
+        clearTimeout(slideshowTimerRef.current);
+      }
+    };
+  }, [isSlideshow, currentIndex, slideshowSpeed, imageLoaded]);
+
   // Keyboard navigation
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'ArrowLeft') navigateToPrevious();
       if (e.key === 'ArrowRight') navigateToNext();
+      if (e.key === ' ' || e.key === 'Spacebar') {
+        e.preventDefault();
+        toggleSlideshow();
+      }
       if (e.key === 'Escape') {
-        if (isFullscreen) {
+        if (isSlideshow) {
+          setIsSlideshow(false);
+        } else if (isFullscreen) {
           exitFullscreen();
         } else {
           navigate(fromFavorites ? '/favorites' : `/events/${slug}`);
@@ -91,7 +116,7 @@ const PhotoDetail: React.FC = () => {
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [currentIndex, displayPhotos, slug, isFullscreen, showDetails, showKeyboardHelp, fromFavorites]);
+  }, [currentIndex, displayPhotos, slug, isFullscreen, showDetails, showKeyboardHelp, fromFavorites, isSlideshow]);
 
   const loadPhoto = async () => {
     try {
@@ -145,6 +170,15 @@ const PhotoDetail: React.FC = () => {
     }
   };
 
+  const toggleSlideshow = () => {
+    setIsSlideshow(!isSlideshow);
+    if (!isSlideshow) {
+      setShowDetails(false); // Hide details when starting slideshow
+    } else {
+      setShowSlideshowSettings(false); // Hide settings when stopping
+    }
+  };
+
   const navigateToNext = () => {
     const photosToUse = displayPhotos.length > 0 ? displayPhotos : allPhotos;
     if (currentIndex >= 0 && currentIndex < photosToUse.length - 1) {
@@ -161,6 +195,21 @@ const PhotoDetail: React.FC = () => {
         });
       } else {
         window.history.pushState(null, '', `/p/${slug}/${nextPhoto.id}`);
+      }
+    } else if (currentIndex === photosToUse.length - 1 && photosToUse.length > 0) {
+      // Loop back to first photo
+      const firstPhoto = photosToUse[0];
+      setCurrentIndex(0);
+      setPhoto(firstPhoto);
+      setImageLoaded(false);
+      // Update URL without reload, preserve state for favorites
+      if (fromFavorites) {
+        navigate(`/p/${slug}/${firstPhoto.id}`, { 
+          replace: true, 
+          state: { fromFavorites: true, favoritePhotos } 
+        });
+      } else {
+        window.history.pushState(null, '', `/p/${slug}/${firstPhoto.id}`);
       }
     } else if (fromFavorites && favoritePhotos.length > 0) {
       // Try to navigate to next favorite in a different event
@@ -430,11 +479,11 @@ const PhotoDetail: React.FC = () => {
           className={`relative bg-black rounded-lg overflow-hidden ${isFullscreen ? 'fixed inset-0 z-50 rounded-none' : ''}`}
         >
           {/* Action buttons */}
-          <div className="absolute top-4 right-4 z-20 flex gap-2">
+          <div className="absolute top-4 right-4 z-20 flex gap-2 items-center">
             {/* Favorite button */}
             <button
               onClick={toggleFavorite}
-              className="bg-black/50 hover:bg-black/75 text-white p-2 rounded-full transition backdrop-blur-sm"
+              className="bg-black/50 hover:bg-black/75 text-white p-2 rounded-full transition backdrop-blur-sm w-9 h-9 flex items-center justify-center"
               aria-label="Favorite"
             >
               <Heart className={`w-5 h-5 ${isFavorited ? 'fill-red-500 text-red-500' : ''}`} />
@@ -444,7 +493,7 @@ const PhotoDetail: React.FC = () => {
             <div className="relative">
               <button
                 onClick={() => setShowShareMenu(!showShareMenu)}
-                className="bg-black/50 hover:bg-black/75 text-white p-2 rounded-full transition backdrop-blur-sm"
+                className="bg-black/50 hover:bg-black/75 text-white p-2 rounded-full transition backdrop-blur-sm w-9 h-9 flex items-center justify-center"
                 aria-label="Share"
               >
                 <Share2 className="w-5 h-5" />
@@ -496,27 +545,98 @@ const PhotoDetail: React.FC = () => {
             {/* Fullscreen button */}
             <button
               onClick={toggleFullscreen}
-              className="bg-black/50 hover:bg-black/75 text-white p-2 rounded-full transition backdrop-blur-sm"
+              className="bg-black/50 hover:bg-black/75 text-white p-2 rounded-full transition backdrop-blur-sm w-9 h-9 flex items-center justify-center"
               aria-label="Fullscreen"
             >
               {isFullscreen ? <Minimize className="w-5 h-5" /> : <Maximize className="w-5 h-5" />}
             </button>
 
+            {/* Slideshow button */}
+            <div className="relative">
+              <button
+                onClick={() => {
+                  toggleSlideshow();
+                  if (!isSlideshow) {
+                    setShowSlideshowSettings(true);
+                  }
+                }}
+                className={`bg-black/50 hover:bg-black/75 text-white p-2 rounded-full transition backdrop-blur-sm w-9 h-9 flex items-center justify-center ${
+                  isSlideshow ? 'ring-2 ring-blue-500' : ''
+                }`}
+                aria-label="Slideshow"
+              >
+                {isSlideshow ? <Pause className="w-5 h-5" /> : <Play className="w-5 h-5" />}
+              </button>
+              
+              {/* Slideshow settings dropdown */}
+              {isSlideshow && showSlideshowSettings && (
+                <div className="absolute right-0 mt-2 w-48 bg-gray-800 rounded-lg shadow-xl border border-gray-700 p-3">
+                  <div className="text-white text-sm mb-2">Speed</div>
+                  <div className="space-y-1">
+                    <button
+                      onClick={() => {
+                        setSlideshowSpeed(2000);
+                        setShowSlideshowSettings(false);
+                      }}
+                      className={`w-full px-3 py-1.5 text-left text-sm rounded transition ${
+                        slideshowSpeed === 2000 ? 'bg-blue-600 text-white' : 'text-gray-300 hover:bg-gray-700'
+                      }`}
+                    >
+                      Fast (2s)
+                    </button>
+                    <button
+                      onClick={() => {
+                        setSlideshowSpeed(3000);
+                        setShowSlideshowSettings(false);
+                      }}
+                      className={`w-full px-3 py-1.5 text-left text-sm rounded transition ${
+                        slideshowSpeed === 3000 ? 'bg-blue-600 text-white' : 'text-gray-300 hover:bg-gray-700'
+                      }`}
+                    >
+                      Normal (3s)
+                    </button>
+                    <button
+                      onClick={() => {
+                        setSlideshowSpeed(5000);
+                        setShowSlideshowSettings(false);
+                      }}
+                      className={`w-full px-3 py-1.5 text-left text-sm rounded transition ${
+                        slideshowSpeed === 5000 ? 'bg-blue-600 text-white' : 'text-gray-300 hover:bg-gray-700'
+                      }`}
+                    >
+                      Slow (5s)
+                    </button>
+                    <button
+                      onClick={() => {
+                        setSlideshowSpeed(10000);
+                        setShowSlideshowSettings(false);
+                      }}
+                      className={`w-full px-3 py-1.5 text-left text-sm rounded transition ${
+                        slideshowSpeed === 10000 ? 'bg-blue-600 text-white' : 'text-gray-300 hover:bg-gray-700'
+                      }`}
+                    >
+                      Very Slow (10s)
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+
             {/* Help button */}
             <button
               onClick={() => setShowKeyboardHelp(true)}
-              className="bg-black/50 hover:bg-black/75 text-white p-2 rounded-full transition backdrop-blur-sm"
+              className="bg-black/50 hover:bg-black/75 text-white p-2 rounded-full transition backdrop-blur-sm w-9 h-9 flex items-center justify-center"
               aria-label="Keyboard shortcuts"
               title="Keyboard shortcuts (? or H)"
             >
-              <span className="text-lg font-bold">?</span>
+              <span className="text-base font-bold leading-none">?</span>
             </button>
             
             {/* Close button (only in fullscreen) */}
             {isFullscreen && (
               <button
                 onClick={exitFullscreen}
-                className="bg-black/50 hover:bg-black/75 text-white p-2 rounded-full transition backdrop-blur-sm"
+                className="bg-black/50 hover:bg-black/75 text-white p-2 rounded-full transition backdrop-blur-sm w-9 h-9 flex items-center justify-center"
                 aria-label="Close"
               >
                 <X className="w-5 h-5" />
@@ -713,6 +833,10 @@ const PhotoDetail: React.FC = () => {
               <div className="flex justify-between items-center">
                 <span className="text-gray-300">Navigate photos</span>
                 <span className="bg-gray-700 px-3 py-1 rounded text-white font-mono">← →</span>
+              </div>
+              <div className="flex justify-between items-center">
+                <span className="text-gray-300">Play/Pause slideshow</span>
+                <span className="bg-gray-700 px-3 py-1 rounded text-white font-mono">SPACE</span>
               </div>
               <div className="flex justify-between items-center">
                 <span className="text-gray-300">Toggle fullscreen</span>
