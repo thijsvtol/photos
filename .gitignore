@@ -30,3 +30,13 @@ Thumbs.db
 # Temporary files
 tmp/
 temp/
+
+# Infrastructure state (contains resource IDs)
+infrastructure/.deployment-state.json
+infrastructure/.deployment-state.json.backup
+
+# Terraform state (if used)
+*.tfstate
+*.tfstate.*
+.terraform/
+.terraform.lock.hcl

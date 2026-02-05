@@ -1,0 +1,46 @@
+{
+  "project_name": "thijsvtol-photos",
+  "domain": {
+    "zone": "thijsvtol.nl",
+    "subdomain": "photos"
+  },
+  "storage": {
+    "r2_bucket": "photos-storage",
+    "location_hint": "WEUR"
+  },
+  "database": {
+    "d1_name": "photos-db",
+    "migration_path": "../subdomains/photos/migrations"
+  },
+  "worker": {
+    "name": "photos-worker",
+    "source_dir": "../subdomains/photos/apps/worker",
+    "compatibility_date": "2024-09-23",
+    "routes": [
+      "photos.thijsvtol.nl/api/*",
+      "photos.thijsvtol.nl/media/*"
+    ],
+    "secrets": [
+      "EVENT_COOKIE_SECRET"
+    ],
+    "environment_vars": {
+      "ENVIRONMENT": "production"
+    }
+  },
+  "pages": {
+    "project_name": "photos-web",
+    "source_dir": "../subdomains/photos/apps/web",
+    "build_command": "npm install && npm run build",
+    "build_output": "dist",
+    "branch": "main"
+  },
+  "access": {
+    "application_name": "Photos Admin Portal",
+    "protected_paths": [
+      "/admin",
+      "/admin/*"
+    ],
+    "session_duration": "24h",
+    "allowed_emails": []
+  }
+}

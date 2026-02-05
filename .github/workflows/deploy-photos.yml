@@ -1,0 +1,116 @@
+name: Deploy Photos Application
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'subdomains/photos/**'
+      - 'infrastructure/**'
+      - '.github/workflows/deploy-photos.yml'
+  workflow_dispatch:
+    inputs:
+      deploy_worker:
+        description: 'Deploy Worker'
+        type: boolean
+        default: true
+      run_migrations:
+        description: 'Run Database Migrations'
+        type: boolean
+        default: false
+
+env:
+  NODE_VERSION: '18'
+
+jobs:
+  deploy-worker:
+    name: Deploy Worker to Cloudflare
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' || inputs.deploy_worker
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+          cache-dependency-path: 'subdomains/photos/apps/worker/package-lock.json'
+
+      - name: Install Worker dependencies
+        working-directory: ./subdomains/photos/apps/worker
+        run: npm ci
+
+      - name: Build Worker
+        working-directory: ./subdomains/photos/apps/worker
+        run: npm run build
+
+      - name: Deploy to Cloudflare Workers
+        working-directory: ./subdomains/photos
+        run: npx wrangler deploy --env production
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+
+  run-migrations:
+    name: Execute Database Migrations
+    runs-on: ubuntu-latest
+    if: inputs.run_migrations == true
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Install Wrangler
+        run: npm install -g wrangler
+
+      - name: Run D1 Migrations
+        working-directory: ./subdomains/photos
+        run: |
+          DB_NAME="photos-db"
+          for migration in migrations/*.sql; do
+            echo "Applying migration: $migration"
+            wrangler d1 execute $DB_NAME --remote --file="$migration" || echo "Migration may already be applied"
+          done
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+
+  provision-infrastructure:
+    name: Provision Infrastructure Resources
+    runs-on: ubuntu-latest
+    if: github.event_name == 'workflow_dispatch'
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Install Wrangler and dependencies
+        run: |
+          npm install -g wrangler
+          sudo apt-get update && sudo apt-get install -y jq
+
+      - name: Run Infrastructure Deployment
+        working-directory: ./infrastructure
+        run: ./deploy.sh
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+
+      - name: Upload deployment state
+        uses: actions/upload-artifact@v4
+        with:
+          name: deployment-state
+          path: infrastructure/.deployment-state.json
+          retention-days: 90
