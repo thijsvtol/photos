@@ -14,6 +14,7 @@ export interface Event {
   requires_password: boolean;
   preview_photo_id: string | null;
   tags?: Tag[];
+  cities?: string[];
   description?: string | null;
   is_archived?: boolean;
 }
@@ -35,6 +36,7 @@ export interface Photo {
   lens_model: string | null;
   latitude: number | null;
   longitude: number | null;
+  city: string | null;
   favorites_count: number;
   blur_placeholder: string | null;
   is_featured: boolean;

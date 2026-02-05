@@ -188,6 +188,16 @@ export const setEventLocation = async (slug: string, latitude: number, longitude
   return response.json();
 };
 
+export const geocodeEventPhotos = async (slug: string): Promise<{ updated: number; total: number }> => {
+  const response = await fetch(`/api/admin/events/${slug}/geocode-photos`, {
+    method: 'POST',
+    headers: { 'X-Admin-Access': '1' },
+    credentials: 'include',
+  });
+  if (!response.ok) throw new Error('Failed to geocode photos');
+  return response.json();
+};
+
 // Admin Stats API
 export const getAdminStats = async (): Promise<AdminStats> => {
   const response = await api.get<AdminStats>('/admin/stats', {

@@ -7,8 +7,10 @@ import type { Event, Tag } from '../types';
 
 const EventList: React.FC = () => {
   const [events, setEvents] = useState<Event[]>([]);
+  const [allEvents, setAllEvents] = useState<Event[]>([]); // Store all events for filtering
   const [tags, setTags] = useState<Tag[]>([]);
   const [selectedTag, setSelectedTag] = useState<string | null>(null);
+  const [selectedCity, setSelectedCity] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -35,6 +37,7 @@ const EventList: React.FC = () => {
         !event.name.toLowerCase().startsWith('[prive]') && 
         !event.name.toLowerCase().startsWith('[hidden]')
       );
+      setAllEvents(visibleEvents);
       setEvents(visibleEvents);
       setError(null);
     } catch (err) {
@@ -49,17 +52,22 @@ const EventList: React.FC = () => {
     try {
       setLoading(true);
       setSelectedTag(tagSlug);
+      let filteredEvents = allEvents;
+      
       if (tagSlug) {
         const data = await getEventsByTag(tagSlug);
-        // Filter out events starting with [prive] or [hidden]
-        const visibleEvents = data.filter(event => 
+        filteredEvents = data.filter(event => 
           !event.name.toLowerCase().startsWith('[prive]') && 
           !event.name.toLowerCase().startsWith('[hidden]')
         );
-        setEvents(visibleEvents);
-      } else {
-        await loadEvents();
       }
+      
+      // Apply city filter if selected
+      if (selectedCity) {
+        filteredEvents = filteredEvents.filter(event => event.cities?.includes(selectedCity));
+      }
+      
+      setEvents(filteredEvents);
       setError(null);
     } catch (err) {
       setError('Failed to filter events');
@@ -67,6 +75,17 @@ const EventList: React.FC = () => {
     } finally {
       setLoading(false);
     }
+  };
+
+  const filterByCity = (city: string | null) => {
+    setSelectedCity(city);
+    let filteredEvents = selectedTag ? events : allEvents;
+    
+    if (city) {
+      filteredEvents = filteredEvents.filter(event => event.cities?.includes(city));
+    }
+    
+    setEvents(filteredEvents);
   };
 
   const formatDate = (dateStr: string | null) => {
@@ -85,22 +104,79 @@ const EventList: React.FC = () => {
 
         {/* Tag filters */}
         {tags.length > 0 && (
-          <div className="mb-6 flex flex-wrap gap-2">
-            {tags.map((tag) => (
+          <div className="mb-4">
+            <h3 className="text-sm font-medium text-gray-700 mb-2">Filter by Tag</h3>
+            <div className="flex flex-wrap gap-2">
               <button
-                key={tag.id}
-                onClick={() => filterByTag(tag.slug)}
+                onClick={() => filterByTag(null)}
                 className={`px-3 py-1.5 rounded-full text-sm font-medium transition ${
-                  selectedTag === tag.slug
+                  !selectedTag
                     ? 'bg-blue-600 text-white'
                     : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
                 }`}
               >
-                {tag.name}
+                All Tags
               </button>
-            ))}
+              {tags.map((tag) => (
+                <button
+                  key={tag.id}
+                  onClick={() => filterByTag(tag.slug)}
+                  className={`px-3 py-1.5 rounded-full text-sm font-medium transition ${
+                    selectedTag === tag.slug
+                      ? 'bg-blue-600 text-white'
+                      : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
+                  }`}
+                >
+                  {tag.name}
+                </button>
+              ))}
+            </div>
           </div>
         )}
+
+        {/* City filters */}
+        {(() => {
+          // Extract unique cities from all events
+          const cities = Array.from(
+            new Set(
+              allEvents.flatMap(event => event.cities || [])
+            )
+          ).sort();
+          
+          if (cities.length > 0) {
+            return (
+              <div className="mb-6">
+                <h3 className="text-sm font-medium text-gray-700 mb-2">Filter by City</h3>
+                <div className="flex flex-wrap gap-2">
+                  <button
+                    onClick={() => filterByCity(null)}
+                    className={`px-3 py-1.5 rounded-full text-sm font-medium transition ${
+                      !selectedCity
+                        ? 'bg-green-600 text-white'
+                        : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
+                    }`}
+                  >
+                    All Cities
+                  </button>
+                  {cities.map((city) => (
+                    <button
+                      key={city}
+                      onClick={() => filterByCity(city)}
+                      className={`px-3 py-1.5 rounded-full text-sm font-medium transition ${
+                        selectedCity === city
+                          ? 'bg-green-600 text-white'
+                          : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
+                      }`}
+                    >
+                      {city}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            );
+          }
+          return null;
+        })()}
 
         {loading && (
           <div className="text-center py-12">

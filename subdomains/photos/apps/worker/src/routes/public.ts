@@ -23,9 +23,11 @@ app.get('/api/events', async (c) => {
       .prepare('SELECT id, slug, name, inferred_date, created_at, (password_hash IS NOT NULL) as requires_password FROM events ORDER BY inferred_date DESC, created_at DESC')
       .all<Omit<Event, 'password_salt' | 'password_hash'>>();
     
-    // For public events, add a preview photo ID
+    // For public events, add a preview photo ID and cities
     const eventsWithPreviews = await Promise.all(
       (events.results || []).map(async (event) => {
+        let preview_photo_id = null;
+        
         if (!(event as any).requires_password) {
           // Get the first photo for this event as preview
           const photo = await c.env.DB
@@ -33,9 +35,18 @@ app.get('/api/events', async (c) => {
             .bind(event.id)
             .first<{ id: string }>();
           
-          return { ...event, preview_photo_id: photo?.id || null };
+          preview_photo_id = photo?.id || null;
         }
-        return { ...event, preview_photo_id: null };
+        
+        // Get unique cities for this event
+        const citiesResult = await c.env.DB
+          .prepare('SELECT DISTINCT city FROM photos WHERE event_id = ? AND city IS NOT NULL ORDER BY city ASC')
+          .bind(event.id)
+          .all<{ city: string }>();
+        
+        const cities = (citiesResult.results || []).map(r => r.city);
+        
+        return { ...event, preview_photo_id, cities };
       })
     );
     

@@ -3,6 +3,7 @@ import { ulid } from 'ulid';
 import type { Env, CreateEventRequest, StartUploadRequest, CompleteUploadRequest } from '../types';
 import { generateSalt, hashPassword, generateUniqueSlug } from '../utils';
 import { generateThumbnails } from '../imageProcessing';
+import { getCityFromCoordinates } from '../geocoding';
 
 const app = new Hono<{ Bindings: Env }>();
 
@@ -806,6 +807,67 @@ app.delete('/tags/:id', async (c) => {
   } catch (error) {
     console.error('Error deleting tag:', error);
     return c.json({ error: 'Failed to delete tag' }, 500);
+  }
+});
+
+/**
+ * POST /events/:slug/geocode-photos
+ * Reverse geocode all photos in an event that have GPS coordinates but no city
+ */
+app.post('/events/:slug/geocode-photos', async (c) => {
+  try {
+    const { slug } = c.req.param();
+    
+    // Get event
+    const event = await c.env.DB
+      .prepare('SELECT id FROM events WHERE slug = ?')
+      .bind(slug)
+      .first();
+    
+    if (!event) {
+      return c.json({ error: 'Event not found' }, 404);
+    }
+    
+    // Get photos with GPS but no city
+    const photos = await c.env.DB
+      .prepare(`
+        SELECT id, latitude, longitude
+        FROM photos
+        WHERE event_id = ? AND latitude IS NOT NULL AND longitude IS NOT NULL AND city IS NULL
+      `)
+      .bind(event.id)
+      .all();
+    
+    if (!photos.results || photos.results.length === 0) {
+      return c.json({ message: 'No photos need geocoding', updated: 0 });
+    }
+    
+    let updated = 0;
+    
+    // Process each photo (with rate limiting)
+    for (const photo of photos.results as any[]) {
+      const city = await getCityFromCoordinates(photo.latitude, photo.longitude);
+      
+      if (city) {
+        await c.env.DB
+          .prepare('UPDATE photos SET city = ? WHERE id = ?')
+          .bind(city, photo.id)
+          .run();
+        updated++;
+      }
+      
+      // Rate limit: 1 request per second for Nominatim
+      await new Promise(resolve => setTimeout(resolve, 1100));
+    }
+    
+    return c.json({ 
+      success: true, 
+      updated,
+      total: photos.results.length 
+    });
+  } catch (error) {
+    console.error('Error geocoding photos:', error);
+    return c.json({ error: 'Failed to geocode photos' }, 500);
   }
 });
 

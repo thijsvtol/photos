@@ -251,7 +251,7 @@ const EventGallery: React.FC = () => {
           )}
         </div>
 
-        {/* Sort Options - Mobile optimized */}
+        {/* Sort & Filter Options - Mobile optimized */}
         <div className="bg-white rounded-lg shadow p-3 sm:p-4 mb-6">
           <div className="flex flex-col sm:flex-row flex-wrap gap-3 sm:gap-4 sm:items-center">
             <div className="flex-1 sm:flex-none">

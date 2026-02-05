@@ -114,6 +114,11 @@ const PhotoDetail: React.FC = () => {
           : allPhotosData;
         const index = photosToUse.findIndex(p => p.id === photoId);
         setCurrentIndex(index);
+        
+        // Update photo with the version from allPhotos which includes all EXIF data
+        if (index >= 0 && photosToUse[index]) {
+          setPhoto(photosToUse[index]);
+        }
       } catch {
         setAuthenticated(false);
       }

@@ -6,7 +6,7 @@ import { MapContainer, TileLayer, Marker, useMapEvents } from 'react-leaflet';
 import 'leaflet/dist/leaflet.css';
 import L from 'leaflet';
 import Navbar from '../components/Navbar';
-import { getEvent, startUpload, uploadPart, completeUpload, regenerateThumbnails, setEventLocation, getEventStats, getPreviewUrl } from '../api';
+import { getEvent, startUpload, uploadPart, completeUpload, regenerateThumbnails, setEventLocation, getEventStats, getPreviewUrl, geocodeEventPhotos } from '../api';
 import { addToQueue, updateQueueItem, getQueueItems, getPendingUploads } from '../uploadQueue';
 import type { Event, UploadQueueItem, EventStats } from '../types';
 
@@ -28,6 +28,7 @@ const AdminEventUpload: React.FC = () => {
   const [isDragging, setIsDragging] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [isRegenerating, setIsRegenerating] = useState(false);
+  const [isGeocoding, setIsGeocoding] = useState(false);
   const [showLocationPicker, setShowLocationPicker] = useState(false);
   const [selectedLocation, setSelectedLocation] = useState<[number, number] | null>(null);
 
@@ -323,6 +324,27 @@ const AdminEventUpload: React.FC = () => {
     }
   };
 
+  const handleGeocodePhotos = async () => {
+    if (!slug || !confirm('This will fetch city names for all photos with GPS coordinates. This may take a while. Continue?')) {
+      return;
+    }
+    try {
+      setIsGeocoding(true);
+      const result = await geocodeEventPhotos(slug);
+      if (result.updated === 0) {
+        alert('No photos needed geocoding. All photos with GPS already have city names.');
+      } else {
+        alert(`Successfully geocoded ${result.updated} of ${result.total} photos`);
+        loadEvent();
+      }
+    } catch (err) {
+      alert('Failed to geocode photos');
+      console.error(err);
+    } finally {
+      setIsGeocoding(false);
+    }
+  };
+
   const handleSetEventLocation = async () => {
     if (!slug || !selectedLocation) return;
     
@@ -375,6 +397,14 @@ const AdminEventUpload: React.FC = () => {
                 className="px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition disabled:bg-gray-400 disabled:cursor-not-allowed"
               >
                 {isRegenerating ? 'Regenerating...' : '🔄 Regenerate Thumbnails'}
+              </button>
+              <button
+                onClick={handleGeocodePhotos}
+                disabled={isGeocoding}
+                className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition disabled:bg-gray-400 disabled:cursor-not-allowed"
+                title="Fetch city names for photos with GPS coordinates"
+              >
+                {isGeocoding ? 'Geocoding...' : '🌍 Geocode Cities'}
               </button>
             </div>
           </div>
