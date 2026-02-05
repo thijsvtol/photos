@@ -30,10 +30,6 @@ name = "photos-worker-dev"
 # Production configuration
 [env.production]
 name = "photos-worker"
-routes = [
-  { pattern = "photos.thijsvtol.nl/api/*", zone_name = "thijsvtol.nl" },
-  { pattern = "photos.thijsvtol.nl/media/*", zone_name = "thijsvtol.nl" }
-]
 
 [env.production.vars]
 ENVIRONMENT = "production"
