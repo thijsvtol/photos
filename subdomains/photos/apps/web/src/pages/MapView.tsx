@@ -3,6 +3,7 @@ import { MapContainer, TileLayer, Marker, Popup, useMap } from 'react-leaflet';
 import { Icon, LatLngBounds } from 'leaflet';
 import { Link } from 'react-router-dom';
 import Navbar from '../components/Navbar';
+import Footer from '../components/Footer';
 import { getEvents, getPhotos } from '../api';
 import type { Photo } from '../types';
 
@@ -133,9 +134,9 @@ const MapView: React.FC = () => {
   }, [locations]);
 
   return (
-    <div className="min-h-screen bg-gray-50">
+    <div className="min-h-screen bg-gray-50 flex flex-col">
       <Navbar />
-      <div className="max-w-7xl mx-auto px-3 sm:px-4 lg:px-8 py-4 sm:py-8">
+      <div className="max-w-7xl mx-auto px-3 sm:px-4 lg:px-8 py-4 sm:py-8 flex-grow w-full">
         <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-6 sm:mb-8">
           <div>
             <h1 className="text-3xl sm:text-4xl font-bold text-gray-900 flex items-center gap-2">
@@ -255,6 +256,7 @@ const MapView: React.FC = () => {
           </div>
         )}
       </div>
+      <Footer />
     </div>
   );
 };

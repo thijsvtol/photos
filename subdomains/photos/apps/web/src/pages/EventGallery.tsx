@@ -3,6 +3,7 @@ import { useParams, Link, useLocation } from 'react-router-dom';
 import { Heart, Star } from 'lucide-react';
 import Masonry from 'react-masonry-css';
 import Navbar from '../components/Navbar';
+import Footer from '../components/Footer';
 import ProgressiveImage from '../components/ProgressiveImage';
 import { getEvent, getPhotos, loginToEvent, getPreviewUrl, getOriginalUrl, getIgUrl, requestZip, setPhotoFeatured } from '../api';
 import type { Event, Photo } from '../types';
@@ -236,9 +237,9 @@ const EventGallery: React.FC = () => {
   }
 
   return (
-    <div className="min-h-screen bg-gray-50">
+    <div className="min-h-screen bg-gray-50 flex flex-col">
       <Navbar />
-      <div className="max-w-7xl mx-auto px-3 sm:px-4 lg:px-8 py-4 sm:py-8">
+      <div className="max-w-7xl mx-auto px-3 sm:px-4 lg:px-8 py-4 sm:py-8 flex-grow w-full">
         <div className="mb-6 sm:mb-8">
           <Link to="/events" className="text-blue-600 hover:text-blue-700 mb-3 sm:mb-4 inline-block text-sm sm:text-base">
             ← Back to Events
@@ -388,6 +389,7 @@ const EventGallery: React.FC = () => {
           </Masonry>
         )}
       </div>
+      <Footer />
     </div>
   );
 };

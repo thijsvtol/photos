@@ -1,7 +1,8 @@
 import React, { useEffect, useState, useRef } from 'react';
 import { useParams, Link, useNavigate, useLocation } from 'react-router-dom';
-import { Maximize, Minimize, Share2, X, Heart, Info, Play, Pause } from 'lucide-react';
+import { Maximize, Minimize, Share2, X, Heart, Play, Pause } from 'lucide-react';
 import Navbar from '../components/Navbar';
+import Footer from '../components/Footer';
 import { getEvent, getPhoto, getPhotos, loginToEvent, getPreviewUrl, getOriginalUrl, getIgUrl } from '../api';
 import type { Event, Photo } from '../types';
 
@@ -411,7 +412,7 @@ const PhotoDetail: React.FC = () => {
   }
 
   return (
-    <div className="min-h-screen bg-gray-900 pb-safe">
+    <div className="min-h-screen bg-gray-900 flex flex-col">
       <Navbar />
       {/* Header - Mobile optimized */}
       <div className="sticky top-0 z-50 bg-gray-900/95 backdrop-blur-sm border-b border-gray-800">
@@ -725,12 +726,12 @@ const PhotoDetail: React.FC = () => {
           <div className="bg-gray-800 rounded-lg p-4 md:p-6">
             <div className="flex justify-between items-center mb-3 md:mb-4">
               <h3 className="text-base md:text-lg font-semibold text-white">📷 Photo Info</h3>
-              {photo?.favorites_count && photo.favorites_count > 0 && (
+              {photo?.favorites_count && photo.favorites_count > 0 ? (
                 <div className="flex items-center gap-1 text-red-500">
                   <Heart className="w-4 h-4 fill-current" />
                   <span className="text-sm">{photo.favorites_count}</span>
                 </div>
-              )}
+              ) : null}
             </div>
             <dl className="space-y-2 text-sm md:text-base">
               <div>
@@ -755,16 +756,7 @@ const PhotoDetail: React.FC = () => {
           {/* Camera Settings */}
           {(photo?.iso || photo?.aperture || photo?.shutter_speed || photo?.focal_length) && (
             <div className="bg-gray-800 rounded-lg p-4 md:p-6">
-              <div className="flex justify-between items-center mb-3 md:mb-4">
-                <h3 className="text-base md:text-lg font-semibold text-white">⚙️ Camera Settings</h3>
-                <button
-                  onClick={() => setShowDetails(!showDetails)}
-                  className="text-gray-400 hover:text-white transition"
-                  aria-label="Toggle EXIF data"
-                >
-                  <Info className="w-5 h-5" />
-                </button>
-              </div>
+              <h3 className="text-base md:text-lg font-semibold text-white mb-3 md:mb-4">⚙️ Camera Settings</h3>
               <dl className="space-y-2 text-sm md:text-base">
                 {photo.iso && (
                   <div>
@@ -858,6 +850,7 @@ const PhotoDetail: React.FC = () => {
           </div>
         </div>
       )}
+      <Footer />
     </div>
   );
 };

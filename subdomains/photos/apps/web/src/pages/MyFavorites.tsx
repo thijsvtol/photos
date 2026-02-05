@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom';
 import { Heart, Download } from 'lucide-react';
 import Masonry from 'react-masonry-css';
 import Navbar from '../components/Navbar';
+import Footer from '../components/Footer';
 import ProgressiveImage from '../components/ProgressiveImage';
 import { getPhoto, requestZip } from '../api';
 import type { Photo } from '../types';
@@ -128,9 +129,9 @@ const MyFavorites: React.FC = () => {
   };
 
   return (
-    <div className="min-h-screen bg-gray-50">
+    <div className="min-h-screen bg-gray-50 flex flex-col">
       <Navbar />
-      <div className="max-w-7xl mx-auto px-3 sm:px-4 lg:px-8 py-4 sm:py-8">
+      <div className="max-w-7xl mx-auto px-3 sm:px-4 lg:px-8 py-4 sm:py-8 flex-grow w-full">
         <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-6 sm:mb-8">
           <div>
             <h1 className="text-3xl sm:text-4xl font-bold text-gray-900 flex items-center gap-2">
@@ -238,6 +239,7 @@ const MyFavorites: React.FC = () => {
           </Masonry>
         )}
       </div>
+      <Footer />
     </div>
   );
 };
