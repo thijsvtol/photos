@@ -181,74 +181,68 @@ const PhotoDetail: React.FC = () => {
   };
 
   const navigateToNext = () => {
-    const photosToUse = displayPhotos.length > 0 ? displayPhotos : allPhotos;
-    if (currentIndex >= 0 && currentIndex < photosToUse.length - 1) {
-      const nextIndex = currentIndex + 1;
-      const nextPhoto = photosToUse[nextIndex];
-      setCurrentIndex(nextIndex);
-      setPhoto(nextPhoto);
-      setImageLoaded(false);
-      // Update URL without reload, preserve state for favorites
-      if (fromFavorites) {
-        navigate(`/p/${slug}/${nextPhoto.id}`, { 
-          replace: true, 
-          state: { fromFavorites: true, favoritePhotos } 
-        });
-      } else {
-        window.history.pushState(null, '', `/p/${slug}/${nextPhoto.id}`);
-      }
-    } else if (currentIndex === photosToUse.length - 1 && photosToUse.length > 0) {
-      // Loop back to first photo
-      const firstPhoto = photosToUse[0];
-      setCurrentIndex(0);
-      setPhoto(firstPhoto);
-      setImageLoaded(false);
-      // Update URL without reload, preserve state for favorites
-      if (fromFavorites) {
-        navigate(`/p/${slug}/${firstPhoto.id}`, { 
-          replace: true, 
-          state: { fromFavorites: true, favoritePhotos } 
-        });
-      } else {
-        window.history.pushState(null, '', `/p/${slug}/${firstPhoto.id}`);
-      }
-    } else if (fromFavorites && favoritePhotos.length > 0) {
-      // Try to navigate to next favorite in a different event
+    // When viewing favorites, always navigate through the favoritePhotos list across all events
+    if (fromFavorites && favoritePhotos.length > 0) {
       const currentFavIndex = favoritePhotos.findIndex((fav: { id: string; slug: string }) => fav.id === photoId && fav.slug === slug);
       if (currentFavIndex >= 0 && currentFavIndex < favoritePhotos.length - 1) {
         const nextFav = favoritePhotos[currentFavIndex + 1];
         navigate(`/p/${nextFav.slug}/${nextFav.id}`, { 
           state: { fromFavorites: true, favoritePhotos } 
         });
+      } else if (currentFavIndex === favoritePhotos.length - 1) {
+        // Loop back to first favorite
+        const firstFav = favoritePhotos[0];
+        navigate(`/p/${firstFav.slug}/${firstFav.id}`, { 
+          state: { fromFavorites: true, favoritePhotos } 
+        });
+      }
+    } else {
+      // Normal event gallery navigation
+      const photosToUse = displayPhotos.length > 0 ? displayPhotos : allPhotos;
+      if (currentIndex >= 0 && currentIndex < photosToUse.length - 1) {
+        const nextIndex = currentIndex + 1;
+        const nextPhoto = photosToUse[nextIndex];
+        setCurrentIndex(nextIndex);
+        setPhoto(nextPhoto);
+        setImageLoaded(false);
+        window.history.pushState(null, '', `/p/${slug}/${nextPhoto.id}`);
+      } else if (currentIndex === photosToUse.length - 1 && photosToUse.length > 0) {
+        // Loop back to first photo
+        const firstPhoto = photosToUse[0];
+        setCurrentIndex(0);
+        setPhoto(firstPhoto);
+        setImageLoaded(false);
+        window.history.pushState(null, '', `/p/${slug}/${firstPhoto.id}`);
       }
     }
   };
 
   const navigateToPrevious = () => {
-    const photosToUse = displayPhotos.length > 0 ? displayPhotos : allPhotos;
-    if (currentIndex > 0) {
-      const prevIndex = currentIndex - 1;
-      const prevPhoto = photosToUse[prevIndex];
-      setCurrentIndex(prevIndex);
-      setPhoto(prevPhoto);
-      setImageLoaded(false);
-      // Update URL without reload, preserve state for favorites
-      if (fromFavorites) {
-        navigate(`/p/${slug}/${prevPhoto.id}`, { 
-          replace: true, 
-          state: { fromFavorites: true, favoritePhotos } 
-        });
-      } else {
-        window.history.pushState(null, '', `/p/${slug}/${prevPhoto.id}`);
-      }
-    } else if (fromFavorites && favoritePhotos.length > 0) {
-      // Try to navigate to previous favorite in a different event
+    // When viewing favorites, always navigate through the favoritePhotos list across all events
+    if (fromFavorites && favoritePhotos.length > 0) {
       const currentFavIndex = favoritePhotos.findIndex((fav: { id: string; slug: string }) => fav.id === photoId && fav.slug === slug);
       if (currentFavIndex > 0) {
         const prevFav = favoritePhotos[currentFavIndex - 1];
         navigate(`/p/${prevFav.slug}/${prevFav.id}`, { 
           state: { fromFavorites: true, favoritePhotos } 
         });
+      } else if (currentFavIndex === 0) {
+        // Loop back to last favorite
+        const lastFav = favoritePhotos[favoritePhotos.length - 1];
+        navigate(`/p/${lastFav.slug}/${lastFav.id}`, { 
+          state: { fromFavorites: true, favoritePhotos } 
+        });
+      }
+    } else {
+      // Normal event gallery navigation
+      const photosToUse = displayPhotos.length > 0 ? displayPhotos : allPhotos;
+      if (currentIndex > 0) {
+        const prevIndex = currentIndex - 1;
+        const prevPhoto = photosToUse[prevIndex];
+        setCurrentIndex(prevIndex);
+        setPhoto(prevPhoto);
+        setImageLoaded(false);
+        window.history.pushState(null, '', `/p/${slug}/${prevPhoto.id}`);
       }
     }
   };
@@ -470,7 +464,7 @@ const PhotoDetail: React.FC = () => {
             {currentIndex >= 0 && (
               <div className="text-white text-sm">
                 {fromFavorites && favoritePhotos.length > 0
-                  ? `${favoritePhotos.findIndex((fav: { id: string; slug: string }) => fav.id === photoId && fav.slug === slug) + 1} / ${favoritePhotos.length}`
+                  ? `${(favoritePhotos.findIndex((fav: { id: string; slug: string }) => fav.id === photoId && fav.slug === slug) + 1) || 1} / ${favoritePhotos.length}`
                   : `${currentIndex + 1} / ${displayPhotos.length > 0 ? displayPhotos.length : allPhotos.length}`
                 }
                 {fromFavorites && <span className="ml-1 text-red-400">♥</span>}
@@ -685,7 +679,8 @@ const PhotoDetail: React.FC = () => {
           </div>
           
           {/* Navigation buttons - Desktop */}
-          {currentIndex > 0 && (
+          {/* Always show previous button - logic will handle looping */}
+          {(fromFavorites && favoritePhotos.length > 1) || (!fromFavorites && currentIndex > 0) ? (
             <button
               onClick={navigateToPrevious}
               className="hidden md:block absolute left-4 top-1/2 -translate-y-1/2 z-10 bg-black/50 hover:bg-black/75 text-white p-3 rounded-full transition"
@@ -695,9 +690,10 @@ const PhotoDetail: React.FC = () => {
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
               </svg>
             </button>
-          )}
+          ) : null}
           
-          {currentIndex < allPhotos.length - 1 && currentIndex >= 0 && (
+          {/* Always show next button - logic will handle looping */}
+          {(fromFavorites && favoritePhotos.length > 1) || (!fromFavorites && currentIndex < allPhotos.length - 1 && currentIndex >= 0) ? (
             <button
               onClick={navigateToNext}
               className="hidden md:block absolute right-4 top-1/2 -translate-y-1/2 z-10 bg-black/50 hover:bg-black/75 text-white p-3 rounded-full transition"
@@ -707,7 +703,7 @@ const PhotoDetail: React.FC = () => {
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
               </svg>
             </button>
-          )}
+          ) : null}
           
           {/* Main image with swipe support and progressive loading */}
           <div className="relative">

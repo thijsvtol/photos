@@ -55,11 +55,10 @@ const EventList: React.FC = () => {
       setSelectedTag(tagSlug);
       let filteredEvents = allEvents;
       
+      // Filter client-side using the tags field instead of calling API
       if (tagSlug) {
-        const data = await getEventsByTag(tagSlug);
-        filteredEvents = data.filter(event => 
-          !event.name.toLowerCase().startsWith('[prive]') && 
-          !event.name.toLowerCase().startsWith('[hidden]')
+        filteredEvents = allEvents.filter(event => 
+          event.tags?.some(tag => tag.slug === tagSlug)
         );
       }
       
