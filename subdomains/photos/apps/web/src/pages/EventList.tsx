@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom';
 import Masonry from 'react-masonry-css';
 import Navbar from '../components/Navbar';
 import Footer from '../components/Footer';
+import SEO from '../components/SEO';
 import { getEvents, getTags, getPreviewUrl } from '../api';
 import type { Event, Tag } from '../types';
 
@@ -94,8 +95,43 @@ const EventList: React.FC = () => {
     return date.toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' });
   };
 
+  const structuredData = {
+    '@context': 'https://schema.org',
+    '@type': 'CollectionPage',
+    name: 'Photo Events',
+    description: 'Browse all photo events including ice skating, inline skating, and sports photography',
+    url: 'https://photos.thijsvtol.nl/events',
+    mainEntity: {
+      '@type': 'ItemList',
+      itemListElement: events.slice(0, 10).map((event, index) => ({
+        '@type': 'ListItem',
+        position: index + 1,
+        item: {
+          '@type': 'Event',
+          name: event.name,
+          url: `https://photos.thijsvtol.nl/events/${event.slug}`,
+          startDate: event.inferred_date || event.created_at,
+          location: event.cities && event.cities.length > 0 ? {
+            '@type': 'Place',
+            address: {
+              '@type': 'PostalAddress',
+              addressLocality: event.cities[0]
+            }
+          } : undefined
+        }
+      }))
+    }
+  };
+
   return (
     <div className="min-h-screen bg-gray-50 flex flex-col">
+      <SEO
+        title="Photo Events - Thijs van Tol | Browse Event Photography"
+        description="Browse all photo events featuring ice skating, inline skating, and sports photography. Filter by tags and locations to find your favorite moments."
+        keywords="photo events, ice skating events, inline skating events, sports photography events, event gallery"
+        url="https://photos.thijsvtol.nl/events"
+        structuredData={structuredData}
+      />
       <Navbar />
       <div className="max-w-7xl mx-auto px-3 sm:px-4 lg:px-8 py-4 sm:py-8 flex-grow w-full">
         <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-6 sm:mb-8">

@@ -5,6 +5,7 @@ import Masonry from 'react-masonry-css';
 import Navbar from '../components/Navbar';
 import Footer from '../components/Footer';
 import PhotoCard from '../components/PhotoCard';
+import SEO from '../components/SEO';
 import { getEvent, getPhotos, loginToEvent, getPreviewUrl, requestZip, setPhotoFeatured } from '../api';
 import type { Event, Photo } from '../types';
 
@@ -321,8 +322,37 @@ const EventGallery: React.FC = () => {
     );
   }
 
+  const structuredData = {
+    '@context': 'https://schema.org',
+    '@type': 'Event',
+    name: event?.name || '',
+    url: `https://photos.thijsvtol.nl/events/${slug}`,
+    startDate: event?.inferred_date || event?.created_at,
+    location: event?.cities && event.cities.length > 0 ? {
+      '@type': 'Place',
+      address: {
+        '@type': 'PostalAddress',
+        addressLocality: event.cities[0]
+      }
+    } : undefined,
+    image: photos.length > 0 ? getPreviewUrl(slug!, photos[0].id) : undefined,
+    description: `Photo gallery for ${event?.name} featuring ${photos.length} photos${event?.cities && event.cities.length > 0 ? ` from ${event.cities.join(', ')}` : ''}`
+  };
+
+  const previewPhoto = photos.find(p => p.is_featured) || photos[0];
+  const previewImageUrl = previewPhoto ? getPreviewUrl(slug!, previewPhoto.id) : undefined;
+
   return (
     <div className="min-h-screen bg-gray-50 flex flex-col">
+      <SEO
+        title={`${event?.name || 'Event Gallery'} - Thijs van Tol Photos`}
+        description={`Browse ${photos.length} photos from ${event?.name}${event?.cities && event.cities.length > 0 ? ` in ${event.cities.join(', ')}` : ''}. Professional event photography featuring ice skating and inline skating.`}
+        keywords={`${event?.name}, event photography, ${event?.cities?.join(', ')}, ice skating, inline skating`}
+        url={`https://photos.thijsvtol.nl/events/${slug}`}
+        type="article"
+        image={previewImageUrl}
+        structuredData={structuredData}
+      />
       <Navbar />
       <div className="max-w-7xl mx-auto px-3 sm:px-4 lg:px-8 py-4 sm:py-8 flex-grow w-full">
         <div className="mb-6 sm:mb-8">

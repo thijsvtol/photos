@@ -3,6 +3,7 @@ import { useParams, Link, useNavigate, useLocation } from 'react-router-dom';
 import { Maximize, Minimize, Share2, X, Heart, Play, Pause } from 'lucide-react';
 import Navbar from '../components/Navbar';
 import Footer from '../components/Footer';
+import SEO from '../components/SEO';
 import { getEvent, getPhoto, getPhotos, loginToEvent, getPreviewUrl, downloadOriginal, downloadSmall } from '../api';
 import type { Event, Photo } from '../types';
 
@@ -444,8 +445,45 @@ const PhotoDetail: React.FC = () => {
     );
   }
 
+  const structuredData = photo ? {
+    '@context': 'https://schema.org',
+    '@type': 'ImageObject',
+    contentUrl: getPreviewUrl(slug!, photo.id),
+    name: `Photo from ${event?.name}`,
+    caption: `Photo from ${event?.name} event${photo.city ? ` in ${photo.city}` : ''}`,
+    creator: {
+      '@type': 'Person',
+      name: 'Thijs van Tol'
+    },
+    datePublished: photo.capture_time || photo.uploaded_at,
+    uploadDate: photo.uploaded_at,
+    exifData: [
+      photo.camera_model && { '@type': 'PropertyValue', name: 'Camera', value: photo.camera_model },
+      photo.lens_model && { '@type': 'PropertyValue', name: 'Lens', value: photo.lens_model },
+      photo.iso && { '@type': 'PropertyValue', name: 'ISO', value: photo.iso },
+      photo.aperture && { '@type': 'PropertyValue', name: 'Aperture', value: photo.aperture },
+      photo.shutter_speed && { '@type': 'PropertyValue', name: 'Shutter Speed', value: photo.shutter_speed },
+      photo.focal_length && { '@type': 'PropertyValue', name: 'Focal Length', value: photo.focal_length }
+    ].filter(Boolean)
+  } : undefined;
+
+  const photoDescription = photo
+    ? `Photo from ${event?.name}${photo.city ? ` in ${photo.city}` : ''}. ${photo.camera_model ? `Shot with ${photo.camera_model}${photo.lens_model ? ` and ${photo.lens_model}` : ''}.` : ''}`
+    : '';
+
   return (
     <div className="min-h-screen bg-gray-900 flex flex-col">
+      {photo && (
+        <SEO
+          title={`Photo from ${event?.name} - Thijs van Tol Photos`}
+          description={photoDescription}
+          keywords={`${event?.name}, photo, ${photo.city || ''}, event photography, ${photo.camera_model || ''}`}
+          url={`https://photos.thijsvtol.nl/events/${slug}/${photoId}`}
+          type="article"
+          image={getPreviewUrl(slug!, photo.id)}
+          structuredData={structuredData}
+        />
+      )}
       <Navbar />
       {/* Header - Mobile optimized */}
       <div className="sticky top-0 z-50 bg-gray-900/95 backdrop-blur-sm border-b border-gray-800">

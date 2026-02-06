@@ -5,6 +5,7 @@ import Masonry from 'react-masonry-css';
 import Navbar from '../components/Navbar';
 import Footer from '../components/Footer';
 import PhotoCard from '../components/PhotoCard';
+import SEO from '../components/SEO';
 import { getPhoto, requestZip } from '../api';
 import type { Photo } from '../types';
 
@@ -130,6 +131,11 @@ const MyFavorites: React.FC = () => {
 
   return (
     <div className="min-h-screen bg-gray-50 flex flex-col">
+      <SEO
+        title="My Favorites - Thijs van Tol Photos"
+        description="Your personal collection of favorite photos from various events. Private collection not indexed by search engines."
+        url="https://photos.thijsvtol.nl/favorites"
+      />
       <Navbar />
       <div className="max-w-7xl mx-auto px-3 sm:px-4 lg:px-8 py-4 sm:py-8 flex-grow w-full">
         <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-6 sm:mb-8">

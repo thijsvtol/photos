@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom';
 import { ChevronDown, Heart, MapPin } from 'lucide-react';
 import ContactForm from '../components/ContactForm';
 import Footer from '../components/Footer';
+import SEO from '../components/SEO';
 
 interface FeaturedPhoto {
   id: string;
@@ -49,8 +50,33 @@ export default function Landing() {
     return () => window.removeEventListener('scroll', handleScroll);
   }, []);
 
+  const structuredData = {
+    '@context': 'https://schema.org',
+    '@type': 'WebSite',
+    name: 'Thijs van Tol Photos',
+    url: 'https://photos.thijsvtol.nl',
+    description: 'Professional event photography featuring ice skating, inline skating, and sports events',
+    author: {
+      '@type': 'Person',
+      name: 'Thijs van Tol',
+      url: 'https://thijsvtol.nl'
+    },
+    potentialAction: {
+      '@type': 'SearchAction',
+      target: 'https://photos.thijsvtol.nl/events?search={search_term_string}',
+      'query-input': 'required name=search_term_string'
+    }
+  };
+
   return (
     <div className="min-h-screen bg-gray-50 flex flex-col">
+      <SEO
+        title="Photos - Thijs van Tol | Professional Event Photography"
+        description="Professional event photography featuring ice skating, inline skating, and sports events. Browse high-quality photos and download your favorites."
+        keywords="photography, sports photography, ice skating photography, inline skating, event photography, Thijs van Tol"
+        url="https://photos.thijsvtol.nl/"
+        structuredData={structuredData}
+      />
       {/* Hero Section with Slideshow */}
       <section className="relative h-screen bg-black overflow-hidden">
         {loading ? (

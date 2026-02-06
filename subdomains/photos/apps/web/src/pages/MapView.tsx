@@ -4,6 +4,7 @@ import { Icon, LatLngBounds } from 'leaflet';
 import { Link } from 'react-router-dom';
 import Navbar from '../components/Navbar';
 import Footer from '../components/Footer';
+import SEO from '../components/SEO';
 import { getEvents, getPhotos } from '../api';
 import type { Photo } from '../types';
 
@@ -135,6 +136,12 @@ const MapView: React.FC = () => {
 
   return (
     <div className="min-h-screen bg-gray-50 flex flex-col">
+      <SEO
+        title="Photo Map - Thijs van Tol Photos | Browse by Location"
+        description="Explore photos on an interactive map. Browse event photography by location, including ice skating and inline skating events across different cities."
+        keywords="photo map, event locations, ice skating locations, inline skating locations, GPS photos, photography map"
+        url="https://photos.thijsvtol.nl/map"
+      />
       <Navbar />
       <div className="max-w-7xl mx-auto px-3 sm:px-4 lg:px-8 py-4 sm:py-8 flex-grow w-full">
         <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-6 sm:mb-8">
