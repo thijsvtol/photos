@@ -47,19 +47,14 @@ const PhotoCard: React.FC<PhotoCardProps> = ({
           fromFavorites: true,
           favoritePhotos
         } : undefined}
-        className="block relative"
+        className="block relative aspect-[16/9] overflow-hidden"
       >
         <ProgressiveImage
           src={getPreviewUrl(slug, photo.id)}
           blurDataUrl={photo.blur_placeholder}
           alt={photo.original_filename}
-          className="w-full object-cover"
+          className="w-full h-full object-cover"
           loading="lazy"
-          style={{
-            height: photo.height && photo.width
-              ? `${(photo.height / photo.width) * 100}%`
-              : 'auto'
-          }}
         />
         {/* User favorite indicator */}
         {userFavorites.has(photo.id) && (

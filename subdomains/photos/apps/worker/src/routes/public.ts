@@ -46,7 +46,19 @@ app.get('/api/events', async (c) => {
         
         const cities = (citiesResult.results || []).map(r => r.city);
         
-        return { ...event, preview_photo_id, cities };
+        // Get tags for this event
+        const tagsResult = await c.env.DB
+          .prepare(`
+            SELECT t.* FROM tags t
+            JOIN event_tags et ON t.id = et.tag_id
+            WHERE et.event_id = ?
+          `)
+          .bind(event.id)
+          .all();
+        
+        const tags = tagsResult.results || [];
+        
+        return { ...event, preview_photo_id, cities, tags };
       })
     );
     
