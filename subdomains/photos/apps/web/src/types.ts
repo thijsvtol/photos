@@ -107,4 +107,7 @@ export interface UploadQueueItem {
   cameraMake?: string;
   cameraModel?: string;
   lensModel?: string;
+  latitude?: number;
+  longitude?: number;
+  blurPlaceholder?: string;
 }

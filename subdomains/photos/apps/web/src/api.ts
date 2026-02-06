@@ -84,14 +84,20 @@ export const startUpload = async (
   focalLength?: string,
   cameraMake?: string,
   cameraModel?: string,
-  lensModel?: string
+  lensModel?: string,
+  latitude?: number,
+  longitude?: number,
+  blurPlaceholder?: string,
+  isPreview: boolean = false
 ): Promise<{ uploadId: string; key: string }> => {
   const response = await api.post(
     `/admin/events/${slug}/uploads/start`,
     { 
       photoId, filename, captureTime, width, height,
       iso, aperture, shutterSpeed, focalLength,
-      cameraMake, cameraModel, lensModel
+      cameraMake, cameraModel, lensModel,
+      latitude, longitude, blurPlaceholder,
+      isPreview
     },
     { headers: getAdminHeaders() }
   );
@@ -103,10 +109,11 @@ export const uploadPart = async (
   photoId: string,
   uploadId: string,
   partNumber: number,
-  chunk: Blob
+  chunk: Blob,
+  isPreview: boolean = false
 ): Promise<{ partNumber: number; etag: string }> => {
   const response = await api.put(
-    `/admin/events/${slug}/uploads/${photoId}/parts/${partNumber}`,
+    `/admin/events/${slug}/uploads/${photoId}/parts/${partNumber}${isPreview ? '?preview=true' : ''}`,
     chunk,
     { 
       headers: { 
@@ -123,10 +130,11 @@ export const completeUpload = async (
   slug: string,
   photoId: string,
   uploadId: string,
-  parts: Array<{ partNumber: number; etag: string }>
+  parts: Array<{ partNumber: number; etag: string }>,
+  isPreview: boolean = false
 ): Promise<void> => {
   await api.post(
-    `/admin/events/${slug}/uploads/${photoId}/complete`,
+    `/admin/events/${slug}/uploads/${photoId}/complete${isPreview ? '?preview=true' : ''}`,
     { uploadId, parts },
     { headers: getAdminHeaders() }
   );
@@ -181,12 +189,43 @@ export const getPreviewUrl = (slug: string, photoId: string): string => {
   return `/media/${slug}/preview/${photoId}.jpg`;
 };
 
-export const getIgUrl = (slug: string, photoId: string): string => {
-  return `/media/${slug}/ig/${photoId}.jpg`;
-};
-
 export const getOriginalUrl = (slug: string, photoId: string): string => {
   return `/media/${slug}/original/${photoId}.jpg`;
+};
+
+// Download functions that trigger browser downloads
+export const downloadPhoto = async (url: string, filename: string): Promise<void> => {
+  try {
+    const response = await fetch(url);
+    if (!response.ok) {
+      throw new Error(`Download failed: ${response.statusText}`);
+    }
+    
+    const blob = await response.blob();
+    
+    const downloadUrl = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = downloadUrl;
+    link.download = filename;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(downloadUrl);
+  } catch (error) {
+    console.error('Download error:', error);
+    throw error;
+  }
+};
+
+export const downloadOriginal = (slug: string, photoId: string): void => {
+  const url = getOriginalUrl(slug, photoId);
+  downloadPhoto(url, `${slug}_${photoId}_original.jpg`);
+};
+
+export const downloadSmall = (slug: string, photoId: string): void => {
+  // Download the preview version (1920px)
+  const url = getPreviewUrl(slug, photoId);
+  downloadPhoto(url, `${slug}_${photoId}_small.jpg`);
 };
 
 export const setPhotoFeatured = async (photoId: string, isFeatured: boolean): Promise<void> => {

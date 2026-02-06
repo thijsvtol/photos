@@ -4,7 +4,7 @@ import { Heart, Star, Share2 } from 'lucide-react';
 import Navbar from '../components/Navbar';
 import Footer from '../components/Footer';
 import ProgressiveImage from '../components/ProgressiveImage';
-import { getEvent, getPhotos, loginToEvent, getPreviewUrl, getOriginalUrl, getIgUrl, requestZip, setPhotoFeatured } from '../api';
+import { getEvent, getPhotos, loginToEvent, getPreviewUrl, getOriginalUrl, requestZip, setPhotoFeatured } from '../api';
 import type { Event, Photo } from '../types';
 
 const EventGallery: React.FC = () => {
@@ -471,7 +471,7 @@ const EventGallery: React.FC = () => {
                         <span className="sm:hidden">Full</span>
                       </a>
                       <a
-                        href={getIgUrl(slug!, photo.id)}
+                        href={getPreviewUrl(slug!, photo.id)}
                         download
                         className="flex-1 sm:flex-none px-3 py-2 bg-purple-600 text-white rounded-lg text-xs sm:text-sm hover:bg-purple-700 active:bg-purple-800 active:scale-95 transition-all text-center flex items-center justify-center gap-1.5 font-medium shadow-sm"
                         onClick={(e) => e.stopPropagation()}

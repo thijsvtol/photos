@@ -8,6 +8,7 @@ import L from 'leaflet';
 import Navbar from '../components/Navbar';
 import { getEvent, startUpload, uploadPart, completeUpload, regenerateThumbnails, setEventLocation, getEventStats, getPreviewUrl, geocodeEventPhotos } from '../api';
 import { addToQueue, updateQueueItem, getQueueItems, getPendingUploads } from '../uploadQueue';
+import { createPreview } from '../imageUtils';
 import type { Event, UploadQueueItem, EventStats } from '../types';
 
 // Fix Leaflet marker icons
@@ -216,7 +217,10 @@ const AdminEventUpload: React.FC = () => {
       await updateQueueItem(item.id, { status: 'uploading' });
       setQueueItems(prev => prev.map(i => i.id === item.id ? { ...i, status: 'uploading' } : i));
       
-      // Start multipart upload
+      // Create preview version client-side
+      const previewBlob = await createPreview(item.file);
+      
+      // Start multipart upload for original
       const { uploadId } = await startUpload(
         item.eventSlug,
         item.photoId!,
@@ -230,12 +234,15 @@ const AdminEventUpload: React.FC = () => {
         item.focalLength,
         item.cameraMake,
         item.cameraModel,
-        item.lensModel
+        item.lensModel,
+        item.latitude,
+        item.longitude,
+        item.blurPlaceholder
       );
       
       await updateQueueItem(item.id, { uploadId });
       
-      // Upload parts
+      // Upload original parts (80% of total progress)
       const parts: Array<{ partNumber: number; etag: string }> = [];
       const totalParts = Math.ceil(item.file.size / CHUNK_SIZE);
       
@@ -255,14 +262,21 @@ const AdminEventUpload: React.FC = () => {
         
         parts.push({ partNumber, etag });
         
-        // Update progress
-        const progress = Math.round((partNumber / totalParts) * 100);
+        // Update progress (0-80% for original upload)
+        const progress = Math.round((partNumber / totalParts) * 80);
         await updateQueueItem(item.id, { progress, parts });
         setQueueItems(prev => prev.map(i => i.id === item.id ? { ...i, progress, parts } : i));
       }
       
-      // Complete upload
+      // Complete original upload
       await completeUpload(item.eventSlug, item.photoId!, uploadId, parts);
+      
+      // Update progress to 85%
+      await updateQueueItem(item.id, { progress: 85 });
+      setQueueItems(prev => prev.map(i => i.id === item.id ? { ...i, progress: 85 } : i));
+      
+      // Upload preview version (85-100% of progress)
+      await uploadPreview(item.eventSlug, item.photoId!, previewBlob);
       
       await updateQueueItem(item.id, { status: 'completed', progress: 100 });
       setQueueItems(prev => prev.map(i => i.id === item.id ? { ...i, status: 'completed', progress: 100 } : i));
@@ -271,6 +285,55 @@ const AdminEventUpload: React.FC = () => {
       await updateQueueItem(item.id, { status: 'failed', error: String(err) });
       setQueueItems(prev => prev.map(i => i.id === item.id ? { ...i, status: 'failed', error: String(err) } : i));
     }
+  };
+
+  const uploadPreview = async (eventSlug: string, photoId: string, previewBlob: Blob): Promise<string> => {
+    // Start multipart upload for preview
+    const { uploadId } = await startUpload(
+      eventSlug,
+      photoId,
+      `${photoId}_preview.jpg`,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      true // isPreview flag
+    );
+    
+    // Upload preview parts
+    const parts: Array<{ partNumber: number; etag: string }> = [];
+    const totalParts = Math.ceil(previewBlob.size / CHUNK_SIZE);
+    
+    for (let partNumber = 1; partNumber <= totalParts; partNumber++) {
+      const start = (partNumber - 1) * CHUNK_SIZE;
+      const end = Math.min(start + CHUNK_SIZE, previewBlob.size);
+      const chunk = previewBlob.slice(start, end);
+      
+      const { etag } = await uploadPart(
+        eventSlug,
+        photoId,
+        uploadId,
+        partNumber,
+        chunk,
+        true // isPreview flag
+      );
+      
+      parts.push({ partNumber, etag });
+    }
+    
+    // Complete preview upload
+    await completeUpload(eventSlug, photoId, uploadId, parts, true);
+    
+    return uploadId;
   };
 
   const handleDragOver = useCallback((e: React.DragEvent) => {

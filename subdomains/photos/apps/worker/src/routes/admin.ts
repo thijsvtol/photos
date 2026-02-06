@@ -2,7 +2,6 @@ import { Hono } from 'hono';
 import { ulid } from 'ulid';
 import type { Env, CreateEventRequest, StartUploadRequest, CompleteUploadRequest } from '../types';
 import { generateSalt, hashPassword, generateUniqueSlug } from '../utils';
-import { generateThumbnails } from '../imageProcessing';
 import { getCityFromCoordinates } from '../geocoding';
 
 const app = new Hono<{ Bindings: Env }>();
@@ -93,13 +92,13 @@ app.post('/events', async (c) => {
 
 /**
  * POST /events/:slug/uploads/start
- * Starts a multipart upload for a photo
+ * Starts a multipart upload for a photo (original or preview)
  */
 app.post('/events/:slug/uploads/start', async (c) => {
   const slug = c.req.param('slug');
   
   try {
-    const body = await c.req.json<StartUploadRequest>();
+    const body = await c.req.json<StartUploadRequest & { isPreview?: boolean }>();
     
     if (!body.photoId || !body.filename) {
       return c.json({ error: 'photoId and filename are required' }, 400);
@@ -115,41 +114,46 @@ app.post('/events/:slug/uploads/start', async (c) => {
       return c.json({ error: 'Event not found' }, 404);
     }
     
+    // Determine upload path based on isPreview flag
+    const folder = body.isPreview ? 'preview' : 'original';
+    const key = `${folder}/${slug}/${body.photoId}.jpg`;
+    
     // Create multipart upload in R2
-    const key = `original/${slug}/${body.photoId}.jpg`;
     const multipartUpload = await c.env.PHOTOS_BUCKET.createMultipartUpload(key);
     
-    // Store photo metadata in database
-    const captureTime = body.captureTime || new Date().toISOString();
-    await c.env.DB
-      .prepare(`INSERT INTO photos (
-        id, event_id, original_filename, capture_time, width, height,
-        iso, aperture, shutter_speed, focal_length, camera_make, camera_model, lens_model,
-        latitude, longitude, blur_placeholder
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
-      .bind(
-        body.photoId, event.id, body.filename, captureTime, 
-        body.width || null, body.height || null,
-        body.iso || null, body.aperture || null, body.shutterSpeed || null,
-        body.focalLength || null, body.cameraMake || null, body.cameraModel || null,
-        body.lensModel || null, body.latitude || null, body.longitude || null,
-        body.blurPlaceholder || null
-      )
-      .run();
-    
-    // Update event inferred date if this is the earliest photo
-    await c.env.DB
-      .prepare(`
-        UPDATE events 
-        SET inferred_date = (
-          SELECT DATE(MIN(capture_time)) 
-          FROM photos 
-          WHERE event_id = ?
+    // Store photo metadata in database only if it's the original (not preview)
+    if (!body.isPreview) {
+      const captureTime = body.captureTime || new Date().toISOString();
+      await c.env.DB
+        .prepare(`INSERT INTO photos (
+          id, event_id, original_filename, capture_time, width, height,
+          iso, aperture, shutter_speed, focal_length, camera_make, camera_model, lens_model,
+          latitude, longitude, blur_placeholder
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+        .bind(
+          body.photoId, event.id, body.filename, captureTime, 
+          body.width || null, body.height || null,
+          body.iso || null, body.aperture || null, body.shutterSpeed || null,
+          body.focalLength || null, body.cameraMake || null, body.cameraModel || null,
+          body.lensModel || null, body.latitude || null, body.longitude || null,
+          body.blurPlaceholder || null
         )
-        WHERE id = ?
-      `)
-      .bind(event.id, event.id)
-      .run();
+        .run();
+      
+      // Update event inferred date if this is the earliest photo
+      await c.env.DB
+        .prepare(`
+          UPDATE events 
+          SET inferred_date = (
+            SELECT DATE(MIN(capture_time)) 
+            FROM photos 
+            WHERE event_id = ?
+          )
+          WHERE id = ?
+        `)
+        .bind(event.id, event.id)
+        .run();
+    }
     
     return c.json({
       uploadId: multipartUpload.uploadId,
@@ -163,12 +167,13 @@ app.post('/events/:slug/uploads/start', async (c) => {
 
 /**
  * PUT /events/:slug/uploads/:photoId/parts/:partNumber
- * Uploads a part directly to R2
+ * Uploads a part directly to R2 (supports preview uploads via query param)
  */
 app.put('/events/:slug/uploads/:photoId/parts/:partNumber', async (c) => {
   const slug = c.req.param('slug');
   const photoId = c.req.param('photoId');
   const partNumber = parseInt(c.req.param('partNumber'));
+  const isPreview = c.req.query('preview') === 'true';
   
   try {
     const uploadId = c.req.header('X-Upload-Id');
@@ -181,7 +186,8 @@ app.put('/events/:slug/uploads/:photoId/parts/:partNumber', async (c) => {
       return c.json({ error: 'Invalid part number' }, 400);
     }
     
-    const key = `original/${slug}/${photoId}.jpg`;
+    const folder = isPreview ? 'preview' : 'original';
+    const key = `${folder}/${slug}/${photoId}.jpg`;
     
     // Get the body as ArrayBuffer
     const body = await c.req.arrayBuffer();
@@ -202,11 +208,12 @@ app.put('/events/:slug/uploads/:photoId/parts/:partNumber', async (c) => {
 
 /**
  * POST /events/:slug/uploads/:photoId/complete
- * Completes a multipart upload
+ * Completes a multipart upload (supports preview uploads via query param)
  */
 app.post('/events/:slug/uploads/:photoId/complete', async (c) => {
   const slug = c.req.param('slug');
   const photoId = c.req.param('photoId');
+  const isPreview = c.req.query('preview') === 'true';
   
   try {
     const body = await c.req.json<CompleteUploadRequest>();
@@ -215,31 +222,30 @@ app.post('/events/:slug/uploads/:photoId/complete', async (c) => {
       return c.json({ error: 'uploadId and parts are required' }, 400);
     }
     
-    const key = `original/${slug}/${photoId}.jpg`;
+    const folder = isPreview ? 'preview' : 'original';
+    const key = `${folder}/${slug}/${photoId}.jpg`;
     
     // Complete the multipart upload
     const upload = c.env.PHOTOS_BUCKET.resumeMultipartUpload(key, body.uploadId);
     await upload.complete(body.parts);
     
-    // Generate thumbnails asynchronously (don't wait for completion)
-    c.executionCtx.waitUntil(generateThumbnails(c.env.PHOTOS_BUCKET, slug, photoId));
-    
     return c.json({ success: true, message: 'Upload completed successfully' });
   } catch (error) {
-    console.error('Error completing upload:', error);
+    console.error('[UPLOAD] Error completing upload:', error);
     return c.json({ error: 'Failed to complete upload' }, 500);
   }
 });
 
 /**
  * POST /events/:slug/regenerate-thumbnails
- * Regenerates thumbnails for all photos in an event
+ * Note: Thumbnail generation is now done client-side during upload
+ * This endpoint is kept for backwards compatibility but does nothing
  */
 app.post('/events/:slug/regenerate-thumbnails', async (c) => {
   const slug = c.req.param('slug');
   
   try {
-    // Get all photos for this event
+    // Get photo count for this event
     const event = await c.env.DB
       .prepare('SELECT id FROM events WHERE slug = ?')
       .bind(slug)
@@ -250,23 +256,14 @@ app.post('/events/:slug/regenerate-thumbnails', async (c) => {
     }
     
     const photos = await c.env.DB
-      .prepare('SELECT id FROM photos WHERE event_id = ?')
+      .prepare('SELECT COUNT(*) as count FROM photos WHERE event_id = ?')
       .bind(event.id)
-      .all<{ id: string }>();
-    
-    if (!photos.results || photos.results.length === 0) {
-      return c.json({ message: 'No photos found for this event' }, 200);
-    }
-    
-    // Generate thumbnails for each photo asynchronously
-    for (const photo of photos.results) {
-      c.executionCtx.waitUntil(generateThumbnails(c.env.PHOTOS_BUCKET, slug, photo.id));
-    }
+      .first<{ count: number }>();
     
     return c.json({ 
       success: true, 
-      message: `Regenerating thumbnails for ${photos.results.length} photos`,
-      count: photos.results.length
+      message: `Preview images are now generated client-side during upload. No action needed.`,
+      count: photos?.count || 0
     });
   } catch (error) {
     console.error('Error regenerating thumbnails:', error);

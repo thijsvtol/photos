@@ -12,8 +12,6 @@ app.get('/media/:slug/preview/:photoId', async (c) => {
   const slug = c.req.param('slug');
   const photoId = c.req.param('photoId').replace(/\.jpg$/, '');
   
-  console.log(`[MEDIA] Request for preview: ${slug}/${photoId}`);
-  
   try {
     // Check if event is password protected
     const event = await c.env.DB
@@ -28,32 +26,25 @@ app.get('/media/:slug/preview/:photoId', async (c) => {
     // Check authentication only if password protected
     if (event.password_hash) {
       const isAuthenticated = await getEventSession(c.req.raw, slug, c.env.EVENT_COOKIE_SECRET);
-      console.log(`[MEDIA] Authentication status: ${isAuthenticated}`);
       
       if (!isAuthenticated) {
         return c.json({ error: 'Authentication required' }, 401);
       }
-    } else {
-      console.log(`[MEDIA] Event is not password protected, allowing access`);
     }
-    // Try to get the preview version
+    
+    // Try to get the preview version first, fall back to original
     let key = `preview/${slug}/${photoId}.jpg`;
-    console.log(`[MEDIA] Trying to get: ${key}`);
     let object = await c.env.PHOTOS_BUCKET.get(key);
     
-    // If preview doesn't exist, fall back to original
+    // Fallback to original if preview doesn't exist
     if (!object) {
-      console.log(`[MEDIA] Preview not found, trying original`);
       key = `original/${slug}/${photoId}.jpg`;
       object = await c.env.PHOTOS_BUCKET.get(key);
     }
     
     if (!object) {
-      console.log(`[MEDIA] Neither preview nor original found for ${photoId}`);
       return c.json({ error: 'Photo not found' }, 404);
     }
-    
-    console.log(`[MEDIA] Found image at ${key}, size: ${object.size} bytes`);
     
     return new Response(object.body, {
       headers: {
@@ -104,24 +95,19 @@ app.get('/media/:slug/ig/:photoId', async (c) => {
       return c.json({ error: 'Photo not found' }, 404);
     }
     
-    // Try to get the Instagram version
-    let key = `ig/${slug}/${photoId}.jpg`;
-    console.log(`[MEDIA] IG download request - trying key: ${key}`);
+    // Try to get the preview (small) version
+    let key = `preview/${slug}/${photoId}.jpg`;
     let object = await c.env.PHOTOS_BUCKET.get(key);
     
-    // If IG version doesn't exist, fall back to original
+    // If preview version doesn't exist, fall back to original
     if (!object) {
       key = `original/${slug}/${photoId}.jpg`;
-      console.log(`[MEDIA] IG version not found, falling back to: ${key}`);
       object = await c.env.PHOTOS_BUCKET.get(key);
     }
     
     if (!object) {
-      console.log(`[MEDIA] Neither IG nor original found for ${photoId}`);
       return c.json({ error: 'Photo not found' }, 404);
     }
-    
-    console.log(`[MEDIA] Serving IG download from ${key}, size: ${object.size} bytes`);
     
     // Generate filename: eventSlug_captureTime_photoId_small.jpg
     const captureTime = photo.capture_time.replace(/[:.]/g, '-');
@@ -179,15 +165,11 @@ app.get('/media/:slug/original/:photoId', async (c) => {
     
     // Get from R2
     const key = `original/${slug}/${photoId}.jpg`;
-    console.log(`[MEDIA] Original download request - trying key: ${key}`);
     const object = await c.env.PHOTOS_BUCKET.get(key);
     
     if (!object) {
-      console.log(`[MEDIA] Original not found for ${photoId}`);
       return c.json({ error: 'Photo not found in storage' }, 404);
     }
-    
-    console.log(`[MEDIA] Serving original download from ${key}, size: ${object.size} bytes`);
     
     // Generate filename: eventSlug_captureTime_photoId.jpg
     const captureTime = photo.capture_time.replace(/[:.]/g, '-');

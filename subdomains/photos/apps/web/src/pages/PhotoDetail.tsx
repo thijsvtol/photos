@@ -3,7 +3,7 @@ import { useParams, Link, useNavigate, useLocation } from 'react-router-dom';
 import { Maximize, Minimize, Share2, X, Heart, Play, Pause } from 'lucide-react';
 import Navbar from '../components/Navbar';
 import Footer from '../components/Footer';
-import { getEvent, getPhoto, getPhotos, loginToEvent, getPreviewUrl, getOriginalUrl, getIgUrl } from '../api';
+import { getEvent, getPhoto, getPhotos, loginToEvent, getPreviewUrl, downloadOriginal, downloadSmall } from '../api';
 import type { Event, Photo } from '../types';
 
 const PhotoDetail: React.FC = () => {
@@ -473,26 +473,24 @@ const PhotoDetail: React.FC = () => {
             
             {/* Desktop download buttons */}
             <div className="hidden md:flex gap-2">
-              <a
-                href={getOriginalUrl(slug!, photo?.id || photoId!)}
-                download
+              <button
+                onClick={() => downloadOriginal(slug!, photo?.id || photoId!)}
                 className="px-3 py-1.5 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition text-sm flex items-center gap-1.5"
               >
                 <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
                 </svg>
                 Original
-              </a>
-              <a
-                href={getIgUrl(slug!, photo?.id || photoId!)}
-                download
+              </button>
+              <button
+                onClick={() => downloadSmall(slug!, photo?.id || photoId!)}
                 className="px-3 py-1.5 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition text-sm flex items-center gap-1.5"
               >
                 <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
                 </svg>
                 Small
-              </a>
+              </button>
             </div>
             
             {/* Mobile menu button */}
@@ -772,26 +770,24 @@ const PhotoDetail: React.FC = () => {
           
           {/* Download buttons */}
           <div className="flex gap-2">
-            <a
-              href={getOriginalUrl(slug!, photo?.id || photoId!)}
-              download
+            <button
+              onClick={() => downloadOriginal(slug!, photo?.id || photoId!)}
               className="flex-1 px-4 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 active:bg-blue-800 transition text-center font-medium flex items-center justify-center gap-2"
             >
               <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
               </svg>
               <span className="text-sm">Original</span>
-            </a>
-            <a
-              href={getIgUrl(slug!, photo?.id || photoId!)}
-              download
+            </button>
+            <button
+              onClick={() => downloadSmall(slug!, photo?.id || photoId!)}
               className="flex-1 px-4 py-3 bg-purple-600 text-white rounded-lg hover:bg-purple-700 active:bg-purple-800 transition text-center font-medium flex items-center justify-center gap-2"
             >
               <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
               </svg>
               <span className="text-sm">Small</span>
-            </a>
+            </button>
           </div>
           
           {/* Navigation hint */}
