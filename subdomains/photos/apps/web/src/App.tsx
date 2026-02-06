@@ -6,6 +6,7 @@ import EventGallery from './pages/EventGallery';
 import PhotoDetail from './pages/PhotoDetail';
 import MyFavorites from './pages/MyFavorites';
 import MapView from './pages/MapView';
+import PhotoUsage from './pages/PhotoUsage';
 import AdminDashboard from './pages/AdminDashboard';
 import AdminEventUpload from './pages/AdminEventUpload';
 import AdminPhotoManager from './pages/AdminPhotoManager';
@@ -22,6 +23,7 @@ function App() {
           <Route path="/p/:slug/:photoId" element={<PhotoDetail />} />
           <Route path="/favorites" element={<MyFavorites />} />
           <Route path="/map" element={<MapView />} />
+          <Route path="/usage" element={<PhotoUsage />} />
           <Route path="/admin" element={<AdminDashboard />} />
           <Route path="/admin/events/:slug/upload" element={<AdminEventUpload />} />
           <Route path="/admin/events/:slug/photos" element={<AdminPhotoManager />} />

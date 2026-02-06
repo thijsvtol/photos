@@ -11,6 +11,7 @@ interface PhotoCardProps {
   // Optional props for different contexts
   fromFavorites?: boolean;
   favoritePhotos?: Array<{ id: string; slug: string }>;
+  sortBy?: string;
   showSelection?: boolean;
   isSelected?: boolean;
   onToggleSelection?: (photoId: string) => void;
@@ -28,6 +29,7 @@ const PhotoCard: React.FC<PhotoCardProps> = ({
   slug,
   fromFavorites = false,
   favoritePhotos,
+  sortBy,
   showSelection = false,
   isSelected = false,
   onToggleSelection,
@@ -45,7 +47,10 @@ const PhotoCard: React.FC<PhotoCardProps> = ({
         to={`/p/${slug}/${photo.id}`}
         state={fromFavorites && favoritePhotos ? {
           fromFavorites: true,
-          favoritePhotos
+          favoritePhotos,
+          sortBy
+        } : sortBy ? {
+          sortBy
         } : undefined}
         className="block relative aspect-[16/9] overflow-hidden"
       >

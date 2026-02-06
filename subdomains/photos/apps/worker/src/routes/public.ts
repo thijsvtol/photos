@@ -110,7 +110,7 @@ app.get('/api/events/:slug', async (c) => {
  */
 app.get('/api/events/:slug/photos', async (c) => {
   const slug = c.req.param('slug');
-  const sort = c.req.query('sort') || 'date_desc';
+  const sort = c.req.query('sort') || 'date_asc';
   
   try {
     // Get event to check if password protected

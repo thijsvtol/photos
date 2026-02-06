@@ -37,6 +37,7 @@ const PhotoDetail: React.FC = () => {
   // Check if we came from favorites page
   const fromFavorites = location.state?.fromFavorites;
   const favoritePhotos = (location.state?.favoritePhotos || []) as Array<{ id: string; slug: string }>;
+  const sortBy = location.state?.sortBy || 'date_asc';
   
   // Filter photos based on whether we're viewing favorites
   // When in favorites mode, only show photos from this event that are in favorites
@@ -131,8 +132,8 @@ const PhotoDetail: React.FC = () => {
         setPhoto(photoData);
         setAuthenticated(true);
         
-        // Load all photos for navigation
-        const allPhotosData = await getPhotos(slug!);
+        // Load all photos for navigation with the same sort order
+        const allPhotosData = await getPhotos(slug!, sortBy);
         setAllPhotos(allPhotosData);
         
         // Find index in the appropriate list

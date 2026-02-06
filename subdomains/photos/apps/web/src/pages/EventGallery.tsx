@@ -20,7 +20,7 @@ const EventGallery: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [loginError, setLoginError] = useState<string | null>(null);
-  const [sortBy, setSortBy] = useState('date_desc');
+  const [sortBy, setSortBy] = useState('date_asc');
   const [selectedPhotos, setSelectedPhotos] = useState<Set<string>>(new Set());
   const [userFavorites, setUserFavorites] = useState<Set<string>>(new Set());
   const [showShareMenu, setShowShareMenu] = useState(false);
@@ -473,6 +473,7 @@ const EventGallery: React.FC = () => {
                 key={photo.id}
                 photo={photo}
                 slug={slug!}
+                sortBy={sortBy}
                 showSelection={true}
                 isSelected={selectedPhotos.has(photo.id)}
                 onToggleSelection={toggleSelection}
