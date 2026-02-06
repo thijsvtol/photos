@@ -12,7 +12,8 @@ The repository is organized into subdomains, each containing its own application
 │   └── photos/           # photos.thijsvtol.nl - Photo gallery application
 │       ├── apps/
 │       │   ├── web/      # React frontend
-│       │   └── worker/   # Cloudflare Worker backend
+│       │   ├── worker/   # Cloudflare Worker backend
+│       │   └── mobile/   # React Native mobile app
 │       ├── migrations/   # Database migrations
 │       └── README.md     # Detailed documentation
 └── README.md             # This file
@@ -29,6 +30,7 @@ A full-stack photo gallery application with event-based organization, password p
 - Backend: Cloudflare Worker (TypeScript + Hono)
 - Database: Cloudflare D1 (SQLite)
 - Storage: Cloudflare R2 (S3-compatible)
+- Mobile: React Native + Expo (iOS/Android)
 
 **Features:**
 - Public event galleries with password protection
@@ -37,6 +39,7 @@ A full-stack photo gallery application with event-based organization, password p
 - EXIF metadata extraction
 - Multiple download formats (original, Instagram-ready)
 - Batch downloads
+- Mobile app for direct photo uploads from phones
 
 See [subdomains/photos/README.md](./subdomains/photos/README.md) for detailed documentation and setup instructions.
 

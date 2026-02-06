@@ -22,6 +22,13 @@ A full-stack photo gallery application built with React + Vite + Tailwind (front
 - **Auth**: HTTP-only cookies with session tokens
 - **Image Processing**: Client-side (Canvas API), watermarking server-side
 
+### Mobile App (`apps/mobile`)
+- **Framework**: React Native + Expo
+- **Platform**: iOS and Android
+- **Features**: Photo upload from mobile devices directly to gallery
+- **Auth**: Admin secret authentication
+- See [apps/mobile/README.md](./apps/mobile/README.md) for detailed documentation
+
 ## ✨ Features
 
 ### Public Features
@@ -101,7 +108,8 @@ A full-stack photo gallery application built with React + Vite + Tailwind (front
 subdomains/photos/
 ├── apps/
 │   ├── web/           # React + Vite + Tailwind frontend
-│   └── worker/        # Cloudflare Worker backend (TypeScript + Hono)
+│   ├── worker/        # Cloudflare Worker backend (TypeScript + Hono)
+│   └── mobile/        # React Native mobile app for photo uploads
 ├── migrations/        # D1 database migrations
 ├── wrangler.toml      # Worker configuration
 └── README.md          # This file

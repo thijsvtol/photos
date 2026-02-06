@@ -1,0 +1,58 @@
+{
+  "expo": {
+    "name": "Photos Upload",
+    "slug": "photos-upload",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "light",
+    "newArchEnabled": true,
+    "splash": {
+      "image": "./assets/splash-icon.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#ffffff"
+    },
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "nl.thijsvtol.photos.upload",
+      "infoPlist": {
+        "NSPhotoLibraryUsageDescription": "This app needs access to your photo library to upload photos to your gallery.",
+        "NSCameraUsageDescription": "This app needs access to your camera to take photos for upload."
+      }
+    },
+    "android": {
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "backgroundColor": "#ffffff"
+      },
+      "package": "nl.thijsvtol.photos.upload",
+      "permissions": [
+        "READ_EXTERNAL_STORAGE",
+        "WRITE_EXTERNAL_STORAGE",
+        "CAMERA"
+      ],
+      "edgeToEdgeEnabled": true,
+      "predictiveBackGestureEnabled": false
+    },
+    "web": {
+      "favicon": "./assets/favicon.png"
+    },
+    "plugins": [
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "Allow Photos Upload to access your photos for uploading to your gallery.",
+          "cameraPermission": "Allow Photos Upload to access your camera to take photos for upload."
+        }
+      ],
+      [
+        "expo-media-library",
+        {
+          "photosPermission": "Allow Photos Upload to access your photos.",
+          "savePhotosPermission": "Allow Photos Upload to save photos.",
+          "isAccessMediaLocationEnabled": true
+        }
+      ]
+    ]
+  }
+}
