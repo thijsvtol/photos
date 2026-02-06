@@ -3,7 +3,7 @@ import { Link } from 'react-router-dom';
 import Masonry from 'react-masonry-css';
 import Navbar from '../components/Navbar';
 import Footer from '../components/Footer';
-import { getEvents, getTags, getEventsByTag, getPreviewUrl } from '../api';
+import { getEvents, getTags, getPreviewUrl } from '../api';
 import type { Event, Tag } from '../types';
 
 const EventList: React.FC = () => {
