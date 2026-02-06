@@ -32,7 +32,7 @@ const PhotoDetail: React.FC = () => {
   const touchStartX = useRef<number | null>(null);
   const touchEndX = useRef<number | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
-  const slideshowTimerRef = useRef<number | null>(null);
+  const slideshowTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Check if we came from favorites page
   const fromFavorites = location.state?.fromFavorites;

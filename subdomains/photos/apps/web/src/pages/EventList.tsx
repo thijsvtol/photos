@@ -188,7 +188,7 @@ const EventList: React.FC = () => {
                     onClick={() => filterByCity(null)}
                     className={`px-4 py-2.5 rounded-full text-sm font-medium transition-all active:scale-95 ${
                       !selectedCity
-                        ? 'bg-green-600 text-white shadow-md'
+                        ? 'bg-green-700 text-white shadow-md'
                         : 'bg-gray-200 text-gray-700 hover:bg-gray-300 active:bg-gray-400'
                     }`}
                   >
@@ -200,7 +200,7 @@ const EventList: React.FC = () => {
                       onClick={() => filterByCity(city)}
                       className={`px-4 py-2.5 rounded-full text-sm font-medium transition-all active:scale-95 ${
                         selectedCity === city
-                          ? 'bg-green-600 text-white shadow-md'
+                          ? 'bg-green-700 text-white shadow-md'
                           : 'bg-gray-200 text-gray-700 hover:bg-gray-300 active:bg-gray-400'
                       }`}
                     >

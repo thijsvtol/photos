@@ -47,33 +47,38 @@ const Navbar: React.FC = () => {
           {/* Navigation Links */}
           <div className="flex items-center gap-1 sm:gap-2">
             <Link to="/events" className={linkClass('/events')}>
-              <LayoutGrid className="w-4 h-4" />
+              <LayoutGrid className="w-4 h-4 sm:mr-0" aria-hidden="true" />
               <span className="hidden sm:inline">Events</span>
+              <span className="sr-only sm:hidden">Events</span>
             </Link>
             
             <Link to="/favorites" className={linkClass('/favorites')}>
-              <Heart className="w-4 h-4" />
+              <Heart className="w-4 h-4 sm:mr-0" aria-hidden="true" />
               <span className="hidden sm:inline">Favorites</span>
+              <span className="sr-only sm:hidden">Favorites</span>
             </Link>
             
             <Link to="/map" className={linkClass('/map')}>
-              <MapPin className="w-4 h-4" />
+              <MapPin className="w-4 h-4 sm:mr-0" aria-hidden="true" />
               <span className="hidden sm:inline">Map</span>
+              <span className="sr-only sm:hidden">Map</span>
             </Link>
             
             <Link to="/admin" className={linkClass('/admin')}>
-              <Settings className="w-4 h-4" />
+              <Settings className="w-4 h-4 sm:mr-0" aria-hidden="true" />
               <span className="hidden sm:inline">Admin</span>
+              <span className="sr-only sm:hidden">Admin</span>
             </Link>
 
             {(isAdmin || isOnAdminPage) && (
               <button
                 onClick={handleLogout}
                 className="flex items-center gap-2 px-3 py-2 rounded-lg transition-colors text-sm font-medium text-red-600 hover:bg-red-50"
-                title="Logout"
+                aria-label="Logout"
               >
-                <LogOut className="w-4 h-4" />
+                <LogOut className="w-4 h-4 sm:mr-0" aria-hidden="true" />
                 <span className="hidden sm:inline">Logout</span>
+                <span className="sr-only sm:hidden">Logout</span>
               </button>
             )}
           </div>

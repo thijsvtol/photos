@@ -30,3 +30,8 @@ Thumbs.db
 # Temporary files
 tmp/
 temp/
+
+# Playwright test reports
+playwright-report/
+test-results/
+
