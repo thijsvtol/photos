@@ -214,33 +214,49 @@ const EventList: React.FC = () => {
                 to={`/events/${event.slug}`}
                 className="mb-4 sm:mb-6 block bg-white rounded-xl shadow-md hover:shadow-xl active:scale-[0.98] transition-all overflow-hidden"
               >
-                {/* Preview Image for Public Events */}
-                {!event.requires_password && event.preview_photo_id && (
-                  <div className="relative w-full h-48 sm:h-56 bg-gray-200">
+                {/* Preview Image or Placeholder */}
+                <div className="relative w-full h-48 sm:h-56 bg-gradient-to-br from-gray-200 to-gray-300">
+                  {event.preview_photo_id ? (
                     <img
                       src={getPreviewUrl(event.slug, event.preview_photo_id)}
                       alt={event.name}
-                      className="w-full h-full object-cover"
+                      className={`w-full h-full object-cover ${event.requires_password ? 'blur-md' : ''}`}
                       loading="lazy"
                     />
-                    <div className="absolute top-2 right-2">
-                      <span className="px-2 py-1 text-xs bg-green-100 text-green-800 rounded-full backdrop-blur-sm bg-opacity-90">
-                        Public
-                      </span>
+                  ) : (
+                    <div className="w-full h-full flex items-center justify-center">
+                      <svg className="w-16 h-16 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                      </svg>
                     </div>
+                  )}
+                  <div className="absolute top-2 right-2">
+                    <span className={`px-2 py-1 text-xs rounded-full backdrop-blur-sm bg-opacity-90 ${
+                      event.requires_password 
+                        ? 'bg-amber-100 text-amber-800' 
+                        : 'bg-green-100 text-green-800'
+                    }`}>
+                      {event.requires_password ? 'Protected' : 'Public'}
+                    </span>
                   </div>
-                )}
+                </div>
                 
                 <div className="p-4 sm:p-6">
                   <div className="flex items-start justify-between mb-2">
                     <h2 className="text-xl sm:text-2xl font-semibold text-gray-900">{event.name}</h2>
-                    {!event.requires_password && !event.preview_photo_id && (
-                      <span className="ml-2 px-2 py-1 text-xs bg-green-100 text-green-800 rounded-full whitespace-nowrap">
-                        Public
-                      </span>
-                    )}
                   </div>
                   <p className="text-gray-600 mb-3 text-sm sm:text-base">{formatDate(event.inferred_date)}</p>
+                  
+                  {/* Location */}
+                  {event.cities && event.cities.length > 0 && (
+                    <div className="flex items-center gap-1.5 mb-3 text-gray-600">
+                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z" />
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 11a3 3 0 11-6 0 3 3 0 016 0z" />
+                      </svg>
+                      <span className="text-sm">{event.cities.join(', ')}</span>
+                    </div>
+                  )}
                   
                   {/* Tags */}
                   {event.tags && event.tags.length > 0 && (

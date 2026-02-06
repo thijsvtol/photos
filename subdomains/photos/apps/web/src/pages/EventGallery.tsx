@@ -1,10 +1,11 @@
 import React, { useEffect, useState } from 'react';
 import { useParams, Link, useLocation } from 'react-router-dom';
-import { Heart, Star, Share2 } from 'lucide-react';
+import { Share2 } from 'lucide-react';
+import Masonry from 'react-masonry-css';
 import Navbar from '../components/Navbar';
 import Footer from '../components/Footer';
-import ProgressiveImage from '../components/ProgressiveImage';
-import { getEvent, getPhotos, loginToEvent, getPreviewUrl, getOriginalUrl, requestZip, setPhotoFeatured } from '../api';
+import PhotoCard from '../components/PhotoCard';
+import { getEvent, getPhotos, loginToEvent, getPreviewUrl, requestZip, setPhotoFeatured } from '../api';
 import type { Event, Photo } from '../types';
 
 const EventGallery: React.FC = () => {
@@ -129,6 +130,25 @@ const EventGallery: React.FC = () => {
       newSelected.add(photoId);
     }
     setSelectedPhotos(newSelected);
+  };
+
+  const toggleFavorite = (photoId: string, isFavorited: boolean) => {
+    const favoritesStr = localStorage.getItem('user_favorites');
+    let favorites = favoritesStr ? JSON.parse(favoritesStr) as Array<{ photoId: string; slug: string; timestamp: number }> : [];
+    
+    if (isFavorited) {
+      // Remove from favorites
+      favorites = favorites.filter(f => f.photoId !== photoId);
+    } else {
+      // Add to favorites
+      favorites.push({ photoId, slug: slug!, timestamp: Date.now() });
+    }
+    
+    localStorage.setItem('user_favorites', JSON.stringify(favorites));
+    
+    // Update local state
+    const favoriteIds = new Set(favorites.map(f => f.photoId));
+    setUserFavorites(favoriteIds);
   };
 
   const toggleFeatured = async (photoId: string, currentStatus: boolean) => {
@@ -406,93 +426,34 @@ const EventGallery: React.FC = () => {
             <p className="text-gray-600">No photos found.</p>
           </div>
         ) : (
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3 sm:gap-4">
+          <Masonry
+            breakpointCols={{
+              default: 4,
+              1536: 4,
+              1280: 3,
+              1024: 3,
+              768: 2,
+              400: 1
+            }}
+            className="flex -ml-2 sm:-ml-4 w-auto"
+            columnClassName="pl-2 sm:pl-4 bg-clip-padding"
+          >
             {photos.map((photo) => (
-              <div key={photo.id} className="relative group bg-white rounded-lg overflow-hidden shadow-md flex flex-col">
-                <Link to={`/p/${slug}/${photo.id}`} className="block relative overflow-hidden" style={{ aspectRatio: '16/9' }}>
-                  <ProgressiveImage
-                    src={getPreviewUrl(slug!, photo.id)}
-                    blurDataUrl={photo.blur_placeholder}
-                    alt={photo.original_filename}
-                    className="w-full h-full object-cover object-center"
-                    loading="lazy"
-                  />
-                  {/* User favorite indicator */}
-                  {userFavorites.has(photo.id) && (
-                    <div className="absolute top-2 right-2 bg-black/50 backdrop-blur-sm text-white p-1.5 rounded-full">
-                      <Heart className="w-4 h-4 fill-red-500 text-red-500" />
-                    </div>
-                  )}
-                  {/* Featured photo indicator */}
-                  {!!photo.is_featured && (
-                    <div className="absolute top-2 left-2 bg-yellow-500/90 backdrop-blur-sm text-white p-1.5 rounded-full">
-                      <Star className="w-4 h-4 fill-white" />
-                    </div>
-                  )}
-                </Link>
-                <div className="p-2">
-                  <div className="flex flex-col sm:flex-row justify-between items-stretch sm:items-center gap-2">
-                    <div className="flex gap-1 sm:gap-2">
-                      <button
-                        onClick={() => toggleSelection(photo.id)}
-                        className={`px-3 py-2 rounded-lg text-xs sm:text-sm font-medium transition-all active:scale-95 ${
-                          selectedPhotos.has(photo.id)
-                            ? 'bg-blue-600 text-white shadow-sm'
-                            : 'bg-gray-200 text-gray-700 hover:bg-gray-300 active:bg-gray-400'
-                        }`}
-                      >
-                        {selectedPhotos.has(photo.id) ? '✓ Selected' : 'Select'}
-                      </button>
-                      {isAdminView && (
-                        <button
-                          onClick={() => toggleFeatured(photo.id, photo.is_featured || false)}
-                          className={`px-2 py-2 rounded-lg text-xs sm:text-sm flex items-center gap-1 transition-all active:scale-95 ${
-                            photo.is_featured
-                              ? 'bg-yellow-500 text-white shadow-sm'
-                              : 'bg-gray-200 text-gray-700 hover:bg-gray-300 active:bg-gray-400'
-                          }`}
-                          title={photo.is_featured ? 'Remove from featured' : 'Mark as featured'}
-                        >
-                          <Star className={`w-3 h-3 sm:w-4 sm:h-4 ${photo.is_featured ? 'fill-white' : ''}`} />
-                        </button>
-                      )}
-                    </div>
-                    <div className="flex gap-1 sm:gap-2">
-                      <a
-                        href={getOriginalUrl(slug!, photo.id)}
-                        download
-                        className="flex-1 sm:flex-none px-3 py-2 bg-blue-600 text-white rounded-lg text-xs sm:text-sm hover:bg-blue-700 active:bg-blue-800 active:scale-95 transition-all text-center flex items-center justify-center gap-1.5 font-medium shadow-sm"
-                        onClick={(e) => e.stopPropagation()}
-                      >
-                        <svg className="w-3 h-3 sm:w-4 sm:h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
-                        </svg>
-                        <span className="hidden sm:inline">Original</span>
-                        <span className="sm:hidden">Full</span>
-                      </a>
-                      <a
-                        href={getPreviewUrl(slug!, photo.id)}
-                        download
-                        className="flex-1 sm:flex-none px-3 py-2 bg-purple-600 text-white rounded-lg text-xs sm:text-sm hover:bg-purple-700 active:bg-purple-800 active:scale-95 transition-all text-center flex items-center justify-center gap-1.5 font-medium shadow-sm"
-                        onClick={(e) => e.stopPropagation()}
-                      >
-                        <svg className="w-3 h-3 sm:w-4 sm:h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
-                        </svg>
-                        Small
-                      </a>
-                    </div>
-                  </div>
-                  <p className="text-xs text-gray-500 mt-2 hidden sm:block">
-                    {new Date(photo.capture_time).toLocaleString()}
-                  </p>
-                  <p className="text-xs text-gray-500 mt-1 sm:hidden">
-                    {new Date(photo.capture_time).toLocaleDateString()}
-                  </p>
-                </div>
-              </div>
+              <PhotoCard
+                key={photo.id}
+                photo={photo}
+                slug={slug!}
+                showSelection={true}
+                isSelected={selectedPhotos.has(photo.id)}
+                onToggleSelection={toggleSelection}
+                showAddToFavorites={true}
+                onToggleFavorite={toggleFavorite}
+                showFeatured={isAdminView}
+                onToggleFeatured={toggleFeatured}
+                userFavorites={userFavorites}
+              />
             ))}
-          </div>
+          </Masonry>
         )}
       </div>
       <Footer />

@@ -4,7 +4,7 @@ import { Heart, Download } from 'lucide-react';
 import Masonry from 'react-masonry-css';
 import Navbar from '../components/Navbar';
 import Footer from '../components/Footer';
-import ProgressiveImage from '../components/ProgressiveImage';
+import PhotoCard from '../components/PhotoCard';
 import { getPhoto, requestZip } from '../api';
 import type { Photo } from '../types';
 
@@ -195,46 +195,15 @@ const MyFavorites: React.FC = () => {
             columnClassName="pl-2 sm:pl-4 bg-clip-padding"
           >
             {photos.map((photo) => (
-              <div key={photo.id} className="mb-2 sm:mb-4 relative group bg-white rounded-xl overflow-hidden shadow-md hover:shadow-lg active:scale-[0.98] transition-all">
-                <Link 
-                  to={`/p/${photo.event_slug}/${photo.id}`} 
-                  state={{ 
-                    fromFavorites: true, 
-                    favoritePhotos: photos.map(p => ({ id: p.id, slug: p.event_slug })) 
-                  }}
-                  className="block relative"
-                >
-                  <ProgressiveImage
-                    src={`/media/${photo.event_slug}/preview/${photo.id}.jpg`}
-                    blurDataUrl={photo.blur_placeholder}
-                    alt={photo.original_filename}
-                    className="w-full object-cover"
-                    loading="lazy"
-                    style={{
-                      height: photo.height && photo.width 
-                        ? `${(photo.height / photo.width) * 100}%` 
-                        : 'auto'
-                    }}
-                  />
-                </Link>
-                <div className="p-3 flex justify-between items-center">
-                  <div className="flex-1 min-w-0">
-                    <p className="text-xs text-gray-500 truncate">{photo.original_filename}</p>
-                    {photo.capture_time && (
-                      <p className="text-xs text-gray-400 mt-1">
-                        {new Date(photo.capture_time).toLocaleDateString()}
-                      </p>
-                    )}
-                  </div>
-                  <button
-                    onClick={() => removeFavorite(photo.id)}
-                    className="ml-2 p-2.5 text-red-500 hover:bg-red-50 active:bg-red-100 rounded-full transition-all"
-                    title="Remove from favorites"
-                  >
-                    <Heart className="w-5 h-5 fill-current" />
-                  </button>
-                </div>
-              </div>
+              <PhotoCard
+                key={photo.id}
+                photo={photo}
+                slug={photo.event_slug}
+                fromFavorites={true}
+                favoritePhotos={photos.map(p => ({ id: p.id, slug: p.event_slug }))}
+                showRemoveFavorite={true}
+                onRemoveFavorite={removeFavorite}
+              />
             ))}
           </Masonry>
         )}
