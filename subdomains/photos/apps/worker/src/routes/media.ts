@@ -78,9 +78,9 @@ app.get('/media/:slug/ig/:photoId', async (c) => {
   try {
     // Check if event is password protected
     const event = await c.env.DB
-      .prepare('SELECT password_hash FROM events WHERE slug = ?')
+      .prepare('SELECT id, password_hash FROM events WHERE slug = ?')
       .bind(slug)
-      .first<{ password_hash: string | null }>();
+      .first<{ id: number; password_hash: string | null }>();
     
     if (!event) {
       return c.json({ error: 'Event not found' }, 404);
@@ -93,23 +93,44 @@ app.get('/media/:slug/ig/:photoId', async (c) => {
         return c.json({ error: 'Authentication required' }, 401);
       }
     }
+    
+    // Get photo metadata for filename
+    const photo = await c.env.DB
+      .prepare('SELECT capture_time FROM photos WHERE id = ? AND event_id = ?')
+      .bind(photoId, event.id)
+      .first<{ capture_time: string }>();
+    
+    if (!photo) {
+      return c.json({ error: 'Photo not found' }, 404);
+    }
+    
     // Try to get the Instagram version
     let key = `ig/${slug}/${photoId}.jpg`;
+    console.log(`[MEDIA] IG download request - trying key: ${key}`);
     let object = await c.env.PHOTOS_BUCKET.get(key);
     
     // If IG version doesn't exist, fall back to original
     if (!object) {
       key = `original/${slug}/${photoId}.jpg`;
+      console.log(`[MEDIA] IG version not found, falling back to: ${key}`);
       object = await c.env.PHOTOS_BUCKET.get(key);
     }
     
     if (!object) {
+      console.log(`[MEDIA] Neither IG nor original found for ${photoId}`);
       return c.json({ error: 'Photo not found' }, 404);
     }
+    
+    console.log(`[MEDIA] Serving IG download from ${key}, size: ${object.size} bytes`);
+    
+    // Generate filename: eventSlug_captureTime_photoId_small.jpg
+    const captureTime = photo.capture_time.replace(/[:.]/g, '-');
+    const filename = `${slug}_${captureTime}_${photoId}_small.jpg`;
     
     return new Response(object.body, {
       headers: {
         'Content-Type': 'image/jpeg',
+        'Content-Disposition': `attachment; filename="${filename}"`,
         'Cache-Control': 'public, max-age=31536000',
       },
     });
@@ -158,11 +179,15 @@ app.get('/media/:slug/original/:photoId', async (c) => {
     
     // Get from R2
     const key = `original/${slug}/${photoId}.jpg`;
+    console.log(`[MEDIA] Original download request - trying key: ${key}`);
     const object = await c.env.PHOTOS_BUCKET.get(key);
     
     if (!object) {
+      console.log(`[MEDIA] Original not found for ${photoId}`);
       return c.json({ error: 'Photo not found in storage' }, 404);
     }
+    
+    console.log(`[MEDIA] Serving original download from ${key}, size: ${object.size} bytes`);
     
     // Generate filename: eventSlug_captureTime_photoId.jpg
     const captureTime = photo.capture_time.replace(/[:.]/g, '-');

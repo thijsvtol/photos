@@ -1,6 +1,6 @@
 import React from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
-import { Camera, Heart, MapPin, LayoutGrid, Settings, LogOut } from 'lucide-react';
+import { Heart, MapPin, LayoutGrid, Settings, LogOut } from 'lucide-react';
 import { adminLogout } from '../api';
 
 const Navbar: React.FC = () => {
@@ -39,7 +39,7 @@ const Navbar: React.FC = () => {
         <div className="flex items-center justify-between h-16">
           {/* Logo */}
           <Link to="/" className="flex items-center gap-2 text-gray-900 hover:text-gray-700 transition-colors">
-            <Camera className="w-6 h-6" />
+            <img src="/favicon.svg" alt="Logo" className="w-6 h-6" />
             <span className="font-bold text-lg hidden sm:inline">Thijs van Tol</span>
             <span className="font-bold text-lg sm:hidden">TvT</span>
           </Link>

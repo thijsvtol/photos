@@ -635,9 +635,9 @@ app.delete('/events/:slug', async (c) => {
     // Delete from R2 (original, preview, ig sizes)
     for (const photo of photos.results || []) {
       try {
-        await c.env.PHOTOS_BUCKET.delete(`${slug}/original/${photo.id}.jpg`);
-        await c.env.PHOTOS_BUCKET.delete(`${slug}/preview/${photo.id}.jpg`);
-        await c.env.PHOTOS_BUCKET.delete(`${slug}/ig/${photo.id}.jpg`);
+        await c.env.PHOTOS_BUCKET.delete(`original/${slug}/${photo.id}.jpg`);
+        await c.env.PHOTOS_BUCKET.delete(`preview/${slug}/${photo.id}.jpg`);
+        await c.env.PHOTOS_BUCKET.delete(`ig/${slug}/${photo.id}.jpg`);
       } catch (err) {
         console.error(`Failed to delete photo ${photo.id} from R2:`, err);
         // Continue even if R2 delete fails
@@ -694,9 +694,9 @@ app.delete('/photos/:photoId', async (c) => {
     
     // Delete from R2
     try {
-      await c.env.PHOTOS_BUCKET.delete(`${photo.slug}/original/${photo.id}.jpg`);
-      await c.env.PHOTOS_BUCKET.delete(`${photo.slug}/preview/${photo.id}.jpg`);
-      await c.env.PHOTOS_BUCKET.delete(`${photo.slug}/ig/${photo.id}.jpg`);
+      await c.env.PHOTOS_BUCKET.delete(`original/${photo.slug}/${photo.id}.jpg`);
+      await c.env.PHOTOS_BUCKET.delete(`preview/${photo.slug}/${photo.id}.jpg`);
+      await c.env.PHOTOS_BUCKET.delete(`ig/${photo.slug}/${photo.id}.jpg`);
     } catch (err) {
       console.error(`Failed to delete photo ${photo.id} from R2:`, err);
       // Continue to delete from database even if R2 fails
