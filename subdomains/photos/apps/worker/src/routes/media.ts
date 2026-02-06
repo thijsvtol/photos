@@ -106,17 +106,22 @@ app.get('/media/:slug/ig/:photoId', async (c) => {
     
     // Try to get the Instagram version
     let key = `ig/${slug}/${photoId}.jpg`;
+    console.log(`[MEDIA] IG download request - trying key: ${key}`);
     let object = await c.env.PHOTOS_BUCKET.get(key);
     
     // If IG version doesn't exist, fall back to original
     if (!object) {
       key = `original/${slug}/${photoId}.jpg`;
+      console.log(`[MEDIA] IG version not found, falling back to: ${key}`);
       object = await c.env.PHOTOS_BUCKET.get(key);
     }
     
     if (!object) {
+      console.log(`[MEDIA] Neither IG nor original found for ${photoId}`);
       return c.json({ error: 'Photo not found' }, 404);
     }
+    
+    console.log(`[MEDIA] Serving IG download from ${key}, size: ${object.size} bytes`);
     
     // Generate filename: eventSlug_captureTime_photoId_small.jpg
     const captureTime = photo.capture_time.replace(/[:.]/g, '-');
@@ -174,11 +179,15 @@ app.get('/media/:slug/original/:photoId', async (c) => {
     
     // Get from R2
     const key = `original/${slug}/${photoId}.jpg`;
+    console.log(`[MEDIA] Original download request - trying key: ${key}`);
     const object = await c.env.PHOTOS_BUCKET.get(key);
     
     if (!object) {
+      console.log(`[MEDIA] Original not found for ${photoId}`);
       return c.json({ error: 'Photo not found in storage' }, 404);
     }
+    
+    console.log(`[MEDIA] Serving original download from ${key}, size: ${object.size} bytes`);
     
     // Generate filename: eventSlug_captureTime_photoId.jpg
     const captureTime = photo.capture_time.replace(/[:.]/g, '-');
