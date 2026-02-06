@@ -70,7 +70,6 @@ export async function resizeImage(
         canvas.toBlob(
           (blob) => {
             if (blob) {
-              console.log(`[CLIENT] Resized ${file.name}: ${file.size} bytes → ${blob.size} bytes (${Math.round(blob.size / file.size * 100)}%)`);
               resolve(blob);
             } else {
               reject(new Error('Failed to create blob from canvas'));

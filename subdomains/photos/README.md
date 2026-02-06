@@ -1,28 +1,50 @@
 # Photos Subdomain - photos.thijsvtol.nl
 
-A full-stack photo gallery application built with React + Vite + Tailwind (frontend) and Cloudflare Worker (backend), with D1 database and R2 storage.
+A full-stack photo gallery application built with React + Vite + Tailwind (frontend) and Cloudflare Workers (backend), with D1 database and R2 storage.
 
-## Features
+## 🏗️ Architecture
+
+### Frontend (`apps/web`)
+- **Framework**: React 18.3 + TypeScript
+- **Build Tool**: Vite 6.4
+- **Styling**: Tailwind CSS 3.4
+- **Routing**: React Router v6
+- **State**: React hooks + localStorage
+- **Storage**: IndexedDB (via Dexie) for upload queue persistence
+- **Maps**: Leaflet + React-Leaflet
+- **Image Processing**: Client-side Canvas API for preview generation
+
+### Backend (`apps/worker`)
+- **Runtime**: Cloudflare Workers
+- **Framework**: Hono 4.6
+- **Database**: Cloudflare D1 (SQLite)
+- **Storage**: Cloudflare R2 (S3-compatible)
+- **Auth**: HTTP-only cookies with session tokens
+- **Image Processing**: Client-side (Canvas API), watermarking server-side
+
+## ✨ Features
 
 ### Public Features
 - 🏠 **Landing Page**: Featured photo slideshow with auto-rotation
-- 📋 **Event List**: Browse all public events with preview images and tags
+- 📋 **Event List**: Browse all public events with preview images, tags, and locations
 - 🔐 **Password Protection**: Optional per-event password protection
-- 🖼️ **Gallery View**: Masonry layout with watermarked preview images
+- 🖼️ **Gallery View**: Masonry layout with responsive cards preserving aspect ratios
 - 📅 **Photo Sorting**: By date (asc/desc), filename (asc/desc), or featured status
 - 🏷️ **Tag Filtering**: Browse events by tags (e.g., "Schaatsen", "Skeeleren")
+- 🌍 **City Filtering**: Filter events by location/city
 - 📷 **Direct Photo Links**: Share individual photos with `/p/:eventSlug/:photoId`
 - 🎯 **Photo Navigation**: Seamless browsing without page reload (pushState)
-- ⌨️ **Keyboard Navigation**: Arrow keys, Escape to close
-- 📱 **Mobile-Friendly**: Touch gestures and responsive design
+- ⌨️ **Keyboard Navigation**: Arrow keys, Escape to close, slideshow mode
+- 📱 **Mobile-Friendly**: Touch gestures, native share API, and responsive design
 - 📸 **EXIF Metadata**: Full camera, lens, and settings display
 - 🗺️ **Map View**: Browse all photos with GPS coordinates on interactive map
 - ⬇️ **Download Options**:
   - Original full-resolution JPEG
-  - Small (1080px max)
+  - Preview (1920px @ 85% quality)
   - Batch download selected photos as ZIP (max 50)
-- ⭐ **Favorites**: Local favorites/selection (stored in browser)
-- 🔍 **My Favorites**: Dedicated page to view all favorited photos
+- ⭐ **Favorites**: Add photos to favorites, view in dedicated favorites page
+- 🎨 **Progressive Images**: Blur placeholder → full image transition
+- 🔄 **Smart Caching**: Preview images cached by browser
 
 ### Admin Features
 
@@ -38,15 +60,16 @@ A full-stack photo gallery application built with React + Vite + Tailwind (front
 #### Photo Upload (`/admin/events/:slug/upload`)
 - 📤 **Drag & Drop**: Upload multiple photos at once
 - 🔄 **Persistent Queue**: IndexedDB-backed upload queue survives page reloads
-- 📦 **Multipart Upload**: Efficient large file uploads to R2
+- 📦 **Multipart Upload**: Efficient large file uploads (5MB chunks) to R2
 - 📊 **EXIF Extraction**: Automatic metadata extraction (camera, lens, settings, GPS)
+- 🖼️ **Client-Side Preview Generation**: Creates 1920px previews in browser (85% quality)
+- 🎨 **Blur Placeholders**: Generates tiny blurred placeholders for progressive loading
 - 📈 **Event Analytics**:
   - Photo count and GPS coverage
   - Top 5 favorited photos with thumbnails
   - Camera models used
   - Featured photo count
-- 🗺️ **GPS Location Setter**: Interactive map to set event location
-- 🔄 **Bulk Thumbnail Regen**: Regenerate all thumbnails for an event
+- 🗺️ **GPS Location Setter**: Interactive map to view/verify photo locations
 - 🖼️ **Photo Manager Link**: Quick access to manage all photos
 
 #### Photo Manager (`/admin/events/:slug/photos`)

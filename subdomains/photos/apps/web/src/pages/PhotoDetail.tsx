@@ -320,7 +320,7 @@ const PhotoDetail: React.FC = () => {
             shareData.files = [file];
           }
         } catch (err) {
-          console.log('Could not include photo file in share, sharing URL only:', err);
+          // Could not include photo file, continue with URL only share
         }
         
         await (navigator as any).share(shareData);
