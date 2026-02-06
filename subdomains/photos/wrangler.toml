@@ -37,7 +37,9 @@ name = "photos-worker-dev"
 name = "photos-worker"
 routes = [
   { pattern = "photos.thijsvtol.nl/api/*", zone_name = "thijsvtol.nl" },
-  { pattern = "photos.thijsvtol.nl/media/*", zone_name = "thijsvtol.nl" }
+  { pattern = "photos.thijsvtol.nl/media/*", zone_name = "thijsvtol.nl" },
+  { pattern = "photos.thijsvtol.nl/sitemap.xml", zone_name = "thijsvtol.nl" },
+  { pattern = "photos.thijsvtol.nl/robots.txt", zone_name = "thijsvtol.nl" }
 ]
 
 [env.production.vars]
