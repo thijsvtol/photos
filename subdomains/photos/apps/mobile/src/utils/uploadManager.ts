@@ -58,7 +58,7 @@ export class UploadManager {
 
         // Read chunk from file
         const chunk = await FileSystem.readAsStringAsync(item.uri, {
-          encoding: FileSystem.EncodingType.Base64,
+          encoding: 'base64',
           position: start,
           length: end - start,
         });
