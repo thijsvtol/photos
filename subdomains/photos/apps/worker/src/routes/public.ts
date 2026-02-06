@@ -211,31 +211,4 @@ app.get('/api/tags', async (c) => {
   }
 });
 
-/**
- * GET /api/events/by-tag/:tagSlug
- * Returns events that have a specific tag
- */
-app.get('/api/events/by-tag/:tagSlug', async (c) => {
-  const tagSlug = c.req.param('tagSlug');
-  
-  try {
-    const events = await c.env.DB
-      .prepare(`
-        SELECT DISTINCT e.id, e.slug, e.name, e.inferred_date, e.created_at, (e.password_hash IS NOT NULL) as requires_password
-        FROM events e
-        JOIN event_tags et ON e.id = et.event_id
-        JOIN tags t ON et.tag_id = t.id
-        WHERE t.slug = ?
-        ORDER BY e.inferred_date DESC, e.created_at DESC
-      `)
-      .bind(tagSlug)
-      .all();
-    
-    return c.json({ events: events.results || [] });
-  } catch (error) {
-    console.error('Error fetching events by tag:', error);
-    return c.json({ error: 'Failed to fetch events' }, 500);
-  }
-});
-
 export default app;

@@ -134,11 +134,18 @@ app.get('/api/tags', async (c) => {
 app.get('/api/events/by-tag/:tagSlug', async (c) => {
   try {
     const tagSlug = c.req.param('tagSlug');
+    console.log('Fetching events for tag:', tagSlug);
     
+    // First get events with the tag
     const events = await c.env.DB
       .prepare(`
-        SELECT DISTINCT e.id, e.slug, e.name, e.inferred_date, e.created_at,
-               (e.password_hash IS NOT NULL) as requires_password
+        SELECT DISTINCT 
+          e.id, 
+          e.slug, 
+          e.name, 
+          e.inferred_date, 
+          e.created_at,
+          (e.password_hash IS NOT NULL) as requires_password
         FROM events e
         JOIN event_tags et ON e.id = et.event_id
         JOIN tags t ON et.tag_id = t.id
@@ -148,7 +155,40 @@ app.get('/api/events/by-tag/:tagSlug', async (c) => {
       .bind(tagSlug)
       .all();
     
-    return c.json({ events: events.results || [] });
+    console.log('Events found:', events.results?.length || 0);
+    
+    const eventsWithDetails = await Promise.all(
+      (events.results || []).map(async (event: any) => {
+        // Get tags for this event
+        const tagsResult = await c.env.DB
+          .prepare(`
+            SELECT t.id, t.name, t.slug
+            FROM tags t
+            JOIN event_tags et ON t.id = et.tag_id
+            WHERE et.event_id = ?
+          `)
+          .bind(event.id)
+          .all();
+        
+        // Get preview photo for public events
+        let previewPhotoId = null;
+        if (!event.requires_password) {
+          const previewResult = await c.env.DB
+            .prepare('SELECT id FROM photos WHERE event_id = ? LIMIT 1')
+            .bind(event.id)
+            .first();
+          previewPhotoId = previewResult?.id || null;
+        }
+        
+        return {
+          ...event,
+          tags: tagsResult.results || [],
+          preview_photo_id: previewPhotoId
+        };
+      })
+    );
+    
+    return c.json({ events: eventsWithDetails });
   } catch (error) {
     console.error('Error fetching events by tag:', error);
     return c.json({ error: 'Failed to fetch events' }, 500);

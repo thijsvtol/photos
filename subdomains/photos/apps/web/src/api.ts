@@ -6,6 +6,20 @@ const api = axios.create({
   withCredentials: true,
 });
 
+// Helper to get admin headers
+const getAdminHeaders = () => {
+  const headers: Record<string, string> = {
+    'X-Admin-Access': '1',
+  };
+  
+  // In development, add the shared secret
+  if (import.meta.env.DEV) {
+    headers['X-Admin-Secret'] = 'dev-admin-secret';
+  }
+  
+  return headers;
+};
+
 // Public API
 export const getEvents = async (): Promise<Event[]> => {
   const response = await api.get<{ events: Event[] }>('/events');
@@ -23,7 +37,7 @@ export const loginToEvent = async (slug: string, password: string): Promise<void
 
 export const adminLogout = async (): Promise<void> => {
   await api.post('/admin/logout', {}, {
-    headers: { 'X-Admin-Access': '1' },
+    headers: getAdminHeaders(),
   });
   // Clear admin session from localStorage
   localStorage.removeItem('isAdmin');
@@ -52,7 +66,7 @@ export const requestZip = async (slug: string, photoIds: string[]): Promise<Blob
 // Admin API
 export const createEvent = async (data: CreateEventRequest): Promise<Event> => {
   const response = await api.post<{ event: Event }>('/admin/events', data, {
-    headers: { 'X-Admin-Access': '1' },
+    headers: getAdminHeaders(),
   });
   return response.data.event;
 };
@@ -79,7 +93,7 @@ export const startUpload = async (
       iso, aperture, shutterSpeed, focalLength,
       cameraMake, cameraModel, lensModel
     },
-    { headers: { 'X-Admin-Access': '1' } }
+    { headers: getAdminHeaders() }
   );
   return response.data;
 };
@@ -96,7 +110,7 @@ export const uploadPart = async (
     chunk,
     { 
       headers: { 
-        'X-Admin-Access': '1',
+        ...getAdminHeaders(),
         'X-Upload-Id': uploadId,
         'Content-Type': 'application/octet-stream',
       } 
@@ -114,7 +128,7 @@ export const completeUpload = async (
   await api.post(
     `/admin/events/${slug}/uploads/${photoId}/complete`,
     { uploadId, parts },
-    { headers: { 'X-Admin-Access': '1' } }
+    { headers: getAdminHeaders() }
   );
 };
 
@@ -122,7 +136,7 @@ export const regenerateThumbnails = async (slug: string): Promise<{ count: numbe
   const response = await api.post(
     `/admin/events/${slug}/regenerate-thumbnails`,
     {},
-    { headers: { 'X-Admin-Access': '1' } }
+    { headers: getAdminHeaders() }
   );
   return response.data;
 };
@@ -137,7 +151,7 @@ export const setEventTags = async (slug: string, tagIds: number[]): Promise<void
   await api.post(
     `/admin/events/${slug}/tags`,
     { tagIds },
-    { headers: { 'X-Admin-Access': '1' } }
+    { headers: getAdminHeaders() }
   );
 };
 
@@ -199,7 +213,7 @@ export const setEventLocation = async (slug: string, latitude: number, longitude
 export const geocodeEventPhotos = async (slug: string): Promise<{ updated: number; total: number }> => {
   const response = await fetch(`/api/admin/events/${slug}/geocode-photos`, {
     method: 'POST',
-    headers: { 'X-Admin-Access': '1' },
+    headers: getAdminHeaders(),
     credentials: 'include',
   });
   if (!response.ok) throw new Error('Failed to geocode photos');
@@ -209,14 +223,14 @@ export const geocodeEventPhotos = async (slug: string): Promise<{ updated: numbe
 // Admin Stats API
 export const getAdminStats = async (): Promise<AdminStats> => {
   const response = await api.get<AdminStats>('/admin/stats', {
-    headers: { 'X-Admin-Access': '1' },
+    headers: getAdminHeaders(),
   });
   return response.data;
 };
 
 export const getEventStats = async (slug: string): Promise<EventStats> => {
   const response = await api.get<EventStats>(`/admin/events/${slug}/stats`, {
-    headers: { 'X-Admin-Access': '1' },
+    headers: getAdminHeaders(),
   });
   return response.data;
 };
@@ -224,13 +238,13 @@ export const getEventStats = async (slug: string): Promise<EventStats> => {
 // Event Management API
 export const updateEvent = async (slug: string, data: UpdateEventRequest): Promise<void> => {
   await api.put(`/admin/events/${slug}`, data, {
-    headers: { 'X-Admin-Access': '1' },
+    headers: getAdminHeaders(),
   });
 };
 
 export const deleteEvent = async (slug: string): Promise<{ success: boolean; deletedPhotos: number }> => {
   const response = await api.delete<{ success: boolean; deletedPhotos: number }>(`/admin/events/${slug}`, {
-    headers: { 'X-Admin-Access': '1' },
+    headers: getAdminHeaders(),
   });
   return response.data;
 };
@@ -238,26 +252,26 @@ export const deleteEvent = async (slug: string): Promise<{ success: boolean; del
 // Photo Management API
 export const deletePhoto = async (photoId: string): Promise<void> => {
   await api.delete(`/admin/photos/${photoId}`, {
-    headers: { 'X-Admin-Access': '1' },
+    headers: getAdminHeaders(),
   });
 };
 
 // Tag Management API
 export const createTag = async (data: CreateTagRequest): Promise<Tag> => {
   const response = await api.post<{ tag: Tag }>('/admin/tags', data, {
-    headers: { 'X-Admin-Access': '1' },
+    headers: getAdminHeaders(),
   });
   return response.data.tag;
 };
 
 export const updateTag = async (id: number, data: UpdateTagRequest): Promise<void> => {
   await api.put(`/admin/tags/${id}`, data, {
-    headers: { 'X-Admin-Access': '1' },
+    headers: getAdminHeaders(),
   });
 };
 
 export const deleteTag = async (id: number): Promise<void> => {
   await api.delete(`/admin/tags/${id}`, {
-    headers: { 'X-Admin-Access': '1' },
+    headers: getAdminHeaders(),
   });
 };
