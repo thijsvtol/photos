@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import {
   View,
   Text,
@@ -28,7 +28,9 @@ export const PhotoUploadScreen: React.FC<PhotoUploadScreenProps> = ({
 }) => {
   const [uploadQueue, setUploadQueue] = useState<UploadQueueItem[]>([]);
   const [uploading, setUploading] = useState(false);
-  const uploadManager = new UploadManager(apiClient);
+  
+  // Create upload manager once with useMemo to avoid recreation on every render
+  const uploadManager = useMemo(() => new UploadManager(apiClient), [apiClient]);
 
   useEffect(() => {
     requestPermissions();
@@ -57,7 +59,7 @@ export const PhotoUploadScreen: React.FC<PhotoUploadScreenProps> = ({
 
       if (!result.canceled && result.assets) {
         const newItems: UploadQueueItem[] = result.assets.map((asset) => ({
-          id: `photo-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+          id: `photo-${Date.now()}-${crypto.randomUUID()}`,
           uri: asset.uri,
           filename: asset.fileName || `photo-${Date.now()}.jpg`,
           eventSlug: event.slug,
