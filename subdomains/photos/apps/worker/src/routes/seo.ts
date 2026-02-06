@@ -61,8 +61,23 @@ seo.get('/sitemap.xml', async (c) => {
     for (const event of events.results) {
       sitemap += '  <url>\n';
       sitemap += `    <loc>${baseUrl}/events/${event.slug}</loc>\n`;
-      const lastmod = (event.inferred_date || event.created_at) as string;
-      sitemap += `    <lastmod>${lastmod.split('T')[0]}</lastmod>\n`;
+      
+      // Ensure valid date format (YYYY-MM-DD)
+      const rawDate = event.inferred_date || event.created_at;
+      let lastmod = now; // fallback to current date
+      if (rawDate) {
+        try {
+          const dateStr = String(rawDate).split('T')[0];
+          // Validate it's a proper date format
+          if (/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) {
+            lastmod = dateStr;
+          }
+        } catch (e) {
+          // Use fallback
+        }
+      }
+      
+      sitemap += `    <lastmod>${lastmod}</lastmod>\n`;
       sitemap += '    <changefreq>weekly</changefreq>\n';
       sitemap += '    <priority>0.8</priority>\n';
       sitemap += '  </url>\n';
@@ -72,7 +87,22 @@ seo.get('/sitemap.xml', async (c) => {
     for (const photo of photos.results.slice(0, 500)) {
       sitemap += '  <url>\n';
       sitemap += `    <loc>${baseUrl}/p/${photo.event_slug}/${photo.id}</loc>\n`;
-      sitemap += `    <lastmod>${(photo.uploaded_at as string).split('T')[0]}</lastmod>\n`;
+      
+      // Ensure valid date format (YYYY-MM-DD)
+      let lastmod = now; // fallback to current date
+      if (photo.uploaded_at) {
+        try {
+          const dateStr = String(photo.uploaded_at).split('T')[0];
+          // Validate it's a proper date format
+          if (/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) {
+            lastmod = dateStr;
+          }
+        } catch (e) {
+          // Use fallback
+        }
+      }
+      
+      sitemap += `    <lastmod>${lastmod}</lastmod>\n`;
       sitemap += '    <changefreq>monthly</changefreq>\n';
       sitemap += '    <priority>0.6</priority>\n';
       sitemap += '  </url>\n';
