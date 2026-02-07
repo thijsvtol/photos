@@ -7,6 +7,7 @@ import mediaRoutes from './routes/media';
 import adminRoutes from './routes/admin';
 import zipRoutes from './routes/zip';
 import featuresRoutes from './routes/features';
+import favoritesRoutes from './routes/favorites';
 import { seo } from './routes/seo';
 
 const app = new Hono<{ Bindings: Env }>();
@@ -16,7 +17,7 @@ app.use('/*', cors({
   origin: (origin) => origin, // Allow same origin
   credentials: true,
   allowMethods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-  allowHeaders: ['Content-Type', 'Authorization', 'X-Admin-Access'],
+  allowHeaders: ['Content-Type', 'Authorization', 'X-Admin-Access', 'Cf-Access-Jwt-Assertion'],
 }));
 
 // Mount route modules
@@ -26,6 +27,7 @@ app.route('/', mediaRoutes);
 app.route('/api/admin', adminRoutes);
 app.route('/', zipRoutes);
 app.route('/', featuresRoutes);
+app.route('/', favoritesRoutes);
 app.route('/', seo);
 
 // Health check endpoint

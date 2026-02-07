@@ -1,64 +1,36 @@
 import React, { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { Heart, Download } from 'lucide-react';
+import { Heart, Download, LogIn } from 'lucide-react';
 import Masonry from 'react-masonry-css';
 import Navbar from '../components/Navbar';
 import Footer from '../components/Footer';
 import PhotoCard from '../components/PhotoCard';
 import SEO from '../components/SEO';
-import { getPhoto, requestZip } from '../api';
-import type { Photo } from '../types';
-
-interface PhotoWithEvent extends Photo {
-  event_slug: string;
-}
+import { getUserFavorites, removeFavorite as removeFavoriteAPI, requestZip, type FavoritePhoto } from '../api';
+import { useAuth } from '../contexts/AuthContext';
 
 const MyFavorites: React.FC = () => {
-  const [photos, setPhotos] = useState<PhotoWithEvent[]>([]);
+  const { isAuthenticated, loading: authLoading, login } = useAuth();
+  const [photos, setPhotos] = useState<FavoritePhoto[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [downloading, setDownloading] = useState(false);
 
   useEffect(() => {
-    loadFavorites();
-  }, []);
+    if (!authLoading) {
+      if (isAuthenticated) {
+        loadFavorites();
+      } else {
+        setLoading(false);
+      }
+    }
+  }, [isAuthenticated, authLoading]);
 
   const loadFavorites = async () => {
     try {
       setLoading(true);
-      
-      // Get favorite photo IDs from localStorage
-      const favoritesStr = localStorage.getItem('user_favorites');
-      if (!favoritesStr) {
-        setPhotos([]);
-        setLoading(false);
-        return;
-      }
-      
-      const favorites = JSON.parse(favoritesStr) as Array<{ photoId: string; slug: string; timestamp: number }>;
-      
-      // Load photo details for each favorite
-      const photoPromises = favorites.map(async (fav) => {
-        try {
-          const photo = await getPhoto(fav.slug, fav.photoId);
-          return { ...photo, event_slug: fav.slug } as PhotoWithEvent;
-        } catch (err) {
-          console.error(`Failed to load photo ${fav.photoId}:`, err);
-          return null;
-        }
-      });
-      
-      const loadedPhotos = await Promise.all(photoPromises);
-      const validPhotos = loadedPhotos.filter((p): p is PhotoWithEvent => p !== null && p.event_slug !== undefined);
-      
-      // Sort by timestamp (most recently favorited first)
-      const sortedPhotos = validPhotos.sort((a, b) => {
-        const aFav = favorites.find(f => f.photoId === a.id);
-        const bFav = favorites.find(f => f.photoId === b.id);
-        return (bFav?.timestamp || 0) - (aFav?.timestamp || 0);
-      });
-      
-      setPhotos(sortedPhotos);
+      const favorites = await getUserFavorites();
+      setPhotos(favorites);
       setError(null);
     } catch (err) {
       setError('Failed to load your favorites');
@@ -68,13 +40,13 @@ const MyFavorites: React.FC = () => {
     }
   };
 
-  const removeFavorite = (photoId: string) => {
-    const favoritesStr = localStorage.getItem('user_favorites');
-    if (favoritesStr) {
-      const favorites = JSON.parse(favoritesStr) as Array<{ photoId: string; slug: string; timestamp: number }>;
-      const updated = favorites.filter(f => f.photoId !== photoId);
-      localStorage.setItem('user_favorites', JSON.stringify(updated));
+  const handleRemoveFavorite = async (photoId: string) => {
+    try {
+      await removeFavoriteAPI(photoId);
       setPhotos(photos.filter(p => p.id !== photoId));
+    } catch (err) {
+      console.error('Failed to remove favorite:', err);
+      alert('Failed to remove from favorites. Please try again.');
     }
   };
 
@@ -128,6 +100,37 @@ const MyFavorites: React.FC = () => {
       setDownloading(false);
     }
   };
+
+  // Show login prompt if not authenticated
+  if (!authLoading && !isAuthenticated) {
+    return (
+      <div className="min-h-screen bg-gray-50 flex flex-col">
+        <SEO
+          title="My Favorites - Thijs van Tol Photos"
+          description="Your personal collection of favorite photos from various events. Login required."
+          url="https://photos.thijsvtol.nl/favorites"
+        />
+        <Navbar />
+        <div className="max-w-7xl mx-auto px-3 sm:px-4 lg:px-8 py-8 flex-grow w-full">
+          <div className="text-center py-16 px-4 bg-white rounded-xl shadow-lg max-w-2xl mx-auto">
+            <Heart className="w-20 h-20 text-red-500 mx-auto mb-4" />
+            <h1 className="text-3xl font-bold text-gray-900 mb-4">Login Required</h1>
+            <p className="text-gray-600 text-lg mb-8">
+              You need to be logged in to view and manage your favorites.
+            </p>
+            <button
+              onClick={login}
+              className="inline-flex items-center gap-2 px-8 py-4 bg-blue-600 text-white rounded-xl hover:bg-blue-700 active:scale-95 transition-all font-semibold shadow-md"
+            >
+              <LogIn className="w-5 h-5" />
+              Login with Cloudflare Access
+            </button>
+          </div>
+        </div>
+        <Footer />
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-gray-50 flex flex-col">
@@ -208,7 +211,7 @@ const MyFavorites: React.FC = () => {
                 fromFavorites={true}
                 favoritePhotos={photos.map(p => ({ id: p.id, slug: p.event_slug }))}
                 showRemoveFavorite={true}
-                onRemoveFavorite={removeFavorite}
+                onRemoveFavorite={handleRemoveFavorite}
               />
             ))}
           </Masonry>

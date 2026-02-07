@@ -314,3 +314,41 @@ export const deleteTag = async (id: number): Promise<void> => {
     headers: getAdminHeaders(),
   });
 };
+
+// User Favorites API
+export interface FavoritePhoto extends Photo {
+  event_slug: string;
+  event_name: string;
+  favorited_at: string;
+}
+
+export interface FavoriteIdInfo {
+  photoId: string;
+  eventId: number;
+}
+
+export const getUserFavorites = async (): Promise<FavoritePhoto[]> => {
+  const response = await api.get<{ favorites: FavoritePhoto[] }>('/favorites');
+  return response.data.favorites;
+};
+
+export const getUserFavoriteIds = async (): Promise<FavoriteIdInfo[]> => {
+  const response = await api.get<{ favorites: FavoriteIdInfo[] }>('/favorites/ids');
+  return response.data.favorites;
+};
+
+export const addFavorite = async (photoId: string): Promise<void> => {
+  await api.post(`/favorites/${photoId}`);
+};
+
+export const removeFavorite = async (photoId: string): Promise<void> => {
+  await api.delete(`/favorites/${photoId}`);
+};
+
+export const toggleFavorite = async (photoId: string, isFavorite: boolean): Promise<void> => {
+  if (isFavorite) {
+    await removeFavorite(photoId);
+  } else {
+    await addFavorite(photoId);
+  }
+};

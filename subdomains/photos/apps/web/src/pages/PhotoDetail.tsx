@@ -4,13 +4,15 @@ import { Maximize, Minimize, Share2, X, Heart, Play, Pause } from 'lucide-react'
 import Navbar from '../components/Navbar';
 import Footer from '../components/Footer';
 import SEO from '../components/SEO';
-import { getEvent, getPhoto, getPhotos, loginToEvent, getPreviewUrl, downloadOriginal, downloadSmall } from '../api';
+import { getEvent, getPhoto, getPhotos, loginToEvent, getPreviewUrl, downloadOriginal, downloadSmall, toggleFavorite as toggleFavoriteAPI, getUserFavoriteIds } from '../api';
 import type { Event, Photo } from '../types';
+import { useAuth } from '../contexts/AuthContext';
 
 const PhotoDetail: React.FC = () => {
   const { slug, photoId } = useParams<{ slug: string; photoId: string }>();
   const navigate = useNavigate();
   const location = useLocation();
+  const { isAuthenticated, login } = useAuth();
   const [event, setEvent] = useState<Event | null>(null);
   const [photo, setPhoto] = useState<Photo | null>(null);
   const [allPhotos, setAllPhotos] = useState<Photo[]>([]);
@@ -69,16 +71,21 @@ const PhotoDetail: React.FC = () => {
 
   // Check if current photo is favorited
   useEffect(() => {
-    if (photo) {
-      const favoritesStr = localStorage.getItem('user_favorites');
-      if (favoritesStr) {
-        const favorites = JSON.parse(favoritesStr) as Array<{ photoId: string; slug: string; timestamp: number }>;
-        setIsFavorited(favorites.some(f => f.photoId === photo.id));
+    const loadFavoriteStatus = async () => {
+      if (photo && isAuthenticated) {
+        try {
+          const favorites = await getUserFavoriteIds();
+          setIsFavorited(favorites.some(f => f.photoId === photo.id));
+        } catch (err) {
+          console.error('Failed to load favorite status:', err);
+          setIsFavorited(false);
+        }
       } else {
         setIsFavorited(false);
       }
-    }
-  }, [photo]);
+    };
+    loadFavoriteStatus();
+  }, [photo, isAuthenticated]);
 
   // Slideshow timer
   useEffect(() => {
@@ -365,25 +372,25 @@ const PhotoDetail: React.FC = () => {
     setShowShareMenu(false);
   };
 
-  const toggleFavorite = () => {
+  const toggleFavorite = async () => {
     if (!photo || !slug) return;
     
-    const favoritesStr = localStorage.getItem('user_favorites');
-    const favorites = favoritesStr ? JSON.parse(favoritesStr) as Array<{ photoId: string; slug: string; timestamp: number }> : [];
-    
-    const existingIndex = favorites.findIndex(f => f.photoId === photo.id);
-    
-    if (existingIndex >= 0) {
-      // Remove from favorites
-      favorites.splice(existingIndex, 1);
-      setIsFavorited(false);
-    } else {
-      // Add to favorites
-      favorites.push({ photoId: photo.id, slug, timestamp: Date.now() });
-      setIsFavorited(true);
+    // Require authentication for favorites
+    if (!isAuthenticated) {
+      const shouldLogin = window.confirm('You need to be logged in to save favorites. Would you like to login now?');
+      if (shouldLogin) {
+        login();
+      }
+      return;
     }
     
-    localStorage.setItem('user_favorites', JSON.stringify(favorites));
+    try {
+      await toggleFavoriteAPI(photo.id, isFavorited);
+      setIsFavorited(!isFavorited);
+    } catch (err) {
+      console.error('Failed to toggle favorite:', err);
+      alert('Failed to update favorite. Please try again.');
+    }
   };
 
   if (loading) {

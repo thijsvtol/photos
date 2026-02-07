@@ -1,13 +1,29 @@
-import React from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
-import { Heart, MapPin, LayoutGrid, Settings, LogOut } from 'lucide-react';
+import { Heart, MapPin, LayoutGrid, Settings, LogOut, User, LogIn, ChevronDown } from 'lucide-react';
 import { adminLogout } from '../api';
+import { useAuth } from '../contexts/AuthContext';
 
 const Navbar: React.FC = () => {
   const location = useLocation();
   const navigate = useNavigate();
+  const { user, isAuthenticated, login, logout } = useAuth();
+  const [showUserMenu, setShowUserMenu] = useState(false);
+  const menuRef = useRef<HTMLDivElement>(null);
   const isAdmin = localStorage.getItem('isAdmin') === 'true';
   const isOnAdminPage = location.pathname.startsWith('/admin');
+  
+  // Close menu when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (menuRef.current && !menuRef.current.contains(event.target as Node)) {
+        setShowUserMenu(false);
+      }
+    };
+    
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
   
   const isActive = (path: string) => {
     if (path === '/events') {
@@ -23,7 +39,7 @@ const Navbar: React.FC = () => {
       : `${base} text-gray-600 hover:bg-gray-100`;
   };
 
-  const handleLogout = async () => {
+  const handleAdminLogout = async () => {
     try {
       await adminLogout();
       navigate('/events');
@@ -31,6 +47,11 @@ const Navbar: React.FC = () => {
     } catch (error) {
       console.error('Logout failed:', error);
     }
+  };
+
+  const handleUserLogout = () => {
+    setShowUserMenu(false);
+    logout();
   };
 
   return (
@@ -64,23 +85,78 @@ const Navbar: React.FC = () => {
               <span className="sr-only sm:hidden">Map</span>
             </Link>
             
+            {/* Admin button hidden for now
             <Link to="/admin" className={linkClass('/admin')}>
               <Settings className="w-4 h-4 sm:mr-0" aria-hidden="true" />
               <span className="hidden sm:inline">Admin</span>
               <span className="sr-only sm:hidden">Admin</span>
             </Link>
+            */}
 
             {(isAdmin || isOnAdminPage) && (
               <button
-                onClick={handleLogout}
+                onClick={handleAdminLogout}
                 className="flex items-center gap-2 px-3 py-2 rounded-lg transition-colors text-sm font-medium text-red-600 hover:bg-red-50"
-                aria-label="Logout"
+                aria-label="Admin Logout"
               >
                 <LogOut className="w-4 h-4 sm:mr-0" aria-hidden="true" />
-                <span className="hidden sm:inline">Logout</span>
-                <span className="sr-only sm:hidden">Logout</span>
+                <span className="hidden sm:inline">Admin Logout</span>
+                <span className="sr-only sm:hidden">Admin Logout</span>
               </button>
             )}
+
+            {/* User Menu */}
+            <div className="relative ml-2" ref={menuRef}>
+              {isAuthenticated ? (
+                <>
+                  <button
+                    onClick={() => setShowUserMenu(!showUserMenu)}
+                    className="flex items-center gap-2 px-3 py-2 rounded-lg transition-colors text-sm font-medium text-gray-700 hover:bg-gray-100"
+                    aria-label="User menu"
+                  >
+                    <User className="w-4 h-4" aria-hidden="true" />
+                    <span className="hidden lg:inline max-w-[150px] truncate">
+                      {user?.name || user?.email}
+                    </span>
+                    <ChevronDown className="w-3 h-3" aria-hidden="true" />
+                  </button>
+                  
+                  {showUserMenu && (
+                    <div className="absolute right-0 mt-2 w-64 bg-white rounded-lg shadow-lg border border-gray-200 py-2">
+                      <div className="px-4 py-2 border-b border-gray-100">
+                        <p className="text-sm font-medium text-gray-900 truncate">
+                          {user?.name || 'User'}
+                        </p>
+                        <p className="text-xs text-gray-500 truncate">
+                          {user?.email}
+                        </p>
+                        {user?.favorites_count !== undefined && (
+                          <p className="text-xs text-gray-500 mt-1">
+                            {user.favorites_count} favorite{user.favorites_count !== 1 ? 's' : ''}
+                          </p>
+                        )}
+                      </div>
+                      <button
+                        onClick={handleUserLogout}
+                        className="w-full text-left px-4 py-2 text-sm text-red-600 hover:bg-red-50 flex items-center gap-2"
+                      >
+                        <LogOut className="w-4 h-4" />
+                        Logout
+                      </button>
+                    </div>
+                  )}
+                </>
+              ) : (
+                <button
+                  onClick={login}
+                  className="flex items-center gap-2 px-3 py-2 rounded-lg transition-colors text-sm font-medium text-gray-700 hover:bg-gray-100"
+                  aria-label="Login"
+                >
+                  <LogIn className="w-4 h-4" aria-hidden="true" />
+                  <span className="hidden sm:inline">Login</span>
+                </button>
+              )}
+            </div>
           </div>
         </div>
       </div>

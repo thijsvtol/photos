@@ -100,3 +100,38 @@ export interface EventSession {
   authenticated: boolean;
   timestamp: number;
 }
+
+// User from Cloudflare Access JWT
+export interface User {
+  id: string; // sub claim from JWT
+  email: string;
+  name?: string;
+}
+
+// Cloudflare Access JWT payload
+export interface CloudflareAccessJWT {
+  sub: string; // User ID
+  email: string;
+  name?: string;
+  iss: string;
+  aud: string[];
+  exp: number;
+  iat: number;
+}
+
+// User database model
+export interface DBUser {
+  id: string;
+  email: string;
+  name: string | null;
+  created_at: string;
+  last_login: string;
+}
+
+// User favorite in database
+export interface UserFavorite {
+  user_id: string;
+  photo_id: string;
+  event_id: number;
+  created_at: string;
+}

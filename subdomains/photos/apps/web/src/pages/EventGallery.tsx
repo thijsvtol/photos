@@ -6,12 +6,14 @@ import Navbar from '../components/Navbar';
 import Footer from '../components/Footer';
 import PhotoCard from '../components/PhotoCard';
 import SEO from '../components/SEO';
-import { getEvent, getPhotos, loginToEvent, getPreviewUrl, requestZip, setPhotoFeatured } from '../api';
+import { getEvent, getPhotos, loginToEvent, getPreviewUrl, requestZip, setPhotoFeatured, getUserFavoriteIds, toggleFavorite as toggleFavoriteAPI } from '../api';
 import type { Event, Photo } from '../types';
+import { useAuth } from '../contexts/AuthContext';
 
 const EventGallery: React.FC = () => {
   const { slug } = useParams<{ slug: string }>();
   const location = useLocation();
+  const { isAuthenticated, login } = useAuth();
   const isAdminView = location.pathname.startsWith('/admin');
   const [event, setEvent] = useState<Event | null>(null);
   const [photos, setPhotos] = useState<Photo[]>([]);
@@ -32,14 +34,22 @@ const EventGallery: React.FC = () => {
   }, [slug]);
 
   useEffect(() => {
-    // Load user favorites from localStorage
-    const favoritesStr = localStorage.getItem('user_favorites');
-    if (favoritesStr) {
-      const favorites = JSON.parse(favoritesStr) as Array<{ photoId: string; slug: string; timestamp: number }>;
-      const favoriteIds = new Set(favorites.map(f => f.photoId));
-      setUserFavorites(favoriteIds);
-    }
-  }, []);
+    // Load user favorites from API if authenticated
+    const loadFavorites = async () => {
+      if (isAuthenticated) {
+        try {
+          const favorites = await getUserFavoriteIds();
+          const favoriteIds = new Set(favorites.map(f => f.photoId));
+          setUserFavorites(favoriteIds);
+        } catch (err) {
+          console.error('Failed to load favorites:', err);
+        }
+      } else {
+        setUserFavorites(new Set());
+      }
+    };
+    loadFavorites();
+  }, [isAuthenticated]);
 
   useEffect(() => {
     // Load selected photos from localStorage (for download selection)
@@ -133,23 +143,31 @@ const EventGallery: React.FC = () => {
     setSelectedPhotos(newSelected);
   };
 
-  const toggleFavorite = (photoId: string, isFavorited: boolean) => {
-    const favoritesStr = localStorage.getItem('user_favorites');
-    let favorites = favoritesStr ? JSON.parse(favoritesStr) as Array<{ photoId: string; slug: string; timestamp: number }> : [];
-    
-    if (isFavorited) {
-      // Remove from favorites
-      favorites = favorites.filter(f => f.photoId !== photoId);
-    } else {
-      // Add to favorites
-      favorites.push({ photoId, slug: slug!, timestamp: Date.now() });
+  const toggleFavorite = async (photoId: string, isFavorited: boolean) => {
+    // Require authentication for favorites
+    if (!isAuthenticated) {
+      const shouldLogin = window.confirm('You need to be logged in to save favorites. Would you like to login now?');
+      if (shouldLogin) {
+        login();
+      }
+      return;
     }
     
-    localStorage.setItem('user_favorites', JSON.stringify(favorites));
-    
-    // Update local state
-    const favoriteIds = new Set(favorites.map(f => f.photoId));
-    setUserFavorites(favoriteIds);
+    try {
+      await toggleFavoriteAPI(photoId, isFavorited);
+      
+      // Update local state
+      const newFavorites = new Set(userFavorites);
+      if (isFavorited) {
+        newFavorites.delete(photoId);
+      } else {
+        newFavorites.add(photoId);
+      }
+      setUserFavorites(newFavorites);
+    } catch (err) {
+      console.error('Failed to toggle favorite:', err);
+      alert('Failed to update favorite. Please try again.');
+    }
   };
 
   const toggleFeatured = async (photoId: string, currentStatus: boolean) => {
