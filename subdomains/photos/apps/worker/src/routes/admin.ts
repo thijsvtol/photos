@@ -80,9 +80,14 @@ app.post('/events/:slug/uploads/start', async (c) => {
       return c.json({ error: 'Event not found' }, 404);
     }
     
+    // Determine file extension based on fileType
+    const fileType = body.fileType || 'image/jpeg';
+    const isVideo = fileType === 'video/mp4';
+    const extension = isVideo ? 'mp4' : 'jpg';
+    
     // Determine upload path based on isPreview flag
     const folder = body.isPreview ? 'preview' : 'original';
-    const key = `${folder}/${slug}/${body.photoId}.jpg`;
+    const key = `${folder}/${slug}/${body.photoId}.${extension}`;
     
     // Create multipart upload in R2
     const multipartUpload = await c.env.PHOTOS_BUCKET.createMultipartUpload(key);
@@ -92,12 +97,11 @@ app.post('/events/:slug/uploads/start', async (c) => {
       const captureTime = body.captureTime || new Date().toISOString();
       await c.env.DB
         .prepare(`INSERT INTO photos (
-          id, event_id, original_filename, capture_time, width, height,
+          id, event_id, original_filename, file_type, capture_time, width, height,
           iso, aperture, shutter_speed, focal_length, camera_make, camera_model, lens_model,
           latitude, longitude, blur_placeholder
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
-        .bind(
-          body.photoId, event.id, body.filename, captureTime, 
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)        .bind(
+          body.photoId, event.id, body.filename, fileType, captureTime, 
           body.width || null, body.height || null,
           body.iso || null, body.aperture || null, body.shutterSpeed || null,
           body.focalLength || null, body.cameraMake || null, body.cameraModel || null,
@@ -143,6 +147,7 @@ app.put('/events/:slug/uploads/:photoId/parts/:partNumber', async (c) => {
   
   try {
     const uploadId = c.req.header('X-Upload-Id');
+    const fileType = c.req.header('X-File-Type') || 'image/jpeg';
     
     if (!uploadId) {
       return c.json({ error: 'X-Upload-Id header is required' }, 400);
@@ -152,8 +157,10 @@ app.put('/events/:slug/uploads/:photoId/parts/:partNumber', async (c) => {
       return c.json({ error: 'Invalid part number' }, 400);
     }
     
+    const isVideo = fileType === 'video/mp4';
+    const extension = isVideo ? 'mp4' : 'jpg';
     const folder = isPreview ? 'preview' : 'original';
-    const key = `${folder}/${slug}/${photoId}.jpg`;
+    const key = `${folder}/${slug}/${photoId}.${extension}`;
     
     // Get the body as ArrayBuffer
     const body = await c.req.arrayBuffer();
@@ -188,8 +195,18 @@ app.post('/events/:slug/uploads/:photoId/complete', async (c) => {
       return c.json({ error: 'uploadId and parts are required' }, 400);
     }
     
+    // Get file type from database to determine extension
+    const photo = await c.env.DB
+      .prepare('SELECT file_type FROM photos WHERE id = ?')
+      .bind(photoId)
+      .first<{ file_type: string }>();
+    
+    const fileType = photo?.file_type || 'image/jpeg';
+    const isVideo = fileType === 'video/mp4';
+    const extension = isVideo ? 'mp4' : 'jpg';
+    
     const folder = isPreview ? 'preview' : 'original';
-    const key = `${folder}/${slug}/${photoId}.jpg`;
+    const key = `${folder}/${slug}/${photoId}.${extension}`;
     
     // Complete the multipart upload
     const upload = c.env.PHOTOS_BUCKET.resumeMultipartUpload(key, body.uploadId);

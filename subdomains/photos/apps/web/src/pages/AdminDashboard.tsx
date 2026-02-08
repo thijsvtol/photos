@@ -1,6 +1,8 @@
 import React, { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import Navbar from '../components/Navbar';import TagManager from '../components/TagManager';import { getEvents, createEvent, getAdminStats, updateEvent, deleteEvent } from '../api';
+import Navbar from '../components/Navbar';
+import TagManager from '../components/TagManager';
+import { getEvents, createEvent, getAdminStats, updateEvent, deleteEvent, setEventTags } from '../api';
 import type { Event, AdminStats, UpdateEventRequest } from '../types';
 
 const AdminDashboard: React.FC = () => {
@@ -19,6 +21,7 @@ const AdminDashboard: React.FC = () => {
   const [editName, setEditName] = useState('');
   const [editPassword, setEditPassword] = useState('');
   const [editDescription, setEditDescription] = useState('');
+  const [editTagIds, setEditTagIds] = useState<number[]>([]);
   const [changePassword, setChangePassword] = useState(false);
   
   // Delete modal state
@@ -78,6 +81,7 @@ const AdminDashboard: React.FC = () => {
   const openEditModal = (event: Event) => {
     setEditingEvent(event);
     setEditName(event.name);
+    setEditTagIds(event.tags?.map(t => t.id) || []);
     setEditDescription(event.description || '');
     setEditPassword('');
     setChangePassword(false);
@@ -102,6 +106,13 @@ const AdminDashboard: React.FC = () => {
         updates.password = editPassword; // Empty string to remove password
       }
 
+      // Update tags separately
+      const currentTagIds = editingEvent.tags?.map(t => t.id) || [];
+      const tagsChanged = JSON.stringify(editTagIds.sort()) !== JSON.stringify(currentTagIds.sort());
+      if (tagsChanged) {
+        await setEventTags(editingEvent.slug, editTagIds);
+      }
+      
       await updateEvent(editingEvent.slug, updates);
       
       setSuccess('Event updated successfully!');
@@ -398,7 +409,11 @@ const AdminDashboard: React.FC = () => {
                     
                     {/* Event Tags */}
                     <div>
-                      <TagManager eventSlug={editingEvent.slug} initialTags={editingEvent.tags} />
+                      <TagManager 
+                        eventSlug={editingEvent.slug} 
+                        initialTags={editingEvent.tags}
+                        onChange={setEditTagIds}
+                      />
                     </div>
                   </div>
                   

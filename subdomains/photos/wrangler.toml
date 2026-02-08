@@ -45,6 +45,7 @@ routes = [
 
 [env.production.vars]
 ENVIRONMENT = "production"
+ADMIN_EMAILS = "vantol.thijs@gmail.com"
 
 [[env.production.d1_databases]]
 binding = "DB"

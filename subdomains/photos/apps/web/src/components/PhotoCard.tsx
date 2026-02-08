@@ -41,6 +41,8 @@ const PhotoCard: React.FC<PhotoCardProps> = ({
   onRemoveFavorite,
   userFavorites = new Set(),
 }) => {
+  const isVideo = photo.file_type === 'video/mp4';
+  
   return (
     <div className="mb-2 sm:mb-4 relative group bg-white rounded-xl overflow-hidden shadow-md hover:shadow-lg active:scale-[0.98] transition-all">
       <Link
@@ -58,13 +60,27 @@ const PhotoCard: React.FC<PhotoCardProps> = ({
           sessionStorage.setItem(`gallery_scroll_${slug}`, window.scrollY.toString());
         }}
       >
-        <ProgressiveImage
-          src={getPreviewUrl(slug, photo.id)}
-          blurDataUrl={photo.blur_placeholder}
-          alt={photo.original_filename}
-          className="w-full h-full object-cover"
-          loading="lazy"
-        />
+        {isVideo ? (
+          <video
+            src={getPreviewUrl(slug, photo.id, photo.file_type)}
+            className="w-full h-full object-cover"
+            muted
+            playsInline
+            onMouseEnter={(e) => e.currentTarget.play()}
+            onMouseLeave={(e) => {
+              e.currentTarget.pause();
+              e.currentTarget.currentTime = 0;
+            }}
+          />
+        ) : (
+          <ProgressiveImage
+            src={getPreviewUrl(slug, photo.id, photo.file_type)}
+            blurDataUrl={photo.blur_placeholder}
+            alt={photo.original_filename}
+            className="w-full h-full object-cover"
+            loading="lazy"
+          />
+        )}
         {/* User favorite indicator */}
         {userFavorites.has(photo.id) && (
           <div className="absolute top-2 right-2 bg-black/50 backdrop-blur-sm text-white p-1.5 rounded-full">
@@ -112,8 +128,8 @@ const PhotoCard: React.FC<PhotoCardProps> = ({
               )}
               {showFeatured && onToggleFeatured && (
                 <button
-                  onClick={() => onToggleFeatured(photo.id, photo.is_featured || false)}
-                  className={`px-2 py-2 rounded-lg text-xs sm:text-sm flex items-center gap-1 transition-all active:scale-95 ${
+                  onClick={() => onToggleFeatured(photo.id, photo.is_featured)}
+                  className={`${showSelection || showAddToFavorites ? 'px-2 py-2' : 'flex-1 px-3 py-2'} rounded-lg text-xs sm:text-sm flex items-center ${showSelection || showAddToFavorites ? 'gap-1' : 'justify-center gap-1.5'} font-medium transition-all active:scale-95 ${
                     photo.is_featured
                       ? 'bg-yellow-500 text-white shadow-sm'
                       : 'bg-gray-200 text-gray-700 hover:bg-gray-300 active:bg-gray-400'
@@ -121,14 +137,16 @@ const PhotoCard: React.FC<PhotoCardProps> = ({
                   title={photo.is_featured ? 'Remove from featured' : 'Mark as featured'}
                 >
                   <Star className={`w-3 h-3 sm:w-4 sm:h-4 ${photo.is_featured ? 'fill-white' : ''}`} />
+                  {!(showSelection || showAddToFavorites) && <span>{photo.is_featured ? 'Featured' : 'Feature'}</span>}
                 </button>
               )}
             </div>
           )}
+          
           {/* Download buttons row */}
           <div className="flex gap-1 sm:gap-2">
             <a
-              href={getOriginalUrl(slug, photo.id)}
+              href={getOriginalUrl(slug, photo.id, photo.file_type)}
               download
               className="flex-1 px-3 py-2 bg-blue-600 text-white rounded-lg text-xs sm:text-sm hover:bg-blue-700 active:bg-blue-800 active:scale-95 transition-all text-center flex items-center justify-center gap-1.5 font-medium shadow-sm"
               onClick={(e) => e.stopPropagation()}
@@ -139,17 +157,19 @@ const PhotoCard: React.FC<PhotoCardProps> = ({
               <span className="hidden sm:inline">Original</span>
               <span className="sm:hidden">Full</span>
             </a>
-            <a
-              href={getPreviewUrl(slug, photo.id)}
-              download
-              className="flex-1 px-3 py-2 bg-purple-600 text-white rounded-lg text-xs sm:text-sm hover:bg-purple-700 active:bg-purple-800 active:scale-95 transition-all text-center flex items-center justify-center gap-1.5 font-medium shadow-sm"
-              onClick={(e) => e.stopPropagation()}
-            >
-              <svg className="w-3 h-3 sm:w-4 sm:h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
-              </svg>
-              Small
-            </a>
+            {!isVideo && (
+              <a
+                href={getPreviewUrl(slug, photo.id, photo.file_type)}
+                download
+                className="flex-1 px-3 py-2 bg-purple-600 text-white rounded-lg text-xs sm:text-sm hover:bg-purple-700 active:bg-purple-800 active:scale-95 transition-all text-center flex items-center justify-center gap-1.5 font-medium shadow-sm"
+                onClick={(e) => e.stopPropagation()}
+              >
+                <svg className="w-3 h-3 sm:w-4 sm:h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                </svg>
+                Small
+              </a>
+            )}
             {/* Remove from favorites button in same row */}
             {showRemoveFavorite && onRemoveFavorite && (
               <button

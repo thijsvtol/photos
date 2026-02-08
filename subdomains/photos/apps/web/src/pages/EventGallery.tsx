@@ -1,20 +1,19 @@
 import React, { useEffect, useState } from 'react';
-import { useParams, Link, useLocation } from 'react-router-dom';
+import { useParams, Link } from 'react-router-dom';
 import { Share2 } from 'lucide-react';
 import Masonry from 'react-masonry-css';
 import Navbar from '../components/Navbar';
 import Footer from '../components/Footer';
 import PhotoCard from '../components/PhotoCard';
 import SEO from '../components/SEO';
-import { getEvent, getPhotos, loginToEvent, getPreviewUrl, requestZip, setPhotoFeatured, getUserFavoriteIds, toggleFavorite as toggleFavoriteAPI } from '../api';
+import { getEvent, getPhotos, loginToEvent, getPreviewUrl, requestZip, setPhotoFeatured, getUserFavoriteIds, toggleFavorite as toggleFavoriteAPI, deletePhoto } from '../api';
 import type { Event, Photo } from '../types';
 import { useAuth } from '../contexts/AuthContext';
 
 const EventGallery: React.FC = () => {
   const { slug } = useParams<{ slug: string }>();
-  const location = useLocation();
-  const { isAuthenticated, login } = useAuth();
-  const isAdminView = location.pathname.startsWith('/admin');
+  const { isAuthenticated, login, user } = useAuth();
+  const isAdmin = user?.isAdmin === true;
   const [event, setEvent] = useState<Event | null>(null);
   const [photos, setPhotos] = useState<Photo[]>([]);
   const [authenticated, setAuthenticated] = useState(false);
@@ -26,6 +25,7 @@ const EventGallery: React.FC = () => {
   const [selectedPhotos, setSelectedPhotos] = useState<Set<string>>(new Set());
   const [userFavorites, setUserFavorites] = useState<Set<string>>(new Set());
   const [showShareMenu, setShowShareMenu] = useState(false);
+  const [deleting, setDeleting] = useState(false);
 
   useEffect(() => {
     if (slug) {
@@ -246,6 +246,44 @@ const EventGallery: React.FC = () => {
     } catch (error) {
       console.error('Error downloading ZIP:', error);
       alert('Failed to download ZIP file');
+    }
+  };
+
+  const handleBulkDelete = async () => {
+    const selected = Array.from(selectedPhotos);
+    if (selected.length === 0) {
+      alert('No photos selected');
+      return;
+    }
+    
+    const confirmed = window.confirm(
+      `Are you sure you want to delete ${selected.length} selected photo(s)? This cannot be undone!`
+    );
+    
+    if (!confirmed) return;
+    
+    try {
+      setDeleting(true);
+      let deleted = 0;
+      
+      for (const photoId of selected) {
+        try {
+          await deletePhoto(photoId);
+          deleted++;
+        } catch (err) {
+          console.error(`Failed to delete photo ${photoId}:`, err);
+        }
+      }
+      
+      // Reload photos
+      await loadPhotos();
+      setSelectedPhotos(new Set());
+      alert(`Successfully deleted ${deleted} of ${selected.length} photos`);
+    } catch (error) {
+      console.error('Error deleting photos:', error);
+      alert('Failed to delete photos');
+    } finally {
+      setDeleting(false);
     }
   };
 
@@ -487,17 +525,32 @@ const EventGallery: React.FC = () => {
               </select>
             </div>
             {selectedPhotos.size > 0 && (
-              <button
-                onClick={downloadSelected}
-                className="w-full sm:w-auto px-6 py-3 bg-green-600 text-white rounded-xl hover:bg-green-700 active:scale-95 transition-all sm:ml-auto text-sm font-semibold shadow-md flex items-center justify-center gap-2"
-              >
-                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
-                </svg>
-                <span className="hidden sm:inline">Download Selected</span>
-                <span className="sm:hidden">Download</span>
-                <span>({selectedPhotos.size})</span>
-              </button>
+              <>
+                <button
+                  onClick={downloadSelected}
+                  className="w-full sm:w-auto px-6 py-3 bg-green-600 text-white rounded-xl hover:bg-green-700 active:scale-95 transition-all text-sm font-semibold shadow-md flex items-center justify-center gap-2"
+                >
+                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                  </svg>
+                  <span className="hidden sm:inline">Download Selected</span>
+                  <span className="sm:hidden">Download</span>
+                  <span>({selectedPhotos.size})</span>
+                </button>
+                {isAdmin && (
+                  <button
+                    onClick={handleBulkDelete}
+                    disabled={deleting}
+                    className="w-full sm:w-auto px-6 py-3 bg-red-600 text-white rounded-xl hover:bg-red-700 active:scale-95 transition-all text-sm font-semibold shadow-md flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                    </svg>
+                    <span>{deleting ? 'Deleting...' : 'Delete Selected'}</span>
+                    <span>({selectedPhotos.size})</span>
+                  </button>
+                )}
+              </>
             )}
           </div>
         </div>
@@ -531,7 +584,7 @@ const EventGallery: React.FC = () => {
                 onToggleSelection={toggleSelection}
                 showAddToFavorites={true}
                 onToggleFavorite={toggleFavorite}
-                showFeatured={isAdminView}
+                showFeatured={isAdmin}
                 onToggleFeatured={toggleFeatured}
                 userFavorites={userFavorites}
               />

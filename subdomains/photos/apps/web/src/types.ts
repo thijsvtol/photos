@@ -23,6 +23,7 @@ export interface Photo {
   id: string;
   event_id: number;
   original_filename: string;
+  file_type: string; // MIME type: 'image/jpeg' or 'video/mp4'
   capture_time: string;
   uploaded_at: string;
   width: number | null;
@@ -96,6 +97,7 @@ export interface UploadQueueItem {
   error?: string;
   photoId?: string;
   uploadId?: string;
+  fileType?: string; // MIME type
   parts?: Array<{ partNumber: number; etag: string }>;
   captureTime?: string;
   width?: number;

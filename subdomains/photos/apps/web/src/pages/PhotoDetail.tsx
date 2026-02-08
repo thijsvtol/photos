@@ -528,15 +528,17 @@ const PhotoDetail: React.FC = () => {
                 </svg>
                 Original
               </button>
-              <button
-                onClick={() => downloadSmall(slug!, photo?.id || photoId!)}
-                className="px-3 py-1.5 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition text-sm flex items-center gap-1.5"
-              >
-                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
-                </svg>
-                Small
-              </button>
+              {photo?.file_type !== 'video/mp4' && (
+                <button
+                  onClick={() => downloadSmall(slug!, photo?.id || photoId!)}
+                  className="px-3 py-1.5 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition text-sm flex items-center gap-1.5"
+                >
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                  </svg>
+                  Small
+                </button>
+              )}
             </div>
             
             {/* Mobile menu button */}
@@ -749,24 +751,39 @@ const PhotoDetail: React.FC = () => {
             </button>
           ) : null}
           
-          {/* Main image with swipe support and progressive loading */}
+          {/* Main image/video with swipe support and progressive loading */}
           <div className="relative">
-            {photo?.blur_placeholder && !imageLoaded && (
-              <img
-                src={photo.blur_placeholder}
-                alt="Loading..."
-                className={`w-full h-auto ${isFullscreen ? 'max-h-screen' : 'max-h-[70vh] md:max-h-[80vh]'} object-contain blur-xl`}
+            {photo?.file_type === 'video/mp4' ? (
+              <video
+                src={getPreviewUrl(slug!, photo?.id || photoId!, photo?.file_type)}
+                controls
+                autoPlay
+                loop
+                className={`w-full h-auto ${isFullscreen ? 'max-h-screen' : 'max-h-[70vh] md:max-h-[80vh]'} object-contain`}
+                onTouchStart={handleTouchStart}
+                onTouchMove={handleTouchMove}
+                onTouchEnd={handleTouchEnd}
               />
+            ) : (
+              <>
+                {photo?.blur_placeholder && !imageLoaded && (
+                  <img
+                    src={photo.blur_placeholder}
+                    alt="Loading..."
+                    className={`w-full h-auto ${isFullscreen ? 'max-h-screen' : 'max-h-[70vh] md:max-h-[80vh]'} object-contain blur-xl`}
+                  />
+                )}
+                <img
+                  src={getPreviewUrl(slug!, photo?.id || photoId!, photo?.file_type)}
+                  alt={photo?.original_filename}
+                  className={`w-full h-auto ${isFullscreen ? 'max-h-screen' : 'max-h-[70vh] md:max-h-[80vh]'} object-contain transition-opacity duration-500 ${imageLoaded ? 'opacity-100' : 'opacity-0'} ${photo?.blur_placeholder && !imageLoaded ? 'absolute inset-0' : ''}`}
+                  onLoad={() => setImageLoaded(true)}
+                  onTouchStart={handleTouchStart}
+                  onTouchMove={handleTouchMove}
+                  onTouchEnd={handleTouchEnd}
+                />
+              </>
             )}
-            <img
-              src={getPreviewUrl(slug!, photo?.id || photoId!)}
-              alt={photo?.original_filename}
-              className={`w-full h-auto ${isFullscreen ? 'max-h-screen' : 'max-h-[70vh] md:max-h-[80vh]'} object-contain transition-opacity duration-500 ${imageLoaded ? 'opacity-100' : 'opacity-0'} ${photo?.blur_placeholder && !imageLoaded ? 'absolute inset-0' : ''}`}
-              onLoad={() => setImageLoaded(true)}
-              onTouchStart={handleTouchStart}
-              onTouchMove={handleTouchMove}
-              onTouchEnd={handleTouchEnd}
-            />
           </div>
         </div>
 

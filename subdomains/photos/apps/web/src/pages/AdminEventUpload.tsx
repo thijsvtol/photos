@@ -186,18 +186,23 @@ const AdminEventUpload: React.FC = () => {
   };
 
   const handleFiles = async (files: FileList) => {
-    const jpegFiles = Array.from(files).filter(f => f.type === 'image/jpeg');
+    const supportedFiles = Array.from(files).filter(f => 
+      f.type === 'image/jpeg' || f.type === 'video/mp4'
+    );
     
-    for (const file of jpegFiles) {
+    for (const file of supportedFiles) {
       const id = ulid();
       const photoId = ulid();
+      const isVideo = file.type === 'video/mp4';
       
-      const exif = await extractExifData(file);
+      // Extract EXIF data only for images
+      const exif = isVideo ? {} : await extractExifData(file);
       
       const item: UploadQueueItem = {
         id,
         eventSlug: slug!,
         file,
+        fileType: file.type,
         status: 'pending',
         progress: 0,
         photoId,
@@ -217,8 +222,13 @@ const AdminEventUpload: React.FC = () => {
       await updateQueueItem(item.id, { status: 'uploading' });
       setQueueItems(prev => prev.map(i => i.id === item.id ? { ...i, status: 'uploading' } : i));
       
-      // Create preview version client-side
-      const previewBlob = await createPreview(item.file);
+      const isVideo = item.fileType === 'video/mp4';
+      
+      // Create preview version client-side (only for images)
+      let previewBlob: Blob | null = null;
+      if (!isVideo) {
+        previewBlob = await createPreview(item.file);
+      }
       
       // Start multipart upload for original
       const { uploadId } = await startUpload(
@@ -237,14 +247,17 @@ const AdminEventUpload: React.FC = () => {
         item.lensModel,
         item.latitude,
         item.longitude,
-        item.blurPlaceholder
+        item.blurPlaceholder,
+        false,
+        item.fileType
       );
       
       await updateQueueItem(item.id, { uploadId });
       
-      // Upload original parts (80% of total progress)
+      // Upload original parts (progress: 0-80% for images, 0-100% for videos)
       const parts: Array<{ partNumber: number; etag: string }> = [];
       const totalParts = Math.ceil(item.file.size / CHUNK_SIZE);
+      const originalProgressMax = isVideo ? 100 : 80;
       
       for (let partNumber = 1; partNumber <= totalParts; partNumber++) {
         const start = (partNumber - 1) * CHUNK_SIZE;
@@ -257,13 +270,15 @@ const AdminEventUpload: React.FC = () => {
           item.photoId!,
           uploadId,
           partNumber,
-          chunk
+          chunk,
+          false,
+          item.fileType
         );
         
         parts.push({ partNumber, etag });
         
-        // Update progress (0-80% for original upload)
-        const progress = Math.round((partNumber / totalParts) * 80);
+        // Update progress
+        const progress = Math.round((partNumber / totalParts) * originalProgressMax);
         await updateQueueItem(item.id, { progress, parts });
         setQueueItems(prev => prev.map(i => i.id === item.id ? { ...i, progress, parts } : i));
       }
@@ -271,15 +286,21 @@ const AdminEventUpload: React.FC = () => {
       // Complete original upload
       await completeUpload(item.eventSlug, item.photoId!, uploadId, parts);
       
-      // Update progress to 85%
-      await updateQueueItem(item.id, { progress: 85 });
-      setQueueItems(prev => prev.map(i => i.id === item.id ? { ...i, progress: 85 } : i));
-      
-      // Upload preview version (85-100% of progress)
-      await uploadPreview(item.eventSlug, item.photoId!, previewBlob);
-      
-      await updateQueueItem(item.id, { status: 'completed', progress: 100 });
-      setQueueItems(prev => prev.map(i => i.id === item.id ? { ...i, status: 'completed', progress: 100 } : i));
+      // For videos, we're done. For images, upload preview
+      if (isVideo) {
+        await updateQueueItem(item.id, { status: 'completed', progress: 100 });
+        setQueueItems(prev => prev.map(i => i.id === item.id ? { ...i, status: 'completed', progress: 100 } : i));
+      } else {
+        // Update progress to 85%
+        await updateQueueItem(item.id, { progress: 85 });
+        setQueueItems(prev => prev.map(i => i.id === item.id ? { ...i, progress: 85 } : i));
+        
+        // Upload preview version (85-100% of progress)
+        await uploadPreview(item.eventSlug, item.photoId!, previewBlob!);
+        
+        await updateQueueItem(item.id, { status: 'completed', progress: 100 });
+        setQueueItems(prev => prev.map(i => i.id === item.id ? { ...i, status: 'completed', progress: 100 } : i));
+      }
     } catch (err) {
       console.error('Upload failed:', err);
       await updateQueueItem(item.id, { status: 'failed', error: String(err) });
@@ -542,11 +563,14 @@ const AdminEventUpload: React.FC = () => {
 
               <div className="mt-6">
                 <Link
-                  to={`/admin/events/${slug}/photos`}
+                  to={`/events/${slug}`}
                   className="inline-block px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition"
                 >
-                  🖼️ Manage All Photos
+                  👁️ View Gallery
                 </Link>
+                <p className="text-sm text-gray-500 mt-2">
+                  View the gallery as admin to manage photos (delete, mark as featured)
+                </p>
               </div>
             </div>
           </div>
@@ -571,12 +595,12 @@ const AdminEventUpload: React.FC = () => {
             <input
               type="file"
               multiple
-              accept="image/jpeg"
+              accept="image/jpeg,video/mp4"
               onChange={handleFileInput}
               className="hidden"
             />
           </label>
-          <p className="text-sm text-gray-500 mt-4">Only JPEG files are supported</p>
+          <p className="text-sm text-gray-500 mt-4">Supports JPEG images and MP4 videos</p>
         </div>
 
         {/* Upload Queue */}

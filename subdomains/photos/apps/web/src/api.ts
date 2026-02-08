@@ -88,7 +88,8 @@ export const startUpload = async (
   latitude?: number,
   longitude?: number,
   blurPlaceholder?: string,
-  isPreview: boolean = false
+  isPreview: boolean = false,
+  fileType?: string
 ): Promise<{ uploadId: string; key: string }> => {
   const response = await api.post(
     `/admin/events/${slug}/uploads/start`,
@@ -97,7 +98,7 @@ export const startUpload = async (
       iso, aperture, shutterSpeed, focalLength,
       cameraMake, cameraModel, lensModel,
       latitude, longitude, blurPlaceholder,
-      isPreview
+      isPreview, fileType
     },
     { headers: getAdminHeaders() }
   );
@@ -110,7 +111,8 @@ export const uploadPart = async (
   uploadId: string,
   partNumber: number,
   chunk: Blob,
-  isPreview: boolean = false
+  isPreview: boolean = false,
+  fileType?: string
 ): Promise<{ partNumber: number; etag: string }> => {
   const response = await api.put(
     `/admin/events/${slug}/uploads/${photoId}/parts/${partNumber}${isPreview ? '?preview=true' : ''}`,
@@ -119,6 +121,7 @@ export const uploadPart = async (
       headers: { 
         ...getAdminHeaders(),
         'X-Upload-Id': uploadId,
+        'X-File-Type': fileType || 'image/jpeg',
         'Content-Type': 'application/octet-stream',
       } 
     }
@@ -185,12 +188,16 @@ export const getFeaturedPhotos = async (limit: number = 10): Promise<Photo[]> =>
 };
 
 // Helper functions
-export const getPreviewUrl = (slug: string, photoId: string): string => {
-  return `/media/${slug}/preview/${photoId}.jpg`;
+export const getPreviewUrl = (slug: string, photoId: string, fileType?: string): string => {
+  const isVideo = fileType === 'video/mp4';
+  const extension = isVideo ? 'mp4' : 'jpg';
+  return `/media/${slug}/preview/${photoId}.${extension}`;
 };
 
-export const getOriginalUrl = (slug: string, photoId: string): string => {
-  return `/media/${slug}/original/${photoId}.jpg`;
+export const getOriginalUrl = (slug: string, photoId: string, fileType?: string): string => {
+  const isVideo = fileType === 'video/mp4';
+  const extension = isVideo ? 'mp4' : 'jpg';
+  return `/media/${slug}/original/${photoId}.${extension}`;
 };
 
 // Download functions that trigger browser downloads

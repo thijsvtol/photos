@@ -23,6 +23,7 @@ export interface Photo {
   id: string;
   event_id: number;
   original_filename: string;
+  file_type: string; // MIME type: 'image/jpeg' or 'video/mp4'
   capture_time: string;
   uploaded_at: string;
   width: number | null;
@@ -66,6 +67,7 @@ export interface LoginRequest {
 export interface StartUploadRequest {
   photoId: string;
   filename: string;
+  fileType?: string; // MIME type
   captureTime?: string;
   width?: number;
   height?: number;
