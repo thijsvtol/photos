@@ -53,6 +53,10 @@ const PhotoCard: React.FC<PhotoCardProps> = ({
           sortBy
         } : undefined}
         className="block relative aspect-[16/9] overflow-hidden"
+        onClick={() => {
+          // Save current scroll position before navigating
+          sessionStorage.setItem(`gallery_scroll_${slug}`, window.scrollY.toString());
+        }}
       >
         <ProgressiveImage
           src={getPreviewUrl(slug, photo.id)}

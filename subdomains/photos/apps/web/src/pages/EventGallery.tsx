@@ -51,6 +51,40 @@ const EventGallery: React.FC = () => {
     loadFavorites();
   }, [isAuthenticated]);
 
+  // Restore scroll position when returning to gallery
+  useEffect(() => {
+    if (slug && !loading && photos.length > 0) {
+      const savedScroll = sessionStorage.getItem(`gallery_scroll_${slug}`);
+      if (savedScroll) {
+        // Use setTimeout to ensure DOM has rendered
+        setTimeout(() => {
+          window.scrollTo(0, parseInt(savedScroll, 10));
+          // Clear the saved position after restoring
+          sessionStorage.removeItem(`gallery_scroll_${slug}`);
+        }, 100);
+      }
+    }
+  }, [slug, loading, photos]);
+
+  // Handle browser back/forward navigation
+  useEffect(() => {
+    const handlePopState = () => {
+      if (slug) {
+        const savedScroll = sessionStorage.getItem(`gallery_scroll_${slug}`);
+        if (savedScroll) {
+          // Delay slightly to ensure page is rendered
+          setTimeout(() => {
+            window.scrollTo(0, parseInt(savedScroll, 10));
+            sessionStorage.removeItem(`gallery_scroll_${slug}`);
+          }, 100);
+        }
+      }
+    };
+
+    window.addEventListener('popstate', handlePopState);
+    return () => window.removeEventListener('popstate', handlePopState);
+  }, [slug]);
+
   useEffect(() => {
     // Load selected photos from localStorage (for download selection)
     if (slug) {
