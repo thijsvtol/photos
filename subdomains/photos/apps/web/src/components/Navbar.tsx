@@ -1,17 +1,13 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Link, useLocation, useNavigate } from 'react-router-dom';
+import { Link, useLocation } from 'react-router-dom';
 import { Heart, MapPin, LayoutGrid, Settings, LogOut, User, LogIn, ChevronDown } from 'lucide-react';
-import { adminLogout } from '../api';
 import { useAuth } from '../contexts/AuthContext';
 
 const Navbar: React.FC = () => {
   const location = useLocation();
-  const navigate = useNavigate();
   const { user, isAuthenticated, login, logout } = useAuth();
   const [showUserMenu, setShowUserMenu] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
-  const isAdmin = localStorage.getItem('isAdmin') === 'true';
-  const isOnAdminPage = location.pathname.startsWith('/admin');
   
   // Close menu when clicking outside
   useEffect(() => {
@@ -39,17 +35,7 @@ const Navbar: React.FC = () => {
       : `${base} text-gray-600 hover:bg-gray-100`;
   };
 
-  const handleAdminLogout = async () => {
-    try {
-      await adminLogout();
-      navigate('/events');
-      window.location.reload(); // Reload to clear any cached admin state
-    } catch (error) {
-      console.error('Logout failed:', error);
-    }
-  };
-
-  const handleUserLogout = () => {
+  const handleLogout = () => {
     setShowUserMenu(false);
     logout();
   };
@@ -94,19 +80,6 @@ const Navbar: React.FC = () => {
               </Link>
             )}
 
-            {/* Old admin logout button - kept for backward compatibility */}
-            {(isAdmin || isOnAdminPage) && user?.isAdmin && (
-              <button
-                onClick={handleAdminLogout}
-                className="flex items-center gap-2 px-3 py-2 rounded-lg transition-colors text-sm font-medium text-red-600 hover:bg-red-50"
-                aria-label="Admin Logout"
-              >
-                <LogOut className="w-4 h-4 sm:mr-0" aria-hidden="true" />
-                <span className="hidden sm:inline">Admin Logout</span>
-                <span className="sr-only sm:hidden">Admin Logout</span>
-              </button>
-            )}
-
             {/* User Menu */}
             <div className="relative ml-2" ref={menuRef}>
               {isAuthenticated ? (
@@ -139,7 +112,7 @@ const Navbar: React.FC = () => {
                         )}
                       </div>
                       <button
-                        onClick={handleUserLogout}
+                        onClick={handleLogout}
                         className="w-full text-left px-4 py-2 text-sm text-red-600 hover:bg-red-50 flex items-center gap-2"
                       >
                         <LogOut className="w-4 h-4" />

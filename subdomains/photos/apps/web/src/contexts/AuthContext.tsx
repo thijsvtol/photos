@@ -79,33 +79,36 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
   };
 
   const logout = () => {
-    if (import.meta.env.DEV || window.location.hostname === 'localhost') {
-      setUser(null);
-      return;
-    }
-    
     // Clear session storage
     sessionStorage.removeItem('auth_redirect');
     
     // Clear local user state immediately
     setUser(null);
     
-    // Call Cloudflare Access logout in background to clear session
-    // Using an iframe to avoid full page redirect
+    if (import.meta.env.DEV || window.location.hostname === 'localhost') {
+      return;
+    }
+    
+    // Call Cloudflare Access logout in background using iframe
+    // This clears the Access session without redirecting the user
     const iframe = document.createElement('iframe');
     iframe.style.display = 'none';
     iframe.src = '/cdn-cgi/access/logout';
     document.body.appendChild(iframe);
     
-    // Remove iframe after a short delay
+    // Wait for logout to complete, then hard refresh
     setTimeout(() => {
-      document.body.removeChild(iframe);
-    }, 2000);
-    
-    // Redirect to home page instead of Cloudflare logout page
-    if (window.location.pathname !== '/') {
-      window.location.href = '/';
-    }
+      if (document.body.contains(iframe)) {
+        document.body.removeChild(iframe);
+      }
+      
+      // Hard refresh to clear all state
+      if (window.location.pathname.startsWith('/admin') || window.location.pathname === '/favorites') {
+        window.location.href = '/events';
+      } else {
+        window.location.reload();
+      }
+    }, 1000);
   };
 
   const refreshUser = async () => {

@@ -54,21 +54,7 @@ const EventList: React.FC = () => {
     try {
       setLoading(true);
       setSelectedTag(tagSlug);
-      let filteredEvents = allEvents;
-      
-      // Filter client-side using the tags field instead of calling API
-      if (tagSlug) {
-        filteredEvents = allEvents.filter(event => 
-          event.tags?.some(tag => tag.slug === tagSlug)
-        );
-      }
-      
-      // Apply city filter if selected
-      if (selectedCity) {
-        filteredEvents = filteredEvents.filter(event => event.cities?.includes(selectedCity));
-      }
-      
-      setEvents(filteredEvents);
+      applyFilters(tagSlug, selectedCity);
       setError(null);
     } catch (err) {
       setError('Failed to filter events');
@@ -80,10 +66,24 @@ const EventList: React.FC = () => {
 
   const filterByCity = (city: string | null) => {
     setSelectedCity(city);
-    let filteredEvents = selectedTag ? events : allEvents;
+    applyFilters(selectedTag, city);
+  };
+
+  const applyFilters = (tagSlug: string | null, city: string | null) => {
+    let filteredEvents = allEvents;
     
+    // Apply tag filter
+    if (tagSlug) {
+      filteredEvents = filteredEvents.filter(event => 
+        event.tags?.some(tag => tag.slug === tagSlug)
+      );
+    }
+    
+    // Apply city filter
     if (city) {
-      filteredEvents = filteredEvents.filter(event => event.cities?.includes(city));
+      filteredEvents = filteredEvents.filter(event => 
+        event.cities?.includes(city)
+      );
     }
     
     setEvents(filteredEvents);
