@@ -23,10 +23,11 @@ bucket_name = "photos-storage"
 # Set these via: wrangler secret put <NAME>
 [vars]
 ENVIRONMENT = "development"
+ADMIN_EMAILS = "vantol.thijs@gmail.com" # Replace with your admin email(s), comma-separated for multiple
 
 # Secrets (set via wrangler secret put):
 # - EVENT_COOKIE_SECRET: Secret for signing event session cookies
-# - ADMIN_SHARED_SECRET: Optional secret for admin API in development
+# - ADMIN_EMAILS: Comma-separated list of admin email addresses (use vars instead for easier updates)
 
 # Development configuration
 [env.development]

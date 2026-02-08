@@ -1,6 +1,6 @@
 import { Hono } from 'hono';
 import type { Env, Photo, UserFavorite } from '../types';
-import { requireAuth, optionalAuth, getUser } from '../auth';
+import { requireAuth, optionalAuth, getUser, isAdmin } from '../auth';
 
 const app = new Hono<{ Bindings: Env }>();
 
@@ -195,7 +195,9 @@ app.get('/api/user/profile', optionalAuth, async (c) => {
       .bind(user.id)
       .first();
 
-    return c.json({ user: dbUser });
+    return c.json({ 
+      user: dbUser ? { ...dbUser, isAdmin: isAdmin(c) } : null 
+    });
   } catch (error) {
     console.error('Error fetching user profile:', error);
     return c.json({ error: 'Failed to fetch profile' }, 500);

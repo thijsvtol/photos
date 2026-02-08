@@ -143,3 +143,42 @@ async function upsertUser(db: D1Database, user: User): Promise<void> {
 export function getUser(c: Context<{ Bindings: Env; Variables: Variables }>): User | null {
   return c.get('user') || null;
 }
+
+/**
+ * Check if user is an admin based on email whitelist
+ */
+export function isAdmin(c: Context<{ Bindings: Env; Variables: Variables }>): boolean {
+  const user = getUser(c);
+  if (!user) return false;
+
+  const adminEmails = c.env.ADMIN_EMAILS || '';
+  const adminList = adminEmails.split(',').map(email => email.trim().toLowerCase());
+  
+  return adminList.includes(user.email.toLowerCase());
+}
+
+/**
+ * Middleware to require admin access
+ * Returns 403 if user is not an admin
+ */
+export async function requireAdmin(c: Context<{ Bindings: Env; Variables: Variables }>, next: Next) {
+  const user = await extractUser(c);
+  
+  if (!user) {
+    console.log('Admin access denied - no user found');
+    return c.json({ error: 'Authentication required' }, 401);
+  }
+
+  // Store user in context
+  c.set('user', user);
+  await upsertUser(c.env.DB, user);
+
+  // Check if user is admin
+  if (!isAdmin(c)) {
+    console.log('Admin access denied for user:', user.email);
+    return c.json({ error: 'Admin access required' }, 403);
+  }
+
+  console.log('Admin access granted:', user.email);
+  await next();
+}

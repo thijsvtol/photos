@@ -85,15 +85,17 @@ const Navbar: React.FC = () => {
               <span className="sr-only sm:hidden">Map</span>
             </Link>
             
-            {/* Admin button hidden for now
-            <Link to="/admin" className={linkClass('/admin')}>
-              <Settings className="w-4 h-4 sm:mr-0" aria-hidden="true" />
-              <span className="hidden sm:inline">Admin</span>
-              <span className="sr-only sm:hidden">Admin</span>
-            </Link>
-            */}
+            {/* Show admin link if user is admin */}
+            {user?.isAdmin && (
+              <Link to="/admin" className={linkClass('/admin')}>
+                <Settings className="w-4 h-4 sm:mr-0" aria-hidden="true" />
+                <span className="hidden sm:inline">Admin</span>
+                <span className="sr-only sm:hidden">Admin</span>
+              </Link>
+            )}
 
-            {(isAdmin || isOnAdminPage) && (
+            {/* Old admin logout button - kept for backward compatibility */}
+            {(isAdmin || isOnAdminPage) && user?.isAdmin && (
               <button
                 onClick={handleAdminLogout}
                 className="flex items-center gap-2 px-3 py-2 rounded-lg transition-colors text-sm font-medium text-red-600 hover:bg-red-50"

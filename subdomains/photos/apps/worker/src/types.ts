@@ -4,6 +4,7 @@ export interface Env {
   PHOTOS_BUCKET: R2Bucket;
   EVENT_COOKIE_SECRET: string;
   ADMIN_SHARED_SECRET?: string;
+  ADMIN_EMAILS?: string; // Comma-separated list of admin emails
   ENVIRONMENT?: string;
 }
 

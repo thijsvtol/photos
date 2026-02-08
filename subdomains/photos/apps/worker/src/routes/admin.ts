@@ -3,46 +3,12 @@ import { ulid } from 'ulid';
 import type { Env, CreateEventRequest, StartUploadRequest, CompleteUploadRequest } from '../types';
 import { generateSalt, hashPassword, generateUniqueSlug } from '../utils';
 import { getCityFromCoordinates } from '../geocoding';
+import { requireAdmin } from '../auth';
 
 const app = new Hono<{ Bindings: Env }>();
 
-/**
- * Admin authentication middleware
- */
-app.use('/*', async (c, next) => {
-  // Check for Cloudflare Access JWT (automatically added by Cloudflare Access)
-  const accessJwt = c.req.header('Cf-Access-Jwt-Assertion');
-  
-  // Check for admin secret header (fallback authentication)
-  const adminSecret = c.req.header('X-Admin-Secret');
-  
-  // Debug logging
-  console.log('Admin auth check - hasJWT:', !!accessJwt);
-  console.log('Admin auth check - hasAdminSecret:', !!adminSecret);
-  console.log('Admin auth check - hasSharedSecretConfigured:', !!c.env.ADMIN_SHARED_SECRET);
-  console.log('Admin auth check - environment:', c.env.ENVIRONMENT);
-  
-  // Allow access if either Cloudflare Access JWT or valid admin secret is present
-  if (accessJwt) {
-    // Cloudflare Access JWT present - allow access
-    console.log('Authenticated via Cloudflare Access JWT');
-    await next();
-    return;
-  }
-  
-  // Check admin secret if configured
-  if (c.env.ADMIN_SHARED_SECRET) {
-    if (adminSecret === c.env.ADMIN_SHARED_SECRET) {
-      console.log('Authenticated via Admin Secret');
-      await next();
-      return;
-    }
-  }
-  
-  // No valid authentication found
-  console.log('Authentication failed - no valid JWT or admin secret');
-  return c.json({ error: 'Unauthorized - Admin access required' }, 401);
-});
+// Apply admin authentication to all routes
+app.use('/*', requireAdmin);
 
 /**
  * POST /events

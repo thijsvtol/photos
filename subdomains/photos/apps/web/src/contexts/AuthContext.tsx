@@ -5,6 +5,7 @@ export interface User {
   email: string;
   name?: string;
   favorites_count?: number;
+  isAdmin?: boolean;
 }
 
 interface AuthContextType {
