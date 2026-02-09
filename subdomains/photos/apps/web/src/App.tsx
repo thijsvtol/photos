@@ -9,6 +9,7 @@ const EventList = lazy(() => import('./pages/EventList'));
 const EventGallery = lazy(() => import('./pages/EventGallery'));
 const PhotoDetail = lazy(() => import('./pages/PhotoDetail'));
 const MyFavorites = lazy(() => import('./pages/MyFavorites'));
+const Logout = lazy(() => import('./pages/Logout'));
 const MapView = lazy(() => import('./pages/MapView'));
 const PhotoUsage = lazy(() => import('./pages/PhotoUsage'));
 const AdminDashboard = lazy(() => import('./pages/AdminDashboard'));
@@ -38,6 +39,7 @@ function App() {
               <Route path="/events/:slug" element={<EventGallery />} />
               <Route path="/p/:slug/:photoId" element={<PhotoDetail />} />
               <Route path="/favorites" element={<MyFavorites />} />
+              <Route path="/logout" element={<Logout />} />
               <Route path="/map" element={<MapView />} />
               <Route path="/usage" element={<PhotoUsage />} />
               <Route path="/admin" element={<AdminDashboard />} />

@@ -52,13 +52,19 @@ api.interceptors.response.use(
   (response) => response,
   (error) => {
     if (error.response?.status === 401) {
+      // Skip prompt if user is intentionally logging out
+      const isLoggingOut = sessionStorage.getItem('logging_out') === 'true';
+      if (isLoggingOut) {
+        return Promise.reject(error);
+      }
+      
       // Token expired - prompt user to re-authenticate
       const shouldReauth = window.confirm(
         'Your session has expired. Would you like to login again?'
       );
       if (shouldReauth) {
-        // Redirect through logout to clear expired token
-        window.location.href = '/cdn-cgi/access/logout?redirect_uri=' + 
+        // Trigger login flow
+        window.location.href = '/api/auth/login?return_to=' + 
           encodeURIComponent(window.location.pathname);
       }
     }

@@ -2,8 +2,34 @@ import { Hono } from 'hono';
 import type { Env, Event, LoginRequest } from '../types';
 import { verifyPassword } from '../utils';
 import { createEventCookie } from '../cookies';
+import { requireAuth, getUser } from '../auth';
 
 const app = new Hono<{ Bindings: Env }>();
+
+/**
+ * GET /api/auth/login
+ * Protected by Cloudflare Access - triggers authentication and redirects back
+ */
+app.get('/api/auth/login', requireAuth, async (c) => {
+  const user = getUser(c);
+  const returnTo = c.req.query('return_to') || '/favorites';
+  
+  if (!user) {
+    return c.json({ error: 'Authentication failed' }, 401);
+  }
+
+  // User is authenticated, redirect back
+  return c.redirect(returnTo);
+});
+
+/**
+ * GET /api/auth/logout
+ * Clears Cloudflare Access session and redirects home
+ */
+app.get('/api/auth/logout', async (c) => {
+  // Redirect to Cloudflare logout with relative path
+  return c.redirect('/cdn-cgi/access/logout');
+});
 
 /**
  * POST /api/events/:slug/login

@@ -55,6 +55,15 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
         return;
       }
 
+      // Check if this is an intentional logout
+      const isLoggingOut = sessionStorage.getItem('logging_out') === 'true';
+      if (isLoggingOut) {
+        sessionStorage.removeItem('logging_out');
+        setUser(null);
+        setLoading(false);
+        return;
+      }
+
       // On web, use existing cookie-based auth
       const response = await fetch('/api/user/profile', {
         credentials: 'include',
@@ -103,48 +112,31 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
       return;
     }
     
-    // Store the current location to return after login
+    // Redirect to login endpoint which is protected by Cloudflare Access
+    // After authentication, it will redirect back
     const currentPath = window.location.pathname;
-    if (currentPath !== '/favorites' && currentPath !== '/cdn-cgi/access/logout') {
-      sessionStorage.setItem('auth_redirect', currentPath);
-    }
-    
-    // Clear any expired tokens by logging out of Access first, then redirecting to favorites
-    // This ensures we get a fresh token
-    window.location.href = '/cdn-cgi/access/logout?return_to=' + encodeURIComponent('/favorites');
+    const returnTo = encodeURIComponent(currentPath === '/' ? '/favorites' : currentPath);
+    window.location.href = `/api/auth/login?return_to=${returnTo}`;
   };
 
   const logout = () => {
-    // Clear session storage
-    sessionStorage.removeItem('auth_redirect');
-    
-    // Clear local user state immediately
-    setUser(null);
-    
-    if (import.meta.env.DEV || window.location.hostname === 'localhost') {
+    if (Capacitor.isNativePlatform()) {
+      MobileAuthService.clearToken();
+      setUser(null);
       return;
     }
     
-    // Call Cloudflare Access logout in background using iframe
-    // This clears the Access session without redirecting the user
-    const iframe = document.createElement('iframe');
-    iframe.style.display = 'none';
-    iframe.src = '/cdn-cgi/access/logout';
-    document.body.appendChild(iframe);
+    // Set flag to prevent "session expired" error
+    sessionStorage.setItem('logging_out', 'true');
     
-    // Wait for logout to complete, then hard refresh
-    setTimeout(() => {
-      if (document.body.contains(iframe)) {
-        document.body.removeChild(iframe);
-      }
-      
-      // Hard refresh to clear all state
-      if (window.location.pathname.startsWith('/admin') || window.location.pathname === '/favorites') {
-        window.location.href = '/events';
-      } else {
-        window.location.reload();
-      }
-    }, 1000);
+    // Clear session storage
+    sessionStorage.removeItem('auth_redirect');
+    
+    // Clear local user state
+    setUser(null);
+    
+    // Redirect to logout page which handles CF logout in iframe
+    window.location.href = '/logout';
   };
 
   const refreshUser = async () => {
