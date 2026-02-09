@@ -33,8 +33,10 @@ const PhotoDetail: React.FC = () => {
   const [showSlideshowSettings, setShowSlideshowSettings] = useState(false);
   const touchStartX = useRef<number | null>(null);
   const touchEndX = useRef<number | null>(null);
+  const touchStartDistance = useRef<number | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const slideshowTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [isPinching, setIsPinching] = useState(false);
 
   // Check if we came from favorites page
   const fromFavorites = location.state?.fromFavorites;
@@ -258,31 +260,55 @@ const PhotoDetail: React.FC = () => {
 
   // Touch handlers for swipe gestures
   const handleTouchStart = (e: React.TouchEvent) => {
-    touchStartX.current = e.touches[0].clientX;
+    if (e.touches.length === 2) {
+      // Two fingers - user is pinching/zooming
+      setIsPinching(true);
+      const touch1 = e.touches[0];
+      const touch2 = e.touches[1];
+      const distance = Math.hypot(
+        touch2.clientX - touch1.clientX,
+        touch2.clientY - touch1.clientY
+      );
+      touchStartDistance.current = distance;
+    } else if (e.touches.length === 1) {
+      // Single finger - potential swipe
+      touchStartX.current = e.touches[0].clientX;
+      setIsPinching(false);
+    }
   };
 
   const handleTouchMove = (e: React.TouchEvent) => {
-    touchEndX.current = e.touches[0].clientX;
+    if (e.touches.length === 2) {
+      // User is pinching - mark as pinching
+      setIsPinching(true);
+    } else if (e.touches.length === 1 && !isPinching) {
+      touchEndX.current = e.touches[0].clientX;
+    }
   };
 
   const handleTouchEnd = () => {
-    if (touchStartX.current === null || touchEndX.current === null) return;
-    
-    const diff = touchStartX.current - touchEndX.current;
-    const threshold = 50; // minimum swipe distance
-    
-    if (Math.abs(diff) > threshold) {
-      if (diff > 0) {
-        // Swiped left - next photo
-        navigateToNext();
-      } else {
-        // Swiped right - previous photo
-        navigateToPrevious();
+    // Only navigate if user was not pinching/zooming
+    if (!isPinching && touchStartX.current !== null && touchEndX.current !== null) {
+      const diff = touchStartX.current - touchEndX.current;
+      const threshold = 50; // minimum swipe distance
+      
+      if (Math.abs(diff) > threshold) {
+        if (diff > 0) {
+          // Swiped left - next photo
+          navigateToNext();
+        } else {
+          // Swiped right - previous photo
+          navigateToPrevious();
+        }
       }
     }
     
+    // Reset on touch end
     touchStartX.current = null;
     touchEndX.current = null;
+    touchStartDistance.current = null;
+    // Keep isPinching true briefly to prevent accidental navigation
+    setTimeout(() => setIsPinching(false), 300);
   };
 
   const toggleFullscreen = async () => {
@@ -724,28 +750,27 @@ const PhotoDetail: React.FC = () => {
             )}
           </div>
           
-          {/* Navigation buttons - Desktop */}
-          {/* Always show previous button - logic will handle looping */}
-          {(fromFavorites && favoritePhotos.length > 1) || (!fromFavorites && currentIndex > 0) ? (
+          {/* Navigation buttons - Previous */}
+          {(fromFavorites && favoritePhotos.length > 1) || (!fromFavorites && displayPhotos.length > 1) ? (
             <button
               onClick={navigateToPrevious}
-              className="hidden md:block absolute left-4 top-1/2 -translate-y-1/2 z-10 bg-black/50 hover:bg-black/75 text-white p-3 rounded-full transition"
+              className="absolute left-2 md:left-4 top-1/2 -translate-y-1/2 z-10 bg-black/50 hover:bg-black/75 active:bg-black/90 text-white p-2 md:p-3 rounded-full transition touch-manipulation"
               aria-label="Previous photo"
             >
-              <svg className="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <svg className="w-6 h-6 md:w-8 md:h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
               </svg>
             </button>
           ) : null}
           
-          {/* Always show next button - logic will handle looping */}
-          {(fromFavorites && favoritePhotos.length > 1) || (!fromFavorites && currentIndex < allPhotos.length - 1 && currentIndex >= 0) ? (
+          {/* Navigation buttons - Next */}
+          {(fromFavorites && favoritePhotos.length > 1) || (!fromFavorites && displayPhotos.length > 1) ? (
             <button
               onClick={navigateToNext}
-              className="hidden md:block absolute right-4 top-1/2 -translate-y-1/2 z-10 bg-black/50 hover:bg-black/75 text-white p-3 rounded-full transition"
+              className="absolute right-2 md:right-4 top-1/2 -translate-y-1/2 z-10 bg-black/50 hover:bg-black/75 active:bg-black/90 text-white p-2 md:p-3 rounded-full transition touch-manipulation"
               aria-label="Next photo"
             >
-              <svg className="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <svg className="w-6 h-6 md:w-8 md:h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
               </svg>
             </button>
@@ -855,7 +880,7 @@ const PhotoDetail: React.FC = () => {
           
           {/* Navigation hint */}
           <div className="text-center text-gray-400 text-sm">
-            ← Swipe to navigate →
+            ← Swipe or use buttons to navigate →
           </div>
         </div>
 
