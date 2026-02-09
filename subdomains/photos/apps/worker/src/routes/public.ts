@@ -2,6 +2,7 @@ import { Hono } from 'hono';
 import { cors } from 'hono/cors';
 import type { Env, Event, Photo } from '../types';
 import { getEventSession } from '../cookies';
+import { optionalAuth, getUser, isAdmin } from '../auth';
 
 const app = new Hono<{ Bindings: Env }>();
 
@@ -15,12 +16,40 @@ app.use('/*', cors({
 
 /**
  * GET /api/events
- * Returns list of all events (without sensitive data)
+ * Returns list of events filtered by visibility:
+ * - Public events: visible to everyone
+ * - Private events: visible only to admins
+ * - Collaborators-only events: visible to admins and collaborators
  */
-app.get('/api/events', async (c) => {
+app.get('/api/events', optionalAuth, async (c) => {
   try {
+    const user = getUser(c);
+    const userIsAdmin = isAdmin(c);
+    const userEmail = user?.email || '';
+
+    // Build query with visibility filtering
+    // LEFT JOIN to check if current user is a collaborator
+    const query = `
+      SELECT DISTINCT 
+        e.id, 
+        e.slug, 
+        e.name, 
+        e.inferred_date, 
+        e.created_at, 
+        e.visibility,
+        (e.password_hash IS NOT NULL) as requires_password 
+      FROM events e
+      LEFT JOIN event_collaborators ec ON e.id = ec.event_id AND ec.user_email = ?
+      WHERE 
+        e.visibility = 'public'  -- Always show public events
+        OR ? = 1  -- Show all events if user is admin
+        OR (e.visibility = 'collaborators_only' AND ec.user_email IS NOT NULL)  -- Show collaborators_only if user is collaborator
+      ORDER BY e.inferred_date DESC, e.created_at DESC
+    `;
+    
     const events = await c.env.DB
-      .prepare('SELECT id, slug, name, inferred_date, created_at, (password_hash IS NOT NULL) as requires_password FROM events ORDER BY inferred_date DESC, created_at DESC')
+      .prepare(query)
+      .bind(userEmail, userIsAdmin ? 1 : 0)
       .all<Omit<Event, 'password_salt' | 'password_hash'>>();
     
     // For public events, add a preview photo ID and cities

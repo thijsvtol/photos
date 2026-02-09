@@ -48,8 +48,8 @@ app.post('/events', async (c) => {
     
     // Insert event
     const result = await c.env.DB
-      .prepare('INSERT INTO events (slug, name, password_salt, password_hash) VALUES (?, ?, ?, ?)')
-      .bind(slug, body.name, salt, hash)
+      .prepare('INSERT INTO events (slug, name, password_salt, password_hash, visibility) VALUES (?, ?, ?, ?, ?)')
+      .bind(slug, body.name, salt, hash, body.visibility || 'public')
       .run();
     
     if (!result.success) {
@@ -598,10 +598,11 @@ app.put('/events/:slug', async (c) => {
   const slug = c.req.param('slug');
   
   try {
-    const { name, password, description } = await c.req.json<{
+    const { name, password, description, visibility } = await c.req.json<{
       name?: string;
       password?: string;
       description?: string;
+      visibility?: string;
     }>();
     
     // Get event
@@ -626,6 +627,11 @@ app.put('/events/:slug', async (c) => {
     if (description !== undefined) {
       updates.push('description = ?');
       values.push(description);
+    }
+    
+    if (visibility !== undefined) {
+      updates.push('visibility = ?');
+      values.push(visibility || 'public');
     }
     
     if (password !== undefined) {

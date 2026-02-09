@@ -18,6 +18,7 @@ export interface Event {
   password_salt: string | null;
   password_hash: string | null;
   inferred_date: string | null;
+  visibility: 'public' | 'private' | 'collaborators_only';
   created_at: string;
 }
 
@@ -61,6 +62,7 @@ export interface CreateEventRequest {
   name: string;
   password?: string;
   slug?: string;
+  visibility?: 'public' | 'private' | 'collaborators_only';
 }
 
 export interface LoginRequest {

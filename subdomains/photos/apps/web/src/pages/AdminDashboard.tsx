@@ -15,6 +15,7 @@ const AdminDashboard: React.FC = () => {
   const [newEventName, setNewEventName] = useState('');
   const [newEventPassword, setNewEventPassword] = useState('');
   const [newEventDescription, setNewEventDescription] = useState('');
+  const [newEventVisibility, setNewEventVisibility] = useState<'public' | 'private' | 'collaborators_only'>('public');
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
   
@@ -23,6 +24,7 @@ const AdminDashboard: React.FC = () => {
   const [editName, setEditName] = useState('');
   const [editPassword, setEditPassword] = useState('');
   const [editDescription, setEditDescription] = useState('');
+  const [editVisibility, setEditVisibility] = useState<'public' | 'private' | 'collaborators_only'>('public');
   const [editTagIds, setEditTagIds] = useState<number[]>([]);
   const [changePassword, setChangePassword] = useState(false);
   
@@ -64,12 +66,14 @@ const AdminDashboard: React.FC = () => {
       await createEvent({
         name: newEventName,
         password: newEventPassword || undefined,
+        visibility: newEventVisibility,
       });
       
       setSuccess('Event created successfully!');
       setNewEventName('');
       setNewEventPassword('');
       setNewEventDescription('');
+      setNewEventVisibility('public');
       setShowCreateForm(false);
       await loadData();
       
@@ -85,6 +89,7 @@ const AdminDashboard: React.FC = () => {
     setEditName(event.name);
     setEditTagIds(event.tags?.map(t => t.id) || []);
     setEditDescription(event.description || '');
+    setEditVisibility(event.visibility || 'public');
     setEditPassword('');
     setChangePassword(false);
   };
@@ -102,6 +107,10 @@ const AdminDashboard: React.FC = () => {
       
       if (editDescription !== (editingEvent.description || '')) {
         updates.description = editDescription;
+      }
+      
+      if (editVisibility !== (editingEvent.visibility || 'public')) {
+        updates.visibility = editVisibility;
       }
       
       if (changePassword) {
@@ -269,6 +278,20 @@ const AdminDashboard: React.FC = () => {
               </div>
               <div className="mb-4">
                 <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Who can view this event?
+                </label>
+                <select
+                  value={newEventVisibility}
+                  onChange={(e) => setNewEventVisibility(e.target.value as 'public' | 'private' | 'collaborators_only')}
+                  className="w-full px-3 sm:px-4 py-2 border border-gray-300 rounded-lg text-sm sm:text-base"
+                >
+                  <option value="public">Everyone (Public)</option>
+                  <option value="collaborators_only">Only Collaborators</option>
+                  <option value="private">Only Me (Private)</option>
+                </select>
+              </div>
+              <div className="mb-4">
+                <label className="block text-sm font-medium text-gray-700 mb-1">
                   Description (optional)
                 </label>
                 <textarea
@@ -378,6 +401,21 @@ const AdminDashboard: React.FC = () => {
                         rows={3}
                         placeholder="Event description..."
                       />
+                    </div>
+                    
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">
+                        Who can view this event?
+                      </label>
+                      <select
+                        value={editVisibility}
+                        onChange={(e) => setEditVisibility(e.target.value as 'public' | 'private' | 'collaborators_only')}
+                        className="w-full px-4 py-2 border border-gray-300 rounded-lg"
+                      >
+                        <option value="public">Everyone (Public)</option>
+                        <option value="collaborators_only">Only Collaborators</option>
+                        <option value="private">Only Me (Private)</option>
+                      </select>
                     </div>
                     
                     <div>

@@ -17,6 +17,7 @@ export interface Event {
   cities?: string[];
   description?: string | null;
   is_archived?: boolean;
+  visibility: 'public' | 'private' | 'collaborators_only';
 }
 
 export interface Photo {
@@ -49,12 +50,14 @@ export interface CreateEventRequest {
   name: string;
   password?: string;
   slug?: string;
+  visibility?: 'public' | 'private' | 'collaborators_only';
 }
 
 export interface UpdateEventRequest {
   name?: string;
   password?: string;
   description?: string;
+  visibility?: 'public' | 'private' | 'collaborators_only';
 }
 
 export interface AdminStats {
