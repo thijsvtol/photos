@@ -1,5 +1,6 @@
 import { Context, Next } from 'hono';
 import type { Env, User, CloudflareAccessJWT, DBUser } from './types';
+import { jwtVerify } from 'jose';
 
 // Extend Hono context to include user
 type Variables = {
@@ -8,10 +9,18 @@ type Variables = {
 
 /**
  * Extract and validate Cloudflare Access JWT from request headers or cookies
- * Cloudflare Access sets the Cf-Access-Jwt-Assertion header OR stores JWT in cookies
+ * Also supports Bearer tokens for mobile OAuth
  */
 export async function extractUser(c: Context<{ Bindings: Env; Variables: Variables }>): Promise<User | null> {
   try {
+    // First check for Bearer token (mobile OAuth)
+    const authHeader = c.req.header('Authorization');
+    if (authHeader?.startsWith('Bearer ')) {
+      const token = authHeader.substring(7);
+      return await verifyBearerToken(c.env, token);
+    }
+
+    // Then try Cloudflare Access JWT (web)
     // Try to get JWT from header (for direct Access-protected routes)
     let jwt = c.req.header('Cf-Access-Jwt-Assertion') 
       || c.req.header('cf-access-jwt-assertion')
@@ -87,6 +96,35 @@ function parseJWT(token: string): CloudflareAccessJWT | null {
     return payload as CloudflareAccessJWT;
   } catch (error) {
     console.error('Error parsing JWT:', error);
+    return null;
+  }
+}
+
+/**
+ * Verify mobile OAuth Bearer token (JWT)
+ */
+async function verifyBearerToken(env: Env, token: string): Promise<User | null> {
+  try {
+    if (!env.JWT_SECRET) {
+      console.error('JWT_SECRET not configured');
+      return null;
+    }
+
+    const secret = new TextEncoder().encode(env.JWT_SECRET);
+    const { payload } = await jwtVerify(token, secret);
+
+    if (payload.type !== 'mobile_oauth') {
+      console.log('Invalid token type:', payload.type);
+      return null;
+    }
+
+    return {
+      id: payload.sub as string,
+      email: payload.email as string,
+      name: payload.name as string | undefined,
+    };
+  } catch (error) {
+    console.error('Error verifying bearer token:', error);
     return null;
   }
 }

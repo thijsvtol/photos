@@ -6,6 +6,7 @@ import Navbar from '../components/Navbar';
 import Footer from '../components/Footer';
 import SEO from '../components/SEO';
 import { getEvents, getPhotos } from '../api';
+import { getAbsoluteUrl } from '../utils/urlUtils';
 import type { Photo } from '../types';
 
 // Fix for default marker icon
@@ -239,7 +240,7 @@ const MapView: React.FC = () => {
                                     className="block aspect-square rounded overflow-hidden hover:opacity-80 transition"
                                   >
                                     <img
-                                      src={`/media/${photo.event_slug}/preview/${photo.id}.jpg`}
+                                      src={getAbsoluteUrl(`/media/${photo.event_slug}/preview/${photo.id}.jpg`)}
                                       alt={photo.original_filename}
                                       className="w-full h-full object-cover"
                                     />

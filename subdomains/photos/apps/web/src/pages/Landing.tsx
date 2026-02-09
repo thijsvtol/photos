@@ -4,6 +4,8 @@ import { ChevronDown, Heart, MapPin } from 'lucide-react';
 import ContactForm from '../components/ContactForm';
 import Footer from '../components/Footer';
 import SEO from '../components/SEO';
+import { getAbsoluteUrl } from '../utils/urlUtils';
+import { getFeaturedPhotos } from '../api';
 
 interface FeaturedPhoto {
   id: string;
@@ -19,10 +21,16 @@ export default function Landing() {
   const [scrollY, setScrollY] = useState(0);
 
   useEffect(() => {
-    fetch('/api/photos/featured?limit=10')
-      .then(res => res.json())
-      .then(data => {
-        setFeaturedPhotos(data.photos || []);
+    getFeaturedPhotos(10)
+      .then(photos => {
+        // Map Photo type to FeaturedPhoto interface
+        const featured = photos.map(p => ({
+          id: p.id,
+          event_slug: p.event_slug || '',
+          event_name: p.event_name || '',
+          blur_placeholder: p.blur_placeholder,
+        }));
+        setFeaturedPhotos(featured);
         setLoading(false);
       })
       .catch(err => {
@@ -96,7 +104,7 @@ export default function Landing() {
                   aria-hidden={index !== currentSlide}
                 >
                   <img
-                    src={`/media/${photo.event_slug}/preview/${photo.id}.jpg`}
+                    src={getAbsoluteUrl(`/media/${photo.event_slug}/preview/${photo.id}.jpg`)}
                     alt={photo.event_name}
                     className="w-full h-full object-cover"
                     loading="lazy"

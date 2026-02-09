@@ -1,4 +1,6 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
+import { Capacitor } from '@capacitor/core';
+import { MobileAuthService } from '../services/mobileAuth';
 
 export interface User {
   id: string;
@@ -37,23 +39,37 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
 
   const fetchUser = async () => {
     try {
+      // On native, check if we have a stored token/user
+      if (Capacitor.isNativePlatform()) {
+        const storedUser = await MobileAuthService.getUser();
+        const hasToken = await MobileAuthService.isAuthenticated();
+        
+        if (storedUser && hasToken) {
+          setUser(storedUser);
+          setLoading(false);
+          return;
+        }
+        
+        setUser(null);
+        setLoading(false);
+        return;
+      }
+
+      // On web, use existing cookie-based auth
       const response = await fetch('/api/user/profile', {
         credentials: 'include',
       });
 
       if (response.ok) {
         const data = await response.json();
-        // API returns { user: null } if not authenticated
         setUser(data.user);
       } else if (response.status === 401) {
-        // Token expired or invalid - clear user state
         console.log('Authentication expired or invalid');
         setUser(null);
       } else {
         setUser(null);
       }
     } catch (error) {
-      // Don't log error for unauthenticated state - this is expected
       setUser(null);
     } finally {
       setLoading(false);
@@ -64,10 +80,29 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     fetchUser();
   }, []);
 
-  const login = () => {
-    // Check if we're in development or if Access is not configured
+  const login = async () => {
+    // Check if running on native platform
+    const isNative = Capacitor.isNativePlatform();
+    
+    // On native platform, bypass authentication
+    if (isNative) {
+      alert(
+        'Mobile app runs in development mode.\n\n' +
+        'Authentication is bypassed - all admin features are available.'
+      );
+      // Set mock admin user
+      setUser({
+        id: 'mobile-app-user',
+        email: 'mobile@thijsvtol.nl',
+        name: 'Mobile User',
+        isAdmin: true
+      });
+      return;
+    }
+    
+    // Check if we're in development
     if (import.meta.env.DEV || window.location.hostname === 'localhost') {
-      alert('Cloudflare Access is not available in development mode.\n\nTo test authentication:\n1. Deploy to production\n2. Configure Cloudflare Access in your dashboard\n3. Or use Cloudflare Tunnel for local testing');
+      alert('Cloudflare Access is not available in development mode.\n\nTo test authentication:\n1. Deploy to production\n2. Configure Cloudflare Access in your dashboard\n3. Or use Cloudflare Tunnel for local testing\n4. Or use the mobile app');
       return;
     }
     

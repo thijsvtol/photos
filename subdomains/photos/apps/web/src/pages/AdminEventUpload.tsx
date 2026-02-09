@@ -6,6 +6,8 @@ import { MapContainer, TileLayer, Marker, useMapEvents } from 'react-leaflet';
 import 'leaflet/dist/leaflet.css';
 import L from 'leaflet';
 import Navbar from '../components/Navbar';
+import FolderSyncManager from '../components/FolderSyncManager';
+import MobileAuth from '../components/MobileAuth';
 import { getEvent, startUpload, uploadPart, completeUpload, regenerateThumbnails, setEventLocation, getEventStats, getPreviewUrl, geocodeEventPhotos } from '../api';
 import { addToQueue, updateQueueItem, getQueueItems, getPendingUploads } from '../uploadQueue';
 import { createPreview } from '../imageUtils';
@@ -459,6 +461,8 @@ const AdminEventUpload: React.FC = () => {
     <div className="min-h-screen bg-gray-50">
       <Navbar />
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+        <MobileAuth />
+        
         <div className="mb-8">
           <Link to="/admin" className="text-blue-600 hover:text-blue-700 mb-4 inline-block">
             ← Back to Admin
@@ -601,6 +605,11 @@ const AdminEventUpload: React.FC = () => {
             />
           </label>
           <p className="text-sm text-gray-500 mt-4">Supports JPEG images and MP4 videos</p>
+        </div>
+
+        {/* Folder Sync Manager - Mobile only */}
+        <div className="bg-white rounded-lg shadow p-6 mb-8">
+          <FolderSyncManager eventSlug={slug!} />
         </div>
 
         {/* Upload Queue */}

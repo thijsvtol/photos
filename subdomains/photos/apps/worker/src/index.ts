@@ -9,6 +9,7 @@ import zipRoutes from './routes/zip';
 import featuresRoutes from './routes/features';
 import favoritesRoutes from './routes/favorites';
 import collaboratorsRoutes from './routes/collaborators';
+import mobileAuthRoutes from './routes/mobileAuth';
 import { seo } from './routes/seo';
 
 const app = new Hono<{ Bindings: Env }>();
@@ -30,6 +31,7 @@ app.route('/', zipRoutes);
 app.route('/', featuresRoutes);
 app.route('/', favoritesRoutes);
 app.route('/', collaboratorsRoutes);
+app.route('/', mobileAuthRoutes);
 app.route('/', seo);
 
 // Health check endpoint

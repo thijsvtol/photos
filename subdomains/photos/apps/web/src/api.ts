@@ -1,10 +1,51 @@
 import axios from 'axios';
+import { Capacitor } from '@capacitor/core';
 import type { Event, Photo, CreateEventRequest, Tag, AdminStats, EventStats, UpdateEventRequest, CreateTagRequest, UpdateTagRequest } from './types';
+import { MobileAuthService } from './services/mobileAuth';
 
 const api = axios.create({
-  baseURL: '/api',
-  withCredentials: true,
+  baseURL: import.meta.env.VITE_API_URL || '/api',
+  // Only use credentials in browser, not in native app
+  withCredentials: !Capacitor.isNativePlatform(),
 });
+
+// Add bearer token for mobile requests
+api.interceptors.request.use(async (config) => {
+  if (Capacitor.isNativePlatform()) {
+    const token = await MobileAuthService.getToken();
+    if (token) {
+      config.headers.Authorization = `Bearer ${token}`;
+    }
+  }
+  return config;
+});
+
+// Debug logging in dev
+if (import.meta.env.DEV || Capacitor.isNativePlatform()) {
+  console.log('[API] Base URL:', import.meta.env.VITE_API_URL || '/api');
+  console.log('[API] Is Native:', Capacitor.isNativePlatform());
+  
+  // Log all requests
+  api.interceptors.request.use((config) => {
+    console.log('[API] Request:', config.method?.toUpperCase(), config.url, 'Full URL:', (config.baseURL || '') + (config.url || ''));
+    return config;
+  });
+  
+  // Log all responses
+  api.interceptors.response.use(
+    (response) => {
+      console.log('[API] Response:', response.status, response.config.url);
+      return response;
+    },
+    (error) => {
+      console.error('[API] Error:', error.message, error.config?.url);
+      if (error.response) {
+        console.error('[API] Response data:', typeof error.response.data === 'string' ? error.response.data.substring(0, 200) : error.response.data);
+      }
+      return Promise.reject(error);
+    }
+  );
+}
 
 // Add response interceptor to handle token expiration
 api.interceptors.response.use(
@@ -210,13 +251,27 @@ export const getFeaturedPhotos = async (limit: number = 10): Promise<Photo[]> =>
 export const getPreviewUrl = (slug: string, photoId: string, fileType?: string): string => {
   const isVideo = fileType === 'video/mp4';
   const extension = isVideo ? 'mp4' : 'jpg';
-  return `/media/${slug}/preview/${photoId}.${extension}`;
+  const relativePath = `/media/${slug}/preview/${photoId}.${extension}`;
+  
+  // In native app, use production domain for media files
+  if (typeof window !== 'undefined' && window.location.protocol === 'https:' && window.location.hostname === 'localhost') {
+    return `https://photos.thijsvtol.nl${relativePath}`;
+  }
+  
+  return relativePath;
 };
 
 export const getOriginalUrl = (slug: string, photoId: string, fileType?: string): string => {
   const isVideo = fileType === 'video/mp4';
   const extension = isVideo ? 'mp4' : 'jpg';
-  return `/media/${slug}/original/${photoId}.${extension}`;
+  const relativePath = `/media/${slug}/original/${photoId}.${extension}`;
+  
+  // In native app, use production domain for media files
+  if (typeof window !== 'undefined' && window.location.protocol === 'https:' && window.location.hostname === 'localhost') {
+    return `https://photos.thijsvtol.nl${relativePath}`;
+  }
+  
+  return relativePath;
 };
 
 // Download functions that trigger browser downloads

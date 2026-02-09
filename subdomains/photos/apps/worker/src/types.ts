@@ -8,6 +8,7 @@ export interface Env {
   MAILGUN_API_KEY?: string; // Optional: Mailgun API key for sending email notifications
   MAILGUN_DOMAIN?: string; // Optional: Mailgun domain for sending emails
   ENVIRONMENT?: string;
+  JWT_SECRET?: string; // JWT secret for mobile OAuth tokens
 }
 
 // Database Models

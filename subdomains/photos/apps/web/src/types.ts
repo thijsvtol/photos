@@ -23,6 +23,8 @@ export interface Event {
 export interface Photo {
   id: string;
   event_id: number;
+  event_slug?: string; // Added for featured photos
+  event_name?: string; // Added for featured photos
   original_filename: string;
   file_type: string; // MIME type: 'image/jpeg' or 'video/mp4'
   capture_time: string;
