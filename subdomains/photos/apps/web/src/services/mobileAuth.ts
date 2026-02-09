@@ -57,8 +57,8 @@ export class MobileAuthService {
       const state = Math.random().toString(36).substring(7);
       await Preferences.set({ key: 'oauth_state', value: state });
 
-      // Open browser to OAuth endpoint
-      const authUrl = `https://photos.thijsvtol.nl/mobile-auth?state=${state}`;
+      // First go to /api/mobile-login to ensure user is authenticated, then auto-redirect to mobile-auth
+      const authUrl = `https://photos.thijsvtol.nl/api/mobile-login?state=${state}`;
       
       try {
         await Browser.open({

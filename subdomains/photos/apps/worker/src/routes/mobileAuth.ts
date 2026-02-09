@@ -6,6 +6,74 @@ import { extractUser } from '../auth';
 const router = new Hono<{ Bindings: Env }>();
 
 /**
+ * Mobile Login Landing Page
+ * Protected by Cloudflare Access - redirects to /mobile-auth after authentication
+ */
+router.get('/api/mobile-login', async (c) => {
+  const state = c.req.query('state') || '';
+  
+  return c.html(
+    `<!DOCTYPE html>
+    <html lang="en">
+    <head>
+      <meta charset="UTF-8">
+      <meta name="viewport" content="width=device-width, initial-scale=1.0">
+      <title>Mobile App Login</title>
+      <style>
+        body {
+          font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+          max-width: 600px;
+          margin: 50px auto;
+          padding: 20px;
+          text-align: center;
+          background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+          min-height: 100vh;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+        }
+        .container {
+          background: white;
+          padding: 40px;
+          border-radius: 20px;
+          box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+        }
+        h1 { color: #333; margin-bottom: 10px; }
+        p { color: #666; margin-bottom: 30px; }
+        .spinner {
+          border: 4px solid #f3f3f3;
+          border-top: 4px solid #667eea;
+          border-radius: 50%;
+          width: 40px;
+          height: 40px;
+          animation: spin 1s linear infinite;
+          margin: 20px auto;
+        }
+        @keyframes spin {
+          0% { transform: rotate(0deg); }
+          100% { transform: rotate(360deg); }
+        }
+        .icon { font-size: 60px; margin-bottom: 20px; }
+      </style>
+    </head>
+    <body>
+      <div class="container">
+        <div class="icon">📱</div>
+        <h1>Mobile App Authentication</h1>
+        <p>You're authenticated! Redirecting to mobile app...</p>
+        <div class="spinner"></div>
+      </div>
+      <script>
+        setTimeout(() => {
+          window.location.href = '/api/mobile-auth?state=${state}';
+        }, 1000);
+      </script>
+    </body>
+    </html>`
+  );
+});
+
+/**
  * Mobile OAuth Authentication Page
  * 
  * GET /mobile-auth?state=<random>
@@ -16,7 +84,7 @@ const router = new Hono<{ Bindings: Env }>();
  * 3. Generates a JWT OAuth token for mobile app
  * 4. Redirects to deep link: photos://auth/callback?token=...
  */
-router.get('/mobile-auth', async (c) => {
+router.get('/api/mobile-auth', async (c) => {
   // Extract user from Cloudflare Access (should be authenticated)
   const user = await extractUser(c);
   
@@ -80,7 +148,6 @@ router.get('/mobile-auth', async (c) => {
         <head>
           <title>Authentication Successful</title>
           <meta name="viewport" content="width=device-width, initial-scale=1">
-          <meta http-equiv="refresh" content="1;url=${callbackUrl.toString()}">
           <style>
             body { 
               font-family: system-ui; 
@@ -113,6 +180,12 @@ router.get('/mobile-auth', async (c) => {
               border-radius: 5px;
             }
           </style>
+          <script>
+            // Attempt automatic redirect
+            setTimeout(() => {
+              window.location.href = '${callbackUrl.toString()}';
+            }, 1000);
+          </script>
         </head>
         <body>
           <h2>✓ Authentication Successful</h2>
@@ -120,6 +193,9 @@ router.get('/mobile-auth', async (c) => {
           <p>Redirecting back to app...</p>
           <p>If not redirected automatically:</p>
           <a href="${callbackUrl.toString()}">Click here to return to app</a>
+          <p style="margin-top: 30px; font-size: 12px; color: #666;">
+            You can close this window after clicking the link above.
+          </p>
         </body>
       </html>`
     );

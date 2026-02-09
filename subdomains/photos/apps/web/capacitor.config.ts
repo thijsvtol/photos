@@ -16,9 +16,6 @@ const config: CapacitorConfig = {
       appUrlScheme: 'photos',
     },
   },
-  ios: {
-    contentInset: 'automatic',
-  },
   android: {
     allowMixedContent: true,
   },

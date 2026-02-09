@@ -81,22 +81,19 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
   }, []);
 
   const login = async () => {
-    // Check if running on native platform
-    const isNative = Capacitor.isNativePlatform();
-    
-    // On native platform, bypass authentication
-    if (isNative) {
-      alert(
-        'Mobile app runs in development mode.\n\n' +
-        'Authentication is bypassed - all admin features are available.'
-      );
-      // Set mock admin user
-      setUser({
-        id: 'mobile-app-user',
-        email: 'mobile@thijsvtol.nl',
-        name: 'Mobile User',
-        isAdmin: true
-      });
+    // On native platform, use OAuth flow
+    if (Capacitor.isNativePlatform()) {
+      setLoading(true);
+      const token = await MobileAuthService.startAuthFlow();
+      
+      if (token) {
+        // Fetch user data
+        await fetchUser();
+      } else {
+        alert('Authentication failed. Please try again.');
+      }
+      
+      setLoading(false);
       return;
     }
     
