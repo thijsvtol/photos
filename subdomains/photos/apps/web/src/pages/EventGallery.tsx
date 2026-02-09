@@ -1,10 +1,11 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useRef } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { Share2, Upload } from 'lucide-react';
 import Masonry from 'react-masonry-css';
 import Navbar from '../components/Navbar';
 import Footer from '../components/Footer';
 import PhotoCard from '../components/PhotoCard';
+import DateTimeline from '../components/DateTimeline';
 import SEO from '../components/SEO';
 import { getEvent, getPhotos, loginToEvent, getPreviewUrl, requestZip, setPhotoFeatured, getUserFavoriteIds, toggleFavorite as toggleFavoriteAPI, deletePhoto, getUserCollaborations } from '../api';
 import type { Event, Photo } from '../types';
@@ -27,6 +28,8 @@ const EventGallery: React.FC = () => {
   const [showShareMenu, setShowShareMenu] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [isCollaborator, setIsCollaborator] = useState(false);
+  const [activeDate, setActiveDate] = useState<string | null>(null);
+  const dateRefs = useRef<Map<string, HTMLDivElement>>(new Map());
 
   useEffect(() => {
     if (slug) {
@@ -361,6 +364,76 @@ const EventGallery: React.FC = () => {
     setShowShareMenu(false);
   };
 
+  // Group photos by date
+  const groupPhotosByDate = (photos: Photo[]) => {
+    const groups = new Map<string, Photo[]>();
+    
+    photos.forEach(photo => {
+      // Extract date from capture_time (YYYY-MM-DD)
+      const date = photo.capture_time.split('T')[0];
+      if (!groups.has(date)) {
+        groups.set(date, []);
+      }
+      groups.get(date)!.push(photo);
+    });
+    
+    // Sort dates in descending order (newest first) or ascending based on sortBy
+    const sortedDates = Array.from(groups.keys()).sort((a, b) => {
+      if (sortBy.startsWith('date_desc')) {
+        return b.localeCompare(a);
+      } else {
+        return a.localeCompare(b);
+      }
+    });
+    
+    return { groups, dates: sortedDates };
+  };
+
+  const handleDateClick = (date: string) => {
+    const element = dateRefs.current.get(date);
+    if (element) {
+      const offset = 100; // Offset for sticky timeline
+      const elementPosition = element.getBoundingClientRect().top;
+      const offsetPosition = elementPosition + window.pageYOffset - offset;
+      
+      window.scrollTo({
+        top: offsetPosition,
+        behavior: 'smooth'
+      });
+    }
+  };
+
+  // Set up intersection observer to track active date section
+  useEffect(() => {
+    const observer = new IntersectionObserver(
+      (entries) => {
+        entries.forEach((entry) => {
+          if (entry.isIntersecting) {
+            const date = entry.target.getAttribute('data-date');
+            if (date) {
+              setActiveDate(date);
+            }
+          }
+        });
+      },
+      {
+        rootMargin: '-100px 0px -60% 0px', // Trigger when section is near top
+        threshold: 0.1
+      }
+    );
+
+    // Observe all date sections
+    dateRefs.current.forEach((element) => {
+      observer.observe(element);
+    });
+
+    return () => {
+      observer.disconnect();
+    };
+  }, [photos]);
+
+  const { groups: photosByDate, dates } = groupPhotosByDate(photos);
+
   if (loading) {
     return (
       <div className="min-h-screen bg-gray-50 flex items-center justify-center">
@@ -582,12 +655,93 @@ const EventGallery: React.FC = () => {
           </div>
         </div>
 
+        {/* Date Timeline - Only show for multi-day events */}
+        {dates.length > 1 && (
+          <div className="-mx-3 sm:-mx-4 lg:-mx-8 mb-6">
+            <DateTimeline 
+              dates={dates} 
+              activeDate={activeDate} 
+              onDateClick={handleDateClick} 
+            />
+          </div>
+        )}
+
         {/* Gallery */}
         {photos.length === 0 ? (
           <div className="text-center py-12">
             <p className="text-gray-600">No photos found.</p>
           </div>
+        ) : dates.length > 1 ? (
+          // Multi-date view with date headers
+          <div className="space-y-8">
+            {dates.map((date) => {
+              const datePhotos = photosByDate.get(date) || [];
+              const dateObj = new Date(date);
+              const formattedDate = dateObj.toLocaleDateString('en-US', { 
+                weekday: 'long',
+                year: 'numeric',
+                month: 'long', 
+                day: 'numeric' 
+              });
+              
+              return (
+                <div 
+                  key={date} 
+                  data-date={date}
+                  ref={(el) => {
+                    if (el) {
+                      dateRefs.current.set(date, el);
+                    } else {
+                      dateRefs.current.delete(date);
+                    }
+                  }}
+                >
+                  {/* Date header */}
+                  <div className="mb-4 pb-2 border-b-2 border-gray-200">
+                    <h2 className="text-xl sm:text-2xl font-bold text-gray-900">
+                      {formattedDate}
+                    </h2>
+                    <p className="text-sm text-gray-500 mt-1">
+                      {datePhotos.length} {datePhotos.length === 1 ? 'photo' : 'photos'}
+                    </p>
+                  </div>
+                  
+                  {/* Photos for this date */}
+                  <Masonry
+                    breakpointCols={{
+                      default: 4,
+                      1536: 4,
+                      1280: 3,
+                      1024: 3,
+                      768: 2,
+                      400: 1
+                    }}
+                    className="flex -ml-2 sm:-ml-4 w-auto"
+                    columnClassName="pl-2 sm:pl-4 bg-clip-padding"
+                  >
+                    {datePhotos.map((photo) => (
+                      <PhotoCard
+                        key={photo.id}
+                        photo={photo}
+                        slug={slug!}
+                        sortBy={sortBy}
+                        showSelection={true}
+                        isSelected={selectedPhotos.has(photo.id)}
+                        onToggleSelection={toggleSelection}
+                        showAddToFavorites={true}
+                        onToggleFavorite={toggleFavorite}
+                        showFeatured={isAdmin}
+                        onToggleFeatured={toggleFeatured}
+                        userFavorites={userFavorites}
+                      />
+                    ))}
+                  </Masonry>
+                </div>
+              );
+            })}
+          </div>
         ) : (
+          // Single-date view (original masonry without date headers)
           <Masonry
             breakpointCols={{
               default: 4,
