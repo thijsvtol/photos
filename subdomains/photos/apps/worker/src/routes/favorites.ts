@@ -29,10 +29,10 @@ app.get('/api/favorites', requireAuth, async (c) => {
         FROM user_favorites uf
         JOIN photos p ON uf.photo_id = p.id
         JOIN events e ON uf.event_id = e.id
-        WHERE uf.user_id = ?
+        WHERE uf.user_email = ?
         ORDER BY uf.created_at DESC
       `)
-      .bind(user.id)
+      .bind(user.email)
       .all();
 
     return c.json({ 
@@ -61,9 +61,9 @@ app.get('/api/favorites/ids', requireAuth, async (c) => {
       .prepare(`
         SELECT photo_id, event_id
         FROM user_favorites
-        WHERE user_id = ?
+        WHERE user_email = ?
       `)
-      .bind(user.id)
+      .bind(user.email)
       .all();
 
     const favoriteIds = (favorites.results || []).map((f: any) => ({
@@ -104,11 +104,11 @@ app.post('/api/favorites/:photoId', requireAuth, async (c) => {
     // Insert favorite (ignore if already exists)
     await c.env.DB
       .prepare(`
-        INSERT INTO user_favorites (user_id, photo_id, event_id)
+        INSERT INTO user_favorites (user_email, photo_id, event_id)
         VALUES (?, ?, ?)
-        ON CONFLICT(user_id, photo_id) DO NOTHING
+        ON CONFLICT(user_email, photo_id) DO NOTHING
       `)
-      .bind(user.id, photoId, photo.event_id)
+      .bind(user.email, photoId, photo.event_id)
       .run();
 
     // Update favorites count
@@ -145,8 +145,8 @@ app.delete('/api/favorites/:photoId', requireAuth, async (c) => {
   try {
     // Delete favorite
     await c.env.DB
-      .prepare('DELETE FROM user_favorites WHERE user_id = ? AND photo_id = ?')
-      .bind(user.id, photoId)
+      .prepare('DELETE FROM user_favorites WHERE user_email = ? AND photo_id = ?')
+      .bind(user.email, photoId)
       .run();
 
     // Update favorites count
@@ -174,13 +174,16 @@ app.delete('/api/favorites/:photoId', requireAuth, async (c) => {
  */
 app.get('/api/user/profile', optionalAuth, async (c) => {
   const user = getUser(c);
+  console.log('Profile endpoint - user from context:', user);
   
   // Return null if not authenticated (don't force login)
   if (!user) {
+    console.log('Profile endpoint - no user in context, returning null');
     return c.json({ user: null });
   }
 
   try {
+    console.log('Profile endpoint - querying DB for user:', user.email);
     // Get user with favorite count
     const dbUser = await c.env.DB
       .prepare(`
@@ -188,15 +191,16 @@ app.get('/api/user/profile', optionalAuth, async (c) => {
           u.*,
           COUNT(uf.photo_id) as favorites_count
         FROM users u
-        LEFT JOIN user_favorites uf ON u.id = uf.user_id
-        WHERE u.id = ?
-        GROUP BY u.id
+        LEFT JOIN user_favorites uf ON u.email = uf.user_email
+        WHERE u.email = ?
+        GROUP BY u.email
       `)
-      .bind(user.id)
+      .bind(user.email)
       .first();
 
+    console.log('Profile endpoint - DB query result:', dbUser);
     return c.json({ 
-      user: dbUser ? { ...dbUser, isAdmin: isAdmin(c) } : null 
+      user: dbUser ? { ...dbUser, id: user.id, isAdmin: isAdmin(c) } : null 
     });
   } catch (error) {
     console.error('Error fetching user profile:', error);

@@ -935,6 +935,12 @@ const PhotoDetail: React.FC = () => {
                 <dt className="text-gray-400 text-xs md:text-sm">Filename</dt>
                 <dd className="text-white text-xs md:text-sm break-all">{photo?.original_filename}</dd>
               </div>
+              {photo?.uploader_name && (
+                <div>
+                  <dt className="text-gray-400 text-xs md:text-sm">Uploaded by</dt>
+                  <dd className="text-white text-xs md:text-sm">{photo.uploader_name}</dd>
+                </div>
+              )}
             </dl>
           </div>
 

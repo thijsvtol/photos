@@ -17,4 +17,21 @@ export default defineConfig({
       },
     },
   },
+  build: {
+    rollupOptions: {
+      output: {
+        manualChunks: {
+          // React core
+          'react-vendor': ['react', 'react-dom', 'react-router-dom'],
+          // Map libraries (usually large)
+          'map-vendor': ['leaflet', 'react-leaflet'],
+          // UI libraries
+          'ui-vendor': ['react-masonry-css', 'lucide-react'],
+          // Utilities
+          'utils': ['axios', 'ulid', 'exifreader', 'dexie'],
+        },
+      },
+    },
+    chunkSizeWarningLimit: 600, // Increase slightly from default 500
+  },
 });

@@ -45,6 +45,10 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
         const data = await response.json();
         // API returns { user: null } if not authenticated
         setUser(data.user);
+      } else if (response.status === 401) {
+        // Token expired or invalid - clear user state
+        console.log('Authentication expired or invalid');
+        setUser(null);
       } else {
         setUser(null);
       }
@@ -67,15 +71,15 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
       return;
     }
     
-    // Store the current location to return after login (if not already on a protected page)
-    if (window.location.pathname !== '/favorites') {
-      sessionStorage.setItem('auth_redirect', window.location.pathname);
+    // Store the current location to return after login
+    const currentPath = window.location.pathname;
+    if (currentPath !== '/favorites' && currentPath !== '/cdn-cgi/access/logout') {
+      sessionStorage.setItem('auth_redirect', currentPath);
     }
     
-    // Redirect to the favorites page (which is protected by Access)
-    // Access will automatically redirect to the proper login URL
-    // and then redirect back to /favorites after successful authentication
-    window.location.href = '/favorites';
+    // Clear any expired tokens by logging out of Access first, then redirecting to favorites
+    // This ensures we get a fresh token
+    window.location.href = '/cdn-cgi/access/logout?return_to=' + encodeURIComponent('/favorites');
   };
 
   const logout = () => {

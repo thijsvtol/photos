@@ -1,12 +1,12 @@
 import React, { useEffect, useState } from 'react';
 import { useParams, Link } from 'react-router-dom';
-import { Share2 } from 'lucide-react';
+import { Share2, Upload } from 'lucide-react';
 import Masonry from 'react-masonry-css';
 import Navbar from '../components/Navbar';
 import Footer from '../components/Footer';
 import PhotoCard from '../components/PhotoCard';
 import SEO from '../components/SEO';
-import { getEvent, getPhotos, loginToEvent, getPreviewUrl, requestZip, setPhotoFeatured, getUserFavoriteIds, toggleFavorite as toggleFavoriteAPI, deletePhoto } from '../api';
+import { getEvent, getPhotos, loginToEvent, getPreviewUrl, requestZip, setPhotoFeatured, getUserFavoriteIds, toggleFavorite as toggleFavoriteAPI, deletePhoto, getUserCollaborations } from '../api';
 import type { Event, Photo } from '../types';
 import { useAuth } from '../contexts/AuthContext';
 
@@ -26,6 +26,7 @@ const EventGallery: React.FC = () => {
   const [userFavorites, setUserFavorites] = useState<Set<string>>(new Set());
   const [showShareMenu, setShowShareMenu] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [isCollaborator, setIsCollaborator] = useState(false);
 
   useEffect(() => {
     if (slug) {
@@ -34,22 +35,30 @@ const EventGallery: React.FC = () => {
   }, [slug]);
 
   useEffect(() => {
-    // Load user favorites from API if authenticated
-    const loadFavorites = async () => {
-      if (isAuthenticated) {
+    // Load user favorites and check collaborator status if authenticated
+    const loadUserData = async () => {
+      if (isAuthenticated && slug) {
         try {
-          const favorites = await getUserFavoriteIds();
+          const [favorites, collaborations] = await Promise.all([
+            getUserFavoriteIds(),
+            getUserCollaborations()
+          ]);
           const favoriteIds = new Set(favorites.map(f => f.photoId));
           setUserFavorites(favoriteIds);
+          
+          // Check if user is a collaborator on this event
+          const isCollab = collaborations.some(c => c.slug === slug);
+          setIsCollaborator(isCollab);
         } catch (err) {
-          console.error('Failed to load favorites:', err);
+          console.error('Failed to load user data:', err);
         }
       } else {
         setUserFavorites(new Set());
+        setIsCollaborator(false);
       }
     };
-    loadFavorites();
-  }, [isAuthenticated]);
+    loadUserData();
+  }, [isAuthenticated, slug]);
 
   // Restore scroll position when returning to gallery
   useEffect(() => {
@@ -507,6 +516,24 @@ const EventGallery: React.FC = () => {
             </div>
           </div>
         </div>
+
+        {/* Upload button for admins and collaborators */}
+        {(isAdmin || isCollaborator) && (
+          <div className="mb-4">
+            <Link
+              to={`/admin/events/${slug}/upload`}
+              className="inline-flex items-center gap-2 px-6 py-3 bg-indigo-600 text-white rounded-xl hover:bg-indigo-700 active:scale-95 transition-all text-sm font-semibold shadow-md"
+            >
+              <Upload className="w-5 h-5" />
+              Upload Photos/Videos
+            </Link>
+            {isCollaborator && !isAdmin && (
+              <p className="text-xs text-gray-500 mt-2">
+                You've been invited to contribute to this event
+              </p>
+            )}
+          </div>
+        )}
 
         {/* Sort & Filter Options - Mobile optimized */}
         <div className="bg-white rounded-lg shadow p-3 sm:p-4 mb-6">

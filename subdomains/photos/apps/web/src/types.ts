@@ -26,6 +26,8 @@ export interface Photo {
   file_type: string; // MIME type: 'image/jpeg' or 'video/mp4'
   capture_time: string;
   uploaded_at: string;
+  uploaded_by: string | null; // User ID who uploaded the photo
+  uploader_name?: string | null; // Name of the user who uploaded (joined from users table)
   width: number | null;
   height: number | null;
   iso: number | null;
@@ -112,4 +114,19 @@ export interface UploadQueueItem {
   latitude?: number;
   longitude?: number;
   blurPlaceholder?: string;
+}
+
+export interface Collaborator {
+  id: number;
+  event_id: number;
+  user_id: string;
+  email: string;
+  name: string | null;
+  invited_by: string;
+  invited_at: string;
+  status: 'pending' | 'accepted' | 'declined';
+}
+
+export interface InviteCollaboratorRequest {
+  email: string;
 }

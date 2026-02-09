@@ -88,6 +88,15 @@ A full-stack photo gallery application built with React + Vite + Tailwind (front
 - 📝 **Descriptions**: Add descriptions to tags for context
 - ⚠️ **Safe Deletion**: Warns before deleting tags in use
 
+#### Collaborator System
+- 👥 **Invite Users**: Invite collaborators by email to upload photos to specific events
+- 📧 **Email Notifications**: Automatic invitation emails with event details
+- ⚡ **Upload Permissions**: Collaborators can upload photos/videos without admin access
+- 📊 **Status Tracking**: See pending, accepted, or declined invitations
+- 🔒 **Secure Access**: Uses Cloudflare Access authentication
+- 🗑️ **Easy Management**: Add or remove collaborators anytime from admin dashboard
+- 📚 **Documentation**: See [COLLABORATORS.md](./COLLABORATORS.md) for detailed guide
+
 #### Technical Features
 - 🔐 **Cloudflare Access**: Secure admin authentication
 - 🔒 **Admin-Only APIs**: X-Admin-Access header validation
@@ -152,6 +161,10 @@ wrangler d1 execute photos-db-local --local --file=./migrations/002_add_exif_dat
 wrangler d1 execute photos-db-local --local --file=./migrations/003_optional_passwords.sql
 wrangler d1 execute photos-db-local --local --file=./migrations/004_enhanced_features.sql
 wrangler d1 execute photos-db-local --local --file=./migrations/002_admin_improvements.sql
+wrangler d1 execute photos-db-local --local --file=./migrations/005_add_city_column.sql
+wrangler d1 execute photos-db-local --local --file=./migrations/006_user_favorites.sql
+wrangler d1 execute photos-db-local --local --file=./migrations/007_add_media_type.sql
+wrangler d1 execute photos-db-local --local --file=./migrations/008_event_collaborators.sql
 
 # Or run them all at once:
 for file in ./migrations/*.sql; do wrangler d1 execute photos-db-local --local --file="$file"; done
@@ -163,6 +176,10 @@ for file in ./migrations/*.sql; do wrangler d1 execute photos-db-local --local -
 - `003_optional_passwords.sql`: Optional password support
 - `004_enhanced_features.sql`: GPS, favorites, featured flag, tags, blur placeholders
 - `002_admin_improvements.sql`: Event descriptions and archive flag
+- `005_add_city_column.sql`: City column for photos with GPS coordinates
+- `006_user_favorites.sql`: User favorites with Cloudflare Access authentication
+- `007_add_media_type.sql`: Support for video files (MP4)
+- `008_event_collaborators.sql`: Collaborative photo uploads system
 
 ### 3. Set Up R2 Bucket
 
@@ -297,6 +314,10 @@ wrangler d1 execute photos-db --remote --file=./migrations/002_add_exif_data.sql
 wrangler d1 execute photos-db --remote --file=./migrations/003_optional_passwords.sql
 wrangler d1 execute photos-db --remote --file=./migrations/004_enhanced_features.sql
 wrangler d1 execute photos-db --remote --file=./migrations/002_admin_improvements.sql
+wrangler d1 execute photos-db --remote --file=./migrations/005_add_city_column.sql
+wrangler d1 execute photos-db --remote --file=./migrations/006_user_favorites.sql
+wrangler d1 execute photos-db --remote --file=./migrations/007_add_media_type.sql
+wrangler d1 execute photos-db --remote --file=./migrations/008_event_collaborators.sql
 
 # Or run them all at once:
 for file in ./migrations/*.sql; do wrangler d1 execute photos-db --remote --file="$file"; done

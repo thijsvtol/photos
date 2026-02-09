@@ -27,12 +27,15 @@ export async function extractUser(c: Context<{ Bindings: Env; Variables: Variabl
     }
     
     if (!jwt) {
-      console.log('No JWT found in headers or cookies. Available headers:', 
-        Array.from(c.req.raw.headers.keys()).join(', '));
+      console.log('No JWT found in headers or cookies.');
+      console.log('Available headers:', Array.from(c.req.raw.headers.keys()).join(', '));
+      console.log('Cookie header:', c.req.header('Cookie')?.substring(0, 100));
+      console.log('Request URL:', c.req.url);
       return null;
     }
 
     console.log('JWT found, parsing...');
+    console.log('JWT preview:', jwt.substring(0, 50) + '...');
 
     // Decode JWT (Cloudflare Access already validates it at the edge)
     const payload = parseJWT(jwt);
@@ -50,10 +53,19 @@ export async function extractUser(c: Context<{ Bindings: Env; Variables: Variabl
 
     console.log('User authenticated:', payload.email);
 
+    // Build name from available fields
+    // Google login may provide given_name/family_name instead of name
+    let userName = payload.name;
+    if (!userName && (payload.given_name || payload.family_name)) {
+      userName = [payload.given_name, payload.family_name].filter(Boolean).join(' ');
+    }
+
+    console.log('User name extracted:', userName || 'No name available');
+
     return {
       id: payload.sub,
       email: payload.email,
-      name: payload.name,
+      name: userName,
     };
   } catch (error) {
     console.error('Error extracting user:', error);
@@ -109,29 +121,32 @@ export async function optionalAuth(c: Context<{ Bindings: Env; Variables: Variab
   const user = await extractUser(c);
   
   if (user) {
-    c.set('user', user);
+    // Upsert user to database (email is primary key)
     await upsertUser(c.env.DB, user);
+    // Use email as the identifier (not JWT sub which can change)
+    c.set('user', user);
   }
   
   await next();
 }
 
 /**
- * Insert or update user in database
+ * Insert or update user in database (email is primary key)
  */
 async function upsertUser(db: D1Database, user: User): Promise<void> {
   try {
-    await db
+    console.log('Upserting user:', { email: user.email, name: user.name });
+    const result = await db
       .prepare(`
-        INSERT INTO users (id, email, name, last_login)
-        VALUES (?, ?, ?, datetime('now'))
-        ON CONFLICT(id) DO UPDATE SET
-          email = excluded.email,
+        INSERT INTO users (email, name, last_login)
+        VALUES (?, ?, datetime('now'))
+        ON CONFLICT(email) DO UPDATE SET
           name = excluded.name,
           last_login = excluded.last_login
       `)
-      .bind(user.id, user.email, user.name || null)
+      .bind(user.email, user.name || null)
       .run();
+    console.log('Upsert successful:', result.success);
   } catch (error) {
     console.error('Error upserting user:', error);
   }
@@ -181,4 +196,58 @@ export async function requireAdmin(c: Context<{ Bindings: Env; Variables: Variab
 
   console.log('Admin access granted:', user.email);
   await next();
+}
+
+/**
+ * Check if user is a collaborator on a specific event
+ */
+export async function isCollaborator(db: D1Database, eventSlug: string, userEmail: string): Promise<boolean> {
+  try {
+    const result = await db.prepare(`
+      SELECT 1
+      FROM event_collaborators ec
+      JOIN events e ON ec.event_id = e.id
+      WHERE e.slug = ? AND ec.user_email = ?
+    `).bind(eventSlug, userEmail).first();
+    
+    return !!result;
+  } catch (error) {
+    console.error('Error checking collaborator status:', error);
+    return false;
+  }
+}
+
+/**
+ * Middleware to require upload permission (admin or event collaborator)
+ * Use this for upload endpoints that should allow both admins and collaborators
+ */
+export async function requireUploadPermission(c: Context<{ Bindings: Env; Variables: Variables }>, next: Next) {
+  const user = await extractUser(c);
+  
+  if (!user) {
+    console.log('Upload access denied - no user found');
+    return c.json({ error: 'Authentication required' }, 401);
+  }
+
+  // Store user in context
+  c.set('user', user);
+  await upsertUser(c.env.DB, user);
+
+  // Check if user is admin (admins can upload to any event)
+  if (isAdmin(c)) {
+    console.log('Upload access granted (admin):', user.email);
+    await next();
+    return;
+  }
+
+  // Check if user is a collaborator on this specific event
+  const eventSlug = c.req.param('slug');
+  if (eventSlug && await isCollaborator(c.env.DB, eventSlug, user.email)) {
+    console.log('Upload access granted (collaborator):', user.email, 'for event:', eventSlug);
+    await next();
+    return;
+  }
+
+  console.log('Upload access denied for user:', user.email);
+  return c.json({ error: 'Upload permission required. You must be an admin or invited collaborator.' }, 403);
 }

@@ -2,6 +2,8 @@ import React, { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import Navbar from '../components/Navbar';
 import TagManager from '../components/TagManager';
+import CollaboratorManager from '../components/CollaboratorManager';
+import CollaborationHistory from '../components/CollaborationHistory';
 import { getEvents, createEvent, getAdminStats, updateEvent, deleteEvent, setEventTags } from '../api';
 import type { Event, AdminStats, UpdateEventRequest } from '../types';
 
@@ -413,6 +415,21 @@ const AdminDashboard: React.FC = () => {
                         eventSlug={editingEvent.slug} 
                         initialTags={editingEvent.tags}
                         onChange={setEditTagIds}
+                      />
+                    </div>
+                    
+                    {/* Event Collaborators */}
+                    <div>
+                      <CollaboratorManager 
+                        eventSlug={editingEvent.slug}
+                        eventName={editingEvent.name}
+                      />
+                    </div>
+                    
+                    {/* Collaboration History */}
+                    <div>
+                      <CollaborationHistory 
+                        eventSlug={editingEvent.slug}
                       />
                     </div>
                   </div>

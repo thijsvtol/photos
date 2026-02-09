@@ -131,24 +131,29 @@ app.get('/api/events/:slug/photos', async (c) => {
       }
     }
     
-    // Build query with sorting
-    let orderBy = 'capture_time DESC'; // default
+    // Build query with sorting and join uploader name
+    let orderBy = 'p.capture_time DESC'; // default
     switch (sort) {
       case 'date_asc':
-        orderBy = 'capture_time ASC';
+        orderBy = 'p.capture_time ASC';
         break;
       case 'date_desc':
-        orderBy = 'capture_time DESC';
+        orderBy = 'p.capture_time DESC';
         break;
       case 'name_asc':
-        orderBy = 'original_filename ASC';
+        orderBy = 'p.original_filename ASC';
         break;
       case 'name_desc':
-        orderBy = 'original_filename DESC';
+        orderBy = 'p.original_filename DESC';
         break;
     }
     
-    const query = `SELECT * FROM photos WHERE event_id = ? ORDER BY ${orderBy}`;
+    const query = `
+      SELECT p.*, p.uploaded_by as uploader_name 
+      FROM photos p
+      WHERE p.event_id = ? 
+      ORDER BY ${orderBy}
+    `;
     
     const photos = await c.env.DB
       .prepare(query)
@@ -189,9 +194,13 @@ app.get('/api/events/:slug/photos/:photoId', async (c) => {
       }
     }
     
-    // Get photo
+    // Get photo with uploader name
     const photo = await c.env.DB
-      .prepare('SELECT id, event_id, original_filename, capture_time, uploaded_at, width, height FROM photos WHERE id = ? AND event_id = ?')
+      .prepare(`
+        SELECT p.*, p.uploaded_by as uploader_name 
+        FROM photos p
+        WHERE p.id = ? AND p.event_id = ?
+      `)
       .bind(photoId, event.id)
       .first<Photo>();
     

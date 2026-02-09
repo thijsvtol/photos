@@ -6,6 +6,25 @@ const api = axios.create({
   withCredentials: true,
 });
 
+// Add response interceptor to handle token expiration
+api.interceptors.response.use(
+  (response) => response,
+  (error) => {
+    if (error.response?.status === 401) {
+      // Token expired - prompt user to re-authenticate
+      const shouldReauth = window.confirm(
+        'Your session has expired. Would you like to login again?'
+      );
+      if (shouldReauth) {
+        // Redirect through logout to clear expired token
+        window.location.href = '/cdn-cgi/access/logout?redirect_uri=' + 
+          encodeURIComponent(window.location.pathname);
+      }
+    }
+    return Promise.reject(error);
+  }
+);
+
 // Helper to get admin headers
 const getAdminHeaders = () => {
   const headers: Record<string, string> = {
@@ -358,4 +377,74 @@ export const toggleFavorite = async (photoId: string, isFavorite: boolean): Prom
   } else {
     await addFavorite(photoId);
   }
+};
+
+// Collaborator API
+export const getCollaborators = async (eventSlug: string) => {
+  const response = await api.get<{ collaborators: import('./types').Collaborator[] }>(
+    `/events/${eventSlug}/collaborators`,
+    { headers: getAdminHeaders() }
+  );
+  return response.data.collaborators;
+};
+
+export const inviteCollaborator = async (eventSlug: string, email: string) => {
+  console.log('[API] inviteCollaborator called:', { eventSlug, email });
+  const headers = getAdminHeaders();
+  console.log('[API] Headers:', headers);
+  
+  const response = await api.post(
+    `/events/${eventSlug}/collaborators`,
+    { email },
+    { headers }
+  );
+  console.log('[API] inviteCollaborator response:', response.data);
+  return response.data;
+};
+
+export const removeCollaborator = async (eventSlug: string, userId: string) => {
+  await api.delete(
+    `/events/${eventSlug}/collaborators/${userId}`,
+    { headers: getAdminHeaders() }
+  );
+};
+
+export const getUserCollaborations = async () => {
+  const response = await api.get<{ events: Array<{ id: number; slug: string; name: string; inferred_date: string | null; invited_at: string }> }>(
+    '/user/collaborations'
+  );
+  return response.data.events;
+};
+
+export const searchUsers = async (query: string) => {
+  const response = await api.get<{ users: Array<{ id: string; email: string; name: string | null }> }>(
+    '/users/search',
+    { 
+      params: { q: query },
+      headers: getAdminHeaders()
+    }
+  );
+  return response.data.users;
+};
+
+export const getCollaborationHistory = async (eventSlug: string) => {
+  const response = await api.get<{ 
+    history: Array<{
+      id: number;
+      event_id: number;
+      user_id: string;
+      user_name: string | null;
+      user_email: string;
+      action_type: 'invite' | 'accept' | 'decline' | 'remove' | 'upload';
+      target_user_id: string | null;
+      target_user_name: string | null;
+      target_user_email: string | null;
+      metadata: any;
+      created_at: string;
+    }>
+  }>(
+    `/events/${eventSlug}/collaboration-history`,
+    { headers: getAdminHeaders() }
+  );
+  return response.data.history;
 };

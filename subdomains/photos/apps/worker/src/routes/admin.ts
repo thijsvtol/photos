@@ -1,14 +1,27 @@
 import { Hono } from 'hono';
 import { ulid } from 'ulid';
-import type { Env, CreateEventRequest, StartUploadRequest, CompleteUploadRequest } from '../types';
+import type { Env, CreateEventRequest, StartUploadRequest, CompleteUploadRequest, User } from '../types';
 import { generateSalt, hashPassword, generateUniqueSlug } from '../utils';
 import { getCityFromCoordinates } from '../geocoding';
-import { requireAdmin } from '../auth';
+import { requireAdmin, requireUploadPermission, isAdmin } from '../auth';
+import { sendUploadNotification, logCollaborationAction } from './collaborators';
 
-const app = new Hono<{ Bindings: Env }>();
+type Variables = {
+  user: User;
+};
 
-// Apply admin authentication to all routes
-app.use('/*', requireAdmin);
+const app = new Hono<{ Bindings: Env; Variables: Variables }>();
+
+// Apply admin authentication to most routes (uploads will use their own middleware)
+app.use('/*', async (c, next) => {
+  const path = c.req.path;
+  // Skip admin check for upload routes - they have their own permission check
+  if (path.includes('/uploads/')) {
+    await next();
+  } else {
+    await requireAdmin(c, next);
+  }
+});
 
 /**
  * POST /events
@@ -59,8 +72,9 @@ app.post('/events', async (c) => {
 /**
  * POST /events/:slug/uploads/start
  * Starts a multipart upload for a photo (original or preview)
+ * Accessible by admins and event collaborators
  */
-app.post('/events/:slug/uploads/start', async (c) => {
+app.post('/events/:slug/uploads/start', requireUploadPermission, async (c) => {
   const slug = c.req.param('slug');
   
   try {
@@ -95,13 +109,23 @@ app.post('/events/:slug/uploads/start', async (c) => {
     // Store photo metadata in database only if it's the original (not preview)
     if (!body.isPreview) {
       const captureTime = body.captureTime || new Date().toISOString();
+      const user = c.get('user'); // Get authenticated user (admin or collaborator)
+      
+      // Get first name from full name, or use full name if no space
+      let uploaderName = null;
+      if (user?.name) {
+        uploaderName = user.name.split(' ')[0]; // Get first name
+      }
+      
       await c.env.DB
         .prepare(`INSERT INTO photos (
-          id, event_id, original_filename, file_type, capture_time, width, height,
+          id, event_id, original_filename, file_type, capture_time, uploaded_by, width, height,
           iso, aperture, shutter_speed, focal_length, camera_make, camera_model, lens_model,
           latitude, longitude, blur_placeholder
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)        .bind(
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+        .bind(
           body.photoId, event.id, body.filename, fileType, captureTime, 
+          uploaderName, // Store uploader's first name
           body.width || null, body.height || null,
           body.iso || null, body.aperture || null, body.shutterSpeed || null,
           body.focalLength || null, body.cameraMake || null, body.cameraModel || null,
@@ -182,8 +206,9 @@ app.put('/events/:slug/uploads/:photoId/parts/:partNumber', async (c) => {
 /**
  * POST /events/:slug/uploads/:photoId/complete
  * Completes a multipart upload (supports preview uploads via query param)
+ * Accessible by admins and event collaborators
  */
-app.post('/events/:slug/uploads/:photoId/complete', async (c) => {
+app.post('/events/:slug/uploads/:photoId/complete', requireUploadPermission, async (c) => {
   const slug = c.req.param('slug');
   const photoId = c.req.param('photoId');
   const isPreview = c.req.query('preview') === 'true';
@@ -211,6 +236,53 @@ app.post('/events/:slug/uploads/:photoId/complete', async (c) => {
     // Complete the multipart upload
     const upload = c.env.PHOTOS_BUCKET.resumeMultipartUpload(key, body.uploadId);
     await upload.complete(body.parts);
+    
+    // Send notification if uploader is a collaborator (not admin)
+    // Only send for original uploads, not previews
+    if (!isPreview && !isAdmin(c)) {
+      const user = c.get('user');
+      if (user) {
+        // Get event info
+        const eventInfo = await c.env.DB.prepare(`
+          SELECT 
+            e.id, 
+            e.name
+          FROM events e
+          WHERE e.slug = ?
+        `).bind(slug).first<{
+          id: number;
+          name: string;
+        }>();
+        
+        if (eventInfo) {
+          // Get admin emails from environment
+          const adminEmails = c.env.ADMIN_EMAILS || '';
+          const adminList = adminEmails.split(',').map(email => email.trim()).filter(Boolean);
+          
+          // Send notification to all admins
+          for (const adminEmail of adminList) {
+            console.log('[Upload Notification] Sending to admin:', adminEmail);
+            await sendUploadNotification(c.env, {
+              adminEmail: adminEmail,
+              adminName: null,
+              uploaderName: user.name || null,
+              uploaderEmail: user.email,
+              eventName: eventInfo.name,
+              eventSlug: slug,
+              photoCount: 1 // Single photo per completion
+            });
+          }
+          
+          // Log upload action to history
+          await logCollaborationAction(c.env.DB, {
+            eventId: eventInfo.id,
+            userEmail: user.email,
+            actionType: 'upload',
+            metadata: { photoId }
+          });
+        }
+      }
+    }
     
     return c.json({ success: true, message: 'Upload completed successfully' });
   } catch (error) {
