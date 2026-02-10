@@ -33,12 +33,14 @@ const PhotoDetail: React.FC = () => {
   const [showSlideshowSettings, setShowSlideshowSettings] = useState(false);
   const touchStartX = useRef<number | null>(null);
   const touchEndX = useRef<number | null>(null);
-  const touchStartDistance = useRef<number | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const imageContainerRef = useRef<HTMLDivElement>(null);
   const slideshowTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const [isPinching, setIsPinching] = useState(false);
   const [isZoomed, setIsZoomed] = useState(false);
+  const [containerReady, setContainerReady] = useState(false);
+  const handlersAttachedRef = useRef<boolean>(false);
+  const navigateNextRef = useRef<(() => void) | null>(null);
+  const navigatePrevRef = useRef<(() => void) | null>(null);
 
   // Check if we came from favorites page
   const fromFavorites = location.state?.fromFavorites;
@@ -131,6 +133,37 @@ const PhotoDetail: React.FC = () => {
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [currentIndex, displayPhotos, slug, isFullscreen, showDetails, showKeyboardHelp, fromFavorites, isSlideshow]);
+
+  // Continuously monitor zoom state
+  useEffect(() => {
+    const checkZoom = () => {
+      checkIfZoomed();
+    };
+    
+    // Check zoom state very frequently for responsive behavior
+    const interval = setInterval(checkZoom, 50);
+    
+    // Also check on viewport resize events
+    if (window.visualViewport) {
+      window.visualViewport.addEventListener('resize', checkZoom);
+      window.visualViewport.addEventListener('scroll', checkZoom);
+    }
+    
+    return () => {
+      clearInterval(interval);
+      if (window.visualViewport) {
+        window.visualViewport.removeEventListener('resize', checkZoom);
+        window.visualViewport.removeEventListener('scroll', checkZoom);
+      }
+    };
+  }, []);
+
+  // Track when container is mounted
+  useEffect(() => {
+    if (imageContainerRef.current && !containerReady) {
+      setContainerReady(true);
+    }
+  });
 
   const loadPhoto = async () => {
     try {
@@ -260,63 +293,103 @@ const PhotoDetail: React.FC = () => {
     }
   };
 
-  // Touch handlers for swipe gestures
-  const handleTouchStart = (e: React.TouchEvent) => {
-    if (e.touches.length === 2) {
-      // Two fingers - user is pinching/zooming
-      setIsPinching(true);
-      const touch1 = e.touches[0];
-      const touch2 = e.touches[1];
-      const distance = Math.hypot(
-        touch2.clientX - touch1.clientX,
-        touch2.clientY - touch1.clientY
-      );
-      touchStartDistance.current = distance;
-    } else if (e.touches.length === 1) {
-      // Single finger - potential swipe
-      touchStartX.current = e.touches[0].clientX;
-      setIsPinching(false);
-    }
-  };
+  // Keep refs updated for stable event handlers
+  navigateNextRef.current = navigateToNext;
+  navigatePrevRef.current = navigateToPrevious;
 
-  const handleTouchMove = (e: React.TouchEvent) => {
-    if (e.touches.length === 2) {
-      // User is pinching - mark as pinching
-      setIsPinching(true);
-    } else if (e.touches.length === 1 && !isPinching) {
-      touchEndX.current = e.touches[0].clientX;
-    }
-  };
-
-  const handleTouchEnd = () => {
-    // Check if image is zoomed by checking if the container is scrollable
-    const container = imageContainerRef.current;
-    const isImageZoomed = container && (container.scrollWidth > container.clientWidth || container.scrollHeight > container.clientHeight);
-    setIsZoomed(!!isImageZoomed);
+  // Check if the image container is zoomed (only using visualViewport)
+  const checkIfZoomed = (): boolean => {
+    // Check visualViewport scale (mobile browsers)
+    let isViewportZoomed = false;
+    const hasViewport = typeof window !== 'undefined' && window.visualViewport;
     
-    // Only navigate if user was not pinching/zooming and image is not zoomed in
-    if (!isPinching && !isImageZoomed && touchStartX.current !== null && touchEndX.current !== null) {
+    if (hasViewport) {
+      // Lower threshold to catch even slight zooms (>= 1.01 instead of > 1.01)
+      isViewportZoomed = window.visualViewport!.scale >= 1.01;
+    }
+    
+    setIsZoomed(isViewportZoomed);
+    return isViewportZoomed;
+  };
+
+  // Native touch handlers with stable references using useCallback
+  // CRITICAL: No dependencies that change - these must be stable function references
+  const handleTouchStartNative = React.useCallback((e: TouchEvent) => {
+    // Only track single-finger swipes for navigation
+    if (e.touches.length === 1) {
+      touchStartX.current = e.touches[0].clientX;
+    } else {
+      // Multiple fingers - clear tracking
+      touchStartX.current = null;
+      touchEndX.current = null;
+    }
+  }, []);
+
+  const handleTouchMoveNative = React.useCallback((e: TouchEvent) => {
+    // Only track single-finger movement for swipe detection
+    if (e.touches.length === 1 && touchStartX.current !== null) {
+      touchEndX.current = e.touches[0].clientX;
+    } else {
+      // Multiple fingers or no start - clear tracking
+      touchStartX.current = null;
+      touchEndX.current = null;
+    }
+  }, []);
+
+  const handleTouchEndNative = React.useCallback(() => {
+    // Check if we should navigate based on swipe
+    if (touchStartX.current !== null && touchEndX.current !== null) {
       const diff = touchStartX.current - touchEndX.current;
-      const threshold = 50; // minimum swipe distance
+      const threshold = 50;
       
+      // Only navigate if swipe was significant
       if (Math.abs(diff) > threshold) {
+        // Navigate using refs to avoid stale closures
         if (diff > 0) {
-          // Swiped left - next photo
-          navigateToNext();
+          navigateNextRef.current?.();
         } else {
-          // Swiped right - previous photo
-          navigateToPrevious();
+          navigatePrevRef.current?.();
         }
       }
     }
     
-    // Reset on touch end
+    // Reset touch tracking
     touchStartX.current = null;
     touchEndX.current = null;
-    touchStartDistance.current = null;
-    // Keep isPinching true briefly to prevent accidental navigation
-    setTimeout(() => setIsPinching(false), 300);
-  };
+  }, []);
+
+  // Conditionally attach/detach touch handlers based on zoom state
+  useEffect(() => {
+    const container = imageContainerRef.current;
+    if (!container || !containerReady) return;
+
+    // If zoomed, remove handlers to let browser handle panning natively
+    if (isZoomed) {
+      if (handlersAttachedRef.current) {
+        container.removeEventListener('touchstart', handleTouchStartNative);
+        container.removeEventListener('touchmove', handleTouchMoveNative);
+        container.removeEventListener('touchend', handleTouchEndNative);
+        handlersAttachedRef.current = false;
+      }
+    } else {
+      // Not zoomed, attach handlers for swipe navigation
+      if (!handlersAttachedRef.current) {
+        container.addEventListener('touchstart', handleTouchStartNative, { passive: false });
+        container.addEventListener('touchmove', handleTouchMoveNative, { passive: false });
+        container.addEventListener('touchend', handleTouchEndNative, { passive: false });
+        handlersAttachedRef.current = true;
+      }
+    }
+
+    return () => {
+      if (handlersAttachedRef.current && container) {
+        container.removeEventListener('touchstart', handleTouchStartNative);
+        container.removeEventListener('touchmove', handleTouchMoveNative);
+        container.removeEventListener('touchend', handleTouchEndNative);
+        handlersAttachedRef.current = false;
+      }
+    };
+  }, [isZoomed, containerReady]);
 
   const toggleFullscreen = async () => {
     if (!document.fullscreenElement) {
@@ -589,10 +662,11 @@ const PhotoDetail: React.FC = () => {
         {/* Photo viewer with navigation */}
         <div 
           ref={containerRef}
-          className={`relative bg-black rounded-lg overflow-hidden ${isFullscreen ? 'fixed inset-0 z-50 rounded-none' : ''}`}
+          className={`relative bg-black rounded-lg ${isFullscreen ? 'fixed inset-0 z-50 rounded-none overflow-hidden' : ''}`}
         >
           {/* Action buttons - Desktop only */}
           <div className="hidden md:flex absolute top-4 right-4 z-20 gap-2 items-center">
+            
             {/* Favorite button */}
             <button
               onClick={toggleFavorite}
@@ -758,7 +832,14 @@ const PhotoDetail: React.FC = () => {
           </div>
           
           {/* Main image/video with swipe support and progressive loading */}
-          <div ref={imageContainerRef} className="relative overflow-auto">
+          <div 
+            ref={imageContainerRef} 
+            className="relative overflow-auto select-none touch-pan-x touch-pan-y touch-pinch-zoom" 
+            style={{ 
+              touchAction: 'pan-x pan-y pinch-zoom',
+              WebkitOverflowScrolling: 'touch'
+            }}
+          >
             {photo?.file_type === 'video/mp4' ? (
               <video
                 src={getPreviewUrl(slug!, photo?.id || photoId!, photo?.file_type)}
@@ -766,9 +847,6 @@ const PhotoDetail: React.FC = () => {
                 autoPlay
                 loop
                 className={`w-full h-auto ${isFullscreen ? 'max-h-screen' : 'max-h-[70vh] md:max-h-[80vh]'} object-contain`}
-                onTouchStart={handleTouchStart}
-                onTouchMove={handleTouchMove}
-                onTouchEnd={handleTouchEnd}
               />
             ) : (
               <>
@@ -784,9 +862,6 @@ const PhotoDetail: React.FC = () => {
                   alt={photo?.original_filename}
                   className={`w-full h-auto ${isFullscreen ? 'max-h-screen' : 'max-h-[70vh] md:max-h-[80vh]'} object-contain transition-opacity duration-500 ${imageLoaded ? 'opacity-100' : 'opacity-0'} ${photo?.blur_placeholder && !imageLoaded ? 'absolute inset-0' : ''}`}
                   onLoad={() => setImageLoaded(true)}
-                  onTouchStart={handleTouchStart}
-                  onTouchMove={handleTouchMove}
-                  onTouchEnd={handleTouchEnd}
                 />
               </>
             )}
@@ -888,7 +963,7 @@ const PhotoDetail: React.FC = () => {
           
           {/* Navigation hint */}
           <div className="text-center text-gray-400 text-sm">
-            {isZoomed ? 'Swipe disabled while zoomed' : '← Swipe or use buttons to navigate →'}
+            ← Swipe or use buttons to navigate →
           </div>
         </div>
 
