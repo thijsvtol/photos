@@ -35,8 +35,10 @@ const PhotoDetail: React.FC = () => {
   const touchEndX = useRef<number | null>(null);
   const touchStartDistance = useRef<number | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
+  const imageContainerRef = useRef<HTMLDivElement>(null);
   const slideshowTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [isPinching, setIsPinching] = useState(false);
+  const [isZoomed, setIsZoomed] = useState(false);
 
   // Check if we came from favorites page
   const fromFavorites = location.state?.fromFavorites;
@@ -287,8 +289,13 @@ const PhotoDetail: React.FC = () => {
   };
 
   const handleTouchEnd = () => {
-    // Only navigate if user was not pinching/zooming
-    if (!isPinching && touchStartX.current !== null && touchEndX.current !== null) {
+    // Check if image is zoomed by checking if the container is scrollable
+    const container = imageContainerRef.current;
+    const isImageZoomed = container && (container.scrollWidth > container.clientWidth || container.scrollHeight > container.clientHeight);
+    setIsZoomed(!!isImageZoomed);
+    
+    // Only navigate if user was not pinching/zooming and image is not zoomed in
+    if (!isPinching && !isImageZoomed && touchStartX.current !== null && touchEndX.current !== null) {
       const diff = touchStartX.current - touchEndX.current;
       const threshold = 50; // minimum swipe distance
       
@@ -750,34 +757,8 @@ const PhotoDetail: React.FC = () => {
             )}
           </div>
           
-          {/* Navigation buttons - Previous */}
-          {(fromFavorites && favoritePhotos.length > 1) || (!fromFavorites && displayPhotos.length > 1) ? (
-            <button
-              onClick={navigateToPrevious}
-              className="absolute left-2 md:left-4 top-1/2 -translate-y-1/2 z-10 bg-black/50 hover:bg-black/75 active:bg-black/90 text-white p-2 md:p-3 rounded-full transition touch-manipulation"
-              aria-label="Previous photo"
-            >
-              <svg className="w-6 h-6 md:w-8 md:h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
-              </svg>
-            </button>
-          ) : null}
-          
-          {/* Navigation buttons - Next */}
-          {(fromFavorites && favoritePhotos.length > 1) || (!fromFavorites && displayPhotos.length > 1) ? (
-            <button
-              onClick={navigateToNext}
-              className="absolute right-2 md:right-4 top-1/2 -translate-y-1/2 z-10 bg-black/50 hover:bg-black/75 active:bg-black/90 text-white p-2 md:p-3 rounded-full transition touch-manipulation"
-              aria-label="Next photo"
-            >
-              <svg className="w-6 h-6 md:w-8 md:h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
-              </svg>
-            </button>
-          ) : null}
-          
           {/* Main image/video with swipe support and progressive loading */}
-          <div className="relative">
+          <div ref={imageContainerRef} className="relative overflow-auto">
             {photo?.file_type === 'video/mp4' ? (
               <video
                 src={getPreviewUrl(slug!, photo?.id || photoId!, photo?.file_type)}
@@ -811,6 +792,33 @@ const PhotoDetail: React.FC = () => {
             )}
           </div>
         </div>
+
+        {/* Navigation buttons below image - Desktop and Mobile */}
+        {(fromFavorites && favoritePhotos.length > 1) || (!fromFavorites && displayPhotos.length > 1) ? (
+          <div className="flex justify-center items-center gap-4 mt-4">
+            <button
+              onClick={navigateToPrevious}
+              className="bg-gray-800 hover:bg-gray-700 active:bg-gray-600 text-white p-3 rounded-full transition touch-manipulation shadow-lg"
+              aria-label="Previous photo"
+            >
+              <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
+              </svg>
+            </button>
+            <span className="text-gray-400 text-sm">
+              {currentIndex + 1} / {displayPhotos.length}
+            </span>
+            <button
+              onClick={navigateToNext}
+              className="bg-gray-800 hover:bg-gray-700 active:bg-gray-600 text-white p-3 rounded-full transition touch-manipulation shadow-lg"
+              aria-label="Next photo"
+            >
+              <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+              </svg>
+            </button>
+          </div>
+        ) : null}
 
         {/* Mobile Action Bar */}
         <div className="md:hidden mt-4 space-y-3">
@@ -880,7 +888,7 @@ const PhotoDetail: React.FC = () => {
           
           {/* Navigation hint */}
           <div className="text-center text-gray-400 text-sm">
-            ← Swipe or use buttons to navigate →
+            {isZoomed ? 'Swipe disabled while zoomed' : '← Swipe or use buttons to navigate →'}
           </div>
         </div>
 

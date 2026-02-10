@@ -42,14 +42,15 @@ app.get('/api/events', optionalAuth, async (c) => {
       LEFT JOIN event_collaborators ec ON e.id = ec.event_id AND ec.user_email = ?
       WHERE 
         e.visibility = 'public'  -- Always show public events
-        OR ? = 1  -- Show all events if user is admin
+        OR (? = 1)  -- Show all events if user is admin
         OR (e.visibility = 'collaborators_only' AND ec.user_email IS NOT NULL)  -- Show collaborators_only if user is collaborator
+        OR (e.visibility = 'private' AND ? = 1)  -- Show private events only to admins
       ORDER BY e.inferred_date DESC, e.created_at DESC
     `;
     
     const events = await c.env.DB
       .prepare(query)
-      .bind(userEmail, userIsAdmin ? 1 : 0)
+      .bind(userEmail, userIsAdmin ? 1 : 0, userIsAdmin ? 1 : 0)
       .all<Omit<Event, 'password_salt' | 'password_hash'>>();
     
     // For public events, add a preview photo ID and cities
@@ -102,17 +103,38 @@ app.get('/api/events', optionalAuth, async (c) => {
  * GET /api/events/:slug
  * Returns event details (without sensitive data)
  */
-app.get('/api/events/:slug', async (c) => {
+app.get('/api/events/:slug', optionalAuth, async (c) => {
   const slug = c.req.param('slug');
   
   try {
+    const user = getUser(c);
+    const userIsAdmin = isAdmin(c);
+    const userEmail = user?.email || '';
+    
     const event = await c.env.DB
-      .prepare('SELECT id, slug, name, inferred_date, created_at, (password_hash IS NOT NULL) as requires_password FROM events WHERE slug = ?')
+      .prepare('SELECT id, slug, name, inferred_date, created_at, visibility, (password_hash IS NOT NULL) as requires_password FROM events WHERE slug = ?')
       .bind(slug)
       .first<Omit<Event, 'password_salt' | 'password_hash'>>();
     
     if (!event) {
       return c.json({ error: 'Event not found' }, 404);
+    }
+    
+    // Check if user has permission to view this event based on visibility
+    if (event.visibility === 'private' && !userIsAdmin) {
+      return c.json({ error: 'Event not found' }, 404);
+    }
+    
+    if (event.visibility === 'collaborators_only' && !userIsAdmin) {
+      // Check if user is a collaborator
+      const collaborator = await c.env.DB
+        .prepare('SELECT user_email FROM event_collaborators WHERE event_id = ? AND user_email = ?')
+        .bind(event.id, userEmail)
+        .first();
+      
+      if (!collaborator) {
+        return c.json({ error: 'Event not found' }, 404);
+      }
     }
     
     // Get tags for this event
@@ -137,19 +159,40 @@ app.get('/api/events/:slug', async (c) => {
  * Returns photos for an event (requires authentication if password protected)
  * Supports query params: sort (date_asc, date_desc, name_asc, name_desc)
  */
-app.get('/api/events/:slug/photos', async (c) => {
+app.get('/api/events/:slug/photos', optionalAuth, async (c) => {
   const slug = c.req.param('slug');
   const sort = c.req.query('sort') || 'date_asc';
   
   try {
-    // Get event to check if password protected
+    const user = getUser(c);
+    const userIsAdmin = isAdmin(c);
+    const userEmail = user?.email || '';
+    
+    // Get event to check if password protected and visibility
     const event = await c.env.DB
-      .prepare('SELECT id, password_hash FROM events WHERE slug = ?')
+      .prepare('SELECT id, password_hash, visibility FROM events WHERE slug = ?')
       .bind(slug)
-      .first<{ id: number; password_hash: string | null }>();
+      .first<{ id: number; password_hash: string | null; visibility: string }>();
     
     if (!event) {
       return c.json({ error: 'Event not found' }, 404);
+    }
+    
+    // Check if user has permission to view this event based on visibility
+    if (event.visibility === 'private' && !userIsAdmin) {
+      return c.json({ error: 'Event not found' }, 404);
+    }
+    
+    if (event.visibility === 'collaborators_only' && !userIsAdmin) {
+      // Check if user is a collaborator
+      const collaborator = await c.env.DB
+        .prepare('SELECT user_email FROM event_collaborators WHERE event_id = ? AND user_email = ?')
+        .bind(event.id, userEmail)
+        .first();
+      
+      if (!collaborator) {
+        return c.json({ error: 'Event not found' }, 404);
+      }
     }
     
     // Check authentication only if password protected
@@ -200,19 +243,40 @@ app.get('/api/events/:slug/photos', async (c) => {
  * GET /api/events/:slug/photos/:photoId
  * Returns single photo details (requires authentication if password protected)
  */
-app.get('/api/events/:slug/photos/:photoId', async (c) => {
+app.get('/api/events/:slug/photos/:photoId', optionalAuth, async (c) => {
   const slug = c.req.param('slug');
   const photoId = c.req.param('photoId');
   
   try {
-    // Get event to check if password protected
+    const user = getUser(c);
+    const userIsAdmin = isAdmin(c);
+    const userEmail = user?.email || '';
+    
+    // Get event to check if password protected and visibility
     const event = await c.env.DB
-      .prepare('SELECT id, password_hash FROM events WHERE slug = ?')
+      .prepare('SELECT id, password_hash, visibility FROM events WHERE slug = ?')
       .bind(slug)
-      .first<{ id: number; password_hash: string | null }>();
+      .first<{ id: number; password_hash: string | null; visibility: string }>();
     
     if (!event) {
       return c.json({ error: 'Event not found' }, 404);
+    }
+    
+    // Check if user has permission to view this event based on visibility
+    if (event.visibility === 'private' && !userIsAdmin) {
+      return c.json({ error: 'Event not found' }, 404);
+    }
+    
+    if (event.visibility === 'collaborators_only' && !userIsAdmin) {
+      // Check if user is a collaborator
+      const collaborator = await c.env.DB
+        .prepare('SELECT user_email FROM event_collaborators WHERE event_id = ? AND user_email = ?')
+        .bind(event.id, userEmail)
+        .first();
+      
+      if (!collaborator) {
+        return c.json({ error: 'Event not found' }, 404);
+      }
     }
     
     // Check authentication only if password protected

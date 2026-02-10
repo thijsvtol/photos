@@ -270,9 +270,19 @@ const EventList: React.FC = () => {
                     <span className={`px-2 py-1 text-xs rounded-full backdrop-blur-sm bg-opacity-90 ${
                       event.requires_password 
                         ? 'bg-amber-100 text-amber-800' 
+                        : event.visibility === 'private'
+                        ? 'bg-red-100 text-red-800'
+                        : event.visibility === 'collaborators_only'
+                        ? 'bg-purple-100 text-purple-800'
                         : 'bg-green-100 text-green-800'
                     }`}>
-                      {event.requires_password ? 'Protected' : 'Public'}
+                      {event.requires_password 
+                        ? 'Password Protected' 
+                        : event.visibility === 'private'
+                        ? 'Private'
+                        : event.visibility === 'collaborators_only'
+                        ? 'Invite Only'
+                        : 'Public'}
                     </span>
                   </div>
                 </div>
