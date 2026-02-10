@@ -1,5 +1,6 @@
 import axios from 'axios';
 import { Capacitor } from '@capacitor/core';
+import { Filesystem, Directory } from '@capacitor/filesystem';
 import type { Event, Photo, CreateEventRequest, Tag, AdminStats, EventStats, UpdateEventRequest, CreateTagRequest, UpdateTagRequest } from './types';
 import { MobileAuthService } from './services/mobileAuth';
 
@@ -283,36 +284,147 @@ export const getOriginalUrl = (slug: string, photoId: string, fileType?: string)
 // Download functions that trigger browser downloads
 export const downloadPhoto = async (url: string, filename: string): Promise<void> => {
   try {
-    const response = await fetch(url);
-    if (!response.ok) {
-      throw new Error(`Download failed: ${response.statusText}`);
+    const isNative = Capacitor.isNativePlatform();
+    console.log('[Download] Starting download for:', url);
+    console.log('[Download] Is native platform:', isNative);
+    console.log('[Download] Filename:', filename);
+    
+    // Native app: Use Capacitor Filesystem API
+    if (isNative) {
+      const response = await fetch(url);
+      if (!response.ok) {
+        throw new Error(`Download failed: ${response.statusText}`);
+      }
+      
+      console.log('[Download] Fetched successfully, converting to blob');
+      const blob = await response.blob();
+      
+      console.log('[Download] Converting to base64');
+      const base64 = await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onloadend = () => {
+          const result = reader.result as string;
+          if (result) {
+            const base64String = result.split(',')[1];
+            resolve(base64String);
+          } else {
+            reject(new Error('Failed to convert to base64'));
+          }
+        };
+        reader.onerror = () => reject(new Error('FileReader error'));
+        reader.readAsDataURL(blob);
+      });
+      
+      console.log('[Download] Writing file to Documents:', filename);
+      // Save to Documents directory
+      const result = await Filesystem.writeFile({
+        path: filename,
+        data: base64,
+        directory: Directory.Documents,
+        recursive: true
+      });
+      
+      console.log('[Download] File saved:', result.uri);
+      alert(`Photo saved: ${filename}`);
+    } else {
+      // Browser: Use traditional download
+      const response = await fetch(url);
+      if (!response.ok) {
+        throw new Error(`Download failed: ${response.statusText}`);
+      }
+      
+      const blob = await response.blob();
+      
+      const downloadUrl = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = downloadUrl;
+      link.download = filename;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(downloadUrl);
     }
-    
-    const blob = await response.blob();
-    
-    const downloadUrl = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.href = downloadUrl;
-    link.download = filename;
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-    URL.revokeObjectURL(downloadUrl);
   } catch (error) {
-    console.error('Download error:', error);
+    console.error('[Download] Error:', error);
+    alert(`Download failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
     throw error;
   }
 };
 
-export const downloadOriginal = (slug: string, photoId: string): void => {
+export const downloadOriginal = async (slug: string, photoId: string): Promise<void> => {
+  console.log('[downloadOriginal] Called with slug:', slug, 'photoId:', photoId);
   const url = getOriginalUrl(slug, photoId);
-  downloadPhoto(url, `${slug}_${photoId}_original.jpg`);
+  console.log('[downloadOriginal] URL:', url);
+  await downloadPhoto(url, `${slug}_${photoId}_original.jpg`);
 };
 
-export const downloadSmall = (slug: string, photoId: string): void => {
+export const downloadSmall = async (slug: string, photoId: string): Promise<void> => {
+  console.log('[downloadSmall] Called with slug:', slug, 'photoId:', photoId);
   // Download the preview version (1920px)
   const url = getPreviewUrl(slug, photoId);
-  downloadPhoto(url, `${slug}_${photoId}_small.jpg`);
+  console.log('[downloadSmall] URL:', url);
+  await downloadPhoto(url, `${slug}_${photoId}_small.jpg`);
+};
+
+/**
+ * Download a ZIP file (works on both native and web platforms)
+ */
+export const downloadZip = async (zipBlob: Blob, filename: string): Promise<void> => {
+  try {
+    const isNative = Capacitor.isNativePlatform();
+    console.log('[Download ZIP] Starting download');
+    console.log('[Download ZIP] Is native platform:', isNative);
+    console.log('[Download ZIP] Filename:', filename);
+    console.log('[Download ZIP] Blob size:', zipBlob.size, 'bytes');
+
+    if (isNative) {
+      // Native app: Use Capacitor Filesystem API
+      console.log('[Download ZIP] Converting blob to base64');
+      
+      const base64 = await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onloadend = () => {
+          const result = reader.result as string;
+          if (result) {
+            const base64String = result.split(',')[1];
+            resolve(base64String);
+          } else {
+            reject(new Error('Failed to convert to base64'));
+          }
+        };
+        reader.onerror = () => reject(new Error('FileReader error'));
+        reader.readAsDataURL(zipBlob);
+      });
+
+      console.log('[Download ZIP] Writing file to Documents:', filename);
+      
+      const result = await Filesystem.writeFile({
+        path: filename,
+        data: base64,
+        directory: Directory.Documents,
+        recursive: true
+      });
+      
+      console.log('[Download ZIP] File saved:', result.uri);
+      alert(`ZIP file saved: ${filename}`);
+    } else {
+      // Browser: Use traditional download
+      console.log('[Download ZIP] Using browser download');
+      const url = window.URL.createObjectURL(zipBlob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      window.URL.revokeObjectURL(url);
+      console.log('[Download ZIP] Browser download complete');
+    }
+  } catch (error) {
+    console.error('[Download ZIP] Error:', error);
+    alert(`ZIP download failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    throw error;
+  }
 };
 
 export const setPhotoFeatured = async (photoId: string, isFeatured: boolean): Promise<void> => {

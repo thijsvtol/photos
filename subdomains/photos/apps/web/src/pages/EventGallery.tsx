@@ -7,7 +7,7 @@ import Footer from '../components/Footer';
 import PhotoCard from '../components/PhotoCard';
 import DateTimeline from '../components/DateTimeline';
 import SEO from '../components/SEO';
-import { getEvent, getPhotos, loginToEvent, getPreviewUrl, requestZip, setPhotoFeatured, getUserFavoriteIds, toggleFavorite as toggleFavoriteAPI, deletePhoto, getUserCollaborations } from '../api';
+import { getEvent, getPhotos, loginToEvent, getPreviewUrl, requestZip, downloadZip, setPhotoFeatured, getUserFavoriteIds, toggleFavorite as toggleFavoriteAPI, deletePhoto, getUserCollaborations } from '../api';
 import type { Event, Photo } from '../types';
 import { useAuth } from '../contexts/AuthContext';
 
@@ -245,16 +245,9 @@ const EventGallery: React.FC = () => {
       // Request ZIP file from server
       const zipBlob = await requestZip(slug!, selected);
       
-      // Create download link
-      const url = window.URL.createObjectURL(zipBlob);
-      const a = document.createElement('a');
-      a.href = url;
+      // Download using platform-specific method
       const timestamp = new Date().toISOString().split('T')[0];
-      a.download = `${slug}_${timestamp}.zip`;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      window.URL.revokeObjectURL(url);
+      await downloadZip(zipBlob, `${slug}_${timestamp}.zip`);
     } catch (error) {
       console.error('Error downloading ZIP:', error);
       alert('Failed to download ZIP file');

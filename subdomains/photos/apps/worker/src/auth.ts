@@ -1,6 +1,7 @@
 import { Context, Next } from 'hono';
 import type { Env, User, CloudflareAccessJWT, DBUser } from './types';
 import { jwtVerify } from 'jose';
+import { getEventSession } from './cookies';
 
 // Extend Hono context to include user
 type Variables = {
@@ -103,7 +104,7 @@ function parseJWT(token: string): CloudflareAccessJWT | null {
 /**
  * Verify mobile OAuth Bearer token (JWT)
  */
-async function verifyBearerToken(env: Env, token: string): Promise<User | null> {
+export async function verifyBearerToken(env: Env, token: string): Promise<User | null> {
   try {
     if (!env.JWT_SECRET) {
       console.error('JWT_SECRET not configured');
@@ -208,6 +209,58 @@ export function isAdmin(c: Context<{ Bindings: Env; Variables: Variables }>): bo
   const adminList = adminEmails.split(',').map(email => email.trim().toLowerCase());
   
   return adminList.includes(user.email.toLowerCase());
+}
+
+/**
+ * Check if a user is an admin based on User object (without context)
+ */
+export function isUserAdmin(user: User, adminEmails: string): boolean {
+  if (!user) return false;
+  const adminList = adminEmails.split(',').map(email => email.trim().toLowerCase());
+  return adminList.includes(user.email.toLowerCase());
+}
+
+/**
+ * Check event authentication using both cookies and Bearer tokens
+ * Returns true if:
+ * - Event has no password (public access), OR
+ * - User has valid event session cookie (web), OR
+ * - User has valid Bearer token AND is an admin (mobile app)
+ */
+export async function checkEventAuth(
+  c: Context<{ Bindings: Env }>,
+  eventSlug: string,
+  hasPassword: boolean
+): Promise<boolean> {
+  // If event has no password, allow access
+  if (!hasPassword) {
+    return true;
+  }
+
+  // Check for cookie-based session (web users who entered password)
+  const hasCookieSession = await getEventSession(
+    c.req.raw,
+    eventSlug,
+    c.env.EVENT_COOKIE_SECRET
+  );
+  
+  if (hasCookieSession) {
+    return true;
+  }
+
+  // Check for Bearer token (mobile app users)
+  const authHeader = c.req.header('Authorization');
+  if (authHeader?.startsWith('Bearer ')) {
+    const token = authHeader.substring(7);
+    const user = await verifyBearerToken(c.env, token);
+    
+    // Allow if user is an admin
+    if (user && isUserAdmin(user, c.env.ADMIN_EMAILS || '')) {
+      return true;
+    }
+  }
+
+  return false;
 }
 
 /**

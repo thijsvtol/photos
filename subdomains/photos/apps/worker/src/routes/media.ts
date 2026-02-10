@@ -1,6 +1,6 @@
 import { Hono } from 'hono';
 import type { Env } from '../types';
-import { getEventSession } from '../cookies';
+import { checkEventAuth } from '../auth';
 
 const app = new Hono<{ Bindings: Env }>();
 
@@ -24,13 +24,10 @@ app.get('/media/:slug/preview/:photoId', async (c) => {
       return c.json({ error: 'Event not found' }, 404);
     }
     
-    // Check authentication only if password protected
-    if (event.password_hash) {
-      const isAuthenticated = await getEventSession(c.req.raw, slug, c.env.EVENT_COOKIE_SECRET);
-      
-      if (!isAuthenticated) {
-        return c.json({ error: 'Authentication required' }, 401);
-      }
+    // Check authentication (supports both cookies and Bearer tokens)
+    const isAuthenticated = await checkEventAuth(c, slug, !!event.password_hash);
+    if (!isAuthenticated) {
+      return c.json({ error: 'Authentication required' }, 401);
     }
     
     // Get file type from database
@@ -93,12 +90,10 @@ app.get('/media/:slug/ig/:photoId', async (c) => {
       return c.json({ error: 'Event not found' }, 404);
     }
     
-    // Check authentication only if password protected
-    if (event.password_hash) {
-      const isAuthenticated = await getEventSession(c.req.raw, slug, c.env.EVENT_COOKIE_SECRET);
-      if (!isAuthenticated) {
-        return c.json({ error: 'Authentication required' }, 401);
-      }
+    // Check authentication (supports both cookies and Bearer tokens)
+    const isAuthenticated = await checkEventAuth(c, slug, !!event.password_hash);
+    if (!isAuthenticated) {
+      return c.json({ error: 'Authentication required' }, 401);
     }
     
     // Get photo metadata for filename
@@ -163,12 +158,10 @@ app.get('/media/:slug/original/:photoId', async (c) => {
       return c.json({ error: 'Event not found' }, 404);
     }
     
-    // Check authentication only if password protected
-    if (event.password_hash) {
-      const isAuthenticated = await getEventSession(c.req.raw, slug, c.env.EVENT_COOKIE_SECRET);
-      if (!isAuthenticated) {
-        return c.json({ error: 'Authentication required' }, 401);
-      }
+    // Check authentication (supports both cookies and Bearer tokens)
+    const isAuthenticated = await checkEventAuth(c, slug, !!event.password_hash);
+    if (!isAuthenticated) {
+      return c.json({ error: 'Authentication required' }, 401);
     }
     
     const photo = await c.env.DB

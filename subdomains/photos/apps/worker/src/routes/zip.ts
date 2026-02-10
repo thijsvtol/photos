@@ -1,7 +1,7 @@
 import { Hono } from 'hono';
 import { zipSync } from 'fflate';
 import type { Env, ZipRequest, Photo } from '../types';
-import { getEventSession } from '../cookies';
+import { checkEventAuth } from '../auth';
 
 const app = new Hono<{ Bindings: Env }>();
 
@@ -31,13 +31,23 @@ function generatePhotoFilename(slug: string, captureTime: string, photoId: strin
 app.post('/api/events/:slug/zip', async (c) => {
   const slug = c.req.param('slug');
   
-  // Check authentication
-  const isAuthenticated = await getEventSession(c.req.raw, slug, c.env.EVENT_COOKIE_SECRET);
-  if (!isAuthenticated) {
-    return c.json({ error: 'Authentication required' }, 401);
-  }
-  
   try {
+    // Get event to check if password protected
+    const event = await c.env.DB
+      .prepare('SELECT id, name, password_hash FROM events WHERE slug = ?')
+      .bind(slug)
+      .first<{ id: number; name: string; password_hash: string | null }>();
+    
+    if (!event) {
+      return c.json({ error: 'Event not found' }, 404);
+    }
+    
+    // Check authentication (supports both cookies and Bearer tokens)
+    const isAuthenticated = await checkEventAuth(c, slug, !!event.password_hash);
+    if (!isAuthenticated) {
+      return c.json({ error: 'Authentication required' }, 401);
+    }
+    
     const body = await c.req.json<ZipRequest>();
     
     if (!body.photoIds || body.photoIds.length === 0) {
@@ -46,16 +56,6 @@ app.post('/api/events/:slug/zip', async (c) => {
     
     if (body.photoIds.length > 50) {
       return c.json({ error: 'Maximum 50 photos can be downloaded at once' }, 400);
-    }
-    
-    // Verify event exists
-    const event = await c.env.DB
-      .prepare('SELECT id, name FROM events WHERE slug = ?')
-      .bind(slug)
-      .first<{ id: number; name: string }>();
-    
-    if (!event) {
-      return c.json({ error: 'Event not found' }, 404);
     }
     
     // Get photo metadata

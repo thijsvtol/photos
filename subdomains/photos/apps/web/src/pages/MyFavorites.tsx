@@ -6,7 +6,7 @@ import Navbar from '../components/Navbar';
 import Footer from '../components/Footer';
 import PhotoCard from '../components/PhotoCard';
 import SEO from '../components/SEO';
-import { getUserFavorites, removeFavorite as removeFavoriteAPI, requestZip, type FavoritePhoto } from '../api';
+import { getUserFavorites, removeFavorite as removeFavoriteAPI, requestZip, downloadZip, type FavoritePhoto } from '../api';
 import { useAuth } from '../contexts/AuthContext';
 
 const MyFavorites: React.FC = () => {
@@ -78,15 +78,8 @@ const MyFavorites: React.FC = () => {
       for (const [slug, photoIds] of Object.entries(photosByEvent)) {
         const zipBlob = await requestZip(slug, photoIds);
         
-        // Create download link
-        const url = window.URL.createObjectURL(zipBlob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = `favorites_${slug}_${timestamp}.zip`;
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
-        window.URL.revokeObjectURL(url);
+        // Download using platform-specific method
+        await downloadZip(zipBlob, `favorites_${slug}_${timestamp}.zip`);
         
         // Small delay between downloads to avoid issues
         await new Promise(resolve => setTimeout(resolve, 500));

@@ -2,7 +2,7 @@ import React from 'react';
 import { Link } from 'react-router-dom';
 import { Heart, Star } from 'lucide-react';
 import ProgressiveImage from './ProgressiveImage';
-import { getPreviewUrl, getOriginalUrl } from '../api';
+import { getPreviewUrl, downloadOriginal, downloadSmall } from '../api';
 import type { Photo } from '../types';
 
 interface PhotoCardProps {
@@ -145,30 +145,42 @@ const PhotoCard: React.FC<PhotoCardProps> = ({
           
           {/* Download buttons row */}
           <div className="flex gap-1 sm:gap-2">
-            <a
-              href={getOriginalUrl(slug, photo.id, photo.file_type)}
-              download
+            <button
+              onClick={async (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                try {
+                  await downloadOriginal(slug, photo.id);
+                } catch (error) {
+                  console.error('Download failed:', error);
+                }
+              }}
               className="flex-1 px-3 py-2 bg-blue-600 text-white rounded-lg text-xs sm:text-sm hover:bg-blue-700 active:bg-blue-800 active:scale-95 transition-all text-center flex items-center justify-center gap-1.5 font-medium shadow-sm"
-              onClick={(e) => e.stopPropagation()}
             >
               <svg className="w-3 h-3 sm:w-4 sm:h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
               </svg>
               <span className="hidden sm:inline">Original</span>
               <span className="sm:hidden">Full</span>
-            </a>
+            </button>
             {!isVideo && (
-              <a
-                href={getPreviewUrl(slug, photo.id, photo.file_type)}
-                download
+              <button
+                onClick={async (e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  try {
+                    await downloadSmall(slug, photo.id);
+                  } catch (error) {
+                    console.error('Download failed:', error);
+                  }
+                }}
                 className="flex-1 px-3 py-2 bg-purple-600 text-white rounded-lg text-xs sm:text-sm hover:bg-purple-700 active:bg-purple-800 active:scale-95 transition-all text-center flex items-center justify-center gap-1.5 font-medium shadow-sm"
-                onClick={(e) => e.stopPropagation()}
               >
                 <svg className="w-3 h-3 sm:w-4 sm:h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
                 </svg>
                 Small
-              </a>
+              </button>
             )}
             {/* Remove from favorites button in same row */}
             {showRemoveFavorite && onRemoveFavorite && (
