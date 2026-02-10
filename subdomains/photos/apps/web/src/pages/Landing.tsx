@@ -77,7 +77,7 @@ export default function Landing() {
   };
 
   return (
-    <div className="min-h-screen bg-gray-50 flex flex-col">
+    <div className="min-h-screen bg-gray-50 dark:bg-gray-900 flex flex-col">
       <SEO
         title="Photos - Thijs van Tol | Professional Event Photography"
         description="Professional event photography featuring ice skating, inline skating, and sports events. Browse high-quality photos and download your favorites."
@@ -160,9 +160,9 @@ export default function Landing() {
         </section>
 
         {/* Contact Section */}
-        <section className="bg-white py-16" aria-label="Contact">
+        <section className="bg-white dark:bg-gray-800 py-16" aria-label="Contact">
           <div className="max-w-4xl mx-auto px-4">
-            <h2 className="text-3xl font-bold mb-8 text-center">Get in Touch</h2>
+            <h2 className="text-3xl font-bold mb-8 text-center text-gray-900 dark:text-white">Get in Touch</h2>
             
             <ContactForm formId="xdalnwpj" />
 

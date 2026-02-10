@@ -44,7 +44,7 @@ const PhotoCard: React.FC<PhotoCardProps> = ({
   const isVideo = photo.file_type === 'video/mp4';
   
   return (
-    <div className="mb-2 sm:mb-4 relative group bg-white rounded-xl overflow-hidden shadow-md hover:shadow-lg active:scale-[0.98] transition-all">
+    <div className="mb-2 sm:mb-4 relative group bg-white dark:bg-gray-800 rounded-xl overflow-hidden shadow-md hover:shadow-lg active:scale-[0.98] transition-all">
       <Link
         to={`/p/${slug}/${photo.id}`}
         state={fromFavorites && favoritePhotos ? {
@@ -106,7 +106,7 @@ const PhotoCard: React.FC<PhotoCardProps> = ({
                   className={`flex-1 px-3 py-2 rounded-lg text-xs sm:text-sm font-medium transition-all active:scale-95 ${
                     isSelected
                       ? 'bg-blue-600 text-white shadow-sm'
-                      : 'bg-gray-200 text-gray-700 hover:bg-gray-300 active:bg-gray-400'
+                      : 'bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-300 dark:hover:bg-gray-600 active:bg-gray-400 dark:active:bg-gray-500'
                   }`}
                 >
                   {isSelected ? '✓ Selected' : 'Select'}
@@ -118,7 +118,7 @@ const PhotoCard: React.FC<PhotoCardProps> = ({
                   className={`${showSelection ? 'px-2 py-2' : 'flex-1 px-3 py-2'} rounded-lg text-xs sm:text-sm flex items-center ${showSelection ? 'gap-1' : 'justify-center gap-1.5'} font-medium transition-all active:scale-95 ${
                     userFavorites.has(photo.id)
                       ? 'bg-red-500 text-white shadow-sm'
-                      : 'bg-gray-200 text-gray-700 hover:bg-gray-300 active:bg-gray-400'
+                      : 'bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-300 dark:hover:bg-gray-600 active:bg-gray-400 dark:active:bg-gray-500'
                   }`}
                   title={userFavorites.has(photo.id) ? 'Remove from favorites' : 'Add to favorites'}
                 >
@@ -132,7 +132,7 @@ const PhotoCard: React.FC<PhotoCardProps> = ({
                   className={`${showSelection || showAddToFavorites ? 'px-2 py-2' : 'flex-1 px-3 py-2'} rounded-lg text-xs sm:text-sm flex items-center ${showSelection || showAddToFavorites ? 'gap-1' : 'justify-center gap-1.5'} font-medium transition-all active:scale-95 ${
                     photo.is_featured
                       ? 'bg-yellow-500 text-white shadow-sm'
-                      : 'bg-gray-200 text-gray-700 hover:bg-gray-300 active:bg-gray-400'
+                      : 'bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-300 dark:hover:bg-gray-600 active:bg-gray-400 dark:active:bg-gray-500'
                   }`}
                   title={photo.is_featured ? 'Remove from featured' : 'Mark as featured'}
                 >
@@ -186,7 +186,7 @@ const PhotoCard: React.FC<PhotoCardProps> = ({
             {showRemoveFavorite && onRemoveFavorite && (
               <button
                 onClick={() => onRemoveFavorite(photo.id)}
-                className="px-2 py-2 text-red-500 bg-red-50 hover:bg-red-100 active:bg-red-200 rounded-lg transition-all active:scale-95"
+                className="px-2 py-2 text-red-500 bg-red-50 dark:bg-red-900/20 hover:bg-red-100 dark:hover:bg-red-900/30 active:bg-red-200 dark:active:bg-red-900/40 rounded-lg transition-all active:scale-95"
                 title="Remove from favorites"
               >
                 <Heart className="w-4 h-4 fill-current" />
@@ -195,11 +195,11 @@ const PhotoCard: React.FC<PhotoCardProps> = ({
           </div>
         </div>
         {/* Photo info */}
-        <p className="text-xs text-gray-500 truncate">
+        <p className="text-xs text-gray-500 dark:text-gray-400 truncate">
           {photo.original_filename}
         </p>
         {photo.capture_time && (
-          <p className="text-xs text-gray-400 mt-1">
+          <p className="text-xs text-gray-400 dark:text-gray-500 mt-1">
             {new Date(photo.capture_time).toLocaleDateString()}
           </p>
         )}

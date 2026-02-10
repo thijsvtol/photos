@@ -2,6 +2,7 @@ import { lazy, Suspense } from 'react';
 import { BrowserRouter, Routes, Route } from 'react-router-dom';
 import { HelmetProvider } from 'react-helmet-async';
 import { AuthProvider } from './contexts/AuthContext';
+import { ThemeProvider } from './contexts/ThemeContext';
 
 // Lazy load route components for better code splitting
 const Landing = lazy(() => import('./pages/Landing'));
@@ -30,9 +31,10 @@ const LoadingFallback = () => (
 function App() {
   return (
     <HelmetProvider>
-      <AuthProvider>
-        <BrowserRouter>
-          <Suspense fallback={<LoadingFallback />}>
+      <ThemeProvider>
+        <AuthProvider>
+          <BrowserRouter>
+            <Suspense fallback={<LoadingFallback />}>
             <Routes>
               <Route path="/" element={<Landing />} />
               <Route path="/events" element={<EventList />} />
@@ -50,6 +52,7 @@ function App() {
           </Suspense>
         </BrowserRouter>
       </AuthProvider>
+      </ThemeProvider>
     </HelmetProvider>
   );
 }

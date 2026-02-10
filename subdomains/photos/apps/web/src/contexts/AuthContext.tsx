@@ -17,6 +17,7 @@ interface AuthContextType {
   login: () => void;
   logout: () => void;
   refreshUser: () => Promise<void>;
+  updateUser: (user: User) => void;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -71,6 +72,9 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
 
       if (response.ok) {
         const data = await response.json();
+        console.log('[AuthContext] User profile response:', data);
+        console.log('[AuthContext] User object:', data.user);
+        console.log('[AuthContext] User name:', data.user?.name);
         setUser(data.user);
       } else if (response.status === 401) {
         console.log('Authentication expired or invalid');
@@ -143,6 +147,11 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     await fetchUser();
   };
 
+  const updateUser = (updatedUser: User) => {
+    console.log('[AuthContext] Updating user directly:', updatedUser);
+    setUser(updatedUser);
+  };
+
   const value: AuthContextType = {
     user,
     loading,
@@ -150,6 +159,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     login,
     logout,
     refreshUser,
+    updateUser,
   };
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

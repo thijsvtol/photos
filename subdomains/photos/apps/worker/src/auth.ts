@@ -175,17 +175,30 @@ export async function optionalAuth(c: Context<{ Bindings: Env; Variables: Variab
 async function upsertUser(db: D1Database, user: User): Promise<void> {
   try {
     console.log('Upserting user:', { email: user.email, name: user.name });
-    const result = await db
-      .prepare(`
-        INSERT INTO users (email, name, last_login)
-        VALUES (?, ?, datetime('now'))
-        ON CONFLICT(email) DO UPDATE SET
-          name = excluded.name,
-          last_login = excluded.last_login
-      `)
-      .bind(user.email, user.name || null)
-      .run();
-    console.log('Upsert successful:', result.success);
+    
+    // First check if user exists
+    const existingUser = await db
+      .prepare('SELECT email, name FROM users WHERE email = ?')
+      .bind(user.email)
+      .first();
+    
+    if (!existingUser) {
+      // User doesn't exist, create with name from JWT (if available)
+      console.log('Creating new user with name from JWT:', user.name);
+      await db
+        .prepare('INSERT INTO users (email, name, last_login) VALUES (?, ?, datetime(\'now\'))')
+        .bind(user.email, user.name || null)
+        .run();
+    } else {
+      // User exists - ONLY update last_login, preserve existing name
+      console.log('User exists, updating only last_login. Existing name:', existingUser.name);
+      await db
+        .prepare('UPDATE users SET last_login = datetime(\'now\') WHERE email = ?')
+        .bind(user.email)
+        .run();
+    }
+    
+    console.log('Upsert successful');
   } catch (error) {
     console.error('Error upserting user:', error);
   }

@@ -97,7 +97,7 @@ const MyFavorites: React.FC = () => {
   // Show login prompt if not authenticated
   if (!authLoading && !isAuthenticated) {
     return (
-      <div className="min-h-screen bg-gray-50 flex flex-col">
+      <div className="min-h-screen bg-gray-50 dark:bg-gray-900 flex flex-col">
         <SEO
           title="My Favorites - Thijs van Tol Photos"
           description="Your personal collection of favorite photos from various events. Login required."
@@ -105,10 +105,10 @@ const MyFavorites: React.FC = () => {
         />
         <Navbar />
         <div className="max-w-7xl mx-auto px-3 sm:px-4 lg:px-8 py-8 flex-grow w-full">
-          <div className="text-center py-16 px-4 bg-white rounded-xl shadow-lg max-w-2xl mx-auto">
+          <div className="text-center py-16 px-4 bg-white dark:bg-gray-800 rounded-xl shadow-lg max-w-2xl mx-auto">
             <Heart className="w-20 h-20 text-red-500 mx-auto mb-4" />
-            <h1 className="text-3xl font-bold text-gray-900 mb-4">Login Required</h1>
-            <p className="text-gray-600 text-lg mb-8">
+            <h1 className="text-3xl font-bold text-gray-900 dark:text-white mb-4">Login Required</h1>
+            <p className="text-gray-600 dark:text-gray-400 text-lg mb-8">
               You need to be logged in to view and manage your favorites.
             </p>
             <button
@@ -126,7 +126,7 @@ const MyFavorites: React.FC = () => {
   }
 
   return (
-    <div className="min-h-screen bg-gray-50 flex flex-col">
+    <div className="min-h-screen bg-gray-50 dark:bg-gray-900 flex flex-col">
       <SEO
         title="My Favorites - Thijs van Tol Photos"
         description="Your personal collection of favorite photos from various events. Private collection not indexed by search engines."
@@ -136,11 +136,11 @@ const MyFavorites: React.FC = () => {
       <div className="max-w-7xl mx-auto px-3 sm:px-4 lg:px-8 py-4 sm:py-8 flex-grow w-full">
         <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-6 sm:mb-8">
           <div>
-            <h1 className="text-3xl sm:text-4xl font-bold text-gray-900 flex items-center gap-2">
+            <h1 className="text-3xl sm:text-4xl font-bold text-gray-900 dark:text-white flex items-center gap-2">
               <Heart className="w-8 h-8 fill-red-500 text-red-500" />
               My Favorites
             </h1>
-            <p className="text-gray-600 mt-2">
+            <p className="text-gray-600 dark:text-gray-400 mt-2">
               {photos.length} photo{photos.length !== 1 ? 's' : ''} you've favorited
             </p>
           </div>
@@ -158,22 +158,22 @@ const MyFavorites: React.FC = () => {
 
         {loading && (
           <div className="text-center py-12">
-            <div className="inline-block animate-spin rounded-full h-12 w-12 border-b-2 border-gray-900"></div>
-            <p className="mt-4 text-gray-600">Loading your favorites...</p>
+            <div className="inline-block animate-spin rounded-full h-12 w-12 border-b-2 border-gray-900 dark:border-gray-100"></div>
+            <p className="mt-4 text-gray-600 dark:text-gray-400">Loading your favorites...</p>
           </div>
         )}
 
         {error && (
-          <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded">
+          <div className="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 text-red-700 dark:text-red-400 px-4 py-3 rounded">
             {error}
           </div>
         )}
 
         {!loading && !error && photos.length === 0 && (
-          <div className="text-center py-16 px-4 bg-white rounded-xl shadow-lg">
-            <Heart className="w-20 h-20 text-gray-300 mx-auto mb-4" />
-            <p className="text-gray-900 text-xl font-semibold mb-2">No favorites yet</p>
-            <p className="text-gray-500 text-base mb-8 max-w-md mx-auto">Click the heart icon on photos to add them to your favorites</p>
+          <div className="text-center py-16 px-4 bg-white dark:bg-gray-800 rounded-xl shadow-lg">
+            <Heart className="w-20 h-20 text-gray-300 dark:text-gray-600 mx-auto mb-4" />
+            <p className="text-gray-900 dark:text-white text-xl font-semibold mb-2">No favorites yet</p>
+            <p className="text-gray-500 dark:text-gray-400 text-base mb-8 max-w-md mx-auto">Click the heart icon on photos to add them to your favorites</p>
             <Link
               to="/events"
               className="inline-block px-8 py-4 bg-blue-600 text-white rounded-xl hover:bg-blue-700 active:scale-95 transition-all font-semibold shadow-md"

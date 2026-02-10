@@ -2,11 +2,13 @@ import React, { useState, useRef, useEffect } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import { Heart, MapPin, LayoutGrid, Settings, LogOut, User, LogIn, ChevronDown } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
+import UserSettings from './UserSettings';
 
 const Navbar: React.FC = () => {
   const location = useLocation();
   const { user, isAuthenticated, login, logout } = useAuth();
   const [showUserMenu, setShowUserMenu] = useState(false);
+  const [showSettings, setShowSettings] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
   
   // Close menu when clicking outside
@@ -31,8 +33,8 @@ const Navbar: React.FC = () => {
   const linkClass = (path: string) => {
     const base = "flex items-center gap-2 px-3 py-2 rounded-lg transition-colors text-sm font-medium";
     return isActive(path) 
-      ? `${base} bg-blue-100 text-blue-700`
-      : `${base} text-gray-600 hover:bg-gray-100`;
+      ? `${base} bg-blue-100 dark:bg-blue-900 text-blue-700 dark:text-blue-300`
+      : `${base} text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700`;
   };
 
   const handleLogout = () => {
@@ -41,11 +43,11 @@ const Navbar: React.FC = () => {
   };
 
   return (
-    <nav className="bg-white border-b border-gray-200 sticky top-0 z-50 shadow-sm">
+    <nav className="bg-white dark:bg-gray-900 border-b border-gray-200 dark:border-gray-700 sticky top-0 z-50 shadow-sm">
       <div className="max-w-7xl mx-auto px-3 sm:px-4 lg:px-8">
         <div className="flex items-center justify-between h-16">
           {/* Logo */}
-          <Link to="/" className="flex items-center gap-2 text-gray-900 hover:text-gray-700 transition-colors">
+          <Link to="/" className="flex items-center gap-2 text-gray-900 dark:text-white hover:text-gray-700 dark:hover:text-gray-300 transition-colors">
             <img src="/favicon.svg" alt="Logo" className="w-6 h-6" />
             <span className="font-bold text-lg hidden sm:inline">Thijs van Tol</span>
             <span className="font-bold text-lg sm:hidden">TvT</span>
@@ -86,7 +88,7 @@ const Navbar: React.FC = () => {
                 <>
                   <button
                     onClick={() => setShowUserMenu(!showUserMenu)}
-                    className="flex items-center gap-2 px-3 py-2 rounded-lg transition-colors text-sm font-medium text-gray-700 hover:bg-gray-100"
+                    className="flex items-center gap-2 px-3 py-2 rounded-lg transition-colors text-sm font-medium text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700"
                     aria-label="User menu"
                   >
                     <User className="w-4 h-4" aria-hidden="true" />
@@ -97,23 +99,33 @@ const Navbar: React.FC = () => {
                   </button>
                   
                   {showUserMenu && (
-                    <div className="absolute right-0 mt-2 w-64 bg-white rounded-lg shadow-lg border border-gray-200 py-2">
-                      <div className="px-4 py-2 border-b border-gray-100">
-                        <p className="text-sm font-medium text-gray-900 truncate">
+                    <div className="absolute right-0 mt-2 w-64 bg-white dark:bg-gray-800 rounded-lg shadow-lg border border-gray-200 dark:border-gray-700 py-2">
+                      <div className="px-4 py-2 border-b border-gray-100 dark:border-gray-700">
+                        <p className="text-sm font-medium text-gray-900 dark:text-white truncate">
                           {user?.name || 'User'}
                         </p>
-                        <p className="text-xs text-gray-500 truncate">
+                        <p className="text-xs text-gray-500 dark:text-gray-400 truncate">
                           {user?.email}
                         </p>
                         {user?.favorites_count !== undefined && (
-                          <p className="text-xs text-gray-500 mt-1">
+                          <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
                             {user.favorites_count} favorite{user.favorites_count !== 1 ? 's' : ''}
                           </p>
                         )}
                       </div>
                       <button
+                        onClick={() => {
+                          setShowUserMenu(false);
+                          setShowSettings(true);
+                        }}
+                        className="w-full text-left px-4 py-2 text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700 flex items-center gap-2"
+                      >
+                        <Settings className="w-4 h-4" />
+                        Settings
+                      </button>
+                      <button
                         onClick={handleLogout}
-                        className="w-full text-left px-4 py-2 text-sm text-red-600 hover:bg-red-50 flex items-center gap-2"
+                        className="w-full text-left px-4 py-2 text-sm text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 flex items-center gap-2"
                       >
                         <LogOut className="w-4 h-4" />
                         Logout
@@ -124,7 +136,7 @@ const Navbar: React.FC = () => {
               ) : (
                 <button
                   onClick={login}
-                  className="flex items-center gap-2 px-3 py-2 rounded-lg transition-colors text-sm font-medium text-gray-700 hover:bg-gray-100"
+                  className="flex items-center gap-2 px-3 py-2 rounded-lg transition-colors text-sm font-medium text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700"
                   aria-label="Login"
                 >
                   <LogIn className="w-4 h-4" aria-hidden="true" />
@@ -135,6 +147,9 @@ const Navbar: React.FC = () => {
           </div>
         </div>
       </div>
+      
+      {/* User Settings Modal */}
+      <UserSettings isOpen={showSettings} onClose={() => setShowSettings(false)} />
     </nav>
   );
 };

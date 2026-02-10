@@ -124,7 +124,7 @@ const EventList: React.FC = () => {
   };
 
   return (
-    <div className="min-h-screen bg-gray-50 flex flex-col">
+    <div className="min-h-screen bg-gray-50 dark:bg-gray-900 flex flex-col">
       <SEO
         title="Photo Events - Thijs van Tol | Browse Event Photography"
         description="Browse all photo events featuring ice skating, inline skating, and sports photography. Filter by tags and locations to find your favorite moments."
@@ -135,20 +135,20 @@ const EventList: React.FC = () => {
       <Navbar />
       <div className="max-w-7xl mx-auto px-3 sm:px-4 lg:px-8 py-4 sm:py-8 flex-grow w-full">
         <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-6 sm:mb-8">
-          <h1 className="text-3xl sm:text-4xl font-bold text-gray-900">Photo Events</h1>
+          <h1 className="text-3xl sm:text-4xl font-bold text-gray-900 dark:text-white">Photo Events</h1>
         </div>
 
         {/* Tag filters */}
         {tags.length > 0 && (
           <div className="mb-4 sm:mb-6">
-            <h3 className="text-sm font-semibold text-gray-700 mb-3">Filter by Tag</h3>
+            <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-3">Filter by Tag</h3>
             <div className="flex flex-wrap gap-2">
               <button
                 onClick={() => filterByTag(null)}
                 className={`px-4 py-2.5 rounded-full text-sm font-medium transition-all active:scale-95 ${
                   !selectedTag
                     ? 'bg-blue-600 text-white shadow-md'
-                    : 'bg-gray-200 text-gray-700 hover:bg-gray-300 active:bg-gray-400'
+                    : 'bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-300 dark:hover:bg-gray-600'
                 }`}
               >
                 All Tags
@@ -160,7 +160,7 @@ const EventList: React.FC = () => {
                   className={`px-4 py-2.5 rounded-full text-sm font-medium transition-all active:scale-95 ${
                     selectedTag === tag.slug
                       ? 'bg-blue-600 text-white shadow-md'
-                      : 'bg-gray-200 text-gray-700 hover:bg-gray-300 active:bg-gray-400'
+                      : 'bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-300 dark:hover:bg-gray-600'
                   }`}
                 >
                   {tag.name}
@@ -182,14 +182,14 @@ const EventList: React.FC = () => {
           if (cities.length > 0) {
             return (
               <div className="mb-6">
-                <h3 className="text-sm font-semibold text-gray-700 mb-3">Filter by City</h3>
+                <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-3">Filter by City</h3>
                 <div className="flex flex-wrap gap-2">
                   <button
                     onClick={() => filterByCity(null)}
                     className={`px-4 py-2.5 rounded-full text-sm font-medium transition-all active:scale-95 ${
                       !selectedCity
                         ? 'bg-green-700 text-white shadow-md'
-                        : 'bg-gray-200 text-gray-700 hover:bg-gray-300 active:bg-gray-400'
+                        : 'bg-gray-200 text-gray-700 hover:bg-gray-300 active:bg-gray-400 dark:bg-gray-700 dark:text-gray-300 dark:hover:bg-gray-600 dark:active:bg-gray-500'
                     }`}
                   >
                     All Cities
@@ -201,7 +201,7 @@ const EventList: React.FC = () => {
                       className={`px-4 py-2.5 rounded-full text-sm font-medium transition-all active:scale-95 ${
                         selectedCity === city
                           ? 'bg-green-700 text-white shadow-md'
-                          : 'bg-gray-200 text-gray-700 hover:bg-gray-300 active:bg-gray-400'
+                          : 'bg-gray-200 text-gray-700 hover:bg-gray-300 active:bg-gray-400 dark:bg-gray-700 dark:text-gray-300 dark:hover:bg-gray-600 dark:active:bg-gray-500'
                       }`}
                     >
                       {city}
@@ -222,7 +222,7 @@ const EventList: React.FC = () => {
         )}
 
         {error && (
-          <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded">
+          <div className="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 text-red-700 dark:text-red-400 px-4 py-3 rounded">
             {error}
           </div>
         )}
@@ -248,10 +248,10 @@ const EventList: React.FC = () => {
               <Link
                 key={event.id}
                 to={`/events/${event.slug}`}
-                className="mb-4 sm:mb-6 block bg-white rounded-xl shadow-md hover:shadow-xl active:scale-[0.98] transition-all overflow-hidden"
+                className="mb-4 sm:mb-6 block bg-white dark:bg-gray-800 rounded-xl shadow-md hover:shadow-xl active:scale-[0.98] transition-all overflow-hidden"
               >
                 {/* Preview Image or Placeholder */}
-                <div className="relative w-full h-48 sm:h-56 bg-gradient-to-br from-gray-200 to-gray-300">
+                <div className="relative w-full h-48 sm:h-56 bg-gradient-to-br from-gray-200 to-gray-300 dark:from-gray-700 dark:to-gray-800">
                   {event.preview_photo_id ? (
                     <img
                       src={getPreviewUrl(event.slug, event.preview_photo_id)}
@@ -279,13 +279,13 @@ const EventList: React.FC = () => {
                 
                 <div className="p-4 sm:p-6">
                   <div className="flex items-start justify-between mb-2">
-                    <h2 className="text-xl sm:text-2xl font-semibold text-gray-900">{event.name}</h2>
+                    <h2 className="text-xl sm:text-2xl font-semibold text-gray-900 dark:text-white">{event.name}</h2>
                   </div>
-                  <p className="text-gray-600 mb-3 text-sm sm:text-base">{formatDate(event.inferred_date)}</p>
+                  <p className="text-gray-600 dark:text-gray-400 mb-3 text-sm sm:text-base">{formatDate(event.inferred_date)}</p>
                   
                   {/* Location */}
                   {event.cities && event.cities.length > 0 && (
-                    <div className="flex items-center gap-1.5 mb-3 text-gray-600">
+                    <div className="flex items-center gap-1.5 mb-3 text-gray-600 dark:text-gray-400">
                       <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z" />
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 11a3 3 0 11-6 0 3 3 0 016 0z" />
@@ -300,7 +300,7 @@ const EventList: React.FC = () => {
                       {event.tags.map((tag) => (
                         <span
                           key={tag.id}
-                          className="px-2 py-0.5 text-xs bg-blue-100 text-blue-700 rounded-full"
+                          className="px-2 py-0.5 text-xs bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 rounded-full"
                         >
                           {tag.name}
                         </span>
@@ -308,7 +308,7 @@ const EventList: React.FC = () => {
                     </div>
                   )}
                   
-                  <div className="text-blue-600 hover:text-blue-700 font-semibold text-sm sm:text-base inline-flex items-center gap-1">
+                  <div className="text-blue-600 dark:text-blue-400 hover:text-blue-700 dark:hover:text-blue-300 font-semibold text-sm sm:text-base inline-flex items-center gap-1">
                     View Gallery 
                     <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />

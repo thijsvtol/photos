@@ -42,7 +42,7 @@ const EventGallery: React.FC = () => {
     const loadUserData = async () => {
       if (isAuthenticated && slug) {
         try {
-          const [favorites, collaborations] = await Promise.all([
+          const [favorites, collabData] = await Promise.all([
             getUserFavoriteIds(),
             getUserCollaborations()
           ]);
@@ -50,7 +50,7 @@ const EventGallery: React.FC = () => {
           setUserFavorites(favoriteIds);
           
           // Check if user is a collaborator on this event
-          const isCollab = collaborations.some(c => c.slug === slug);
+          const isCollab = collabData.collaborations.some(c => c.event_slug === slug);
           setIsCollaborator(isCollab);
         } catch (err) {
           console.error('Failed to load user data:', err);
@@ -429,10 +429,10 @@ const EventGallery: React.FC = () => {
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+      <div className="min-h-screen bg-gray-50 dark:bg-gray-900 flex items-center justify-center">
         <div className="text-center">
-          <div className="inline-block animate-spin rounded-full h-12 w-12 border-b-2 border-gray-900"></div>
-          <p className="mt-4 text-gray-600">Loading...</p>
+          <div className="inline-block animate-spin rounded-full h-12 w-12 border-b-2 border-gray-900 dark:border-gray-100"></div>
+          <p className="mt-4 text-gray-600 dark:text-gray-400">Loading...</p>
         </div>
       </div>
     );
@@ -440,8 +440,8 @@ const EventGallery: React.FC = () => {
 
   if (error) {
     return (
-      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
-        <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded">
+      <div className="min-h-screen bg-gray-50 dark:bg-gray-900 flex items-center justify-center">
+        <div className="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 text-red-700 dark:text-red-400 px-4 py-3 rounded">
           {error}
         </div>
       </div>
@@ -450,10 +450,10 @@ const EventGallery: React.FC = () => {
 
   if (!authenticated && event?.requires_password) {
     return (
-      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
-        <div className="max-w-md w-full bg-white rounded-lg shadow-md p-8">
-          <h1 className="text-3xl font-bold text-gray-900 mb-4">{event?.name}</h1>
-          <p className="text-gray-600 mb-6">This event is password protected. Please enter the password to view photos.</p>
+      <div className="min-h-screen bg-gray-50 dark:bg-gray-900 flex items-center justify-center">
+        <div className="max-w-md w-full bg-white dark:bg-gray-800 rounded-lg shadow-md p-8">
+          <h1 className="text-3xl font-bold text-gray-900 dark:text-white mb-4">{event?.name}</h1>
+          <p className="text-gray-600 dark:text-gray-400 mb-6">This event is password protected. Please enter the password to view photos.</p>
           
           <form onSubmit={handleLogin}>
             <input
@@ -461,12 +461,12 @@ const EventGallery: React.FC = () => {
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               placeholder="Enter password"
-              className="w-full px-4 py-2 border border-gray-300 rounded-lg mb-4"
+              className="w-full px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg mb-4 bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
               required
             />
             
             {loginError && (
-              <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded mb-4">
+              <div className="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 text-red-700 dark:text-red-400 px-4 py-3 rounded mb-4">
                 {loginError}
               </div>
             )}
@@ -479,7 +479,7 @@ const EventGallery: React.FC = () => {
             </button>
           </form>
           
-          <Link to="/events" className="block mt-4 text-center text-blue-600 hover:text-blue-700">
+            <Link to="/events" className="block mt-4 text-center text-blue-600 dark:text-blue-400 hover:text-blue-700 dark:hover:text-blue-300">
             ← Back to Events
           </Link>
         </div>
@@ -508,7 +508,7 @@ const EventGallery: React.FC = () => {
   const previewImageUrl = previewPhoto ? getPreviewUrl(slug!, previewPhoto.id) : undefined;
 
   return (
-    <div className="min-h-screen bg-gray-50 flex flex-col">
+    <div className="min-h-screen bg-gray-50 dark:bg-gray-900 flex flex-col">
       <SEO
         title={`${event?.name || 'Event Gallery'} - Thijs van Tol Photos`}
         description={`Browse ${photos.length} photos from ${event?.name}${event?.cities && event.cities.length > 0 ? ` in ${event.cities.join(', ')}` : ''}. Professional event photography featuring ice skating and inline skating.`}
@@ -521,14 +521,14 @@ const EventGallery: React.FC = () => {
       <Navbar />
       <div className="max-w-7xl mx-auto px-3 sm:px-4 lg:px-8 py-4 sm:py-8 flex-grow w-full">
         <div className="mb-6 sm:mb-8">
-          <Link to="/events" className="text-blue-600 hover:text-blue-700 mb-3 sm:mb-4 inline-block text-sm sm:text-base">
+          <Link to="/events" className="text-blue-600 dark:text-blue-400 hover:text-blue-700 dark:hover:text-blue-300 mb-3 sm:mb-4 inline-block text-sm sm:text-base">
             ← Back to Events
           </Link>
           <div className="flex justify-between items-start gap-4">
             <div className="flex-1">
-              <h1 className="text-3xl sm:text-4xl font-bold text-gray-900">{event?.name}</h1>
+              <h1 className="text-3xl sm:text-4xl font-bold text-gray-900 dark:text-white">{event?.name}</h1>
               {event && !event.requires_password && (
-                <span className="inline-block mt-2 px-2 py-1 text-xs bg-green-100 text-green-800 rounded-full">
+                <span className="inline-block mt-2 px-2 py-1 text-xs bg-green-100 dark:bg-green-900/30 text-green-800 dark:text-green-300 rounded-full">
                   Public Gallery
                 </span>
               )}
@@ -552,28 +552,28 @@ const EventGallery: React.FC = () => {
               
               {/* Desktop share menu dropdown */}
               {showShareMenu && !('share' in navigator) && (
-                <div className="absolute right-0 mt-2 w-48 bg-white rounded-lg shadow-xl border border-gray-200 overflow-hidden z-30">
+                <div className="absolute right-0 mt-2 w-48 bg-white dark:bg-gray-800 rounded-lg shadow-xl border border-gray-200 dark:border-gray-700 overflow-hidden z-30">
                   <button
                     onClick={() => shareEvent('twitter')}
-                    className="w-full px-4 py-2 text-left text-gray-700 hover:bg-gray-100 transition flex items-center gap-2"
+                    className="w-full px-4 py-2 text-left text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 transition flex items-center gap-2"
                   >
                     <span>🐦</span> Twitter
                   </button>
                   <button
                     onClick={() => shareEvent('facebook')}
-                    className="w-full px-4 py-2 text-left text-gray-700 hover:bg-gray-100 transition flex items-center gap-2"
+                    className="w-full px-4 py-2 text-left text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 transition flex items-center gap-2"
                   >
                     <span>📘</span> Facebook
                   </button>
                   <button
                     onClick={() => shareEvent('whatsapp')}
-                    className="w-full px-4 py-2 text-left text-gray-700 hover:bg-gray-100 transition flex items-center gap-2"
+                    className="w-full px-4 py-2 text-left text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 transition flex items-center gap-2"
                   >
                     <span>💬</span> WhatsApp
                   </button>
                   <button
                     onClick={() => shareEvent('copy')}
-                    className="w-full px-4 py-2 text-left text-gray-700 hover:bg-gray-100 transition flex items-center gap-2"
+                    className="w-full px-4 py-2 text-left text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 transition flex items-center gap-2"
                   >
                     <span>🔗</span> Copy Link
                   </button>
@@ -594,7 +594,7 @@ const EventGallery: React.FC = () => {
               Upload Photos/Videos
             </Link>
             {isCollaborator && !isAdmin && (
-              <p className="text-xs text-gray-500 mt-2">
+              <p className="text-xs text-gray-500 dark:text-gray-400 mt-2">
                 You've been invited to contribute to this event
               </p>
             )}
@@ -602,14 +602,14 @@ const EventGallery: React.FC = () => {
         )}
 
         {/* Sort & Filter Options - Mobile optimized */}
-        <div className="bg-white rounded-lg shadow p-3 sm:p-4 mb-6">
+        <div className="bg-white dark:bg-gray-800 rounded-lg shadow p-3 sm:p-4 mb-6">
           <div className="flex flex-col sm:flex-row flex-wrap gap-3 sm:gap-4 sm:items-center">
             <div className="flex-1 sm:flex-none">
-              <label className="block text-sm font-medium text-gray-700 mb-1">Sort by</label>
+              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Sort by</label>
               <select
                 value={sortBy}
                 onChange={(e) => setSortBy(e.target.value)}
-                className="w-full sm:w-auto px-3 py-2 border border-gray-300 rounded-lg text-sm bg-white"
+                className="w-full sm:w-auto px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg text-sm bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
               >
                 <option value="date_desc">Date (Newest First)</option>
                 <option value="date_asc">Date (Oldest First)</option>

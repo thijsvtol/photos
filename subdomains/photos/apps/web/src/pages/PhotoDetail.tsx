@@ -421,10 +421,10 @@ const PhotoDetail: React.FC = () => {
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+      <div className="min-h-screen bg-gray-50 dark:bg-gray-900 flex items-center justify-center">
         <div className="text-center">
-          <div className="inline-block animate-spin rounded-full h-12 w-12 border-b-2 border-gray-900"></div>
-          <p className="mt-4 text-gray-600">Loading...</p>
+          <div className="inline-block animate-spin rounded-full h-12 w-12 border-b-2 border-gray-900 dark:border-gray-100"></div>
+          <p className="mt-4 text-gray-600 dark:text-gray-400">Loading...</p>
         </div>
       </div>
     );
@@ -432,8 +432,8 @@ const PhotoDetail: React.FC = () => {
 
   if (error) {
     return (
-      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
-        <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded">
+      <div className="min-h-screen bg-gray-50 dark:bg-gray-900 flex items-center justify-center">
+        <div className="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 text-red-700 dark:text-red-400 px-4 py-3 rounded">
           {error}
         </div>
       </div>
@@ -442,10 +442,10 @@ const PhotoDetail: React.FC = () => {
 
   if (!authenticated) {
     return (
-      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
-        <div className="max-w-md w-full bg-white rounded-lg shadow-md p-8">
-          <h1 className="text-3xl font-bold text-gray-900 mb-4">{event?.name}</h1>
-          <p className="text-gray-600 mb-6">This photo is password protected. Please enter the event password to view it.</p>
+      <div className="min-h-screen bg-gray-50 dark:bg-gray-900 flex items-center justify-center">
+        <div className="max-w-md w-full bg-white dark:bg-gray-800 rounded-lg shadow-md p-8">
+          <h1 className="text-3xl font-bold text-gray-900 dark:text-white mb-4">{event?.name}</h1>
+          <p className="text-gray-600 dark:text-gray-400 mb-6">This photo is password protected. Please enter the event password to view it.</p>
           
           <form onSubmit={handleLogin}>
             <input

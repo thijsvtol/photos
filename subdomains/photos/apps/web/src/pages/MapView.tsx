@@ -136,7 +136,7 @@ const MapView: React.FC = () => {
   }, [locations]);
 
   return (
-    <div className="min-h-screen bg-gray-50 flex flex-col">
+    <div className="min-h-screen bg-gray-50 dark:bg-gray-900 flex flex-col">
       <SEO
         title="Photo Map - Thijs van Tol Photos | Browse by Location"
         description="Explore photos on an interactive map. Browse event photography by location, including ice skating and inline skating events across different cities."
@@ -147,10 +147,10 @@ const MapView: React.FC = () => {
       <div className="max-w-7xl mx-auto px-3 sm:px-4 lg:px-8 py-4 sm:py-8 flex-grow w-full">
         <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-6 sm:mb-8">
           <div>
-            <h1 className="text-3xl sm:text-4xl font-bold text-gray-900 flex items-center gap-2">
+            <h1 className="text-3xl sm:text-4xl font-bold text-gray-900 dark:text-white flex items-center gap-2">
               📍 Photo Map
             </h1>
-            <p className="text-gray-600 mt-2">
+            <p className="text-gray-600 dark:text-gray-400 mt-2">
               {locations.length} location{locations.length !== 1 ? 's' : ''} with GPS coordinates
             </p>
           </div>
@@ -158,25 +158,25 @@ const MapView: React.FC = () => {
 
         {loading && (
           <div className="text-center py-12">
-            <div className="inline-block animate-spin rounded-full h-12 w-12 border-b-2 border-gray-900"></div>
-            <p className="mt-4 text-gray-600">Loading photo locations...</p>
+            <div className="inline-block animate-spin rounded-full h-12 w-12 border-b-2 border-gray-900 dark:border-gray-100"></div>
+            <p className="mt-4 text-gray-600 dark:text-gray-400">Loading photo locations...</p>
           </div>
         )}
 
         {error && (
-          <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded">
+          <div className="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 text-red-700 dark:text-red-400 px-4 py-3 rounded">
             {error}
           </div>
         )}
 
         {!loading && !error && locations.length === 0 && (
           <div className="text-center py-12">
-            <p className="text-gray-600">No photos with GPS coordinates found.</p>
+            <p className="text-gray-600 dark:text-gray-400">No photos with GPS coordinates found.</p>
           </div>
         )}
 
         {!loading && !error && locations.length > 0 && (
-          <div className="bg-white rounded-lg shadow-lg overflow-hidden">
+          <div className="bg-white dark:bg-gray-800 rounded-lg shadow-lg overflow-hidden">
             <MapContainer
               center={mapCenter}
               zoom={8}

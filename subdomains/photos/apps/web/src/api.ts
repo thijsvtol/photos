@@ -2,6 +2,7 @@ import axios from 'axios';
 import { Capacitor } from '@capacitor/core';
 import { Filesystem, Directory } from '@capacitor/filesystem';
 import type { Event, Photo, CreateEventRequest, Tag, AdminStats, EventStats, UpdateEventRequest, CreateTagRequest, UpdateTagRequest } from './types';
+import type { User } from './contexts/AuthContext';
 import { MobileAuthService } from './services/mobileAuth';
 
 const api = axios.create({
@@ -315,17 +316,35 @@ export const downloadPhoto = async (url: string, filename: string): Promise<void
         reader.readAsDataURL(blob);
       });
       
-      console.log('[Download] Writing file to Documents:', filename);
-      // Save to Documents directory
-      const result = await Filesystem.writeFile({
-        path: filename,
-        data: base64,
-        directory: Directory.Documents,
-        recursive: true
-      });
+      // Get custom download path from localStorage, or use default
+      const customPath = localStorage.getItem('download_path') || '/storage/emulated/0/Download';
+      const fullPath = `${customPath}/${filename}`;
       
-      console.log('[Download] File saved:', result.uri);
-      alert(`Photo saved: ${filename}`);
+      console.log('[Download] Writing file to:', fullPath);
+      
+      try {
+        // Try to write to external storage with full path
+        const result = await Filesystem.writeFile({
+          path: fullPath,
+          data: base64,
+          directory: Directory.ExternalStorage,
+          recursive: true
+        });
+        
+        console.log('[Download] File saved:', result.uri);
+        alert(`Photo saved to: ${customPath}/${filename}`);
+      } catch (error) {
+        // Fallback to Documents if external storage fails
+        console.warn('[Download] External storage failed, falling back to Documents', error);
+        const result = await Filesystem.writeFile({
+          path: filename,
+          data: base64,
+          directory: Directory.Documents,
+          recursive: true
+        });
+        console.log('[Download] File saved to Documents:', result.uri);
+        alert(`Photo saved to Documents: ${filename}`);
+      }
     } else {
       // Browser: Use traditional download
       const response = await fetch(url);
@@ -381,6 +400,8 @@ export const downloadZip = async (zipBlob: Blob, filename: string): Promise<void
       // Native app: Use Capacitor Filesystem API
       console.log('[Download ZIP] Converting blob to base64');
       
+      console.log('[Download ZIP] Converting to base64');
+      
       const base64 = await new Promise<string>((resolve, reject) => {
         const reader = new FileReader();
         reader.onloadend = () => {
@@ -396,17 +417,35 @@ export const downloadZip = async (zipBlob: Blob, filename: string): Promise<void
         reader.readAsDataURL(zipBlob);
       });
 
-      console.log('[Download ZIP] Writing file to Documents:', filename);
+      // Get custom download path from localStorage, or use default
+      const customPath = localStorage.getItem('download_path') || '/storage/emulated/0/Download';
+      const fullPath = `${customPath}/${filename}`;
       
-      const result = await Filesystem.writeFile({
-        path: filename,
-        data: base64,
-        directory: Directory.Documents,
-        recursive: true
-      });
+      console.log('[Download ZIP] Writing file to:', fullPath);
       
-      console.log('[Download ZIP] File saved:', result.uri);
-      alert(`ZIP file saved: ${filename}`);
+      try {
+        // Try to write to external storage with full path
+        const result = await Filesystem.writeFile({
+          path: fullPath,
+          data: base64,
+          directory: Directory.ExternalStorage,
+          recursive: true
+        });
+        
+        console.log('[Download ZIP] File saved:', result.uri);
+        alert(`ZIP file saved to: ${customPath}/${filename}`);
+      } catch (error) {
+        // Fallback to Documents if external storage fails
+        console.warn('[Download ZIP] External storage failed, falling back to Documents', error);
+        const result = await Filesystem.writeFile({
+          path: filename,
+          data: base64,
+          directory: Directory.Documents,
+          recursive: true
+        });
+        console.log('[Download ZIP] File saved to Documents:', result.uri);
+        alert(`ZIP file saved to Documents: ${filename}`);
+      }
     } else {
       // Browser: Use traditional download
       console.log('[Download ZIP] Using browser download');
@@ -583,10 +622,21 @@ export const removeCollaborator = async (eventSlug: string, userId: string) => {
 };
 
 export const getUserCollaborations = async () => {
-  const response = await api.get<{ events: Array<{ id: number; slug: string; name: string; inferred_date: string | null; invited_at: string }> }>(
-    '/user/collaborations'
-  );
-  return response.data.events;
+  const response = await api.get<{ 
+    collaborations: Array<{ 
+      event_id: number; 
+      event_slug: string; 
+      event_name: string; 
+      can_upload: boolean;
+      invited_at: string;
+    }> 
+  }>('/user/collaborations');
+  return response.data;
+};
+
+export const updateUserProfile = async (data: { name?: string }) => {
+  const response = await api.put<{ user: User }>('/user/profile', data);
+  return response.data.user;
 };
 
 export const searchUsers = async (query: string) => {

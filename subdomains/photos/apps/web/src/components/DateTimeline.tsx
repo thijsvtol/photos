@@ -77,30 +77,30 @@ const DateTimeline: React.FC<DateTimelineProps> = ({ dates, activeDate, onDateCl
 
   return (
     <div 
-      className={`bg-white border-b border-gray-200 transition-all duration-300 z-40 ${
+      className={`bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 transition-all duration-300 z-40 ${
         isSticky ? 'fixed top-0 left-0 right-0 shadow-md' : 'relative'
       }`}
     >
       <div className="max-w-7xl mx-auto px-3 sm:px-4 lg:px-8">
         <div className="flex items-center py-3 gap-2">
           {/* Icon and label - hidden on very small screens */}
-          <div className="hidden sm:flex items-center gap-2 text-gray-600 mr-2 flex-shrink-0">
+          <div className="hidden sm:flex items-center gap-2 text-gray-600 dark:text-gray-400 mr-2 flex-shrink-0">
             <Calendar className="w-5 h-5" />
             <span className="text-sm font-medium hidden md:inline">Timeline</span>
           </div>
 
           {/* Mobile: Just show icon */}
-          <div className="flex sm:hidden items-center text-gray-600 mr-2 flex-shrink-0">
+          <div className="flex sm:hidden items-center text-gray-600 dark:text-gray-400 mr-2 flex-shrink-0">
             <Calendar className="w-4 h-4" />
           </div>
 
           {/* Left scroll button - hidden on mobile */}
           <button
             onClick={() => scrollTimeline('left')}
-            className="hidden md:flex items-center justify-center w-8 h-8 rounded-full bg-gray-100 hover:bg-gray-200 transition flex-shrink-0"
+            className="hidden md:flex items-center justify-center w-8 h-8 rounded-full bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 transition flex-shrink-0"
             aria-label="Scroll left"
           >
-            <ChevronLeft className="w-4 h-4 text-gray-600" />
+            <ChevronLeft className="w-4 h-4 text-gray-600 dark:text-gray-400" />
           </button>
 
           {/* Scrollable date buttons */}
@@ -123,7 +123,7 @@ const DateTimeline: React.FC<DateTimelineProps> = ({ dates, activeDate, onDateCl
                     flex-shrink-0 px-3 sm:px-4 py-1.5 sm:py-2 rounded-full text-xs sm:text-sm font-medium transition-all
                     ${isActive 
                       ? 'bg-blue-600 text-white shadow-md scale-105' 
-                      : 'bg-gray-100 text-gray-700 hover:bg-gray-200 active:scale-95'
+                      : 'bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-600 active:scale-95'
                     }
                   `}
                   title={formatDateLong(date)}
@@ -137,10 +137,10 @@ const DateTimeline: React.FC<DateTimelineProps> = ({ dates, activeDate, onDateCl
           {/* Right scroll button - hidden on mobile */}
           <button
             onClick={() => scrollTimeline('right')}
-            className="hidden md:flex items-center justify-center w-8 h-8 rounded-full bg-gray-100 hover:bg-gray-200 transition flex-shrink-0"
+            className="hidden md:flex items-center justify-center w-8 h-8 rounded-full bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 transition flex-shrink-0"
             aria-label="Scroll right"
           >
-            <ChevronRight className="w-4 h-4 text-gray-600" />
+            <ChevronRight className="w-4 h-4 text-gray-600 dark:text-gray-400" />
           </button>
         </div>
       </div>
