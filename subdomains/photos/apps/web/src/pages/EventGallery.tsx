@@ -527,9 +527,23 @@ const EventGallery: React.FC = () => {
           <div className="flex justify-between items-start gap-4">
             <div className="flex-1">
               <h1 className="text-3xl sm:text-4xl font-bold text-gray-900 dark:text-white">{event?.name}</h1>
-              {event && !event.requires_password && (
-                <span className="inline-block mt-2 px-2 py-1 text-xs bg-green-100 dark:bg-green-900/30 text-green-800 dark:text-green-300 rounded-full">
-                  Public Gallery
+              {event && (
+                <span className={`inline-block mt-2 px-2 py-1 text-xs rounded-full ${
+                  event.requires_password
+                    ? 'bg-amber-100 dark:bg-amber-900/30 text-amber-800 dark:text-amber-300'
+                    : event.visibility === 'public' 
+                    ? 'bg-green-100 dark:bg-green-900/30 text-green-800 dark:text-green-300'
+                    : event.visibility === 'collaborators_only'
+                    ? 'bg-blue-100 dark:bg-blue-900/30 text-blue-800 dark:text-blue-300'
+                    : 'bg-gray-100 dark:bg-gray-900/30 text-gray-800 dark:text-gray-300'
+                }`}>
+                  {event.requires_password
+                    ? 'Password Protected'
+                    : event.visibility === 'public' 
+                    ? 'Public Gallery'
+                    : event.visibility === 'collaborators_only'
+                    ? 'Invite Only'
+                    : 'Private Gallery'}
                 </span>
               )}
             </div>
