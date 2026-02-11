@@ -535,7 +535,7 @@ const EventGallery: React.FC = () => {
                     ? 'bg-green-100 dark:bg-green-900/30 text-green-800 dark:text-green-300'
                     : event.visibility === 'collaborators_only'
                     ? 'bg-blue-100 dark:bg-blue-900/30 text-blue-800 dark:text-blue-300'
-                    : 'bg-gray-100 dark:bg-gray-900/30 text-gray-800 dark:text-gray-300'
+                    : 'bg-red-100 dark:bg-red-900/30 text-red-800 dark:text-red-300'
                 }`}>
                   {event.requires_password
                     ? 'Password Protected'

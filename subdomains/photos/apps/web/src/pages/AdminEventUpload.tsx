@@ -1,5 +1,6 @@
 import React, { useEffect, useState, useCallback } from 'react';
 import { useParams, Link } from 'react-router-dom';
+import { ChevronDown, ChevronUp } from 'lucide-react';
 import { ulid } from 'ulid';
 import ExifReader from 'exifreader';
 import { MapContainer, TileLayer, Marker, useMapEvents } from 'react-leaflet';
@@ -33,6 +34,8 @@ const AdminEventUpload: React.FC = () => {
   const [isGeocoding, setIsGeocoding] = useState(false);
   const [showLocationPicker, setShowLocationPicker] = useState(false);
   const [selectedLocation, setSelectedLocation] = useState<[number, number] | null>(null);
+  const [isAnalyticsExpanded, setIsAnalyticsExpanded] = useState(true);
+  const [queueItemsToShow, setQueueItemsToShow] = useState(10);
 
   useEffect(() => {
     if (slug) {
@@ -470,24 +473,24 @@ const AdminEventUpload: React.FC = () => {
               <h1 className="text-4xl font-bold text-gray-900">{event?.name}</h1>
               <p className="text-gray-600 mt-2">Upload photos to this event</p>
             </div>
-            <div className="flex gap-2">
+            <div className="flex flex-col sm:flex-row gap-2">
               <button
                 onClick={() => setShowLocationPicker(true)}
-                className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition"
+                className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition text-sm sm:text-base whitespace-nowrap"
               >
                 📍 Set GPS Location
               </button>
               <button
                 onClick={handleRegenerateThumbnails}
                 disabled={isRegenerating}
-                className="px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition disabled:bg-gray-400 disabled:cursor-not-allowed"
+                className="px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition disabled:bg-gray-400 disabled:cursor-not-allowed text-sm sm:text-base whitespace-nowrap"
               >
                 {isRegenerating ? 'Regenerating...' : '🔄 Regenerate Thumbnails'}
               </button>
               <button
                 onClick={handleGeocodePhotos}
                 disabled={isGeocoding}
-                className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition disabled:bg-gray-400 disabled:cursor-not-allowed"
+                className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition disabled:bg-gray-400 disabled:cursor-not-allowed text-sm sm:text-base whitespace-nowrap"
                 title="Fetch city names for photos with GPS coordinates"
               >
                 {isGeocoding ? 'Geocoding...' : '🌍 Geocode Cities'}
@@ -506,9 +509,21 @@ const AdminEventUpload: React.FC = () => {
         {stats && (
           <div className="mb-8">
             <div className="bg-white rounded-lg shadow-md p-6">
-              <h2 className="text-xl font-semibold text-gray-900 mb-4">📊 Event Analytics</h2>
+              <button
+                onClick={() => setIsAnalyticsExpanded(!isAnalyticsExpanded)}
+                className="flex items-center justify-between w-full text-left mb-4 hover:text-blue-600 transition"
+              >
+                <h2 className="text-xl font-semibold text-gray-900">📊 Event Analytics</h2>
+                {isAnalyticsExpanded ? (
+                  <ChevronUp className="w-5 h-5 text-gray-500" />
+                ) : (
+                  <ChevronDown className="w-5 h-5 text-gray-500" />
+                )}
+              </button>
               
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
+              {isAnalyticsExpanded && (
+                <>
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6\">
                 <div className="bg-blue-50 rounded-lg p-4">
                   <div className="text-2xl font-bold text-blue-900">{stats.photoCount}</div>
                   <div className="text-sm text-blue-700">Total Photos</div>
@@ -574,6 +589,8 @@ const AdminEventUpload: React.FC = () => {
                   View the gallery as admin to manage photos (delete, mark as featured)
                 </p>
               </div>
+                </>
+              )}
             </div>
           </div>
         )}
@@ -617,8 +634,9 @@ const AdminEventUpload: React.FC = () => {
           {queueItems.length === 0 ? (
             <p className="text-gray-600">No uploads in queue</p>
           ) : (
+            <>
             <div className="space-y-4">
-              {queueItems.map((item) => (
+              {queueItems.slice(0, queueItemsToShow).map((item) => (
                 <div key={item.id} className="border rounded-lg p-4">
                   <div className="flex justify-between items-start mb-2">
                     <div>
@@ -657,6 +675,17 @@ const AdminEventUpload: React.FC = () => {
                 </div>
               ))}
             </div>
+            {queueItems.length > queueItemsToShow && (
+              <div className="mt-4 text-center">
+                <button
+                  onClick={() => setQueueItemsToShow(prev => prev + 10)}
+                  className="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition"
+                >
+                  Load More ({queueItems.length - queueItemsToShow} remaining)
+                </button>
+              </div>
+            )}
+            </>
           )}
         </div>
       </div>
