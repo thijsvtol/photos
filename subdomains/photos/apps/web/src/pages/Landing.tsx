@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { ChevronDown, Heart, MapPin } from 'lucide-react';
+import { ChevronDown, Heart, MapPin, Loader2 } from 'lucide-react';
 import ContactForm from '../components/ContactForm';
 import Footer from '../components/Footer';
 import SEO from '../components/SEO';
@@ -89,7 +89,8 @@ export default function Landing() {
       <main>
         <section className="relative h-screen bg-black overflow-hidden" aria-label="Hero">
           {loading ? (
-            <div className="absolute inset-0 flex items-center justify-center">
+            <div className="absolute inset-0 flex flex-col items-center justify-center">
+              <Loader2 className="w-12 h-12 animate-spin text-white mb-4" />
               <div className="text-white text-xl">Loading...</div>
             </div>
           ) : featuredPhotos.length > 0 ? (

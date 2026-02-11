@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { Heart, Download, LogIn } from 'lucide-react';
+import { Heart, Download, LogIn, Loader2 } from 'lucide-react';
 import Masonry from 'react-masonry-css';
 import Navbar from '../components/Navbar';
 import Footer from '../components/Footer';
@@ -157,9 +157,9 @@ const MyFavorites: React.FC = () => {
         </div>
 
         {loading && (
-          <div className="text-center py-12">
-            <div className="inline-block animate-spin rounded-full h-12 w-12 border-b-2 border-gray-900 dark:border-gray-100"></div>
-            <p className="mt-4 text-gray-600 dark:text-gray-400">Loading your favorites...</p>
+          <div className="flex flex-col items-center justify-center py-16">
+            <Loader2 className="w-12 h-12 animate-spin text-blue-600 dark:text-blue-400 mb-4" />
+            <p className="text-gray-600 dark:text-gray-400">Loading your favorites...</p>
           </div>
         )}
 

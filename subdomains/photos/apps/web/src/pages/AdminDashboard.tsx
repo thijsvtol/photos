@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
+import { Plus, Upload, Eye, Edit2, Trash2, Calendar, Camera, Heart, HardDrive, Globe, Lock, Loader2, Tag, AlertCircle, CheckCircle, X } from 'lucide-react';
 import Navbar from '../components/Navbar';
 import TagManager from '../components/TagManager';
 import CollaboratorManager from '../components/CollaboratorManager';
@@ -174,81 +175,115 @@ const AdminDashboard: React.FC = () => {
       <Navbar />
       <div className="max-w-7xl mx-auto px-3 sm:px-4 lg:px-8 py-4 sm:py-8">
         <div className="mb-6 sm:mb-8">
-          <Link to="/events" className="text-blue-600 hover:text-blue-700 mb-3 sm:mb-4 inline-block text-sm sm:text-base">
+          <Link to="/events" className="text-blue-600 dark:text-blue-400 hover:text-blue-700 dark:hover:text-blue-300 mb-3 sm:mb-4 inline-flex items-center gap-1 text-sm sm:text-base transition">
             ← Back to Public View
           </Link>
-          <div className="flex justify-between items-center">
-            <h1 className="text-3xl sm:text-4xl font-bold text-gray-900">Admin Dashboard</h1>
+          <div className="flex flex-col sm:flex-row justify-between items-start gap-4 mt-4">
+            <div>
+              <h1 className="text-3xl sm:text-4xl font-bold text-gray-900 dark:text-white">Admin Dashboard</h1>
+              <p className="text-gray-600 dark:text-gray-400 mt-2 text-sm sm:text-base">Manage events and view statistics</p>
+            </div>
             <Link
               to="/admin/tags"
-              className="px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition text-sm"
+              className="px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition text-sm flex items-center gap-2 shadow-sm hover:shadow"
             >
-              🏷️ Manage Tags
+              <Tag className="w-4 h-4" />
+              <span>Manage Tags</span>
             </Link>
           </div>
         </div>
 
         {success && (
-          <div className="bg-green-50 border border-green-200 text-green-700 px-4 py-3 rounded mb-4">
-            {success}
+          <div className="bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 text-green-700 dark:text-green-300 px-4 py-3 rounded-lg mb-4 flex items-start gap-3 animate-in slide-in-from-top-2">
+            <CheckCircle className="w-5 h-5 flex-shrink-0 mt-0.5" />
+            <span className="flex-1">{success}</span>
+            <button onClick={() => setSuccess(null)} className="text-green-700 dark:text-green-300 hover:text-green-900 dark:hover:text-green-100">
+              <X className="w-4 h-4" />
+            </button>
           </div>
         )}
 
         {error && (
-          <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded mb-4">
-            {error}
+          <div className="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 text-red-700 dark:text-red-300 px-4 py-3 rounded-lg mb-4 flex items-start gap-3 animate-in slide-in-from-top-2">
+            <AlertCircle className="w-5 h-5 flex-shrink-0 mt-0.5" />
+            <span className="flex-1">{error}</span>
+            <button onClick={() => setError(null)} className="text-red-700 dark:text-red-300 hover:text-red-900 dark:hover:text-red-100">
+              <X className="w-4 h-4" />
+            </button>
           </div>
         )}
 
         {/* Stats Cards */}
         {stats && (
-          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4 mb-8">
-            <div className="bg-white rounded-lg shadow p-4">
-              <div className="text-3xl mb-2">📅</div>
-              <div className="text-2xl font-bold text-gray-900">{stats.totalEvents}</div>
-              <div className="text-sm text-gray-600">Total Events</div>
+          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3 sm:gap-4 mb-6 sm:mb-8">
+            <div className="bg-white dark:bg-gray-800 rounded-lg shadow-md hover:shadow-lg transition p-3 sm:p-4">
+              <div className="flex items-center justify-center w-10 h-10 bg-blue-100 dark:bg-blue-900/30 rounded-lg mb-2">
+                <Calendar className="w-5 h-5 text-blue-600 dark:text-blue-400" />
+              </div>
+              <div className="text-2xl font-bold text-gray-900 dark:text-white">{stats.totalEvents}</div>
+              <div className="text-xs sm:text-sm text-gray-600 dark:text-gray-400">Total Events</div>
             </div>
-            <div className="bg-white rounded-lg shadow p-4">
-              <div className="text-3xl mb-2">📷</div>
-              <div className="text-2xl font-bold text-gray-900">{stats.totalPhotos}</div>
-              <div className="text-sm text-gray-600">Total Photos</div>
+            <div className="bg-white dark:bg-gray-800 rounded-lg shadow-md hover:shadow-lg transition p-3 sm:p-4">
+              <div className="flex items-center justify-center w-10 h-10 bg-purple-100 dark:bg-purple-900/30 rounded-lg mb-2">
+                <Camera className="w-5 h-5 text-purple-600 dark:text-purple-400" />
+              </div>
+              <div className="text-2xl font-bold text-gray-900 dark:text-white">{stats.totalPhotos}</div>
+              <div className="text-xs sm:text-sm text-gray-600 dark:text-gray-400">Total Photos</div>
             </div>
-            <div className="bg-white rounded-lg shadow p-4">
-              <div className="text-3xl mb-2">⭐</div>
-              <div className="text-2xl font-bold text-gray-900">{stats.totalFavorites}</div>
-              <div className="text-sm text-gray-600">Total Favorites</div>
+            <div className="bg-white dark:bg-gray-800 rounded-lg shadow-md hover:shadow-lg transition p-3 sm:p-4">
+              <div className="flex items-center justify-center w-10 h-10 bg-red-100 dark:bg-red-900/30 rounded-lg mb-2">
+                <Heart className="w-5 h-5 text-red-600 dark:text-red-400" />
+              </div>
+              <div className="text-2xl font-bold text-gray-900 dark:text-white">{stats.totalFavorites}</div>
+              <div className="text-xs sm:text-sm text-gray-600 dark:text-gray-400">Total Favorites</div>
             </div>
-            <div className="bg-white rounded-lg shadow p-4">
-              <div className="text-3xl mb-2">💾</div>
-              <div className="text-2xl font-bold text-gray-900">{formatBytes(stats.storageBytes)}</div>
-              <div className="text-sm text-gray-600">Storage (est.)</div>
+            <div className="bg-white dark:bg-gray-800 rounded-lg shadow-md hover:shadow-lg transition p-3 sm:p-4">
+              <div className="flex items-center justify-center w-10 h-10 bg-gray-100 dark:bg-gray-700 rounded-lg mb-2">
+                <HardDrive className="w-5 h-5 text-gray-600 dark:text-gray-400" />
+              </div>
+              <div className="text-2xl font-bold text-gray-900 dark:text-white">{formatBytes(stats.storageBytes)}</div>
+              <div className="text-xs sm:text-sm text-gray-600 dark:text-gray-400">Storage (est.)</div>
             </div>
-            <div className="bg-white rounded-lg shadow p-4">
-              <div className="text-3xl mb-2">🌍</div>
-              <div className="text-2xl font-bold text-gray-900">{stats.publicEvents}</div>
-              <div className="text-sm text-gray-600">Public Events</div>
+            <div className="bg-white dark:bg-gray-800 rounded-lg shadow-md hover:shadow-lg transition p-3 sm:p-4">
+              <div className="flex items-center justify-center w-10 h-10 bg-green-100 dark:bg-green-900/30 rounded-lg mb-2">
+                <Globe className="w-5 h-5 text-green-600 dark:text-green-400" />
+              </div>
+              <div className="text-2xl font-bold text-gray-900 dark:text-white">{stats.publicEvents}</div>
+              <div className="text-xs sm:text-sm text-gray-600 dark:text-gray-400">Public Events</div>
             </div>
-            <div className="bg-white rounded-lg shadow p-4">
-              <div className="text-3xl mb-2">🔒</div>
-              <div className="text-2xl font-bold text-gray-900">{stats.privateEvents}</div>
-              <div className="text-sm text-gray-600">Private Events</div>
+            <div className="bg-white dark:bg-gray-800 rounded-lg shadow-md hover:shadow-lg transition p-3 sm:p-4">
+              <div className="flex items-center justify-center w-10 h-10 bg-amber-100 dark:bg-amber-900/30 rounded-lg mb-2">
+                <Lock className="w-5 h-5 text-amber-600 dark:text-amber-400" />
+              </div>
+              <div className="text-2xl font-bold text-gray-900 dark:text-white">{stats.privateEvents}</div>
+              <div className="text-xs sm:text-sm text-gray-600 dark:text-gray-400">Private Events</div>
             </div>
           </div>
         )}
 
-        <div className="bg-white rounded-lg shadow p-4 sm:p-6 mb-6">
+        <div className="bg-white dark:bg-gray-800 rounded-lg shadow-md hover:shadow-lg transition p-4 sm:p-6 mb-6">
           <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 sm:gap-4 mb-4">
-            <h2 className="text-xl sm:text-2xl font-semibold">Events</h2>
+            <h2 className="text-xl sm:text-2xl font-semibold text-gray-900 dark:text-white">Events</h2>
             <button
               onClick={() => setShowCreateForm(!showCreateForm)}
-              className="w-full sm:w-auto px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition text-sm sm:text-base"
+              className="w-full sm:w-auto px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition text-sm sm:text-base flex items-center justify-center gap-2 shadow-sm hover:shadow"
             >
-              {showCreateForm ? 'Cancel' : '+ Create Event'}
+              {showCreateForm ? (
+                <>
+                  <X className="w-4 h-4" />
+                  Cancel
+                </>
+              ) : (
+                <>
+                  <Plus className="w-4 h-4" />
+                  Create Event
+                </>
+              )}
             </button>
           </div>
 
           {showCreateForm && (
-            <form onSubmit={handleCreateEvent} className="border-t pt-4 mt-4">
+            <form onSubmit={handleCreateEvent} className="border-t border-gray-200 dark:border-gray-700 pt-4 mt-4">
               <div className="grid grid-cols-1 md:grid-cols-2 gap-3 sm:gap-4 mb-4">
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">
@@ -304,8 +339,9 @@ const AdminDashboard: React.FC = () => {
               </div>
               <button
                 type="submit"
-                className="w-full sm:w-auto px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 active:bg-green-800 transition text-sm sm:text-base font-medium"
+                className="w-full sm:w-auto px-6 py-2.5 bg-green-600 text-white rounded-lg hover:bg-green-700 active:bg-green-800 transition text-sm sm:text-base font-medium flex items-center justify-center gap-2 shadow-sm hover:shadow"
               >
+                <Plus className="w-4 h-4" />
                 Create Event
               </button>
             </form>
@@ -313,27 +349,44 @@ const AdminDashboard: React.FC = () => {
         </div>
 
         {loading ? (
-          <div className="text-center py-12">
-            <div className="inline-block animate-spin rounded-full h-12 w-12 border-b-2 border-gray-900"></div>
-            <p className="mt-4 text-gray-600">Loading events...</p>
+          <div className="flex flex-col items-center justify-center py-16">
+            <Loader2 className="w-12 h-12 animate-spin text-blue-600 dark:text-blue-400 mb-4" />
+            <p className="text-gray-600 dark:text-gray-400">Loading events...</p>
           </div>
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-6">
             {events.map((event) => (
-              <div key={event.id} className="bg-white rounded-lg shadow-md p-4 sm:p-6">
+              <div key={event.id} className="bg-white dark:bg-gray-800 rounded-lg shadow-md hover:shadow-lg transition p-4 sm:p-6">
                 <div className="flex items-start justify-between mb-2">
-                  <h3 className="text-lg sm:text-xl font-semibold text-gray-900">{event.name}</h3>
-                  {!event.requires_password && (
-                    <span className="ml-2 px-2 py-1 text-xs bg-green-100 text-green-800 rounded-full whitespace-nowrap">
+                  <h3 className="text-lg sm:text-xl font-semibold text-gray-900 dark:text-white">{event.name}</h3>
+                  {event.requires_password ? (
+                    <span className="ml-2 px-2 py-1 text-xs bg-amber-100 dark:bg-amber-900/30 text-amber-800 dark:text-amber-300 rounded-full whitespace-nowrap flex items-center gap-1">
+                      <Lock className="w-3 h-3" />
+                      Password
+                    </span>
+                  ) : event.visibility === 'public' ? (
+                    <span className="ml-2 px-2 py-1 text-xs bg-green-100 dark:bg-green-900/30 text-green-800 dark:text-green-300 rounded-full whitespace-nowrap flex items-center gap-1">
+                      <Globe className="w-3 h-3" />
                       Public
+                    </span>
+                  ) : event.visibility === 'collaborators_only' ? (
+                    <span className="ml-2 px-2 py-1 text-xs bg-blue-100 dark:bg-blue-900/30 text-blue-800 dark:text-blue-300 rounded-full whitespace-nowrap flex items-center gap-1">
+                      <Globe className="w-3 h-3" />
+                      Invite Only
+                    </span>
+                  ) : (
+                    <span className="ml-2 px-2 py-1 text-xs bg-red-100 dark:bg-red-900/30 text-red-800 dark:text-red-300 rounded-full whitespace-nowrap flex items-center gap-1">
+                      <Lock className="w-3 h-3" />
+                      Private
                     </span>
                   )}
                 </div>
-                <p className="text-gray-600 mb-2 text-sm">
-                  Slug: <code className="bg-gray-100 px-2 py-1 rounded text-xs">{event.slug}</code>
+                <p className="text-gray-600 dark:text-gray-400 mb-2 text-sm">
+                  Slug: <code className="bg-gray-100 dark:bg-gray-700 px-2 py-1 rounded text-xs">{event.slug}</code>
                 </p>
-                <p className="text-gray-600 mb-2 text-sm">
-                  Date: {event.inferred_date || 'Not set'}
+                <p className="text-gray-600 dark:text-gray-400 mb-2 text-sm flex items-center gap-1">
+                  <Calendar className="w-3 h-3" />
+                  {event.inferred_date || 'Not set'}
                 </p>
                 {event.description && (
                   <p className="text-gray-600 mb-4 text-sm italic">{event.description}</p>
@@ -341,27 +394,31 @@ const AdminDashboard: React.FC = () => {
                 <div className="flex flex-col gap-2">
                   <Link
                     to={`/admin/events/${event.slug}/upload`}
-                    className="inline-block w-full text-center px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition text-sm"
+                    className="inline-flex items-center justify-center gap-2 w-full text-center px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition text-sm shadow-sm hover:shadow"
                   >
-                    📷 Upload Photos
+                    <Upload className="w-4 h-4" />
+                    Upload Photos
                   </Link>
                   <Link
                     to={`/events/${event.slug}`}
-                    className="inline-block w-full text-center px-4 py-2 bg-gray-600 text-white rounded-lg hover:bg-gray-700 transition text-sm"
+                    className="inline-flex items-center justify-center gap-2 w-full text-center px-4 py-2 bg-gray-600 text-white rounded-lg hover:bg-gray-700 transition text-sm shadow-sm hover:shadow"
                   >
-                    👁️ View Gallery
+                    <Eye className="w-4 h-4" />
+                    View Gallery
                   </Link>
                   <button
                     onClick={() => openEditModal(event)}
-                    className="w-full px-4 py-2 bg-yellow-600 text-white rounded-lg hover:bg-yellow-700 transition text-sm"
+                    className="w-full px-4 py-2 bg-yellow-600 text-white rounded-lg hover:bg-yellow-700 transition text-sm flex items-center justify-center gap-2 shadow-sm hover:shadow"
                   >
-                    ✏️ Edit Event
+                    <Edit2 className="w-4 h-4" />
+                    Edit Event
                   </button>
                   <button
                     onClick={() => openDeleteModal(event)}
-                    className="w-full px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition text-sm"
+                    className="w-full px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition text-sm flex items-center justify-center gap-2 shadow-sm hover:shadow"
                   >
-                    🗑️ Delete Event
+                    <Trash2 className="w-4 h-4" />
+                    Delete Event
                   </button>
                 </div>
               </div>

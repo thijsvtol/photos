@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import Masonry from 'react-masonry-css';
+import { Tag as TagIcon, MapPin, Calendar, ChevronRight, Loader2, Filter, X } from 'lucide-react';
 import Navbar from '../components/Navbar';
 import Footer from '../components/Footer';
 import SEO from '../components/SEO';
@@ -135,13 +135,31 @@ const EventList: React.FC = () => {
       <Navbar />
       <div className="max-w-7xl mx-auto px-3 sm:px-4 lg:px-8 py-4 sm:py-8 flex-grow w-full">
         <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-6 sm:mb-8">
-          <h1 className="text-3xl sm:text-4xl font-bold text-gray-900 dark:text-white">Photo Events</h1>
+          <div>
+            <h1 className="text-3xl sm:text-4xl font-bold text-gray-900 dark:text-white">Photo Events</h1>
+            <p className="text-gray-600 dark:text-gray-400 mt-2 text-sm sm:text-base">Browse all photo events and galleries</p>
+          </div>
+          {(selectedTag || selectedCity) && (
+            <button
+              onClick={() => {
+                filterByTag(null);
+                filterByCity(null);
+              }}
+              className="px-4 py-2 bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300 rounded-lg hover:bg-gray-300 dark:hover:bg-gray-600 transition flex items-center gap-2 text-sm"
+            >
+              <X className="w-4 h-4" />
+              Clear Filters
+            </button>
+          )}
         </div>
 
         {/* Tag filters */}
         {tags.length > 0 && (
           <div className="mb-4 sm:mb-6">
-            <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-3">Filter by Tag</h3>
+            <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-3 flex items-center gap-2">
+              <Filter className="w-4 h-4" />
+              Filter by Tag
+            </h3>
             <div className="flex flex-wrap gap-2">
               <button
                 onClick={() => filterByTag(null)}
@@ -182,7 +200,10 @@ const EventList: React.FC = () => {
           if (cities.length > 0) {
             return (
               <div className="mb-6">
-                <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-3">Filter by City</h3>
+                <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-3 flex items-center gap-2">
+                  <MapPin className="w-4 h-4" />
+                  Filter by City
+                </h3>
                 <div className="flex flex-wrap gap-2">
                   <button
                     onClick={() => filterByCity(null)}
@@ -215,9 +236,9 @@ const EventList: React.FC = () => {
         })()}
 
         {loading && (
-          <div className="text-center py-12">
-            <div className="inline-block animate-spin rounded-full h-12 w-12 border-b-2 border-gray-900"></div>
-            <p className="mt-4 text-gray-600">Loading events...</p>
+          <div className="flex flex-col items-center justify-center py-16">
+            <Loader2 className="w-12 h-12 animate-spin text-blue-600 dark:text-blue-400 mb-4" />
+            <p className="text-gray-600 dark:text-gray-400">Loading events...</p>
           </div>
         )}
 
@@ -228,27 +249,38 @@ const EventList: React.FC = () => {
         )}
 
         {!loading && !error && events.length === 0 && (
-          <div className="text-center py-12">
-            <p className="text-gray-600">No events found.</p>
+          <div className="text-center py-16">
+            <div className="w-16 h-16 bg-gray-100 dark:bg-gray-800 rounded-full flex items-center justify-center mx-auto mb-4">
+              <Calendar className="w-8 h-8 text-gray-400 dark:text-gray-500" />
+            </div>
+            <h3 className="text-xl font-semibold text-gray-900 dark:text-white mb-2">
+              {selectedTag || selectedCity ? 'No events match your filters' : 'No events found'}
+            </h3>
+            <p className="text-gray-600 dark:text-gray-400 mb-6">
+              {selectedTag || selectedCity ? 'Try adjusting your filters' : 'No events have been created yet'}
+            </p>
+            {(selectedTag || selectedCity) && (
+              <button
+                onClick={() => {
+                  filterByTag(null);
+                  filterByCity(null);
+                }}
+                className="px-6 py-2.5 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition inline-flex items-center gap-2"
+              >
+                <X className="w-4 h-4" />
+                Clear Filters
+              </button>
+            )}
           </div>
         )}
 
         {!loading && !error && events.length > 0 && (
-          <Masonry
-            breakpointCols={{
-              default: 3,
-              1280: 3,
-              1024: 2,
-              640: 1
-            }}
-            className="flex -ml-4 sm:-ml-6 w-auto"
-            columnClassName="pl-4 sm:pl-6 bg-clip-padding"
-          >
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-6">
             {events.map((event) => (
               <Link
                 key={event.id}
                 to={`/events/${event.slug}`}
-                className="mb-4 sm:mb-6 block bg-white dark:bg-gray-800 rounded-xl shadow-md hover:shadow-xl active:scale-[0.98] transition-all overflow-hidden"
+                className="flex flex-col bg-white dark:bg-gray-800 rounded-xl shadow-md hover:shadow-xl active:scale-[0.98] transition-all overflow-hidden h-full"
               >
                 {/* Preview Image or Placeholder */}
                 <div className="relative w-full h-48 sm:h-56 bg-gradient-to-br from-gray-200 to-gray-300 dark:from-gray-700 dark:to-gray-800">
@@ -287,7 +319,7 @@ const EventList: React.FC = () => {
                   </div>
                 </div>
                 
-                <div className="p-4 sm:p-6">
+                <div className="p-4 sm:p-6 flex-1 flex flex-col">
                   <div className="flex items-start justify-between mb-2">
                     <h2 className="text-xl sm:text-2xl font-semibold text-gray-900 dark:text-white">{event.name}</h2>
                   </div>
@@ -296,10 +328,7 @@ const EventList: React.FC = () => {
                   {/* Location */}
                   {event.cities && event.cities.length > 0 && (
                     <div className="flex items-center gap-1.5 mb-3 text-gray-600 dark:text-gray-400">
-                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z" />
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 11a3 3 0 11-6 0 3 3 0 016 0z" />
-                      </svg>
+                      <MapPin className="w-4 h-4" />
                       <span className="text-sm">{event.cities.join(', ')}</span>
                     </div>
                   )}
@@ -310,24 +339,23 @@ const EventList: React.FC = () => {
                       {event.tags.map((tag) => (
                         <span
                           key={tag.id}
-                          className="px-2 py-0.5 text-xs bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 rounded-full"
+                          className="px-2 py-0.5 text-xs bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 rounded-full flex items-center gap-1"
                         >
+                          <TagIcon className="w-3 h-3" />
                           {tag.name}
                         </span>
                       ))}
                     </div>
                   )}
                   
-                  <div className="text-blue-600 dark:text-blue-400 hover:text-blue-700 dark:hover:text-blue-300 font-semibold text-sm sm:text-base inline-flex items-center gap-1">
-                    View Gallery 
-                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
-                    </svg>
+                  <div className="mt-auto text-blue-600 dark:text-blue-400 hover:text-blue-700 dark:hover:text-blue-300 font-semibold text-sm sm:text-base inline-flex items-center gap-1">
+                    View Gallery
+                    <ChevronRight className="w-4 h-4" />
                   </div>
                 </div>
               </Link>
             ))}
-          </Masonry>
+          </div>
         )}
       </div>
       <Footer />
