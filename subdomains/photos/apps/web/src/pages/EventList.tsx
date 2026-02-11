@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { Tag as TagIcon, MapPin, Calendar, ChevronRight, Loader2, Filter, X } from 'lucide-react';
+import { Tag as TagIcon, MapPin, Calendar, ChevronRight, Loader2, Filter, X, ChevronDown, ChevronUp } from 'lucide-react';
 import Navbar from '../components/Navbar';
 import Footer from '../components/Footer';
 import SEO from '../components/SEO';
@@ -15,6 +15,8 @@ const EventList: React.FC = () => {
   const [selectedCity, setSelectedCity] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [showTagFilters, setShowTagFilters] = useState(false);
+  const [showCityFilters, setShowCityFilters] = useState(false);
 
   useEffect(() => {
     loadTags();
@@ -156,14 +158,21 @@ const EventList: React.FC = () => {
         {/* Tag filters */}
         {tags.length > 0 && (
           <div className="mb-4 sm:mb-6">
-            <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-3 flex items-center gap-2">
-              <Filter className="w-4 h-4" />
-              Filter by Tag
-            </h3>
-            <div className="flex flex-wrap gap-2">
+            <button
+              onClick={() => setShowTagFilters(!showTagFilters)}
+              className="w-full sm:w-auto flex items-center justify-between sm:justify-start gap-2 text-sm font-semibold text-gray-700 dark:text-gray-300 mb-3 hover:text-gray-900 dark:hover:text-white transition"
+            >
+              <div className="flex items-center gap-2">
+                <Filter className="w-4 h-4" />
+                Filter by Tag
+                {selectedTag && <span className="text-xs bg-blue-600 text-white px-2 py-0.5 rounded-full">1</span>}
+              </div>
+              {showTagFilters ? <ChevronUp className="w-4 h-4 sm:hidden" /> : <ChevronDown className="w-4 h-4 sm:hidden" />}
+            </button>
+            <div className={`flex flex-wrap gap-1.5 sm:gap-2 ${!showTagFilters ? 'hidden sm:flex' : ''}`}>
               <button
                 onClick={() => filterByTag(null)}
-                className={`px-4 py-2.5 rounded-full text-sm font-medium transition-all active:scale-95 ${
+                className={`px-3 py-1.5 sm:px-4 sm:py-2.5 rounded-full text-xs sm:text-sm font-medium transition-all active:scale-95 ${
                   !selectedTag
                     ? 'bg-blue-600 text-white shadow-md'
                     : 'bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-300 dark:hover:bg-gray-600'
@@ -175,7 +184,7 @@ const EventList: React.FC = () => {
                 <button
                   key={tag.id}
                   onClick={() => filterByTag(tag.slug)}
-                  className={`px-4 py-2.5 rounded-full text-sm font-medium transition-all active:scale-95 ${
+                  className={`px-3 py-1.5 sm:px-4 sm:py-2.5 rounded-full text-xs sm:text-sm font-medium transition-all active:scale-95 ${
                     selectedTag === tag.slug
                       ? 'bg-blue-600 text-white shadow-md'
                       : 'bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-300 dark:hover:bg-gray-600'
@@ -200,14 +209,21 @@ const EventList: React.FC = () => {
           if (cities.length > 0) {
             return (
               <div className="mb-6">
-                <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-3 flex items-center gap-2">
-                  <MapPin className="w-4 h-4" />
-                  Filter by City
-                </h3>
-                <div className="flex flex-wrap gap-2">
+                <button
+                  onClick={() => setShowCityFilters(!showCityFilters)}
+                  className="w-full sm:w-auto flex items-center justify-between sm:justify-start gap-2 text-sm font-semibold text-gray-700 dark:text-gray-300 mb-3 hover:text-gray-900 dark:hover:text-white transition"
+                >
+                  <div className="flex items-center gap-2">
+                    <MapPin className="w-4 h-4" />
+                    Filter by City
+                    {selectedCity && <span className="text-xs bg-green-700 text-white px-2 py-0.5 rounded-full">1</span>}
+                  </div>
+                  {showCityFilters ? <ChevronUp className="w-4 h-4 sm:hidden" /> : <ChevronDown className="w-4 h-4 sm:hidden" />}
+                </button>
+                <div className={`flex flex-wrap gap-1.5 sm:gap-2 ${!showCityFilters ? 'hidden sm:flex' : ''}`}>
                   <button
                     onClick={() => filterByCity(null)}
-                    className={`px-4 py-2.5 rounded-full text-sm font-medium transition-all active:scale-95 ${
+                    className={`px-3 py-1.5 sm:px-4 sm:py-2.5 rounded-full text-xs sm:text-sm font-medium transition-all active:scale-95 ${
                       !selectedCity
                         ? 'bg-green-700 text-white shadow-md'
                         : 'bg-gray-200 text-gray-700 hover:bg-gray-300 active:bg-gray-400 dark:bg-gray-700 dark:text-gray-300 dark:hover:bg-gray-600 dark:active:bg-gray-500'
@@ -219,7 +235,7 @@ const EventList: React.FC = () => {
                     <button
                       key={city}
                       onClick={() => filterByCity(city)}
-                      className={`px-4 py-2.5 rounded-full text-sm font-medium transition-all active:scale-95 ${
+                      className={`px-3 py-1.5 sm:px-4 sm:py-2.5 rounded-full text-xs sm:text-sm font-medium transition-all active:scale-95 ${
                         selectedCity === city
                           ? 'bg-green-700 text-white shadow-md'
                           : 'bg-gray-200 text-gray-700 hover:bg-gray-300 active:bg-gray-400 dark:bg-gray-700 dark:text-gray-300 dark:hover:bg-gray-600 dark:active:bg-gray-500'
