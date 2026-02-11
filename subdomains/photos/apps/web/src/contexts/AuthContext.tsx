@@ -118,8 +118,12 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     
     // Redirect to login endpoint which is protected by Cloudflare Access
     // After authentication, it will redirect back
-    const currentPath = window.location.pathname;
+    const currentPath = window.location.pathname + window.location.search + window.location.hash;
     const returnTo = encodeURIComponent(currentPath === '/' ? '/favorites' : currentPath);
+    
+    // Store in sessionStorage as backup
+    sessionStorage.setItem('auth_redirect', currentPath);
+    
     window.location.href = `/api/auth/login?return_to=${returnTo}`;
   };
 

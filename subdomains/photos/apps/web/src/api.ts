@@ -52,23 +52,35 @@ if (import.meta.env.DEV || Capacitor.isNativePlatform()) {
 // Add response interceptor to handle token expiration
 api.interceptors.response.use(
   (response) => response,
-  (error) => {
+  async (error) => {
     if (error.response?.status === 401) {
-      // Skip prompt if user is intentionally logging out
+      // Skip redirect if user is intentionally logging out
       const isLoggingOut = sessionStorage.getItem('logging_out') === 'true';
       if (isLoggingOut) {
         return Promise.reject(error);
       }
       
-      // Token expired - prompt user to re-authenticate
-      const shouldReauth = window.confirm(
-        'Your session has expired. Would you like to login again?'
-      );
-      if (shouldReauth) {
-        // Trigger login flow
-        window.location.href = '/api/auth/login?return_to=' + 
-          encodeURIComponent(window.location.pathname);
+      // Handle mobile platform differently
+      if (Capacitor.isNativePlatform()) {
+        // Clear the invalid token
+        await MobileAuthService.clearToken();
+        // Redirect to home page where they can re-authenticate
+        window.location.href = '/';
+        return Promise.reject(error);
       }
+      
+      // For web: Save current location and redirect to login
+      const currentPath = window.location.pathname + window.location.search + window.location.hash;
+      const returnTo = encodeURIComponent(currentPath);
+      
+      // Store in sessionStorage as backup (in case return_to gets lost)
+      sessionStorage.setItem('auth_redirect', currentPath);
+      
+      // Redirect to login with return path
+      window.location.href = `/api/auth/login?return_to=${returnTo}`;
+      
+      // Prevent further error handling
+      return new Promise(() => {}); // Never resolves, as we're redirecting
     }
     return Promise.reject(error);
   }
@@ -614,9 +626,9 @@ export const inviteCollaborator = async (eventSlug: string, email: string) => {
   return response.data;
 };
 
-export const removeCollaborator = async (eventSlug: string, userId: string) => {
+export const removeCollaborator = async (eventSlug: string, userEmail: string) => {
   await api.delete(
-    `/events/${eventSlug}/collaborators/${userId}`,
+    `/events/${eventSlug}/collaborators/${userEmail}`,
     { headers: getAdminHeaders() }
   );
 };

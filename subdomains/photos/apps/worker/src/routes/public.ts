@@ -122,7 +122,10 @@ app.get('/api/events/:slug', optionalAuth, async (c) => {
     
     // Check if user has permission to view this event based on visibility
     if (event.visibility === 'private' && !userIsAdmin) {
-      return c.json({ error: 'Event not found' }, 404);
+      // Return 401 if not logged in, 403 if logged in but not authorized
+      const statusCode = user ? 403 : 401;
+      const message = user ? 'Access forbidden' : 'Authentication required';
+      return c.json({ error: message }, statusCode);
     }
     
     if (event.visibility === 'collaborators_only' && !userIsAdmin) {
@@ -133,7 +136,10 @@ app.get('/api/events/:slug', optionalAuth, async (c) => {
         .first();
       
       if (!collaborator) {
-        return c.json({ error: 'Event not found' }, 404);
+        // Return 401 if not logged in, 403 if logged in but not authorized
+        const statusCode = user ? 403 : 401;
+        const message = user ? 'Access forbidden' : 'Authentication required';
+        return c.json({ error: message }, statusCode);
       }
     }
     
@@ -180,7 +186,10 @@ app.get('/api/events/:slug/photos', optionalAuth, async (c) => {
     
     // Check if user has permission to view this event based on visibility
     if (event.visibility === 'private' && !userIsAdmin) {
-      return c.json({ error: 'Event not found' }, 404);
+      // Return 401 if not logged in, 403 if logged in but not authorized
+      const statusCode = user ? 403 : 401;
+      const message = user ? 'Access forbidden' : 'Authentication required';
+      return c.json({ error: message }, statusCode);
     }
     
     if (event.visibility === 'collaborators_only' && !userIsAdmin) {
@@ -191,7 +200,10 @@ app.get('/api/events/:slug/photos', optionalAuth, async (c) => {
         .first();
       
       if (!collaborator) {
-        return c.json({ error: 'Event not found' }, 404);
+        // Return 401 if not logged in, 403 if logged in but not authorized
+        const statusCode = user ? 403 : 401;
+        const message = user ? 'Access forbidden' : 'Authentication required';
+        return c.json({ error: message }, statusCode);
       }
     }
     
@@ -264,7 +276,10 @@ app.get('/api/events/:slug/photos/:photoId', optionalAuth, async (c) => {
     
     // Check if user has permission to view this event based on visibility
     if (event.visibility === 'private' && !userIsAdmin) {
-      return c.json({ error: 'Event not found' }, 404);
+      // Return 401 if not logged in, 403 if logged in but not authorized
+      const statusCode = user ? 403 : 401;
+      const message = user ? 'Access forbidden' : 'Authentication required';
+      return c.json({ error: message }, statusCode);
     }
     
     if (event.visibility === 'collaborators_only' && !userIsAdmin) {
@@ -275,7 +290,10 @@ app.get('/api/events/:slug/photos/:photoId', optionalAuth, async (c) => {
         .first();
       
       if (!collaborator) {
-        return c.json({ error: 'Event not found' }, 404);
+        // Return 401 if not logged in, 403 if logged in but not authorized
+        const statusCode = user ? 403 : 401;
+        const message = user ? 'Access forbidden' : 'Authentication required';
+        return c.json({ error: message }, statusCode);
       }
     }
     

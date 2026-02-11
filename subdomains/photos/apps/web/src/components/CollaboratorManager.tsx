@@ -183,13 +183,13 @@ const CollaboratorManager: React.FC<CollaboratorManagerProps> = ({ eventSlug, ev
     }
   };
 
-  const handleRemove = async (userId: string, email: string) => {
+  const handleRemove = async (email: string) => {
     if (!confirm(`Remove ${email} as a collaborator? They will no longer be able to upload photos to this event.`)) {
       return;
     }
 
     try {
-      await removeCollaborator(eventSlug, userId);
+      await removeCollaborator(eventSlug, email);
       setSuccess(`Removed ${email} from collaborators`);
       await loadCollaborators();
       setTimeout(() => setSuccess(null), 3000);
@@ -430,7 +430,7 @@ const CollaboratorManager: React.FC<CollaboratorManagerProps> = ({ eventSlug, ev
                 </p>
               </div>
               <button
-                onClick={() => handleRemove(collaborator.user_id, collaborator.email)}
+                onClick={() => handleRemove(collaborator.email)}
                 className="ml-3 p-2 text-red-600 hover:bg-red-50 rounded-lg transition-colors"
                 title="Remove collaborator"
               >

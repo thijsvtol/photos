@@ -147,7 +147,7 @@ describe('CollaboratorManager', () => {
     fireEvent.click(removeButtons[0]);
     
     await waitFor(() => {
-      expect(api.removeCollaborator).toHaveBeenCalledWith(mockEventSlug, 'user1');
+      expect(api.removeCollaborator).toHaveBeenCalledWith(mockEventSlug, 'user1@example.com');
     });
   });
 
