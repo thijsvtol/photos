@@ -510,4 +510,216 @@ export async function sendUploadNotification(env: Env, params: {
   }
 }
 
+/**
+ * POST /api/events/:slug/invite-links
+ * Create a shareable invite link for an event (admin only)
+ */
+app.post('/api/events/:slug/invite-links', requireAdmin, async (c) => {
+  const slug = c.req.param('slug');
+  const user = c.get('user');
+  
+  try {
+    // Get event
+    const event = await c.env.DB.prepare(
+      'SELECT id FROM events WHERE slug = ?'
+    ).bind(slug).first<{ id: number }>();
+    
+    if (!event) {
+      return c.json({ error: 'Event not found' }, 404);
+    }
+    
+    // Generate secure token
+    const tokenBytes = new Uint8Array(32);
+    crypto.getRandomValues(tokenBytes);
+    const token = Array.from(tokenBytes)
+      .map(b => b.toString(16).padStart(2, '0'))
+      .join('');
+    
+    // Create invite link
+    const result = await c.env.DB.prepare(`
+      INSERT INTO invite_links (token, event_id, created_by)
+      VALUES (?, ?, ?)
+    `).bind(token, event.id, user.email).run();
+    
+    if (!result.success) {
+      throw new Error('Failed to create invite link');
+    }
+    
+    // Get the created link with creator info
+    const inviteLink = await c.env.DB.prepare(`
+      SELECT 
+        il.*,
+        u.name as creator_name,
+        e.name as event_name,
+        e.slug as event_slug
+      FROM invite_links il
+      LEFT JOIN users u ON il.created_by = u.email
+      LEFT JOIN events e ON il.event_id = e.id
+      WHERE il.token = ?
+    `).bind(token).first();
+    
+    // Log the action
+    await c.env.DB.prepare(`
+      INSERT INTO collaboration_history (event_id, user_email, action_type, metadata)
+      VALUES (?, ?, 'invite', ?)
+    `).bind(event.id, user.email, JSON.stringify({ method: 'link' })).run();
+    
+    return c.json({ inviteLink });
+  } catch (error) {
+    console.error('Error creating invite link:', error);
+    return c.json({ error: 'Failed to create invite link' }, 500);
+  }
+});
+
+/**
+ * GET /api/events/:slug/invite-links
+ * Get all active invite links for an event (admin only)
+ */
+app.get('/api/events/:slug/invite-links', requireAdmin, async (c) => {
+  const slug = c.req.param('slug');
+  
+  try {
+    // Get event
+    const event = await c.env.DB.prepare(
+      'SELECT id FROM events WHERE slug = ?'
+    ).bind(slug).first<{ id: number }>();
+    
+    if (!event) {
+      return c.json({ error: 'Event not found' }, 404);
+    }
+    
+    // Get active invite links
+    const links = await c.env.DB.prepare(`
+      SELECT 
+        il.*,
+        u.name as creator_name
+      FROM invite_links il
+      LEFT JOIN users u ON il.created_by = u.email
+      WHERE il.event_id = ? AND il.revoked_at IS NULL
+      ORDER BY il.created_at DESC
+    `).bind(event.id).all();
+    
+    return c.json({ inviteLinks: links.results || [] });
+  } catch (error) {
+    console.error('Error fetching invite links:', error);
+    return c.json({ error: 'Failed to fetch invite links' }, 500);
+  }
+});
+
+/**
+ * DELETE /api/events/:slug/invite-links/:token
+ * Revoke an invite link (admin only)
+ */
+app.delete('/api/events/:slug/invite-links/:token', requireAdmin, async (c) => {
+  const slug = c.req.param('slug');
+  const token = c.req.param('token');
+  const user = c.get('user');
+  
+  try {
+    // Get event
+    const event = await c.env.DB.prepare(
+      'SELECT id FROM events WHERE slug = ?'
+    ).bind(slug).first<{ id: number }>();
+    
+    if (!event) {
+      return c.json({ error: 'Event not found' }, 404);
+    }
+    
+    // Revoke the link
+    const result = await c.env.DB.prepare(`
+      UPDATE invite_links 
+      SET revoked_at = datetime('now')
+      WHERE token = ? AND event_id = ? AND revoked_at IS NULL
+    `).bind(token, event.id).run();
+    
+    if (result.meta.changes === 0) {
+      return c.json({ error: 'Invite link not found or already revoked' }, 404);
+    }
+    
+    // Log the action
+    await c.env.DB.prepare(`
+      INSERT INTO collaboration_history (event_id, user_email, action_type, metadata)
+      VALUES (?, ?, 'remove', ?)
+    `).bind(event.id, user.email, JSON.stringify({ method: 'link_revoked', token })).run();
+    
+    return c.json({ success: true });
+  } catch (error) {
+    console.error('Error revoking invite link:', error);
+    return c.json({ error: 'Failed to revoke invite link' }, 500);
+  }
+});
+
+/**
+ * POST /api/invite/:token/accept
+ * Accept an invite link (requires authentication)
+ */
+app.post('/api/invite/:token/accept', async (c) => {
+  const token = c.req.param('token');
+  
+  // Extract user from auth - this endpoint requires login
+  const user = await extractUser(c);
+  if (!user) {
+    return c.json({ error: 'Authentication required' }, 401);
+  }
+  
+  try {
+    // Get invite link and verify it's valid
+    const inviteLink = await c.env.DB.prepare(`
+      SELECT il.*, e.name as event_name, e.slug as event_slug
+      FROM invite_links il
+      JOIN events e ON il.event_id = e.id
+      WHERE il.token = ? AND il.revoked_at IS NULL
+    `).bind(token).first<any>();
+    
+    if (!inviteLink) {
+      return c.json({ error: 'Invalid or revoked invite link' }, 404);
+    }
+    
+    // Check if user is already a collaborator
+    const existing = await c.env.DB.prepare(`
+      SELECT 1 FROM event_collaborators 
+      WHERE event_id = ? AND user_email = ?
+    `).bind(inviteLink.event_id, user.email).first();
+    
+    if (existing) {
+      return c.json({ 
+        error: 'You are already a collaborator',
+        eventSlug: inviteLink.event_slug 
+      }, 400);
+    }
+    
+    // Add user as collaborator
+    await c.env.DB.prepare(`
+      INSERT INTO event_collaborators (event_id, user_email)
+      VALUES (?, ?)
+    `).bind(inviteLink.event_id, user.email).run();
+    
+    // Update link usage stats
+    await c.env.DB.prepare(`
+      UPDATE invite_links 
+      SET last_used_at = datetime('now'), use_count = use_count + 1
+      WHERE token = ?
+    `).bind(token).run();
+    
+    // Log the action
+    await c.env.DB.prepare(`
+      INSERT INTO collaboration_history (event_id, user_email, action_type, metadata)
+      VALUES (?, ?, 'accept', ?)
+    `).bind(inviteLink.event_id, user.email, JSON.stringify({ 
+      method: 'link',
+      token,
+      invited_by: inviteLink.created_by 
+    })).run();
+    
+    return c.json({ 
+      success: true, 
+      eventSlug: inviteLink.event_slug,
+      eventName: inviteLink.event_name
+    });
+  } catch (error) {
+    console.error('Error accepting invite:', error);
+    return c.json({ error: 'Failed to accept invite' }, 500);
+  }
+});
+
 export default app;

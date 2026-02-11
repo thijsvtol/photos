@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { UserPlus, X, Mail, Check, Clock, XCircle } from 'lucide-react';
-import { getCollaborators, inviteCollaborator, removeCollaborator, searchUsers } from '../api';
-import type { Collaborator } from '../types';
+import { UserPlus, X, Mail, Check, Clock, XCircle, Link as LinkIcon, Copy, Trash2 } from 'lucide-react';
+import { getCollaborators, inviteCollaborator, removeCollaborator, searchUsers, createInviteLink, getInviteLinks, revokeInviteLink } from '../api';
+import type { Collaborator, InviteLink } from '../types';
 
 interface CollaboratorManagerProps {
   eventSlug: string;
@@ -10,11 +10,15 @@ interface CollaboratorManagerProps {
 
 const CollaboratorManager: React.FC<CollaboratorManagerProps> = ({ eventSlug, eventName }) => {
   const [collaborators, setCollaborators] = useState<Collaborator[]>([]);
+  const [inviteLinks, setInviteLinks] = useState<InviteLink[]>([]);
   const [loading, setLoading] = useState(true);
+  const [linksLoading, setLinksLoading] = useState(false);
+  const [creatingLink, setCreatingLink] = useState(false);
   const [inviteEmail, setInviteEmail] = useState('');
   const [inviting, setInviting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
+  const [copiedToken, setCopiedToken] = useState<string | null>(null);
   const [suggestions, setSuggestions] = useState<Array<{ id: string; email: string; name: string | null }>>([]);
   const [showSuggestions, setShowSuggestions] = useState(false);
   const [searchTimeout, setSearchTimeout] = useState<NodeJS.Timeout | null>(null);
@@ -22,6 +26,7 @@ const CollaboratorManager: React.FC<CollaboratorManagerProps> = ({ eventSlug, ev
 
   useEffect(() => {
     loadCollaborators();
+    loadInviteLinks();
   }, [eventSlug]);
 
   useEffect(() => {
@@ -82,6 +87,57 @@ const CollaboratorManager: React.FC<CollaboratorManagerProps> = ({ eventSlug, ev
       setError('Failed to load collaborators');
     } finally {
       setLoading(false);
+    }
+  };
+
+  const loadInviteLinks = async () => {
+    try {
+      setLinksLoading(true);
+      const links = await getInviteLinks(eventSlug);
+      setInviteLinks(links);
+    } catch (err) {
+      console.error('Failed to load invite links:', err);
+    } finally {
+      setLinksLoading(false);
+    }
+  };
+
+  const handleCreateLink = async () => {
+    try {
+      setCreatingLink(true);
+      setError(null);
+      const newLink = await createInviteLink(eventSlug);
+      setInviteLinks([newLink, ...inviteLinks]);
+      setSuccess('Invite link created!');
+      setTimeout(() => setSuccess(null), 3000);
+    } catch (err: any) {
+      console.error('Failed to create invite link:', err);
+      setError(err.response?.data?.error || 'Failed to create invite link');
+    } finally {
+      setCreatingLink(false);
+    }
+  };
+
+  const handleCopyLink = (token: string) => {
+    const inviteUrl = `${window.location.origin}/invite/${token}`;
+    navigator.clipboard.writeText(inviteUrl);
+    setCopiedToken(token);
+    setTimeout(() => setCopiedToken(null), 2000);
+  };
+
+  const handleRevokeLink = async (token: string) => {
+    if (!confirm('Revoke this invite link? It will no longer work.')) {
+      return;
+    }
+
+    try {
+      await revokeInviteLink(eventSlug, token);
+      setInviteLinks(inviteLinks.filter(link => link.token !== token));
+      setSuccess('Invite link revoked');
+      setTimeout(() => setSuccess(null), 3000);
+    } catch (err) {
+      console.error('Failed to revoke invite link:', err);
+      setError('Failed to revoke invite link');
     }
   };
 
@@ -256,6 +312,83 @@ const CollaboratorManager: React.FC<CollaboratorManagerProps> = ({ eventSlug, ev
           {success}
         </div>
       )}
+
+      {/* Invite Links Section */}
+      <div className="mb-6 pb-6 border-b border-gray-200">
+        <div className="flex items-center justify-between mb-4">
+          <div>
+            <h3 className="text-lg font-semibold text-gray-900">Invite Links</h3>
+            <p className="text-sm text-gray-600">Create shareable links for collaboration</p>
+          </div>
+          <button
+            onClick={handleCreateLink}
+            disabled={creatingLink}
+            className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition flex items-center gap-2"
+          >
+            <LinkIcon className="w-4 h-4" />
+            {creatingLink ? 'Creating...' : 'Create Link'}
+          </button>
+        </div>
+
+        {linksLoading ? (
+          <div className="text-center py-4">
+            <div className="inline-block animate-spin rounded-full h-6 w-6 border-b-2 border-gray-900"></div>
+          </div>
+        ) : inviteLinks.length === 0 ? (
+          <div className="text-center py-6 bg-gray-50 rounded-lg border-2 border-dashed border-gray-300">
+            <LinkIcon className="w-8 h-8 text-gray-400 mx-auto mb-2" />
+            <p className="text-gray-600 text-sm">No active invite links</p>
+            <p className="text-gray-500 text-xs mt-1">Create a link to share with collaborators</p>
+          </div>
+        ) : (
+          <div className="space-y-2">
+            {inviteLinks.map((link) => (
+              <div
+                key={link.token}
+                className="flex items-center justify-between p-3 border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors"
+              >
+                <div className="flex-1 min-w-0 mr-3">
+                  <div className="flex items-center gap-2 mb-1">
+                    <LinkIcon className="w-4 h-4 text-blue-600 flex-shrink-0" />
+                    <code className="text-xs text-gray-600 font-mono truncate">
+                      {window.location.origin}/invite/{link.token}
+                    </code>
+                  </div>
+                  <div className="flex items-center gap-3 text-xs text-gray-500">
+                    <span>Created {new Date(link.created_at).toLocaleDateString()}</span>
+                    {link.use_count > 0 && (
+                      <span className="text-green-600">Used {link.use_count}x</span>
+                    )}
+                    {link.last_used_at && (
+                      <span>Last used {new Date(link.last_used_at).toLocaleDateString()}</span>
+                    )}
+                  </div>
+                </div>
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => handleCopyLink(link.token)}
+                    className="p-2 text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
+                    title="Copy link"
+                  >
+                    {copiedToken === link.token ? (
+                      <Check className="w-4 h-4" />
+                    ) : (
+                      <Copy className="w-4 h-4" />
+                    )}
+                  </button>
+                  <button
+                    onClick={() => handleRevokeLink(link.token)}
+                    className="p-2 text-red-600 hover:bg-red-50 rounded-lg transition-colors"
+                    title="Revoke link"
+                  >
+                    <Trash2 className="w-4 h-4" />
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
 
       {/* Collaborators List */}
       {loading ? (

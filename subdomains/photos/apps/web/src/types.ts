@@ -135,3 +135,17 @@ export interface Collaborator {
 export interface InviteCollaboratorRequest {
   email: string;
 }
+
+export interface InviteLink {
+  id: number;
+  token: string;
+  event_id: number;
+  created_by: string;
+  created_at: string;
+  revoked_at: string | null;
+  last_used_at: string | null;
+  use_count: number;
+  creator_name?: string | null;
+  event_name?: string | null;
+  event_slug?: string | null;
+}

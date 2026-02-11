@@ -621,6 +621,38 @@ export const removeCollaborator = async (eventSlug: string, userId: string) => {
   );
 };
 
+// Invite Links API
+export const createInviteLink = async (eventSlug: string) => {
+  const response = await api.post<{ inviteLink: import('./types').InviteLink }>(
+    `/events/${eventSlug}/invite-links`,
+    {},
+    { headers: getAdminHeaders() }
+  );
+  return response.data.inviteLink;
+};
+
+export const getInviteLinks = async (eventSlug: string) => {
+  const response = await api.get<{ inviteLinks: import('./types').InviteLink[] }>(
+    `/events/${eventSlug}/invite-links`,
+    { headers: getAdminHeaders() }
+  );
+  return response.data.inviteLinks;
+};
+
+export const revokeInviteLink = async (eventSlug: string, token: string) => {
+  await api.delete(
+    `/events/${eventSlug}/invite-links/${token}`,
+    { headers: getAdminHeaders() }
+  );
+};
+
+export const acceptInvite = async (token: string) => {
+  const response = await api.post<{ success: boolean; eventSlug: string; eventName: string }>(
+    `/invite/${token}/accept`
+  );
+  return response.data;
+};
+
 export const getUserCollaborations = async () => {
   const response = await api.get<{ 
     collaborations: Array<{ 

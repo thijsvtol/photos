@@ -197,3 +197,21 @@ export interface CollaborationHistoryWithUsers {
   metadata: any; // Parsed JSON
   created_at: string;
 }
+// Invite link in database
+export interface InviteLink {
+  id: number;
+  token: string;
+  event_id: number;
+  created_by: string;
+  created_at: string;
+  revoked_at: string | null;
+  last_used_at: string | null;
+  use_count: number;
+}
+
+// Invite link with creator info
+export interface InviteLinkWithCreator extends InviteLink {
+  creator_name: string | null;
+  event_name: string | null;
+  event_slug: string | null;
+}

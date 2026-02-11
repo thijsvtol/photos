@@ -17,6 +17,7 @@ const AdminDashboard = lazy(() => import('./pages/AdminDashboard'));
 const AdminEventUpload = lazy(() => import('./pages/AdminEventUpload'));
 const AdminPhotoManager = lazy(() => import('./pages/AdminPhotoManager'));
 const AdminTagManager = lazy(() => import('./pages/AdminTagManager'));
+const InviteAccept = lazy(() => import('./pages/InviteAccept'));
 
 // Loading component
 const LoadingFallback = () => (
@@ -41,6 +42,7 @@ function App() {
               <Route path="/events/:slug" element={<EventGallery />} />
               <Route path="/p/:slug/:photoId" element={<PhotoDetail />} />
               <Route path="/favorites" element={<MyFavorites />} />
+              <Route path="/invite/:token" element={<InviteAccept />} />
               <Route path="/logout" element={<Logout />} />
               <Route path="/map" element={<MapView />} />
               <Route path="/usage" element={<PhotoUsage />} />
