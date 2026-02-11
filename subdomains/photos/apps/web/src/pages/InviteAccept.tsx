@@ -28,6 +28,9 @@ const InviteAccept: React.FC = () => {
       return;
     }
 
+    // Clear any stored redirect after successful auth
+    sessionStorage.removeItem('inviteRedirect');
+    
     handleAcceptInvite();
   }, [token, user, authLoading]);
 
@@ -59,10 +62,11 @@ const InviteAccept: React.FC = () => {
   };
 
   const handleLogin = () => {
-    // Store the current URL to redirect back after login
-    sessionStorage.setItem('redirectAfterLogin', window.location.pathname);
-    // In a Cloudflare Access setup, redirecting to any protected resource will trigger login
-    window.location.href = '/';
+    // Store invite URL in sessionStorage as backup
+    sessionStorage.setItem('inviteRedirect', window.location.pathname);
+    // Redirect to login with current path as return destination
+    const currentPath = window.location.pathname;
+    window.location.href = `/api/auth/login?return_to=${encodeURIComponent(currentPath)}`;
   };
 
   return (
@@ -133,10 +137,15 @@ const InviteAccept: React.FC = () => {
               {error}
             </p>
             <button
-              onClick={() => navigate('/events')}
+              onClick={() => {
+                // Store invite URL in sessionStorage as backup
+                sessionStorage.setItem('inviteRedirect', window.location.pathname);
+                const currentPath = window.location.pathname;
+                window.location.href = `/api/auth/login?return_to=${encodeURIComponent(currentPath)}`;
+              }}
               className="w-full px-6 py-3 bg-gray-600 text-white rounded-lg hover:bg-gray-700 active:bg-gray-800 transition font-medium"
             >
-              Go to Events
+              Login to Continue
             </button>
           </div>
         )}

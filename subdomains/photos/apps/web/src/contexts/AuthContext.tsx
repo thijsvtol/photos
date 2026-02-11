@@ -93,6 +93,17 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     fetchUser();
   }, []);
 
+  // Check for stored invite redirect after auth
+  useEffect(() => {
+    if (!loading && user) {
+      const inviteRedirect = sessionStorage.getItem('inviteRedirect');
+      if (inviteRedirect) {
+        sessionStorage.removeItem('inviteRedirect');
+        window.location.href = inviteRedirect;
+      }
+    }
+  }, [loading, user]);
+
   const login = async () => {
     // On native platform, use OAuth flow
     if (Capacitor.isNativePlatform()) {
