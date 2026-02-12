@@ -16,7 +16,16 @@ if (Capacitor.isNativePlatform()) {
     backgroundSyncService.startBackgroundSync();
   });
   
-  folderSyncService.initialize();
+  folderSyncService.initialize().then(() => {
+    // Auto-sync configured folders on app launch
+    folderSyncService.syncAllFolders().then((count) => {
+      if (count > 0) {
+        console.log(`Folder sync: ${count} new files queued for upload`);
+      }
+    }).catch((err) => {
+      console.warn('Folder auto-sync on startup failed:', err);
+    });
+  });
 }
 
 ReactDOM.createRoot(document.getElementById('root')!).render(

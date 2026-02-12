@@ -15,11 +15,25 @@ import { seo } from './routes/seo';
 const app = new Hono<{ Bindings: Env }>();
 
 // Global CORS for all routes
+// Only allow requests from the production domain and Capacitor app origins
+const allowedOrigins = [
+  'https://photos.thijsvtol.nl',
+  'https://localhost',      // Capacitor Android
+  'capacitor://localhost',  // Capacitor iOS
+  'http://localhost:5173',  // Local development
+];
+
 app.use('/*', cors({
-  origin: (origin) => origin, // Allow same origin
+  origin: (origin) => {
+    // Allow requests with no origin (same-origin) or from allowed list
+    if (!origin || allowedOrigins.includes(origin)) {
+      return origin || '*';
+    }
+    return allowedOrigins[0]; // Fallback to production domain
+  },
   credentials: true,
   allowMethods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-  allowHeaders: ['Content-Type', 'Authorization', 'X-Admin-Access', 'Cf-Access-Jwt-Assertion'],
+  allowHeaders: ['Content-Type', 'Authorization', 'X-Admin-Access', 'Cf-Access-Jwt-Assertion', 'X-Upload-Id', 'X-File-Type'],
 }));
 
 // Mount route modules

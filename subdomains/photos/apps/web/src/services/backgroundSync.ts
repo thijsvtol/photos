@@ -5,6 +5,7 @@ import { Network } from '@capacitor/network';
 import { ulid } from 'ulid';
 import { getPendingUploads, updateQueueItem } from '../uploadQueue';
 import { startUpload, uploadPart, completeUpload } from '../api';
+import { folderSyncService } from './folderSync';
 
 const CHUNK_SIZE = 5 * 1024 * 1024; // 5MB chunks
 
@@ -57,6 +58,16 @@ class BackgroundSyncService {
     if (!status.connected) {
       console.log('No network connection, skipping sync');
       return;
+    }
+
+    // Scan configured folders for new photos before processing uploads
+    try {
+      const newFiles = await folderSyncService.syncAllFolders();
+      if (newFiles > 0) {
+        console.log(`Background folder scan: ${newFiles} new files queued`);
+      }
+    } catch (error) {
+      console.warn('Background folder scan failed:', error);
     }
 
     const pendingUploads = await getPendingUploads();
@@ -164,7 +175,7 @@ class BackgroundSyncService {
         notifications: [{
           title: 'Photo Upload Complete',
           body: `${successCount} uploaded successfully${failCount > 0 ? `, ${failCount} failed` : ''}`,
-          id: Date.now(),
+          id: Math.floor(Math.random() * 2147483647),
           schedule: { at: new Date(Date.now() + 1000) },
         }],
       });
@@ -179,7 +190,6 @@ class BackgroundSyncService {
       // Background task will be finished automatically
       this.taskId = null;
       this.isRunning = false;
-      console.log('Background sync stopped');
     }
   }
 
@@ -188,7 +198,6 @@ class BackgroundSyncService {
    */
   async syncNow() {
     if (!Capacitor.isNativePlatform()) {
-      console.log('Background sync not available on web platform');
       return;
     }
 

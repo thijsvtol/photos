@@ -1,9 +1,20 @@
 import { Capacitor } from '@capacitor/core';
-import { Filesystem, Directory } from '@capacitor/filesystem';
+import { Filesystem } from '@capacitor/filesystem';
+import SafDirectory from './safDirectory';
 import { addToQueue } from '../uploadQueue';
 import { ulid } from 'ulid';
 
+// Enable debug logging (set to false in production builds)
+const DEBUG = import.meta.env.DEV;
+
+function debug(...args: any[]) {
+  if (DEBUG) {
+    console.log('[FolderSync]', ...args);
+  }
+}
+
 export interface FolderSyncConfig {
+  /** SAF tree content:// URI (from FilePicker.pickDirectory) */
   folderPath: string;
   eventSlug: string;
   autoSync: boolean;
@@ -11,8 +22,10 @@ export interface FolderSyncConfig {
 }
 
 /**
- * Folder sync service for mobile devices
- * Allows users to select a folder and automatically sync photos to an event
+ * Folder sync service for mobile devices.
+ * Uses the native SafDirectoryPlugin to enumerate files via Android's
+ * DocumentsContract API, which works correctly under scoped storage (API 30+).
+ * File reading uses Filesystem.readFile() with content:// URIs returned by SAF.
  */
 class FolderSyncService {
   private syncConfigs: Map<string, FolderSyncConfig> = new Map();
@@ -20,7 +33,7 @@ class FolderSyncService {
 
   async initialize() {
     if (!Capacitor.isNativePlatform()) {
-      console.log('Folder sync not available on web platform');
+      debug('Not available on web platform');
       return;
     }
 
@@ -43,15 +56,23 @@ class FolderSyncService {
     const stored = localStorage.getItem(this.STORAGE_KEY);
     if (stored) {
       const configs: FolderSyncConfig[] = JSON.parse(stored);
+      // Only load configs that look like content:// URIs (drop legacy filesystem paths)
       configs.forEach(config => {
-        this.syncConfigs.set(config.folderPath, config);
+        if (config.folderPath.startsWith('content://')) {
+          this.syncConfigs.set(config.folderPath, config);
+        } else {
+          debug('Dropping legacy non-SAF config:', config.folderPath);
+        }
       });
+      // Persist cleaned-up configs
+      if (configs.length !== this.syncConfigs.size) {
+        await this.saveConfigs();
+      }
     }
   }
 
   /**
    * Add a folder to sync to an event
-   * On mobile, this will prompt user to select a folder
    */
   async addFolderSync(eventSlug: string, folderPath: string): Promise<void> {
     if (!Capacitor.isNativePlatform()) {
@@ -62,14 +83,11 @@ class FolderSyncService {
       folderPath,
       eventSlug,
       autoSync: true,
-      lastSyncTime: Date.now(),
+      lastSyncTime: undefined, // No lastSyncTime so first sync picks up everything
     };
 
     this.syncConfigs.set(folderPath, config);
     await this.saveConfigs();
-
-    // Do initial sync
-    await this.syncFolder(folderPath);
   }
 
   /**
@@ -88,8 +106,8 @@ class FolderSyncService {
   }
 
   /**
-   * Sync a specific folder
-   * Scans for new photos and adds them to the upload queue
+   * Sync a specific folder using the native SAF plugin.
+   * The folderPath must be a content:// tree URI obtained from FilePicker.pickDirectory().
    */
   async syncFolder(folderPath: string): Promise<number> {
     const config = this.syncConfigs.get(folderPath);
@@ -101,57 +119,66 @@ class FolderSyncService {
       throw new Error('Folder sync only available on mobile');
     }
 
+    // Validate that this is a content:// URI
+    if (!folderPath.startsWith('content://')) {
+      console.error('[FolderSync] Invalid folder URI (not content://):', folderPath);
+      throw new Error('Invalid folder URI. Please remove and re-add this folder.');
+    }
+
     try {
-      // Read directory contents
-      const result = await Filesystem.readdir({
-        path: folderPath,
-        directory: Directory.External,
-      });
+      // Use the native SAF plugin to list files (works with scoped storage)
+      debug('Listing files via SAF for:', folderPath);
+      const result = await SafDirectory.listFiles({ treeUri: folderPath });
+
+      debug(`SAF listFiles returned ${result.files.length} entries`);
 
       let addedCount = 0;
+      let skippedCount = 0;
       const lastSync = config.lastSyncTime || 0;
 
       for (const file of result.files) {
         // Only process image and video files
         if (!this.isMediaFile(file.name)) {
+          debug(`Skipping non-media: ${file.name} (${file.mimeType})`);
           continue;
         }
-
-        // Get file info
-        const stat = await Filesystem.stat({
-          path: `${folderPath}/${file.name}`,
-          directory: Directory.External,
-        });
 
         // Skip if file was already synced (based on modification time)
-        if (stat.mtime && stat.mtime <= lastSync) {
+        if (file.mtime && file.mtime <= lastSync) {
+          skippedCount++;
           continue;
         }
 
-        // Read file content
-        const fileData = await Filesystem.readFile({
-          path: `${folderPath}/${file.name}`,
-          directory: Directory.External,
-        });
+        try {
+          debug(`Reading file: ${file.name} via ${file.uri}`);
 
-        // Convert to File object
-        const blob = this.base64ToBlob(fileData.data as string, this.getMimeType(file.name));
-        const fileObj = new File([blob], file.name, { 
-          type: this.getMimeType(file.name),
-          lastModified: stat.mtime || Date.now(),
-        });
+          // Filesystem.readFile() supports content:// URIs
+          const fileData = await Filesystem.readFile({ path: file.uri });
 
-        // Add to upload queue
-        await addToQueue({
-          id: ulid(),
-          file: fileObj,
-          eventSlug: config.eventSlug,
-          status: 'pending',
-          progress: 0,
-        });
+          // Convert to File object
+          const blob = this.base64ToBlob(fileData.data as string, this.getMimeType(file.name));
+          const fileObj = new File([blob], file.name, {
+            type: this.getMimeType(file.name),
+            lastModified: file.mtime || Date.now(),
+          });
 
-        addedCount++;
+          // Add to upload queue
+          await addToQueue({
+            id: ulid(),
+            file: fileObj,
+            eventSlug: config.eventSlug,
+            status: 'pending',
+            progress: 0,
+          });
+
+          addedCount++;
+        } catch (fileError) {
+          console.error('[FolderSync] Failed to read file:', file.name, fileError);
+          // Continue with next file instead of failing entire sync
+        }
       }
+
+      debug(`Done: ${addedCount} added, ${skippedCount} already synced`);
 
       // Update last sync time
       config.lastSyncTime = Date.now();
@@ -160,7 +187,7 @@ class FolderSyncService {
 
       return addedCount;
     } catch (error) {
-      console.error('Error syncing folder:', error);
+      console.error('[FolderSync] Error syncing folder:', error);
       throw error;
     }
   }
@@ -168,18 +195,22 @@ class FolderSyncService {
   /**
    * Sync all configured folders
    */
-  async syncAllFolders(): Promise<void> {
+  async syncAllFolders(): Promise<number> {
     const configs = this.getFolderSyncs();
-    
+    let totalAdded = 0;
+
     for (const config of configs) {
       if (config.autoSync) {
         try {
-          await this.syncFolder(config.folderPath);
+          const count = await this.syncFolder(config.folderPath);
+          totalAdded += count;
         } catch (error) {
           console.error(`Error syncing folder ${config.folderPath}:`, error);
         }
       }
     }
+
+    return totalAdded;
   }
 
   /**
@@ -187,7 +218,7 @@ class FolderSyncService {
    */
   private isMediaFile(filename: string): boolean {
     const ext = filename.toLowerCase().split('.').pop();
-    return ['jpg', 'jpeg', 'png', 'gif', 'heic', 'heif', 'mp4', 'mov', 'avi'].includes(ext || '');
+    return ['jpg', 'jpeg', 'png', 'gif', 'webp', 'heic', 'heif', 'mp4', 'mov', 'avi', 'mkv'].includes(ext || '');
   }
 
   /**
@@ -200,11 +231,13 @@ class FolderSyncService {
       'jpeg': 'image/jpeg',
       'png': 'image/png',
       'gif': 'image/gif',
+      'webp': 'image/webp',
       'heic': 'image/heic',
       'heif': 'image/heif',
       'mp4': 'video/mp4',
       'mov': 'video/quicktime',
       'avi': 'video/x-msvideo',
+      'mkv': 'video/x-matroska',
     };
     return mimeTypes[ext || ''] || 'application/octet-stream';
   }
@@ -215,11 +248,11 @@ class FolderSyncService {
   private base64ToBlob(base64: string, mimeType: string): Blob {
     const byteCharacters = atob(base64);
     const byteNumbers = new Array(byteCharacters.length);
-    
+
     for (let i = 0; i < byteCharacters.length; i++) {
       byteNumbers[i] = byteCharacters.charCodeAt(i);
     }
-    
+
     const byteArray = new Uint8Array(byteNumbers);
     return new Blob([byteArray], { type: mimeType });
   }
