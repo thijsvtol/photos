@@ -34,7 +34,10 @@ const AdminEventUpload: React.FC = () => {
   const [isGeocoding, setIsGeocoding] = useState(false);
   const [showLocationPicker, setShowLocationPicker] = useState(false);
   const [selectedLocation, setSelectedLocation] = useState<[number, number] | null>(null);
-  const [isAnalyticsExpanded, setIsAnalyticsExpanded] = useState(true);
+  const [isAnalyticsExpanded, setIsAnalyticsExpanded] = useState(() => {
+    // Open by default on desktop (>= 768px), closed on mobile
+    return typeof window !== 'undefined' && window.innerWidth >= 768;
+  });
   const [queueItemsToShow, setQueueItemsToShow] = useState(10);
   const [isLoading, setIsLoading] = useState(true);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
@@ -505,7 +508,7 @@ const AdminEventUpload: React.FC = () => {
               >
                 {isRegenerating ? <Loader2 className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />}
                 <span className="hidden sm:inline">{isRegenerating ? 'Regenerating...' : 'Regenerate'}</span>
-                <span className="sm:hidden">{isRegenerating ? 'Wait...' : 'Regen'}</span>
+                <span className="sm:hidden">{isRegenerating ? 'Wait...' : 'Regen thumbnails'}</span>
               </button>
               <button
                 onClick={handleGeocodePhotos}
@@ -516,7 +519,7 @@ const AdminEventUpload: React.FC = () => {
               >
                 {isGeocoding ? <Loader2 className="w-4 h-4 animate-spin" /> : <Globe className="w-4 h-4" />}
                 <span className="hidden sm:inline">{isGeocoding ? 'Geocoding...' : 'Geocode'}</span>
-                <span className="sm:hidden">{isGeocoding ? 'Wait...' : 'Cities'}</span>
+                <span className="sm:hidden">{isGeocoding ? 'Wait...' : 'Geocode'}</span>
               </button>
             </div>
           </div>

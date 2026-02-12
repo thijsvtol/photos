@@ -7,7 +7,7 @@ import Footer from '../components/Footer';
 import PhotoCard from '../components/PhotoCard';
 import DateTimeline from '../components/DateTimeline';
 import SEO from '../components/SEO';
-import { getEvent, getPhotos, loginToEvent, getPreviewUrl, requestZip, downloadZip, setPhotoFeatured, getUserFavoriteIds, toggleFavorite as toggleFavoriteAPI, deletePhoto, getUserCollaborations, getCollaborators } from '../api';
+import { getEvent, getPhotos, loginToEvent, getPreviewUrl, requestZip, downloadZip, setPhotoFeatured, getUserFavoriteIds, toggleFavorite as toggleFavoriteAPI, bulkDeletePhotos, getUserCollaborations, getCollaborators } from '../api';
 import type { Event, Photo, Collaborator } from '../types';
 import { CollaboratorAvatars } from '../components/CollaboratorAvatars';
 import { useAuth } from '../contexts/AuthContext';
@@ -209,6 +209,21 @@ const EventGallery: React.FC = () => {
     setSelectedPhotos(newSelected);
   };
 
+  const toggleDateSelection = (datePhotos: Photo[]) => {
+    const datePhotoIds = datePhotos.map(p => p.id);
+    const allSelected = datePhotoIds.every(id => selectedPhotos.has(id));
+    
+    const newSelected = new Set(selectedPhotos);
+    if (allSelected) {
+      // Deselect all from this date
+      datePhotoIds.forEach(id => newSelected.delete(id));
+    } else {
+      // Select all from this date
+      datePhotoIds.forEach(id => newSelected.add(id));
+    }
+    setSelectedPhotos(newSelected);
+  };
+
   const toggleFavorite = async (photoId: string, isFavorited: boolean) => {
     // Require authentication for favorites
     if (!isAuthenticated) {
@@ -289,24 +304,22 @@ const EventGallery: React.FC = () => {
     
     try {
       setDeleting(true);
-      let deleted = 0;
       
-      for (const photoId of selected) {
-        try {
-          await deletePhoto(photoId);
-          deleted++;
-        } catch (err) {
-          console.error(`Failed to delete photo ${photoId}:`, err);
-        }
-      }
+      // Use bulk delete API
+      const result = await bulkDeletePhotos(selected);
       
       // Reload photos
       await loadPhotos();
       setSelectedPhotos(new Set());
-      alert(`Successfully deleted ${deleted} of ${selected.length} photos`);
+      
+      if (result.deletedCount === result.totalRequested) {
+        alert(`Successfully deleted ${result.deletedCount} photo(s)`);
+      } else {
+        alert(`Deleted ${result.deletedCount} of ${result.totalRequested} photo(s). Some photos may have failed to delete.`);
+      }
     } catch (error) {
       console.error('Error deleting photos:', error);
-      alert('Failed to delete photos');
+      alert('Failed to delete photos. Please try again.');
     } finally {
       setDeleting(false);
     }
@@ -729,13 +742,22 @@ const EventGallery: React.FC = () => {
                   }}
                 >
                   {/* Date header */}
-                  <div className="mb-4 pb-2 border-b-2 border-gray-200">
-                    <h2 className="text-xl sm:text-2xl font-bold text-gray-900">
-                      {formattedDate}
-                    </h2>
-                    <p className="text-sm text-gray-500 mt-1">
-                      {datePhotos.length} {datePhotos.length === 1 ? 'photo' : 'photos'}
-                    </p>
+                  <div className="mb-4 pb-2 border-b-2 border-gray-200 flex items-center justify-between">
+                    <div>
+                      <h2 className="text-xl sm:text-2xl font-bold text-gray-900">
+                        {formattedDate}
+                      </h2>
+                      <p className="text-sm text-gray-500 mt-1">
+                        {datePhotos.length} {datePhotos.length === 1 ? 'photo' : 'photos'}
+                      </p>
+                    </div>
+                    <button
+                      onClick={() => toggleDateSelection(datePhotos)}
+                      className="px-3 py-1.5 text-sm bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors"
+                      title={datePhotos.every(p => selectedPhotos.has(p.id)) ? 'Deselect all' : 'Select all'}
+                    >
+                      {datePhotos.every(p => selectedPhotos.has(p.id)) ? 'Deselect All' : 'Select All'}
+                    </button>
                   </div>
                   
                   {/* Photos for this date */}
@@ -746,7 +768,7 @@ const EventGallery: React.FC = () => {
                       1280: 3,
                       1024: 3,
                       768: 2,
-                      400: 1
+                      640: 2
                     }}
                     className="flex -ml-2 sm:-ml-4 w-auto"
                     columnClassName="pl-2 sm:pl-4 bg-clip-padding"
@@ -781,7 +803,7 @@ const EventGallery: React.FC = () => {
               1280: 3,
               1024: 3,
               768: 2,
-              400: 1
+              640: 2
             }}
             className="flex -ml-2 sm:-ml-4 w-auto"
             columnClassName="pl-2 sm:pl-4 bg-clip-padding"

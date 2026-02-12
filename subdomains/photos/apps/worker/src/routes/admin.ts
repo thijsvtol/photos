@@ -774,6 +774,79 @@ app.delete('/photos/:photoId', async (c) => {
 });
 
 /**
+ * POST /photos/bulk-delete
+ * Delete multiple photos in a single request
+ */
+app.post('/photos/bulk-delete', async (c) => {
+  try {
+    const { photoIds } = await c.req.json<{ photoIds: string[] }>();
+    
+    if (!Array.isArray(photoIds) || photoIds.length === 0) {
+      return c.json({ error: 'photoIds array is required' }, 400);
+    }
+    
+    // Limit to 100 photos per request to prevent abuse
+    if (photoIds.length > 100) {
+      return c.json({ error: 'Cannot delete more than 100 photos at once' }, 400);
+    }
+    
+    let deletedCount = 0;
+    const errors: { photoId: string; error: string }[] = [];
+    
+    for (const photoId of photoIds) {
+      try {
+        // Get photo and event slug
+        const photo = await c.env.DB
+          .prepare(`
+            SELECT p.id, e.slug
+            FROM photos p
+            JOIN events e ON p.event_id = e.id
+            WHERE p.id = ?
+          `)
+          .bind(photoId)
+          .first<{ id: string; slug: string }>();
+        
+        if (!photo) {
+          errors.push({ photoId, error: 'Photo not found' });
+          continue;
+        }
+        
+        // Delete from R2
+        try {
+          await c.env.PHOTOS_BUCKET.delete(`original/${photo.slug}/${photo.id}.jpg`);
+          await c.env.PHOTOS_BUCKET.delete(`preview/${photo.slug}/${photo.id}.jpg`);
+          await c.env.PHOTOS_BUCKET.delete(`ig/${photo.slug}/${photo.id}.jpg`);
+        } catch (err) {
+          console.error(`Failed to delete photo ${photo.id} from R2:`, err);
+          // Continue to delete from database even if R2 fails
+        }
+        
+        // Delete from database
+        await c.env.DB
+          .prepare('DELETE FROM photos WHERE id = ?')
+          .bind(photoId)
+          .run();
+        
+        deletedCount++;
+      } catch (err) {
+        console.error(`Failed to delete photo ${photoId}:`, err);
+        errors.push({ photoId, error: 'Delete failed' });
+      }
+    }
+    
+    return c.json({ 
+      success: true, 
+      deletedCount,
+      totalRequested: photoIds.length,
+      errors: errors.length > 0 ? errors : undefined
+    });
+  } catch (error) {
+    console.error('Error in bulk delete:', error);
+    return c.json({ error: 'Failed to process bulk delete' }, 500);
+  }
+});
+
+/**
  * POST /tags
  * Create a new tag
  */
