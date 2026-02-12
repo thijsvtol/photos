@@ -7,8 +7,9 @@ import Footer from '../components/Footer';
 import PhotoCard from '../components/PhotoCard';
 import DateTimeline from '../components/DateTimeline';
 import SEO from '../components/SEO';
-import { getEvent, getPhotos, loginToEvent, getPreviewUrl, requestZip, downloadZip, setPhotoFeatured, getUserFavoriteIds, toggleFavorite as toggleFavoriteAPI, deletePhoto, getUserCollaborations } from '../api';
-import type { Event, Photo } from '../types';
+import { getEvent, getPhotos, loginToEvent, getPreviewUrl, requestZip, downloadZip, setPhotoFeatured, getUserFavoriteIds, toggleFavorite as toggleFavoriteAPI, deletePhoto, getUserCollaborations, getCollaborators } from '../api';
+import type { Event, Photo, Collaborator } from '../types';
+import { CollaboratorAvatars } from '../components/CollaboratorAvatars';
 import { useAuth } from '../contexts/AuthContext';
 
 const EventGallery: React.FC = () => {
@@ -28,6 +29,7 @@ const EventGallery: React.FC = () => {
   const [showShareMenu, setShowShareMenu] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [isCollaborator, setIsCollaborator] = useState(false);
+  const [collaborators, setCollaborators] = useState<Collaborator[]>([]);
   const [activeDate, setActiveDate] = useState<string | null>(null);
   const dateRefs = useRef<Map<string, HTMLDivElement>>(new Map());
 
@@ -62,6 +64,24 @@ const EventGallery: React.FC = () => {
     };
     loadUserData();
   }, [isAuthenticated, slug]);
+
+  // Load collaborators for invite-only events
+  useEffect(() => {
+    const loadCollaborators = async () => {
+      if (event && event.visibility === 'collaborators_only' && slug) {
+        try {
+          const collabData = await getCollaborators(slug);
+          setCollaborators(collabData);
+        } catch (err) {
+          console.error('Failed to load collaborators:', err);
+          // Silently fail - collaborators display is optional
+        }
+      } else {
+        setCollaborators([]);
+      }
+    };
+    loadCollaborators();
+  }, [event, slug]);
 
   // Restore scroll position when returning to gallery
   useEffect(() => {
@@ -545,6 +565,11 @@ const EventGallery: React.FC = () => {
                     ? 'Invite Only'
                     : 'Private Gallery'}
                 </span>
+              )}
+              {event && event.visibility === 'collaborators_only' && collaborators.length > 0 && (
+                <div className="mt-4">
+                  <CollaboratorAvatars collaborators={collaborators} />
+                </div>
               )}
             </div>
             {/* Share button */}

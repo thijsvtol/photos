@@ -606,8 +606,7 @@ export const toggleFavorite = async (photoId: string, isFavorite: boolean): Prom
 // Collaborator API
 export const getCollaborators = async (eventSlug: string) => {
   const response = await api.get<{ collaborators: import('./types').Collaborator[] }>(
-    `/events/${eventSlug}/collaborators`,
-    { headers: getAdminHeaders() }
+    `/events/${eventSlug}/collaborators`
   );
   return response.data.collaborators;
 };

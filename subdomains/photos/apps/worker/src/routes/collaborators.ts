@@ -10,9 +10,10 @@ const app = new Hono<{ Bindings: Env; Variables: Variables }>();
 
 /**
  * GET /api/events/:slug/collaborators
- * Get all collaborators for an event (admin only)
+ * Get all collaborators for an event
+ * Public endpoint - allows anyone who can view the event to see collaborators
  */
-app.get('/api/events/:slug/collaborators', requireAdmin, async (c) => {
+app.get('/api/events/:slug/collaborators', async (c) => {
   const slug = c.req.param('slug');
   
   try {
