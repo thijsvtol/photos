@@ -881,7 +881,10 @@ const PhotoDetail: React.FC = () => {
               </svg>
             </button>
             <span className="text-gray-400 text-sm">
-              {currentIndex + 1} / {displayPhotos.length}
+              {fromFavorites && favoritePhotos.length > 0
+                ? `${(favoritePhotos.findIndex((fav: { id: string; slug: string }) => fav.id === photoId && fav.slug === slug) + 1) || 1} / ${favoritePhotos.length}`
+                : `${currentIndex + 1} / ${displayPhotos.length}`
+              }
             </span>
             <button
               onClick={navigateToNext}
