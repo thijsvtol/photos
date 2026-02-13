@@ -1,7 +1,7 @@
 {
   "name": "photos-web",
   "version": "1.0.0",
-  "description": "React frontend for photos.thijsvtol.nl",
+  "description": "React frontend for photo sharing application",
   "type": "module",
   "scripts": {
     "dev": "vite",

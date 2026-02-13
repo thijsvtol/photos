@@ -2,7 +2,6 @@ export interface Tag {
   id: number;
   name: string;
   slug: string;
-  description: string | null;
 }
 
 export interface Event {
@@ -84,13 +83,11 @@ export interface EventStats {
 export interface CreateTagRequest {
   name: string;
   slug?: string;
-  description?: string;
 }
 
 export interface UpdateTagRequest {
   name?: string;
   slug?: string;
-  description?: string;
 }
 
 // Upload queue item for persistence in IndexedDB

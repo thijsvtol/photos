@@ -1,5 +1,6 @@
 import { Hono } from 'hono';
 import type { Env } from '../types';
+import { getConfig } from '../config';
 
 export const seo = new Hono<{ Bindings: Env }>();
 
@@ -26,7 +27,8 @@ seo.get('/sitemap.xml', async (c) => {
       LIMIT 1000
     `).all();
 
-    const baseUrl = 'https://photos.thijsvtol.nl';
+    const config = getConfig(c.env);
+    const baseUrl = `https://${config.domain}`;
     const now = new Date().toISOString().split('T')[0];
 
     // Build sitemap XML
@@ -122,12 +124,13 @@ seo.get('/sitemap.xml', async (c) => {
 
 // robots.txt handler (if not served statically)
 seo.get('/robots.txt', (c) => {
+  const config = getConfig(c.env);
   const robotsTxt = `User-agent: *
 Allow: /
 Disallow: /admin/
 Disallow: /api/admin/
 
-Sitemap: https://photos.thijsvtol.nl/sitemap.xml
+Sitemap: https://${config.domain}/sitemap.xml
 
 Crawl-delay: 1`;
 

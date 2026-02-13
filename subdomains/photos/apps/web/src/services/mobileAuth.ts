@@ -1,6 +1,7 @@
 import { Preferences } from '@capacitor/preferences';
 import { Browser } from '@capacitor/browser';
 import { App } from '@capacitor/app';
+import { getConfig } from '../config';
 
 const TOKEN_KEY = 'auth_token';
 const USER_KEY = 'auth_user';
@@ -21,7 +22,7 @@ export interface StoredUser {
  * Mobile OAuth Authentication Service
  * 
  * Flow:
- * 1. App opens browser to: https://photos.thijsvtol.nl/mobile-auth
+ * 1. App opens browser to: <your-domain>/mobile-auth
  * 2. User authenticates via Cloudflare Access
  * 3. Backend generates OAuth token
  * 4. Browser redirects to: photos://auth/callback?token=xxx&expires=xxx
@@ -57,8 +58,9 @@ export class MobileAuthService {
       const state = Math.random().toString(36).substring(7);
       await Preferences.set({ key: 'oauth_state', value: state });
 
+      const config = getConfig();
       // First go to /api/mobile-login to ensure user is authenticated, then auto-redirect to mobile-auth
-      const authUrl = `https://photos.thijsvtol.nl/api/mobile-login?state=${state}`;
+      const authUrl = `${config.apiUrl}/api/mobile-login?state=${state}`;
       
       try {
         await Browser.open({

@@ -29,7 +29,7 @@ JWT_SECRET=CNavn7dPjCywA9zh/S6GE6toPqaX2ZzqywZSJ9Dh+Xo=
 From the photos directory, run:
 
 ```bash
-cd /Users/pnl0nr50/Library/CloudStorage/OneDrive-AholdDelhaize.com/Documents/github/thijsvtol/thijsvtol-site/subdomains/photos
+cd subdomains/photos
 
 # Set the JWT secret in production
 echo "CNavn7dPjCywA9zh/S6GE6toPqaX2ZzqywZSJ9Dh+Xo=" | npx wrangler secret put JWT_SECRET
@@ -46,25 +46,25 @@ The `/mobile-auth` endpoint needs to be protected by Cloudflare Access (just lik
 
 In your Cloudflare Zero Trust dashboard:
 1. Go to Access > Applications
-2. Find your photos.thijsvtol.nl application
+2. Find your photos application
 3. Ensure `/mobile-auth` is protected by the same policy as `/admin/*`
 
 Or create a new policy:
-- **Application domain**: `photos.thijsvtol.nl`
+- **Application domain**: `photos.yourdomain.com`
 - **Path**: `/mobile-auth`
 - **Policy**: Same as your admin policy (email whitelist, etc.)
 
 ### 3. Deploy Backend
 
 ```bash
-cd /Users/pnl0nr50/Library/CloudStorage/OneDrive-AholdDelhaize.com/Documents/github/thijsvtol/thijsvtol-site/subdomains/photos/apps/worker
+cd subdomains/photos/apps/worker
 npm run deploy
 ```
 
 ### 4. Build and Deploy Mobile App
 
 ```bash
-cd /Users/pnl0nr50/Library/CloudStorage/OneDrive-AholdDelhaize.com/Documents/github/thijsvtol/thijsvtol-site/subdomains/photos/apps/web
+cd subdomains/photos/apps/web
 
 # Build web app
 npm run build
@@ -85,7 +85,7 @@ Then build and install APK from Android Studio.
 1. Open app on Android device/emulator
 2. Navigate to admin section (or trigger login)
 3. Click "Login" button
-4. Browser should open to: `https://photos.thijsvtol.nl/mobile-auth?state=<random>`
+4. Browser should open to: `https://photos.yourdomain.com/mobile-auth?state=<random>`
 5. Cloudflare Access prompts for authentication
 6. After successful auth, page shows "Authentication Successful"
 7. Browser redirects to: `photos://auth/callback?token=...&user=...`
@@ -98,7 +98,7 @@ Check Android logcat for:
 ```
 [MobileAuth] Deep link received: photos://auth/callback?...
 [MobileAuth] Token stored successfully
-[API] Request: GET /user/profile Full URL: https://photos.thijsvtol.nl/api/user/profile
+[API] Request: GET /user/profile Full URL: https://photos.yourdomain.com/api/user/profile
 [API] Authorization header: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
 ```
 

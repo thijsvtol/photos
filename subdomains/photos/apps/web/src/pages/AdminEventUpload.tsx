@@ -1,14 +1,15 @@
 import React, { useEffect, useState, useCallback } from 'react';
 import { useParams, Link } from 'react-router-dom';
-import { ChevronDown, ChevronUp, MapPin, RefreshCw, Globe, Upload, Eye, Camera, Heart, AlertCircle, CheckCircle, Loader2, X } from 'lucide-react';
+import { MapPin, RefreshCw, Globe, Upload, AlertCircle, CheckCircle, Loader2, X } from 'lucide-react';
 import { ulid } from 'ulid';
 import ExifReader from 'exifreader';
-import { MapContainer, TileLayer, Marker, useMapEvents } from 'react-leaflet';
-import 'leaflet/dist/leaflet.css';
 import L from 'leaflet';
 import Navbar from '../components/Navbar';
 import FolderSyncManager from '../components/FolderSyncManager';
-import { getEvent, startUpload, uploadPart, completeUpload, regenerateThumbnails, setEventLocation, getEventStats, getPreviewUrl, geocodeEventPhotos } from '../api';
+import EventAnalytics from '../components/EventAnalytics';
+import EventLocationPicker from '../components/EventLocationPicker';
+import UploadQueueList from '../components/UploadQueueList';
+import { getEvent, startUpload, uploadPart, completeUpload, regenerateThumbnails, setEventLocation, getEventStats, geocodeEventPhotos } from '../api';
 import { addToQueue, updateQueueItem, getQueueItems, getPendingUploads } from '../uploadQueue';
 import { createPreview } from '../imageUtils';
 import type { Event, UploadQueueItem, EventStats } from '../types';
@@ -32,8 +33,8 @@ const AdminEventUpload: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
   const [isRegenerating, setIsRegenerating] = useState(false);
   const [isGeocoding, setIsGeocoding] = useState(false);
+
   const [showLocationPicker, setShowLocationPicker] = useState(false);
-  const [selectedLocation, setSelectedLocation] = useState<[number, number] | null>(null);
   const [isAnalyticsExpanded, setIsAnalyticsExpanded] = useState(() => {
     // Open by default on desktop (>= 768px), closed on mobile
     return typeof window !== 'undefined' && window.innerWidth >= 768;
@@ -403,15 +404,6 @@ const AdminEventUpload: React.FC = () => {
     }
   };
 
-  const getStatusColor = (status: string) => {
-    switch (status) {
-      case 'completed': return 'bg-green-500';
-      case 'uploading': return 'bg-blue-500';
-      case 'failed': return 'bg-red-500';
-      default: return 'bg-gray-500';
-    }
-  };
-
   const handleRegenerateThumbnails = async () => {
     if (!slug) return;
     
@@ -450,30 +442,17 @@ const AdminEventUpload: React.FC = () => {
     }
   };
 
-  const handleSetEventLocation = async () => {
-    if (!slug || !selectedLocation) return;
+  const handleSetEventLocation = async (lat: number, lng: number) => {
+    if (!slug) return;
     
     try {
-      const [lat, lng] = selectedLocation;
       const result = await setEventLocation(slug, lat, lng);
       alert(`Successfully set GPS location for ${result.updated_count} photos without GPS data.`);
       setShowLocationPicker(false);
-      setSelectedLocation(null);
     } catch (err) {
       setError('Failed to set event location');
       console.error(err);
     }
-  };
-
-  // Map click handler component
-  const LocationMarker: React.FC = () => {
-    useMapEvents({
-      click(e) {
-        setSelectedLocation([e.latlng.lat, e.latlng.lng]);
-      },
-    });
-    
-    return selectedLocation ? <Marker position={selectedLocation} /> : null;
   };
 
   return (
@@ -554,106 +533,12 @@ const AdminEventUpload: React.FC = () => {
         <>
         {/* Event Analytics */}
         {stats && (
-          <div className="mb-6 sm:mb-8">
-            <div className="bg-white dark:bg-gray-800 rounded-lg shadow-md hover:shadow-lg transition-shadow p-4 sm:p-6">
-              <button
-                onClick={() => setIsAnalyticsExpanded(!isAnalyticsExpanded)}
-                className="flex items-center justify-between w-full text-left group"
-                aria-expanded={isAnalyticsExpanded}
-              >
-                <h2 className="text-lg sm:text-xl font-semibold text-gray-900 dark:text-white flex items-center gap-2">
-                  <Camera className="w-5 h-5" />
-                  <span>Event Analytics</span>
-                </h2>
-                <div className="p-1 rounded-lg group-hover:bg-gray-100 dark:group-hover:bg-gray-700 transition">
-                  {isAnalyticsExpanded ? (
-                    <ChevronUp className="w-5 h-5 text-gray-500 dark:text-gray-400" />
-                  ) : (
-                    <ChevronDown className="w-5 h-5 text-gray-500 dark:text-gray-400" />
-                  )}
-                </div>
-              </button>
-              
-              {isAnalyticsExpanded && (
-                <>
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-3 sm:gap-4 mt-4 sm:mt-6">
-                <div className="bg-blue-50 dark:bg-blue-900/20 rounded-lg p-3 sm:p-4 hover:bg-blue-100 dark:hover:bg-blue-900/30 transition">
-                  <div className="text-xl sm:text-2xl font-bold text-blue-900 dark:text-blue-300">{stats.photoCount}</div>
-                  <div className="text-xs sm:text-sm text-blue-700 dark:text-blue-400 mt-1">Total Photos</div>
-                </div>
-                <div className="bg-green-50 dark:bg-green-900/20 rounded-lg p-3 sm:p-4 hover:bg-green-100 dark:hover:bg-green-900/30 transition">
-                  <div className="text-xl sm:text-2xl font-bold text-green-900 dark:text-green-300">{stats.photosWithGPS}</div>
-                  <div className="text-xs sm:text-sm text-green-700 dark:text-green-400 mt-1">With GPS Data</div>
-                </div>
-                <div className="bg-yellow-50 dark:bg-yellow-900/20 rounded-lg p-3 sm:p-4 hover:bg-yellow-100 dark:hover:bg-yellow-900/30 transition">
-                  <div className="text-xl sm:text-2xl font-bold text-yellow-900 dark:text-yellow-300">{stats.featuredCount}</div>
-                  <div className="text-xs sm:text-sm text-yellow-700 dark:text-yellow-400 mt-1">Featured Photos</div>
-                </div>
-                <div className="bg-red-50 dark:bg-red-900/20 rounded-lg p-3 sm:p-4 hover:bg-red-100 dark:hover:bg-red-900/30 transition">
-                  <div className="text-xl sm:text-2xl font-bold text-red-900 dark:text-red-300">{stats.totalFavorites}</div>
-                  <div className="text-xs sm:text-sm text-red-700 dark:text-red-400 mt-1">Total Favorites</div>
-                </div>
-              </div>
-
-              {stats.topFavorites && stats.topFavorites.length > 0 && (
-                <div className="mb-4 sm:mb-6">
-                  <h3 className="text-base sm:text-lg font-semibold text-gray-900 dark:text-white mb-3 flex items-center gap-2">
-                    <Heart className="w-5 h-5 text-red-500" />
-                    <span>Top Favorited Photos</span>
-                  </h3>
-                  <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-2 sm:gap-3">
-                    {stats.topFavorites.map((photo) => (
-                      <div key={photo.id} className="relative group overflow-hidden rounded-lg">
-                        <img
-                          src={getPreviewUrl(slug!, photo.id)}
-                          alt={photo.original_filename}
-                          className="w-full aspect-square object-cover rounded-lg shadow-sm group-hover:scale-105 transition-transform duration-300"
-                        />
-                        <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/80 to-transparent text-white px-2 py-2 text-xs flex items-center gap-1">
-                          <Heart className="w-3 h-3 fill-red-500 text-red-500" />
-                          <span>{photo.favorites_count}</span>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-
-              {stats.cameraModels && stats.cameraModels.length > 0 && (
-                <div className="mb-4 sm:mb-6">
-                  <h3 className="text-base sm:text-lg font-semibold text-gray-900 dark:text-white mb-3 flex items-center gap-2">
-                    <Camera className="w-5 h-5" />
-                    <span>Cameras Used</span>
-                  </h3>
-                  <div className="flex flex-wrap gap-2">
-                    {stats.cameraModels.map((camera, index) => (
-                      <span
-                        key={index}
-                        className="px-3 py-1 bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 rounded-full text-xs sm:text-sm hover:bg-gray-200 dark:hover:bg-gray-600 transition"
-                      >
-                        {camera.camera_model} ({camera.count})
-                      </span>
-                    ))}
-                  </div>
-                </div>
-              )}
-
-              <div className="mt-4 sm:mt-6 pt-4 border-t border-gray-200 dark:border-gray-700">
-                <Link
-                  to={`/events/${slug}`}
-                  className="inline-flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition shadow-sm hover:shadow"
-                >
-                  <Eye className="w-4 h-4" />
-                  <span>View Gallery</span>
-                </Link>
-                <p className="text-xs sm:text-sm text-gray-500 dark:text-gray-400 mt-2">
-                  View the gallery as admin to manage photos (delete, mark as featured)
-                </p>
-              </div>
-                </>
-              )}
-            </div>
-          </div>
+          <EventAnalytics
+            stats={stats}
+            slug={slug!}
+            isExpanded={isAnalyticsExpanded}
+            onToggleExpand={() => setIsAnalyticsExpanded(!isAnalyticsExpanded)}
+          />
         )}
 
         {/* Drop Zone */}
@@ -700,156 +585,21 @@ const AdminEventUpload: React.FC = () => {
         </div>
 
         {/* Upload Queue */}
-        <div className="bg-white dark:bg-gray-800 rounded-lg shadow-md hover:shadow-lg transition-shadow p-4 sm:p-6">
-          <h2 className="text-xl sm:text-2xl font-semibold text-gray-900 dark:text-white mb-4 flex items-center gap-2">
-            <Upload className="w-5 h-5" />
-            <span>Upload Queue</span>
-            {queueItems.length > 0 && (
-              <span className="ml-2 px-2 py-0.5 bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 text-xs rounded-full">
-                {queueItems.length}
-              </span>
-            )}
-          </h2>
-          
-          {queueItems.length === 0 ? (
-            <div className="text-center py-8">
-              <div className="w-16 h-16 bg-gray-100 dark:bg-gray-700 rounded-full flex items-center justify-center mx-auto mb-3">
-                <Upload className="w-8 h-8 text-gray-400 dark:text-gray-500" />
-              </div>
-              <p className="text-gray-600 dark:text-gray-400">No uploads in queue</p>
-              <p className="text-sm text-gray-500 dark:text-gray-500 mt-1">Files you upload will appear here</p>
-            </div>
-          ) : (
-            <>
-            <div className="space-y-3 sm:space-y-4">
-              {queueItems.slice(0, queueItemsToShow).map((item) => (
-                <div key={item.id} className="border border-gray-200 dark:border-gray-700 rounded-lg p-3 sm:p-4 hover:border-gray-300 dark:hover:border-gray-600 transition bg-gray-50 dark:bg-gray-900/50">
-                  <div className="flex justify-between items-start mb-2 gap-3">
-                    <div className="flex-1 min-w-0">
-                      <p className="font-medium text-gray-900 dark:text-white truncate text-sm sm:text-base">{item.file.name}</p>
-                      <p className="text-xs sm:text-sm text-gray-600 dark:text-gray-400 mt-0.5">
-                        {(item.file.size / 1024 / 1024).toFixed(2)} MB
-                      </p>
-                    </div>
-                    <span className={`px-2 sm:px-3 py-1 rounded-full text-white text-xs font-medium ${getStatusColor(item.status)} flex-shrink-0`}>
-                      {item.status}
-                    </span>
-                  </div>
-                  
-                  {item.status === 'uploading' && (
-                    <div className="space-y-1">
-                      <div className="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-2 overflow-hidden">
-                        <div
-                          className="bg-blue-600 h-2 rounded-full transition-all duration-300 ease-out"
-                          style={{ width: `${item.progress}%` }}
-                        ></div>
-                      </div>
-                      <p className="text-xs sm:text-sm text-gray-600 dark:text-gray-400 flex items-center gap-2">
-                        <Loader2 className="w-3 h-3 animate-spin" />
-                        <span>{item.progress}%</span>
-                      </p>
-                    </div>
-                  )}
-                  
-                  {item.status === 'failed' && (
-                    <div className="flex items-start gap-2 text-xs sm:text-sm text-red-600 dark:text-red-400 bg-red-50 dark:bg-red-900/20 rounded p-2">
-                      <AlertCircle className="w-4 h-4 flex-shrink-0 mt-0.5" />
-                      <span>{item.error}</span>
-                    </div>
-                  )}
-                  
-                  {item.captureTime && (
-                    <p className="text-xs sm:text-sm text-gray-600 dark:text-gray-400 mt-2">
-                      Captured: {new Date(item.captureTime).toLocaleString()}
-                    </p>
-                  )}
-                </div>
-              ))}
-            </div>
-            {queueItems.length > queueItemsToShow && (
-              <div className="mt-4 sm:mt-6 text-center">
-                <button
-                  onClick={() => setQueueItemsToShow(prev => prev + 10)}
-                  className="px-6 py-2.5 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition shadow-sm hover:shadow flex items-center gap-2 mx-auto text-sm sm:text-base"
-                >
-                  <ChevronDown className="w-4 h-4" />
-                  <span>Load More ({queueItems.length - queueItemsToShow} remaining)</span>
-                </button>
-              </div>
-            )}
-            </>
-          )}
-        </div>
+        <UploadQueueList
+          queueItems={queueItems}
+          itemsToShow={queueItemsToShow}
+          onLoadMore={() => setQueueItemsToShow(prev => prev + 10)}
+        />
         </>
         )}
       </div>
 
       {/* GPS Location Picker Modal */}
-      {showLocationPicker && (
-        <div className="fixed inset-0 bg-black/75 backdrop-blur-sm flex items-center justify-center z-50 p-4 animate-in fade-in duration-200">
-          <div className="bg-white dark:bg-gray-800 rounded-xl max-w-4xl w-full max-h-[90vh] h-[600px] flex flex-col shadow-2xl animate-in slide-in-from-bottom-4 duration-300">
-            <div className="p-4 sm:p-6 border-b border-gray-200 dark:border-gray-700 flex justify-between items-start gap-4">
-              <div className="flex-1">
-                <h2 className="text-lg sm:text-xl font-bold text-gray-900 dark:text-white flex items-center gap-2">
-                  <MapPin className="w-5 h-5" />
-                  <span>Set GPS Location for Event</span>
-                </h2>
-                <p className="text-xs sm:text-sm text-gray-600 dark:text-gray-400 mt-1">
-                  Click on the map to select a location. This will update photos without GPS data.
-                </p>
-              </div>
-              <button 
-                onClick={() => setShowLocationPicker(false)} 
-                className="text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-200 p-1 hover:bg-gray-100 dark:hover:bg-gray-700 rounded transition"
-                aria-label="Close modal"
-              >
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-            <div className="flex-1 relative">
-              <MapContainer
-                center={selectedLocation || [51.505, -0.09]}
-                zoom={13}
-                style={{ height: '100%', width: '100%' }}
-              >
-                <TileLayer
-                  attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
-                  url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-                />
-                <LocationMarker />
-              </MapContainer>
-            </div>
-            <div className="p-4 sm:p-6 border-t border-gray-200 dark:border-gray-700 flex flex-col sm:flex-row sm:justify-between sm:items-center gap-3 sm:gap-4">
-              <div className="text-xs sm:text-sm text-gray-600 dark:text-gray-400 flex items-center gap-2">
-                {selectedLocation ? (
-                  <>
-                    <MapPin className="w-4 h-4 text-green-600 dark:text-green-400" />
-                    <span>Selected: {selectedLocation[0].toFixed(6)}, {selectedLocation[1].toFixed(6)}</span>
-                  </>
-                ) : (
-                  <span>Click on the map to select a location</span>
-                )}
-              </div>
-              <div className="flex gap-2">
-                <button
-                  onClick={() => setShowLocationPicker(false)}
-                  className="flex-1 sm:flex-none px-4 py-2 bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300 rounded-lg hover:bg-gray-300 dark:hover:bg-gray-600 transition text-sm sm:text-base"
-                >
-                  Cancel
-                </button>
-                <button
-                  onClick={handleSetEventLocation}
-                  disabled={!selectedLocation}
-                  className="flex-1 sm:flex-none px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:bg-gray-400 dark:disabled:bg-gray-600 disabled:cursor-not-allowed transition flex items-center justify-center gap-2 text-sm sm:text-base"
-                >
-                  <MapPin className="w-4 h-4" />
-                  <span>Set Location</span>
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
+      <EventLocationPicker
+        isOpen={showLocationPicker}
+        onClose={() => setShowLocationPicker(false)}
+        onSetLocation={handleSetEventLocation}
+      />
     </div>
   );
 };

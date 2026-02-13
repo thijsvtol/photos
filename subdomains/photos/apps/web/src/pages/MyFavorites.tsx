@@ -8,6 +8,7 @@ import PhotoCard from '../components/PhotoCard';
 import SEO from '../components/SEO';
 import { getUserFavorites, removeFavorite as removeFavoriteAPI, requestZip, downloadZip, type FavoritePhoto } from '../api';
 import { useAuth } from '../contexts/AuthContext';
+import { config } from '../config';
 
 const MyFavorites: React.FC = () => {
   const { isAuthenticated, loading: authLoading, login } = useAuth();
@@ -99,9 +100,9 @@ const MyFavorites: React.FC = () => {
     return (
       <div className="min-h-screen bg-gray-50 dark:bg-gray-900 flex flex-col">
         <SEO
-          title="My Favorites - Thijs van Tol Photos"
+          title={`My Favorites - ${config.appName}`}
           description="Your personal collection of favorite photos from various events. Login required."
-          url="https://photos.thijsvtol.nl/favorites"
+          url={`${window.location.origin}/favorites`}
         />
         <Navbar />
         <div className="max-w-7xl mx-auto px-3 sm:px-4 lg:px-8 py-8 flex-grow w-full">
@@ -128,9 +129,9 @@ const MyFavorites: React.FC = () => {
   return (
     <div className="min-h-screen bg-gray-50 dark:bg-gray-900 flex flex-col">
       <SEO
-        title="My Favorites - Thijs van Tol Photos"
+        title={`My Favorites - ${config.appName}`}
         description="Your personal collection of favorite photos from various events. Private collection not indexed by search engines."
-        url="https://photos.thijsvtol.nl/favorites"
+        url={`${window.location.origin}/favorites`}
       />
       <Navbar />
       <div className="max-w-7xl mx-auto px-3 sm:px-4 lg:px-8 py-4 sm:py-8 flex-grow w-full">

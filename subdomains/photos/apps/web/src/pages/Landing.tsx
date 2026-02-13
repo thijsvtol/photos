@@ -6,6 +6,7 @@ import Footer from '../components/Footer';
 import SEO from '../components/SEO';
 import { getAbsoluteUrl } from '../utils/urlUtils';
 import { getFeaturedPhotos } from '../api';
+import { getConfig } from '../config';
 
 interface FeaturedPhoto {
   id: string;
@@ -58,20 +59,22 @@ export default function Landing() {
     return () => window.removeEventListener('scroll', handleScroll);
   }, []);
 
+  const config = getConfig();
+  
   const structuredData = {
     '@context': 'https://schema.org',
     '@type': 'WebSite',
-    name: 'Thijs van Tol Photos',
-    url: 'https://photos.thijsvtol.nl',
+    name: config.appName,
+    url: window.location.origin,
     description: 'Professional event photography featuring ice skating, inline skating, and sports events',
     author: {
       '@type': 'Person',
-      name: 'Thijs van Tol',
-      url: 'https://thijsvtol.nl'
+      name: config.brandName,
+      url: window.location.origin
     },
     potentialAction: {
       '@type': 'SearchAction',
-      target: 'https://photos.thijsvtol.nl/events?search={search_term_string}',
+      target: `${window.location.origin}/events?search={search_term_string}`,
       'query-input': 'required name=search_term_string'
     }
   };
@@ -79,10 +82,10 @@ export default function Landing() {
   return (
     <div className="min-h-screen bg-gray-50 dark:bg-gray-900 flex flex-col">
       <SEO
-        title="Photos - Thijs van Tol | Professional Event Photography"
+        title={`${config.appName} - ${config.brandName} | Professional Event Photography`}
         description="Professional event photography featuring ice skating, inline skating, and sports events. Browse high-quality photos and download your favorites."
-        keywords="photography, sports photography, ice skating photography, inline skating, event photography, Thijs van Tol"
-        url="https://photos.thijsvtol.nl/"
+        keywords={`photography, sports photography, ice skating photography, inline skating, event photography, ${config.brandName}`}
+        url={`https://${config.domain}/`}
         structuredData={structuredData}
       />
       {/* Hero Section with Slideshow */}
@@ -122,7 +125,7 @@ export default function Landing() {
           {/* Hero Text Overlay */}
           <div className="absolute inset-0 flex flex-col items-center justify-center z-10 bg-black/50">
             <h1 className="text-5xl md:text-7xl font-bold text-white mb-4 text-center px-4 drop-shadow-2xl">
-              Thijs van Tol Photo's
+              {config.brandName}
             </h1>
             <p className="text-xl md:text-2xl text-white mb-8 text-center px-4 drop-shadow-lg">
               Capturing moments in sports and nature

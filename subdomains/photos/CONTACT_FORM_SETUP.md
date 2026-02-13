@@ -47,11 +47,11 @@ publicRoutes.post('/contact', async (c) => {
       body: JSON.stringify({
         personalizations: [
           {
-            to: [{ email: 'vantol.thijs@gmail.com', name: 'Thijs van Tol' }],
+            to: [{ email: 'your-email@example.com', name: 'Your Name' }],
           },
         ],
         from: {
-          email: 'noreply@photos.thijsvtol.nl',
+          email: 'noreply@photos.yourdomain.com',
           name: 'Photo Gallery Contact Form',
         },
         subject: `Contact Form: Message from ${name}`,

@@ -14,13 +14,11 @@ const AdminTagManager: React.FC = () => {
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [newTagName, setNewTagName] = useState('');
   const [newTagSlug, setNewTagSlug] = useState('');
-  const [newTagDescription, setNewTagDescription] = useState('');
   
   // Edit modal state
   const [editingTag, setEditingTag] = useState<Tag | null>(null);
   const [editName, setEditName] = useState('');
   const [editSlug, setEditSlug] = useState('');
-  const [editDescription, setEditDescription] = useState('');
   
   // Delete confirmation
   const [deletingTag, setDeletingTag] = useState<Tag | null>(null);
@@ -55,14 +53,12 @@ const AdminTagManager: React.FC = () => {
       await createTag({
         name: newTagName,
         slug: newTagSlug || undefined,
-        description: newTagDescription || undefined,
       });
       
       setSuccess('Tag created successfully!');
       setShowCreateModal(false);
       setNewTagName('');
       setNewTagSlug('');
-      setNewTagDescription('');
       await loadTags();
       
       setTimeout(() => setSuccess(null), 3000);
@@ -76,7 +72,6 @@ const AdminTagManager: React.FC = () => {
     setEditingTag(tag);
     setEditName(tag.name);
     setEditSlug(tag.slug);
-    setEditDescription(tag.description || '');
   };
 
   const handleUpdateTag = async (e: React.FormEvent) => {
@@ -92,10 +87,6 @@ const AdminTagManager: React.FC = () => {
       
       if (editSlug !== editingTag.slug) {
         updates.slug = editSlug;
-      }
-      
-      if (editDescription !== (editingTag.description || '')) {
-        updates.description = editDescription;
       }
 
       await updateTag(editingTag.id, updates);
@@ -188,9 +179,6 @@ const AdminTagManager: React.FC = () => {
                   <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                     Slug
                   </th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    Description
-                  </th>
                   <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
                     Actions
                   </th>
@@ -206,9 +194,6 @@ const AdminTagManager: React.FC = () => {
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
                       <code className="bg-gray-100 px-2 py-1 rounded">{tag.slug}</code>
-                    </td>
-                    <td className="px-6 py-4 text-sm text-gray-500">
-                      {tag.description || <span className="italic text-gray-400">No description</span>}
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
                       <button
@@ -268,19 +253,6 @@ const AdminTagManager: React.FC = () => {
                         Used in URLs. Leave empty to auto-generate.
                       </p>
                     </div>
-                    
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-1">
-                        Description (optional)
-                      </label>
-                      <textarea
-                        value={newTagDescription}
-                        onChange={(e) => setNewTagDescription(e.target.value)}
-                        placeholder="Describe this tag..."
-                        className="w-full px-4 py-2 border border-gray-300 rounded-lg"
-                        rows={3}
-                      />
-                    </div>
                   </div>
                   
                   <div className="flex gap-3 mt-6">
@@ -335,18 +307,6 @@ const AdminTagManager: React.FC = () => {
                         onChange={(e) => setEditSlug(e.target.value)}
                         className="w-full px-4 py-2 border border-gray-300 rounded-lg"
                         required
-                      />
-                    </div>
-                    
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-1">
-                        Description
-                      </label>
-                      <textarea
-                        value={editDescription}
-                        onChange={(e) => setEditDescription(e.target.value)}
-                        className="w-full px-4 py-2 border border-gray-300 rounded-lg"
-                        rows={3}
                       />
                     </div>
                   </div>

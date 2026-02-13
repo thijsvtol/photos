@@ -7,6 +7,7 @@ import SEO from '../components/SEO';
 import { getEvent, getPhoto, getPhotos, loginToEvent, getPreviewUrl, downloadOriginal, downloadSmall, toggleFavorite as toggleFavoriteAPI, getUserFavoriteIds } from '../api';
 import type { Event, Photo } from '../types';
 import { useAuth } from '../contexts/AuthContext';
+import { config } from '../config';
 
 const PhotoDetail: React.FC = () => {
   const { slug, photoId } = useParams<{ slug: string; photoId: string }>();
@@ -567,7 +568,7 @@ const PhotoDetail: React.FC = () => {
     caption: `Photo from ${event?.name} event${photo.city ? ` in ${photo.city}` : ''}`,
     creator: {
       '@type': 'Person',
-      name: 'Thijs van Tol'
+      name: config.brandName
     },
     datePublished: photo.capture_time || photo.uploaded_at,
     uploadDate: photo.uploaded_at,
@@ -589,10 +590,10 @@ const PhotoDetail: React.FC = () => {
     <div className="min-h-screen bg-gray-900 flex flex-col">
       {photo && (
         <SEO
-          title={`Photo from ${event?.name} - Thijs van Tol Photos`}
+          title={`Photo from ${event?.name} - ${config.appName}`}
           description={photoDescription}
           keywords={`${event?.name}, photo, ${photo.city || ''}, event photography, ${photo.camera_model || ''}`}
-          url={`https://photos.thijsvtol.nl/events/${slug}/${photoId}`}
+          url={`${window.location.origin}/events/${slug}/${photoId}`}
           type="article"
           image={getPreviewUrl(slug!, photo.id)}
           structuredData={structuredData}

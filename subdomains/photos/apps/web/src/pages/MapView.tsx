@@ -8,6 +8,7 @@ import SEO from '../components/SEO';
 import { getEvents, getPhotos } from '../api';
 import { getAbsoluteUrl } from '../utils/urlUtils';
 import type { Photo } from '../types';
+import { getConfig } from '../config';
 
 // Fix for default marker icon
 import markerIcon from 'leaflet/dist/images/marker-icon.png';
@@ -135,13 +136,15 @@ const MapView: React.FC = () => {
     return [avgLat, avgLng];
   }, [locations]);
 
+  const config = getConfig();
+
   return (
     <div className="min-h-screen bg-gray-50 dark:bg-gray-900 flex flex-col">
       <SEO
-        title="Photo Map - Thijs van Tol Photos | Browse by Location"
+        title={`Photo Map - ${config.appName} | Browse by Location`}
         description="Explore photos on an interactive map. Browse event photography by location, including ice skating and inline skating events across different cities."
         keywords="photo map, event locations, ice skating locations, inline skating locations, GPS photos, photography map"
-        url="https://photos.thijsvtol.nl/map"
+        url={`${window.location.origin}/map`}
       />
       <Navbar />
       <div className="max-w-7xl mx-auto px-3 sm:px-4 lg:px-8 py-4 sm:py-8 flex-grow w-full">

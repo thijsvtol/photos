@@ -12,7 +12,8 @@ export const getAbsoluteUrl = (relativePath: string): string => {
 
   // In native app, use production domain
   if (Capacitor.isNativePlatform()) {
-    const prodUrl = import.meta.env.VITE_API_URL?.replace('/api', '') || 'https://photos.thijsvtol.nl';
+    const domain = import.meta.env.VITE_DOMAIN || window.location.origin;
+    const prodUrl = domain.startsWith('http') ? domain : `https://${domain}`;
     return `${prodUrl}${relativePath}`;
   }
 

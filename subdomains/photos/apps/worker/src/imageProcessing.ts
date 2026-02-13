@@ -29,8 +29,9 @@ export function formatWatermarkTime(isoTime: string): string {
  */
 export function generateWatermarkText(
   eventName: string,
-  captureTime: string
+  captureTime: string,
+  brandName: string
 ): string {
   const timeStr = formatWatermarkTime(captureTime);
-  return `Thijs van Tol • ${timeStr} • ${eventName}`;
+  return `${brandName} • ${timeStr} • ${eventName}`;
 }

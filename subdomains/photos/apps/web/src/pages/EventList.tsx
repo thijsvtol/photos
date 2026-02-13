@@ -6,6 +6,7 @@ import Footer from '../components/Footer';
 import SEO from '../components/SEO';
 import { getEvents, getTags, getPreviewUrl } from '../api';
 import type { Event, Tag } from '../types';
+import { config } from '../config';
 
 const EventList: React.FC = () => {
   const [events, setEvents] = useState<Event[]>([]);
@@ -102,7 +103,7 @@ const EventList: React.FC = () => {
     '@type': 'CollectionPage',
     name: 'Photo Events',
     description: 'Browse all photo events including ice skating, inline skating, and sports photography',
-    url: 'https://photos.thijsvtol.nl/events',
+    url: window.location.origin + '/events',
     mainEntity: {
       '@type': 'ItemList',
       itemListElement: events.slice(0, 10).map((event, index) => ({
@@ -111,7 +112,7 @@ const EventList: React.FC = () => {
         item: {
           '@type': 'Event',
           name: event.name,
-          url: `https://photos.thijsvtol.nl/events/${event.slug}`,
+          url: `${window.location.origin}/events/${event.slug}`,
           startDate: event.inferred_date || event.created_at,
           location: event.cities && event.cities.length > 0 ? {
             '@type': 'Place',
@@ -128,10 +129,10 @@ const EventList: React.FC = () => {
   return (
     <div className="min-h-screen bg-gray-50 dark:bg-gray-900 flex flex-col">
       <SEO
-        title="Photo Events - Thijs van Tol | Browse Event Photography"
+        title={`Photo Events - ${config.brandName} | Browse Event Photography`}
         description="Browse all photo events featuring ice skating, inline skating, and sports photography. Filter by tags and locations to find your favorite moments."
         keywords="photo events, ice skating events, inline skating events, sports photography events, event gallery"
-        url="https://photos.thijsvtol.nl/events"
+        url={window.location.origin + '/events'}
         structuredData={structuredData}
       />
       <Navbar />

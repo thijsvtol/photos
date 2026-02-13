@@ -1,0 +1,29 @@
+{
+  "name": "photo-sharing-app",
+  "version": "1.0.0",
+  "description": "Self-hosted photo sharing application",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "setup:wizard": "node scripts/setup-wizard.js",
+    "validate": "node scripts/validate-config.js",
+    "db:setup": "bash scripts/db-setup.sh",
+    "deploy:helper": "bash scripts/deploy-helper.sh",
+    "dev": "concurrently \"npm --prefix apps/worker run dev\" \"npm --prefix apps/web run dev\"",
+    "install:all": "npm --prefix apps/worker install && npm --prefix apps/web install",
+    "build:all": "npm --prefix apps/worker run build && npm --prefix apps/web run build",
+    "test:all": "npm --prefix apps/worker test && npm --prefix apps/web test"
+  },
+  "keywords": [
+    "photos",
+    "gallery",
+    "cloudflare",
+    "workers",
+    "d1",
+    "r2"
+  ],
+  "license": "MIT",
+  "devDependencies": {
+    "concurrently": "^8.2.2"
+  }
+}

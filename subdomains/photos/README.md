@@ -1,6 +1,16 @@
-# Photos Subdomain - photos.thijsvtol.nl
+# Photo Sharing Application
 
-A full-stack photo gallery application built with React + Vite + Tailwind (frontend) and Cloudflare Workers (backend), with D1 database and R2 storage.
+A full-stack, white-label photo gallery application built with React + Vite + Tailwind (frontend) and Cloudflare Workers (backend), with D1 database and R2 storage.
+
+> **Open Source & Self-Hosted**: Deploy your own branded photo sharing platform with complete control over your data.
+
+## Documentation
+
+- **[Configuration Guide](CONFIGURATION.md)** - Complete setup and deployment instructions
+- **[API Reference](API.md)** - REST API endpoint documentation
+- **[Architecture](ARCHITECTURE.md)** - Technical architecture and design
+- **[Features](FEATURES.md)** - Feature descriptions and usage examples
+- **[Contributing](CONTRIBUTING.md)** - Contribution guidelines and development workflow
 
 ## 🏗️ Architecture
 
@@ -384,20 +394,20 @@ This tells Pages to serve all routes except `/api/*` and `/media/*`, which are h
    [env.production]
    name = "photos-worker"
    routes = [
-     { pattern = "photos.thijsvtol.nl/api/*", zone_name = "thijsvtol.nl" },
-     { pattern = "photos.thijsvtol.nl/media/*", zone_name = "thijsvtol.nl" }
+     { pattern = "photos.yourdomain.com/api/*", zone_name = "yourdomain.com" },
+     { pattern = "photos.yourdomain.com/media/*", zone_name = "yourdomain.com" }
    ]
    ```
 
 2. **Add custom domain to Pages**:
    - In Pages project → **Custom domains**
    - Click **Set up a custom domain**
-   - Enter `photos.thijsvtol.nl`
+   - Enter `photos.yourdomain.com`
    - Wait for DNS to propagate
 
 3. **How it works**:
-   - Pages serves the React app at `photos.thijsvtol.nl`
-   - Worker handles `photos.thijsvtol.nl/api/*` and `photos.thijsvtol.nl/media/*` via routes
+   - Pages serves the React app at `photos.yourdomain.com`
+   - Worker handles `photos.yourdomain.com/api/*` and `photos.yourdomain.com/media/*` via routes
    - `_routes.json` prevents Pages from interfering with Worker routes
 
 ### 7. Set Up Cloudflare Access (Admin Protection)
@@ -411,7 +421,7 @@ This tells Pages to serve all routes except `/api/*` and `/media/*`, which are h
    - **Session Duration**: 24 hours (or your preference)
    - **Application domain**:
      - Subdomain: `photos`
-     - Domain: `thijsvtol.nl`
+     - Domain: `yourdomain.com`
      - Path: `/admin*` (protects all admin routes)
 4. Click **Next**
 5. Add a Policy:
@@ -430,7 +440,7 @@ This tells Pages to serve all routes except `/api/*` and `/media/*`, which are h
 
 **Accessing Admin in Production**:
 
-1. Visit https://photos.thijsvtol.nl/admin
+1. Visit https://photos.yourdomain.com/admin
 2. Cloudflare Access will prompt for authentication
 3. Log in with your authorized email
 4. You'll be redirected to the admin dashboard
@@ -702,4 +712,17 @@ photos-storage/
 
 ## License
 
-Proprietary - Thijs van Tol
+See [LICENSE](../../LICENSE) file for details.
+
+## Acknowledgments
+
+Built with:
+- [React](https://react.dev/) - UI framework
+- [Vite](https://vitejs.dev/) - Build tool
+- [Tailwind CSS](https://tailwindcss.com/) - Styling
+- [Hono](https://hono.dev/) - Backend framework
+- [Cloudflare Workers](https://workers.cloudflare.com/) - Serverless platform
+
+## Support
+
+For issues, questions, or contributions, please see [CONTRIBUTING.md](CONTRIBUTING.md).

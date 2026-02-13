@@ -12,7 +12,7 @@ invocation_logs = true
 [[d1_databases]]
 binding = "DB"
 database_name = "photos-db"
-database_id = "45a56052-5385-463d-bc79-7ddc20307f53"
+database_id = "45a56052-5385-463d-bc79-7ddc20307f53" # Replace with your database_id
 
 # R2 Storage binding
 [[r2_buckets]]
@@ -23,19 +23,29 @@ bucket_name = "photos-storage"
 # Set these via: wrangler secret put <NAME>
 [vars]
 ENVIRONMENT = "development"
-ADMIN_EMAILS = "vantol.thijs@gmail.com" # Replace with your admin email(s), comma-separated for multiple
+APP_NAME = "Photos"
+BRAND_NAME = "Photos"
+COPYRIGHT_HOLDER = "Your Name"
+APP_DOMAIN = "localhost:8787"
+CONTACT_EMAIL = "contact@example.com"
 
 # Secrets (set via wrangler secret put):
 # - EVENT_COOKIE_SECRET: Secret for signing event session cookies
-# - ADMIN_EMAILS: Comma-separated list of admin email addresses (use vars instead for easier updates)
+# - JWT_SECRET: Secret for signing mobile app JWT tokens  
+# - ADMIN_EMAILS: Comma-separated list of admin email addresses
+# - MAILGUN_API_KEY: (Optional) Mailgun API key for email notifications
+# - MAILGUN_DOMAIN: (Optional) Mailgun domain for sending emails
 
 # Development configuration
 [env.development]
 name = "photos-worker-dev"
 
 # Production configuration
+# Update routes to match your domain
 [env.production]
 name = "photos-worker"
+# IMPORTANT: Update these routes to match your APP_DOMAIN
+# Example: { pattern = "photos.yourdomain.com/api/*", zone_name = "yourdomain.com" }
 routes = [
   { pattern = "photos.thijsvtol.nl/api/*", zone_name = "thijsvtol.nl" },
   { pattern = "photos.thijsvtol.nl/media/*", zone_name = "thijsvtol.nl" },
@@ -45,7 +55,11 @@ routes = [
 
 [env.production.vars]
 ENVIRONMENT = "production"
-ADMIN_EMAILS = "vantol.thijs@gmail.com"
+APP_NAME = "Thijs van Tol Photos"
+BRAND_NAME = "Thijs van Tol"
+COPYRIGHT_HOLDER = "Thijs van Tol"
+APP_DOMAIN = "photos.thijsvtol.nl"
+CONTACT_EMAIL = "info@thijsvtol.nl"
 
 [[env.production.d1_databases]]
 binding = "DB"

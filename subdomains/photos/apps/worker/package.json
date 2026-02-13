@@ -1,7 +1,7 @@
 {
   "name": "photos-worker",
   "version": "1.0.0",
-  "description": "Cloudflare Worker backend for photos.thijsvtol.nl",
+  "description": "Cloudflare Worker backend for photo sharing application",
   "main": "src/index.ts",
   "type": "module",
   "scripts": {

@@ -1,8 +1,12 @@
 import { Hono } from 'hono';
 import type { Env, Photo, UserFavorite } from '../types';
 import { requireAuth, optionalAuth, getUser, isAdmin } from '../auth';
+import { requireFeature } from '../features';
 
 const app = new Hono<{ Bindings: Env }>();
+
+// Require favorites feature to be enabled for all routes
+app.use('/*', requireFeature('enableFavorites'));
 
 /**
  * GET /api/favorites

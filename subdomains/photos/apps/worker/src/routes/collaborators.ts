@@ -1,12 +1,17 @@
 import { Hono } from 'hono';
 import type { Env, InviteCollaboratorRequest, CollaboratorWithUser, User } from '../types';
 import { requireAdmin, extractUser } from '../auth';
+import { requireFeature } from '../features';
+import { getConfig } from '../config';
 
 type Variables = {
   user: User;
 };
 
 const app = new Hono<{ Bindings: Env; Variables: Variables }>();
+
+// Require collaborators feature to be enabled for all routes
+app.use('/*', requireFeature('enableCollaborators'));
 
 /**
  * GET /api/events/:slug/collaborators
@@ -356,7 +361,8 @@ async function sendInvitationEmail(env: Env, params: {
     return;
   }
   
-  const inviteUrl = `https://photos.thijsvtol.nl/events/${params.eventSlug}`;
+  const config = getConfig(env);
+  const inviteUrl = `https://${config.domain}/events/${params.eventSlug}`;
   
   const emailBody = `
 <!DOCTYPE html>
@@ -385,7 +391,7 @@ async function sendInvitationEmail(env: Env, params: {
       <p>Simply click the link above, log in with your Google account, and start uploading!</p>
     </div>
     <div class="footer">
-      <p>Thijs van Tol Photography | photos.thijsvtol.nl</p>
+      <p>${config.brandName} | ${config.domain}</p>
     </div>
   </div>
 </body>
@@ -395,7 +401,7 @@ async function sendInvitationEmail(env: Env, params: {
   try {
     // Use Cloudflare Workers native FormData
     const formData = new FormData();
-    formData.append('from', `Thijs van Tol Photography <noreply@${env.MAILGUN_DOMAIN}>`);
+    formData.append('from', `${config.brandName} <noreply@${env.MAILGUN_DOMAIN}>`);
     formData.append('to', params.to);
     formData.append('subject', `You've been invited to collaborate on "${params.eventName}"`);
     formData.append('html', emailBody);
@@ -440,7 +446,8 @@ export async function sendUploadNotification(env: Env, params: {
     return;
   }
   
-  const eventUrl = `https://photos.thijsvtol.nl/events/${params.eventSlug}`;
+  const config = getConfig(env);
+  const eventUrl = `https://${config.domain}/events/${params.eventSlug}`;
   const uploaderDisplayName = params.uploaderName || params.uploaderEmail;
   const adminDisplayName = params.adminName || 'Admin';
   
@@ -474,7 +481,7 @@ export async function sendUploadNotification(env: Env, params: {
       <p>You can review and manage the uploaded photos in your event gallery.</p>
     </div>
     <div class="footer">
-      <p>Thijs van Tol Photography | photos.thijsvtol.nl</p>
+      <p>${config.brandName} | ${config.domain}</p>
     </div>
   </div>
 </body>
@@ -484,7 +491,7 @@ export async function sendUploadNotification(env: Env, params: {
   try {
     // Use Cloudflare Workers native FormData
     const formData = new FormData();
-    formData.append('from', `Thijs van Tol Photography <noreply@${env.MAILGUN_DOMAIN}>`);
+    formData.append('from', `${config.brandName} <noreply@${env.MAILGUN_DOMAIN}>`);
     formData.append('to', params.adminEmail);
     formData.append('subject', `New photos uploaded to "${params.eventName}" by ${uploaderDisplayName}`);
     formData.append('html', emailBody);

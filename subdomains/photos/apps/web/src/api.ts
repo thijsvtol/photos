@@ -4,6 +4,7 @@ import { Filesystem, Directory } from '@capacitor/filesystem';
 import type { Event, Photo, CreateEventRequest, Tag, AdminStats, EventStats, UpdateEventRequest, CreateTagRequest, UpdateTagRequest } from './types';
 import type { User } from './contexts/AuthContext';
 import { MobileAuthService } from './services/mobileAuth';
+import { config } from './config';
 
 const api = axios.create({
   baseURL: import.meta.env.VITE_API_URL || '/api',
@@ -273,9 +274,9 @@ export const getPreviewUrl = (slug: string, photoId: string, fileType?: string):
   const extension = isVideo ? 'mp4' : 'jpg';
   const relativePath = `/media/${slug}/preview/${photoId}.${extension}`;
   
-  // In native app, use production domain for media files
+  // In native app, use configured API URL for media files
   if (typeof window !== 'undefined' && window.location.protocol === 'https:' && window.location.hostname === 'localhost') {
-    return `https://photos.thijsvtol.nl${relativePath}`;
+    return `${config.apiUrl}${relativePath}`;
   }
   
   return relativePath;
@@ -286,9 +287,9 @@ export const getOriginalUrl = (slug: string, photoId: string, fileType?: string)
   const extension = isVideo ? 'mp4' : 'jpg';
   const relativePath = `/media/${slug}/original/${photoId}.${extension}`;
   
-  // In native app, use production domain for media files
+  // In native app, use configured API URL for media files
   if (typeof window !== 'undefined' && window.location.protocol === 'https:' && window.location.hostname === 'localhost') {
-    return `https://photos.thijsvtol.nl${relativePath}`;
+    return `${config.apiUrl}${relativePath}`;
   }
   
   return relativePath;

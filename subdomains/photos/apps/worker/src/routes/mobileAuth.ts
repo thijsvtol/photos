@@ -1,9 +1,13 @@
 import { Hono } from 'hono';
 import { SignJWT } from 'jose';
-import type { Env } from '../types';
+import type { Env, User } from '../types';
 import { extractUser } from '../auth';
 
-const router = new Hono<{ Bindings: Env }>();
+type Variables = {
+  user: User;
+};
+
+const router = new Hono<{ Bindings: Env; Variables: Variables }>();
 
 /**
  * Mobile Login Landing Page

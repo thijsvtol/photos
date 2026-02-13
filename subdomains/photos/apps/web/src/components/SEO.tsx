@@ -1,5 +1,6 @@
 import React from 'react';
 import { Helmet } from 'react-helmet-async';
+import { getConfig } from '../config';
 
 interface SEOProps {
   title?: string;
@@ -12,11 +13,11 @@ interface SEOProps {
 }
 
 const SEO: React.FC<SEOProps> = ({
-  title = 'Photos - Thijs van Tol | Professional Photo Gallery',
-  description = 'Browse professional event photography by Thijs van Tol. Ice skating, inline skating, sports events and more. High-quality photos with download options.',
-  keywords = 'photography, photos, ice skating, inline skating, sports photography, event photography, Thijs van Tol, photo gallery',
-  image = 'https://photos.thijsvtol.nl/og-image.jpg',
-  url = 'https://photos.thijsvtol.nl/',
+  title = getConfig().appName || 'Photos | Professional Photo Gallery',
+  description = 'Browse professional event photography. High-quality photos with download options.',
+  keywords = 'photography, photos, event photography, photo gallery',
+  image = `${window.location.origin}/og-image.jpg`,
+  url = window.location.origin + '/',
   type = 'website',
   structuredData,
 }) => {

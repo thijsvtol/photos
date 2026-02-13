@@ -3,6 +3,7 @@ import { Link, useLocation } from 'react-router-dom';
 import { Heart, MapPin, LayoutGrid, Settings, LogOut, User, LogIn, ChevronDown } from 'lucide-react';
 import { Capacitor } from '@capacitor/core';
 import { useAuth } from '../contexts/AuthContext';
+import { config } from '../config';
 import UserSettings from './UserSettings';
 
 const Navbar: React.FC = () => {
@@ -51,8 +52,8 @@ const Navbar: React.FC = () => {
           {/* Logo */}
           <Link to="/" className="flex items-center gap-2 text-gray-900 dark:text-white hover:text-gray-700 dark:hover:text-gray-300 transition-colors">
             <img src="/favicon.svg" alt="Logo" className="w-6 h-6" />
-            <span className="font-bold text-lg hidden sm:inline">Thijs van Tol</span>
-            <span className="font-bold text-lg sm:hidden">TvT</span>
+            <span className="font-bold text-lg hidden sm:inline">{config.brandName}</span>
+            <span className="font-bold text-lg sm:hidden">{config.brandName.split(' ').map(w => w[0]).join('')}</span>
           </Link>
           
           {/* Navigation Links */}

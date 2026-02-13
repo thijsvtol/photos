@@ -44,12 +44,13 @@ const AdminDashboard: React.FC = () => {
         getEvents(),
         getAdminStats(),
       ]);
+      console.log('[AdminDashboard] Stats received:', statsData);
       setEvents(eventsData);
       setStats(statsData);
       setError(null);
     } catch (err) {
       setError('Failed to load data');
-      console.error(err);
+      console.error('[AdminDashboard] Error loading data:', err);
     } finally {
       setLoading(false);
     }
@@ -162,8 +163,8 @@ const AdminDashboard: React.FC = () => {
     }
   };
 
-  const formatBytes = (bytes: number): string => {
-    if (bytes === 0) return '0 B';
+  const formatBytes = (bytes: number | undefined): string => {
+    if (!bytes || bytes === 0) return '0 B';
     const k = 1024;
     const sizes = ['B', 'KB', 'MB', 'GB', 'TB'];
     const i = Math.floor(Math.log(bytes) / Math.log(k));
@@ -220,21 +221,21 @@ const AdminDashboard: React.FC = () => {
               <div className="flex items-center justify-center w-10 h-10 bg-blue-100 dark:bg-blue-900/30 rounded-lg mb-2">
                 <Calendar className="w-5 h-5 text-blue-600 dark:text-blue-400" />
               </div>
-              <div className="text-2xl font-bold text-gray-900 dark:text-white">{stats.totalEvents}</div>
+              <div className="text-2xl font-bold text-gray-900 dark:text-white">{stats.totalEvents || 0}</div>
               <div className="text-xs sm:text-sm text-gray-600 dark:text-gray-400">Total Events</div>
             </div>
             <div className="bg-white dark:bg-gray-800 rounded-lg shadow-md hover:shadow-lg transition p-3 sm:p-4">
               <div className="flex items-center justify-center w-10 h-10 bg-purple-100 dark:bg-purple-900/30 rounded-lg mb-2">
                 <Camera className="w-5 h-5 text-purple-600 dark:text-purple-400" />
               </div>
-              <div className="text-2xl font-bold text-gray-900 dark:text-white">{stats.totalPhotos}</div>
+              <div className="text-2xl font-bold text-gray-900 dark:text-white">{stats.totalPhotos || 0}</div>
               <div className="text-xs sm:text-sm text-gray-600 dark:text-gray-400">Total Photos</div>
             </div>
             <div className="bg-white dark:bg-gray-800 rounded-lg shadow-md hover:shadow-lg transition p-3 sm:p-4">
               <div className="flex items-center justify-center w-10 h-10 bg-red-100 dark:bg-red-900/30 rounded-lg mb-2">
                 <Heart className="w-5 h-5 text-red-600 dark:text-red-400" />
               </div>
-              <div className="text-2xl font-bold text-gray-900 dark:text-white">{stats.totalFavorites}</div>
+              <div className="text-2xl font-bold text-gray-900 dark:text-white">{stats.totalFavorites || 0}</div>
               <div className="text-xs sm:text-sm text-gray-600 dark:text-gray-400">Total Favorites</div>
             </div>
             <div className="bg-white dark:bg-gray-800 rounded-lg shadow-md hover:shadow-lg transition p-3 sm:p-4">
@@ -248,14 +249,14 @@ const AdminDashboard: React.FC = () => {
               <div className="flex items-center justify-center w-10 h-10 bg-green-100 dark:bg-green-900/30 rounded-lg mb-2">
                 <Globe className="w-5 h-5 text-green-600 dark:text-green-400" />
               </div>
-              <div className="text-2xl font-bold text-gray-900 dark:text-white">{stats.publicEvents}</div>
+              <div className="text-2xl font-bold text-gray-900 dark:text-white">{stats.publicEvents || 0}</div>
               <div className="text-xs sm:text-sm text-gray-600 dark:text-gray-400">Public Events</div>
             </div>
             <div className="bg-white dark:bg-gray-800 rounded-lg shadow-md hover:shadow-lg transition p-3 sm:p-4">
               <div className="flex items-center justify-center w-10 h-10 bg-amber-100 dark:bg-amber-900/30 rounded-lg mb-2">
                 <Lock className="w-5 h-5 text-amber-600 dark:text-amber-400" />
               </div>
-              <div className="text-2xl font-bold text-gray-900 dark:text-white">{stats.privateEvents}</div>
+              <div className="text-2xl font-bold text-gray-900 dark:text-white">{stats.privateEvents || 0}</div>
               <div className="text-xs sm:text-sm text-gray-600 dark:text-gray-400">Private Events</div>
             </div>
           </div>

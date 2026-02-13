@@ -97,8 +97,8 @@ npx cap open ios
 ```
 
 **Required Setup:**
-- Bundle ID: `nl.thijsvtol.photos`
-- App name: "Photos"
+- Bundle ID: `com.yourcompany.photos` (configure in Xcode)
+- App name: "Photos" (or your app name)
 - Version & build number
 - App icons (1024x1024 for store)
 - Screenshots for all device sizes
@@ -127,7 +127,7 @@ npx cap open android
 ```
 
 **Required Setup:**
-- Application ID: `nl.thijsvtol.photos`
+- Application ID: `com.yourcompany.photos` (configure in build.gradle)
 - Version code & name in `build.gradle`
 - Signing key (create with keytool)
 - App icons (various sizes)

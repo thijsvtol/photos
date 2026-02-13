@@ -8,7 +8,7 @@ The current implementation includes the infrastructure for serving watermarked i
 
 1. **Watermark Generation**
    - After upload, generate watermarked versions of images
-   - Watermark text: `Thijs van Tol • <YYYY-MM-DD HH:MM> • <Event name>`
+   - Watermark text: `<Brand Name> • <YYYY-MM-DD HH:MM> • <Event name>`
    - Position: Bottom-right corner
    - Time: Europe/Amsterdam timezone
 

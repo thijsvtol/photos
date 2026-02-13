@@ -9,7 +9,7 @@ This document describes the backend endpoints needed to support mobile OAuth aut
 **Purpose**: Display authentication page in browser, generate OAuth token after Cloudflare Access auth
 
 **Flow**:
-1. User opens browser to: `https://photos.thijsvtol.nl/mobile-auth?state=<random>`
+1. User opens browser to: `https://photos.yourdomain.com/mobile-auth?state=<random>`
 2. Cloudflare Access authenticates the user (existing flow)
 3. After auth, page generates OAuth token
 4. Page redirects to deep link: `photos://auth/callback?token=<token>&expires=<seconds>&state=<state>&user=<json>`

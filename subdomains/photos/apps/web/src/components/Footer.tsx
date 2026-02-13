@@ -1,4 +1,5 @@
 import { Link } from 'react-router-dom';
+import { config } from '../config';
 
 export default function Footer() {
   return (
@@ -13,7 +14,7 @@ export default function Footer() {
           </Link>
         </div>
         <p className="text-gray-400 text-sm">
-          © {new Date().getFullYear()} Thijs van Tol. All rights reserved.
+          © {new Date().getFullYear()} {config.copyrightHolder}. All rights reserved.
         </p>
       </div>
     </footer>

@@ -3,15 +3,18 @@ import { Link } from 'react-router-dom';
 import Navbar from '../components/Navbar';
 import Footer from '../components/Footer';
 import SEO from '../components/SEO';
+import { getConfig } from '../config';
 
 const PhotoUsage: React.FC = () => {
+  const config = getConfig();
+  
   return (
     <div className="min-h-screen bg-gray-50 flex flex-col">
       <SEO
-        title="Photo Usage Rights - Thijs van Tol Photos"
-        description="Learn how you can use photos from Thijs van Tol's photography website. Guidelines for personal and commercial use."
+        title={`Photo Usage Rights - ${config.appName}`}
+        description={`Learn how you can use photos from ${config.brandName}'s photography website. Guidelines for personal and commercial use.`}
         keywords="photo usage, photo rights, image licensing, photography terms"
-        url="https://photos.thijsvtol.nl/usage"
+        url={`https://${config.domain}/usage`}
       />
       <Navbar />
       <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-8 sm:py-12 flex-grow">
@@ -38,8 +41,8 @@ const PhotoUsage: React.FC = () => {
             </p>
             <div className="bg-gray-100 rounded-lg p-4 border border-gray-200">
               <p className="font-mono text-sm text-gray-800">
-                📷 Photo by <strong>Thijs van Tol</strong><br />
-                🌐 photos.thijsvtol.nl
+                📷 Photo by <strong>{config.brandName}</strong><br />
+                🌐 {window.location.hostname}
               </p>
             </div>
             <p className="text-gray-600 text-sm mt-2 italic">
@@ -97,7 +100,7 @@ const PhotoUsage: React.FC = () => {
             </p>
             <div className="mt-4 flex flex-col sm:flex-row gap-4">
               <Link 
-                to="https://photos.thijsvtol.nl/#contact" 
+                to="/#contact" 
                 className="inline-flex items-center gap-2 px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors text-center justify-center font-medium shadow-sm"
               >
                 <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -110,7 +113,7 @@ const PhotoUsage: React.FC = () => {
 
           <section className="border-t pt-6">
             <p className="text-sm text-gray-600">
-              <strong>Copyright Notice:</strong> All photos on this website are © {new Date().getFullYear()} Thijs van Tol. 
+              <strong>Copyright Notice:</strong> All photos on this website are © {new Date().getFullYear()} {config.copyrightHolder}. 
               All rights reserved unless otherwise stated. By downloading or using photos, you agree to these terms.
             </p>
             <p className="text-sm text-gray-600 mt-2">

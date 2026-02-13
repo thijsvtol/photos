@@ -1,6 +1,7 @@
 import { Hono } from 'hono';
 import { cors } from 'hono/cors';
 import type { Env } from './types';
+import { getConfig } from './config';
 import publicRoutes from './routes/public';
 import authRoutes from './routes/auth';
 import mediaRoutes from './routes/media';
@@ -14,27 +15,29 @@ import { seo } from './routes/seo';
 
 const app = new Hono<{ Bindings: Env }>();
 
-// Global CORS for all routes
-// Only allow requests from the production domain and Capacitor app origins
-const allowedOrigins = [
-  'https://photos.thijsvtol.nl',
-  'https://localhost',      // Capacitor Android
-  'capacitor://localhost',  // Capacitor iOS
-  'http://localhost:5173',  // Local development
-];
+// Global CORS middleware - configured per request to read env vars
+app.use('/*', async (c, next) => {
+  const config = getConfig(c.env);
+  const allowedOrigins = [
+    `https://${config.domain}`,
+    'https://localhost',      // Capacitor Android
+    'capacitor://localhost',  // Capacitor iOS
+    'http://localhost:5173',  // Local development
+  ];
 
-app.use('/*', cors({
-  origin: (origin) => {
-    // Allow requests with no origin (same-origin) or from allowed list
-    if (!origin || allowedOrigins.includes(origin)) {
-      return origin || '*';
-    }
-    return allowedOrigins[0]; // Fallback to production domain
-  },
-  credentials: true,
-  allowMethods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-  allowHeaders: ['Content-Type', 'Authorization', 'X-Admin-Access', 'Cf-Access-Jwt-Assertion', 'X-Upload-Id', 'X-File-Type'],
-}));
+  return cors({
+    origin: (origin) => {
+      // Allow requests with no origin (same-origin) or from allowed list
+      if (!origin || allowedOrigins.includes(origin)) {
+        return origin || '*';
+      }
+      return allowedOrigins[0]; // Fallback to production domain
+    },
+    credentials: true,
+    allowMethods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+    allowHeaders: ['Content-Type', 'Authorization', 'X-Admin-Access', 'Cf-Access-Jwt-Assertion', 'X-Upload-Id', 'X-File-Type'],
+  })(c, next);
+});
 
 // Mount route modules
 app.route('/', publicRoutes);

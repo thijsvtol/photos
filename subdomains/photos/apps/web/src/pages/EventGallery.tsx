@@ -1,16 +1,21 @@
 import React, { useEffect, useState, useRef } from 'react';
 import { useParams, Link } from 'react-router-dom';
-import { Share2, Upload } from 'lucide-react';
+import { Upload } from 'lucide-react';
 import Masonry from 'react-masonry-css';
 import Navbar from '../components/Navbar';
 import Footer from '../components/Footer';
 import PhotoCard from '../components/PhotoCard';
 import DateTimeline from '../components/DateTimeline';
 import SEO from '../components/SEO';
+import { EventPasswordForm } from '../components/EventPasswordForm';
+import { GallerySortFilter } from '../components/GallerySortFilter';
+import { ShareEventButton } from '../components/ShareEventButton';
 import { getEvent, getPhotos, loginToEvent, getPreviewUrl, requestZip, downloadZip, setPhotoFeatured, getUserFavoriteIds, toggleFavorite as toggleFavoriteAPI, bulkDeletePhotos, getUserCollaborations, getCollaborators } from '../api';
 import type { Event, Photo, Collaborator } from '../types';
 import { CollaboratorAvatars } from '../components/CollaboratorAvatars';
 import { useAuth } from '../contexts/AuthContext';
+import { usePhotoSelection } from '../hooks/usePhotoSelection';
+import { config } from '../config';
 
 const EventGallery: React.FC = () => {
   const { slug } = useParams<{ slug: string }>();
@@ -19,19 +24,24 @@ const EventGallery: React.FC = () => {
   const [event, setEvent] = useState<Event | null>(null);
   const [photos, setPhotos] = useState<Photo[]>([]);
   const [authenticated, setAuthenticated] = useState(false);
-  const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [loginError, setLoginError] = useState<string | null>(null);
   const [sortBy, setSortBy] = useState('date_asc');
-  const [selectedPhotos, setSelectedPhotos] = useState<Set<string>>(new Set());
   const [userFavorites, setUserFavorites] = useState<Set<string>>(new Set());
-  const [showShareMenu, setShowShareMenu] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [isCollaborator, setIsCollaborator] = useState(false);
   const [collaborators, setCollaborators] = useState<Collaborator[]>([]);
   const [activeDate, setActiveDate] = useState<string | null>(null);
   const dateRefs = useRef<Map<string, HTMLDivElement>>(new Map());
+  
+  // Use custom hook for photo selection
+  const {
+    selectedPhotos,
+    togglePhotoSelection,
+    clearSelection,
+    toggleDateSelection,
+    isDateFullySelected,
+  } = usePhotoSelection(photos);
 
   useEffect(() => {
     if (slug) {
@@ -117,23 +127,6 @@ const EventGallery: React.FC = () => {
     return () => window.removeEventListener('popstate', handlePopState);
   }, [slug]);
 
-  useEffect(() => {
-    // Load selected photos from localStorage (for download selection)
-    if (slug) {
-      const stored = localStorage.getItem(`favorites_${slug}`);
-      if (stored) {
-        setSelectedPhotos(new Set(JSON.parse(stored)));
-      }
-    }
-  }, [slug]);
-
-  useEffect(() => {
-    // Save selected photos to localStorage
-    if (slug) {
-      localStorage.setItem(`favorites_${slug}`, JSON.stringify(Array.from(selectedPhotos)));
-    }
-  }, [selectedPhotos, slug]);
-
   const loadEvent = async () => {
     try {
       setLoading(true);
@@ -170,17 +163,10 @@ const EventGallery: React.FC = () => {
     }
   };
 
-  const handleLogin = async (e: React.FormEvent) => {
-    e.preventDefault();
-    try {
-      await loginToEvent(slug!, password);
-      setAuthenticated(true);
-      setLoginError(null);
-      await loadPhotos();
-    } catch (err) {
-      setLoginError('Invalid password');
-      console.error(err);
-    }
+  const handleLogin = async (password: string) => {
+    await loginToEvent(slug!, password);
+    setAuthenticated(true);
+    await loadPhotos();
   };
 
   const loadPhotos = async () => {
@@ -198,31 +184,6 @@ const EventGallery: React.FC = () => {
       loadPhotos();
     }
   }, [sortBy]);
-
-  const toggleSelection = (photoId: string) => {
-    const newSelected = new Set(selectedPhotos);
-    if (newSelected.has(photoId)) {
-      newSelected.delete(photoId);
-    } else {
-      newSelected.add(photoId);
-    }
-    setSelectedPhotos(newSelected);
-  };
-
-  const toggleDateSelection = (datePhotos: Photo[]) => {
-    const datePhotoIds = datePhotos.map(p => p.id);
-    const allSelected = datePhotoIds.every(id => selectedPhotos.has(id));
-    
-    const newSelected = new Set(selectedPhotos);
-    if (allSelected) {
-      // Deselect all from this date
-      datePhotoIds.forEach(id => newSelected.delete(id));
-    } else {
-      // Select all from this date
-      datePhotoIds.forEach(id => newSelected.add(id));
-    }
-    setSelectedPhotos(newSelected);
-  };
 
   const toggleFavorite = async (photoId: string, isFavorited: boolean) => {
     // Require authentication for favorites
@@ -310,7 +271,7 @@ const EventGallery: React.FC = () => {
       
       // Reload photos
       await loadPhotos();
-      setSelectedPhotos(new Set());
+      clearSelection();
       
       if (result.deletedCount === result.totalRequested) {
         alert(`Successfully deleted ${result.deletedCount} photo(s)`);
@@ -323,71 +284,6 @@ const EventGallery: React.FC = () => {
     } finally {
       setDeleting(false);
     }
-  };
-
-  const shareEvent = async (platform?: string) => {
-    const url = `${window.location.origin}/events/${slug}`;
-    const text = `Check out ${event?.name} photo gallery`;
-    
-    // Use native share API on mobile if available and no platform specified
-    if (!platform && 'share' in navigator) {
-      try {
-        const shareData: any = {
-          title: event?.name || 'Photo Gallery',
-          text: text,
-          url: url,
-        };
-        
-        // Try to include a representative photo from the album
-        if (photos.length > 0) {
-          try {
-            // Use first photo or first featured photo as representative
-            const representativePhoto = photos.find(p => p.is_featured) || photos[0];
-            const imageUrl = getPreviewUrl(slug!, representativePhoto.id);
-            
-            const response = await fetch(imageUrl);
-            const blob = await response.blob();
-            const fileName = `${slug}-preview.jpg`;
-            const file = new File([blob], fileName, { type: blob.type });
-            
-            // Check if we can share files
-            if ((navigator as any).canShare && (navigator as any).canShare({ files: [file] })) {
-              shareData.files = [file];
-            }
-          } catch (err) {
-            console.log('Could not include photo in share, sharing URL only:', err);
-          }
-        }
-        
-        await (navigator as any).share(shareData);
-        setShowShareMenu(false);
-        return;
-      } catch (err) {
-        // User cancelled or share failed
-        if ((err as Error).name !== 'AbortError') {
-          console.error('Error sharing:', err);
-        }
-        return;
-      }
-    }
-    
-    // Fall back to platform-specific sharing
-    switch (platform) {
-      case 'twitter':
-        window.open(`https://twitter.com/intent/tweet?url=${encodeURIComponent(url)}&text=${encodeURIComponent(text)}`, '_blank');
-        break;
-      case 'facebook':
-        window.open(`https://www.facebook.com/sharer/sharer.php?u=${encodeURIComponent(url)}`, '_blank');
-        break;
-      case 'whatsapp':
-        window.open(`https://wa.me/?text=${encodeURIComponent(text + ' ' + url)}`, '_blank');
-        break;
-      case 'copy':
-        navigator.clipboard.writeText(url);
-        alert('Link copied to clipboard!');
-        break;
-    }
-    setShowShareMenu(false);
   };
 
   // Group photos by date
@@ -482,49 +378,14 @@ const EventGallery: React.FC = () => {
   }
 
   if (!authenticated && event?.requires_password) {
-    return (
-      <div className="min-h-screen bg-gray-50 dark:bg-gray-900 flex items-center justify-center">
-        <div className="max-w-md w-full bg-white dark:bg-gray-800 rounded-lg shadow-md p-8">
-          <h1 className="text-3xl font-bold text-gray-900 dark:text-white mb-4">{event?.name}</h1>
-          <p className="text-gray-600 dark:text-gray-400 mb-6">This event is password protected. Please enter the password to view photos.</p>
-          
-          <form onSubmit={handleLogin}>
-            <input
-              type="password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              placeholder="Enter password"
-              className="w-full px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg mb-4 bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
-              required
-            />
-            
-            {loginError && (
-              <div className="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 text-red-700 dark:text-red-400 px-4 py-3 rounded mb-4">
-                {loginError}
-              </div>
-            )}
-            
-            <button
-              type="submit"
-              className="w-full px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition"
-            >
-              Unlock Gallery
-            </button>
-          </form>
-          
-            <Link to="/events" className="block mt-4 text-center text-blue-600 dark:text-blue-400 hover:text-blue-700 dark:hover:text-blue-300">
-            ← Back to Events
-          </Link>
-        </div>
-      </div>
-    );
+    return <EventPasswordForm eventName={event.name} onSubmit={handleLogin} />;
   }
 
   const structuredData = {
     '@context': 'https://schema.org',
     '@type': 'Event',
     name: event?.name || '',
-    url: `https://photos.thijsvtol.nl/events/${slug}`,
+    url: `${window.location.origin}/events/${slug}`,
     startDate: event?.inferred_date || event?.created_at,
     location: event?.cities && event.cities.length > 0 ? {
       '@type': 'Place',
@@ -543,10 +404,10 @@ const EventGallery: React.FC = () => {
   return (
     <div className="min-h-screen bg-gray-50 dark:bg-gray-900 flex flex-col">
       <SEO
-        title={`${event?.name || 'Event Gallery'} - Thijs van Tol Photos`}
+        title={`${event?.name || 'Event Gallery'} - ${config.appName}`}
         description={`Browse ${photos.length} photos from ${event?.name}${event?.cities && event.cities.length > 0 ? ` in ${event.cities.join(', ')}` : ''}. Professional event photography featuring ice skating and inline skating.`}
         keywords={`${event?.name}, event photography, ${event?.cities?.join(', ')}, ice skating, inline skating`}
-        url={`https://photos.thijsvtol.nl/events/${slug}`}
+        url={`${window.location.origin}/events/${slug}`}
         type="article"
         image={previewImageUrl}
         structuredData={structuredData}
@@ -586,52 +447,7 @@ const EventGallery: React.FC = () => {
               )}
             </div>
             {/* Share button */}
-            <div className="relative">
-              <button
-                onClick={() => {
-                  if ('share' in navigator) {
-                    shareEvent();
-                  } else {
-                    setShowShareMenu(!showShareMenu);
-                  }
-                }}
-                className="px-3 py-2 sm:px-4 sm:py-2.5 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition flex items-center gap-2 text-sm font-medium"
-                aria-label="Share album"
-              >
-                <Share2 className="w-4 h-4 sm:w-5 sm:h-5" />
-                <span className="hidden sm:inline">Share</span>
-              </button>
-              
-              {/* Desktop share menu dropdown */}
-              {showShareMenu && !('share' in navigator) && (
-                <div className="absolute right-0 mt-2 w-48 bg-white dark:bg-gray-800 rounded-lg shadow-xl border border-gray-200 dark:border-gray-700 overflow-hidden z-30">
-                  <button
-                    onClick={() => shareEvent('twitter')}
-                    className="w-full px-4 py-2 text-left text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 transition flex items-center gap-2"
-                  >
-                    <span>🐦</span> Twitter
-                  </button>
-                  <button
-                    onClick={() => shareEvent('facebook')}
-                    className="w-full px-4 py-2 text-left text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 transition flex items-center gap-2"
-                  >
-                    <span>📘</span> Facebook
-                  </button>
-                  <button
-                    onClick={() => shareEvent('whatsapp')}
-                    className="w-full px-4 py-2 text-left text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 transition flex items-center gap-2"
-                  >
-                    <span>💬</span> WhatsApp
-                  </button>
-                  <button
-                    onClick={() => shareEvent('copy')}
-                    className="w-full px-4 py-2 text-left text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 transition flex items-center gap-2"
-                  >
-                    <span>🔗</span> Copy Link
-                  </button>
-                </div>
-              )}
-            </div>
+            {event && <ShareEventButton event={event} slug={slug!} photos={photos} />}
           </div>
         </div>
 
@@ -654,51 +470,15 @@ const EventGallery: React.FC = () => {
         )}
 
         {/* Sort & Filter Options - Mobile optimized */}
-        <div className="bg-white dark:bg-gray-800 rounded-lg shadow p-3 sm:p-4 mb-6">
-          <div className="flex flex-col sm:flex-row flex-wrap gap-3 sm:gap-4 sm:items-center">
-            <div className="flex-1 sm:flex-none">
-              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Sort by</label>
-              <select
-                value={sortBy}
-                onChange={(e) => setSortBy(e.target.value)}
-                className="w-full sm:w-auto px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg text-sm bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
-              >
-                <option value="date_desc">Date (Newest First)</option>
-                <option value="date_asc">Date (Oldest First)</option>
-                <option value="name_asc">Name (A-Z)</option>
-                <option value="name_desc">Name (Z-A)</option>
-              </select>
-            </div>
-            {selectedPhotos.size > 0 && (
-              <>
-                <button
-                  onClick={downloadSelected}
-                  className="w-full sm:w-auto px-6 py-3 bg-green-600 text-white rounded-xl hover:bg-green-700 active:scale-95 transition-all text-sm font-semibold shadow-md flex items-center justify-center gap-2"
-                >
-                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
-                  </svg>
-                  <span className="hidden sm:inline">Download Selected</span>
-                  <span className="sm:hidden">Download</span>
-                  <span>({selectedPhotos.size})</span>
-                </button>
-                {isAdmin && (
-                  <button
-                    onClick={handleBulkDelete}
-                    disabled={deleting}
-                    className="w-full sm:w-auto px-6 py-3 bg-red-600 text-white rounded-xl hover:bg-red-700 active:scale-95 transition-all text-sm font-semibold shadow-md flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
-                  >
-                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                    </svg>
-                    <span>{deleting ? 'Deleting...' : 'Delete Selected'}</span>
-                    <span>({selectedPhotos.size})</span>
-                  </button>
-                )}
-              </>
-            )}
-          </div>
-        </div>
+        <GallerySortFilter
+          sortBy={sortBy}
+          onSortChange={setSortBy}
+          selectedCount={selectedPhotos.size}
+          onDownloadSelected={downloadSelected}
+          onDeleteSelected={isAdmin ? handleBulkDelete : undefined}
+          isAdmin={isAdmin}
+          isDeleting={deleting}
+        />
 
         {/* Date Timeline - Only show for multi-day events */}
         {dates.length > 1 && (
@@ -754,9 +534,9 @@ const EventGallery: React.FC = () => {
                     <button
                       onClick={() => toggleDateSelection(datePhotos)}
                       className="px-3 py-1.5 text-sm bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors"
-                      title={datePhotos.every(p => selectedPhotos.has(p.id)) ? 'Deselect all' : 'Select all'}
+                      title={isDateFullySelected(datePhotos) ? 'Deselect all' : 'Select all'}
                     >
-                      {datePhotos.every(p => selectedPhotos.has(p.id)) ? 'Deselect All' : 'Select All'}
+                      {isDateFullySelected(datePhotos) ? 'Deselect All' : 'Select All'}
                     </button>
                   </div>
                   
@@ -781,7 +561,7 @@ const EventGallery: React.FC = () => {
                         sortBy={sortBy}
                         showSelection={true}
                         isSelected={selectedPhotos.has(photo.id)}
-                        onToggleSelection={toggleSelection}
+                        onToggleSelection={togglePhotoSelection}
                         showAddToFavorites={true}
                         onToggleFavorite={toggleFavorite}
                         showFeatured={isAdmin}
@@ -816,7 +596,7 @@ const EventGallery: React.FC = () => {
                 sortBy={sortBy}
                 showSelection={true}
                 isSelected={selectedPhotos.has(photo.id)}
-                onToggleSelection={toggleSelection}
+                onToggleSelection={togglePhotoSelection}
                 showAddToFavorites={true}
                 onToggleFavorite={toggleFavorite}
                 showFeatured={isAdmin}
