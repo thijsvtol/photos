@@ -26,6 +26,12 @@ export interface SafDirectoryPlugin {
    * Uses Android's DocumentsContract API, which works under scoped storage.
    */
   listFiles(options: { treeUri: string }): Promise<SafListResult>;
+  
+  /**
+   * Write a file to a directory identified by a SAF tree URI.
+   * Creates a new document in the tree and writes the base64 data to it.
+   */
+  writeFile(options: { treeUri: string; filename: string; data: string; mimeType: string }): Promise<{ uri: string }>;
 }
 
 /**

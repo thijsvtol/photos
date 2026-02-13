@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { X, Sun, Moon, Folder, Users } from 'lucide-react';
 import { Capacitor } from '@capacitor/core';
+import { FilePicker } from '@capawesome/capacitor-file-picker';
 import { useAuth } from '../contexts/AuthContext';
 import { useTheme } from '../contexts/ThemeContext';
 import { getUserCollaborations, updateUserProfile } from '../api';
@@ -108,6 +109,22 @@ const UserSettings: React.FC<UserSettingsProps> = ({ isOpen, onClose }) => {
     } else {
       setShowCustomPath(false);
       setDownloadPath(value);
+    }
+  };
+
+  const handleBrowseFolder = async () => {
+    try {
+      const result = await FilePicker.pickDirectory();
+      if (result.path) {
+        setDownloadPath(result.path);
+        setSelectedPathOption('custom');
+        setShowCustomPath(true);
+      }
+    } catch (error) {
+      console.error('Failed to pick folder:', error);
+      if (error instanceof Error && !error.message?.includes('cancel')) {
+        alert('Failed to select folder: ' + error.message);
+      }
     }
   };
 
@@ -260,23 +277,32 @@ const UserSettings: React.FC<UserSettingsProps> = ({ isOpen, onClose }) => {
                     Download Location (Android)
                   </label>
 
-                  {/* Path selection dropdown */}
+                  {/* Path selection dropdown with Browse button */}
                   <div className="mb-3">
                     <label className="block text-xs text-gray-600 dark:text-gray-400 mb-1">
                       Select a folder
                     </label>
-                    <select
-                      value={selectedPathOption}
-                      onChange={(e) => handlePathOptionChange(e.target.value)}
-                      className="w-full px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent dark:bg-gray-700 dark:text-white"
-                    >
-                      <option value="">Choose a folder...</option>
-                      {commonPaths.map((path) => (
-                        <option key={path.value} value={path.value}>
-                          {path.label}
-                        </option>
-                      ))}
-                    </select>
+                    <div className="flex gap-2">
+                      <select
+                        value={selectedPathOption}
+                        onChange={(e) => handlePathOptionChange(e.target.value)}
+                        className="flex-1 px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent dark:bg-gray-700 dark:text-white"
+                      >
+                        <option value="">Choose a folder...</option>
+                        {commonPaths.map((path) => (
+                          <option key={path.value} value={path.value}>
+                            {path.label}
+                          </option>
+                        ))}
+                      </select>
+                      <button
+                        onClick={handleBrowseFolder}
+                        className="px-4 py-2 bg-gray-600 text-white rounded-lg hover:bg-gray-700 transition-colors flex items-center gap-2"
+                      >
+                        <Folder className="w-4 h-4" />
+                        Browse
+                      </button>
+                    </div>
                   </div>
 
                   {/* Custom path input (only shown when "Custom" is selected) */}
@@ -314,9 +340,14 @@ const UserSettings: React.FC<UserSettingsProps> = ({ isOpen, onClose }) => {
                     Save Download Location
                   </button>
                   
-                  <p className="mt-2 text-xs text-gray-500 dark:text-gray-400">
-                    💡 Tip: Make sure the folder exists on your device and the app has permission to write there.
-                  </p>
+                  <div className="mt-3 p-3 bg-blue-50 dark:bg-blue-900/20 rounded-lg border border-blue-200 dark:border-blue-800">
+                    <p className="text-xs text-blue-800 dark:text-blue-300 font-medium mb-1">
+                      📌 Tip:
+                    </p>
+                    <p className="text-xs text-blue-700 dark:text-blue-400">
+                      Use the Browse button to select any folder on your device, or manually enter a path.
+                    </p>
+                  </div>
                 </div>
               )}
             </div>

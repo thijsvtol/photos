@@ -4,6 +4,7 @@ import android.content.ContentResolver;
 import android.database.Cursor;
 import android.net.Uri;
 import android.provider.DocumentsContract;
+import android.util.Base64;
 
 import com.getcapacitor.JSArray;
 import com.getcapacitor.JSObject;
@@ -11,6 +12,8 @@ import com.getcapacitor.Plugin;
 import com.getcapacitor.PluginCall;
 import com.getcapacitor.PluginMethod;
 import com.getcapacitor.annotation.CapacitorPlugin;
+
+import java.io.OutputStream;
 
 /**
  * Native Capacitor plugin that lists files in a directory selected via
@@ -112,6 +115,81 @@ public class SafDirectoryPlugin extends Plugin {
 
         } catch (Exception e) {
             call.reject("Failed to list directory: " + e.getMessage(), e);
+        }
+    }
+
+    @PluginMethod()
+    public void writeFile(PluginCall call) {
+        String treeUriString = call.getString("treeUri");
+        String filename = call.getString("filename");
+        String base64Data = call.getString("data");
+        String mimeType = call.getString("mimeType", "application/octet-stream");
+
+        if (treeUriString == null || treeUriString.isEmpty()) {
+            call.reject("treeUri parameter is required");
+            return;
+        }
+        if (filename == null || filename.isEmpty()) {
+            call.reject("filename parameter is required");
+            return;
+        }
+        if (base64Data == null || base64Data.isEmpty()) {
+            call.reject("data parameter is required");
+            return;
+        }
+
+        // Validate that this is a content:// URI
+        if (!treeUriString.startsWith("content://")) {
+            call.reject("treeUri must be a content:// URI from Storage Access Framework");
+            return;
+        }
+
+        try {
+            Uri treeUri = Uri.parse(treeUriString);
+            String docId = DocumentsContract.getTreeDocumentId(treeUri);
+            Uri parentUri = DocumentsContract.buildDocumentUriUsingTree(treeUri, docId);
+
+            ContentResolver resolver = getContext().getContentResolver();
+
+            // Take persistable write permission
+            try {
+                resolver.takePersistableUriPermission(treeUri,
+                        android.content.Intent.FLAG_GRANT_WRITE_URI_PERMISSION);
+            } catch (SecurityException e) {
+                // Non-fatal: permission may already be taken
+            }
+
+            // Create a new document in the tree
+            Uri newFileUri = DocumentsContract.createDocument(resolver, parentUri, mimeType, filename);
+            
+            if (newFileUri == null) {
+                call.reject("Failed to create document in directory");
+                return;
+            }
+
+            // Decode base64 data
+            byte[] fileData = Base64.decode(base64Data, Base64.DEFAULT);
+
+            // Write data to the document
+            OutputStream outputStream = resolver.openOutputStream(newFileUri);
+            if (outputStream == null) {
+                call.reject("Failed to open output stream for writing");
+                return;
+            }
+
+            try {
+                outputStream.write(fileData);
+                outputStream.flush();
+            } finally {
+                outputStream.close();
+            }
+
+            JSObject result = new JSObject();
+            result.put("uri", newFileUri.toString());
+            call.resolve(result);
+
+        } catch (Exception e) {
+            call.reject("Failed to write file: " + e.getMessage(), e);
         }
     }
 }

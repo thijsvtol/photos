@@ -5,6 +5,7 @@ import type { Event, Photo, CreateEventRequest, Tag, AdminStats, EventStats, Upd
 import type { User } from './contexts/AuthContext';
 import { MobileAuthService } from './services/mobileAuth';
 import { config } from './config';
+import SafDirectory from './services/safDirectory';
 
 const api = axios.create({
   baseURL: import.meta.env.VITE_API_URL || '/api',
@@ -333,24 +334,41 @@ export const downloadPhoto = async (url: string, filename: string): Promise<void
       
       // Get custom download path from localStorage, or use default
       const customPath = localStorage.getItem('download_path') || '/storage/emulated/0/Download';
-      const fullPath = `${customPath}/${filename}`;
-      
-      console.log('[Download] Writing file to:', fullPath);
+      console.log('[Download] Custom path:', customPath);
       
       try {
-        // Try to write to external storage with full path
-        const result = await Filesystem.writeFile({
-          path: fullPath,
-          data: base64,
-          directory: Directory.ExternalStorage,
-          recursive: true
-        });
+        let result;
         
-        console.log('[Download] File saved:', result.uri);
-        alert(`Photo saved to: ${customPath}/${filename}`);
+        // Check if it's a content:// URI (from folder picker)
+        if (customPath.startsWith('content://')) {
+          console.log('[Download] Using SafDirectory plugin for content:// URI');
+          // Use SafDirectory plugin to write to SAF tree URI
+          // Detect mime type from filename
+          const mimeType = filename.toLowerCase().endsWith('.png') ? 'image/png' : 'image/jpeg';
+          result = await SafDirectory.writeFile({
+            treeUri: customPath,
+            filename: filename,
+            data: base64,
+            mimeType: mimeType
+          });
+          console.log('[Download] File saved via SAF:', result.uri);
+          alert(`Photo saved: ${filename}`);
+        } else {
+          // Traditional filesystem path
+          const fullPath = `${customPath}/${filename}`;
+          console.log('[Download] Writing file to filesystem path:', fullPath);
+          result = await Filesystem.writeFile({
+            path: fullPath,
+            data: base64,
+            directory: Directory.ExternalStorage,
+            recursive: true
+          });
+          console.log('[Download] File saved:', result.uri);
+          alert(`Photo saved to: ${filename}`);
+        }
       } catch (error) {
-        // Fallback to Documents if external storage fails
-        console.warn('[Download] External storage failed, falling back to Documents', error);
+        // Fallback to Documents if custom path fails
+        console.warn('[Download] Custom path failed, falling back to Documents', error);
         const result = await Filesystem.writeFile({
           path: filename,
           data: base64,
