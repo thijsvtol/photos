@@ -274,9 +274,10 @@ export const getPreviewUrl = (slug: string, photoId: string, fileType?: string):
   const extension = isVideo ? 'mp4' : 'jpg';
   const relativePath = `/media/${slug}/preview/${photoId}.${extension}`;
   
-  // In native app, use configured API URL for media files
-  if (typeof window !== 'undefined' && window.location.protocol === 'https:' && window.location.hostname === 'localhost') {
-    return `${config.apiUrl}${relativePath}`;
+  // In native app (Capacitor), use full production domain for media files
+  if (Capacitor.isNativePlatform()) {
+    const domain = config.domain.startsWith('http') ? config.domain : `https://${config.domain}`;
+    return `${domain}${relativePath}`;
   }
   
   return relativePath;
@@ -287,9 +288,10 @@ export const getOriginalUrl = (slug: string, photoId: string, fileType?: string)
   const extension = isVideo ? 'mp4' : 'jpg';
   const relativePath = `/media/${slug}/original/${photoId}.${extension}`;
   
-  // In native app, use configured API URL for media files
-  if (typeof window !== 'undefined' && window.location.protocol === 'https:' && window.location.hostname === 'localhost') {
-    return `${config.apiUrl}${relativePath}`;
+  // In native app (Capacitor), use full production domain for media files
+  if (Capacitor.isNativePlatform()) {
+    const domain = config.domain.startsWith('http') ? config.domain : `https://${config.domain}`;
+    return `${domain}${relativePath}`;
   }
   
   return relativePath;
