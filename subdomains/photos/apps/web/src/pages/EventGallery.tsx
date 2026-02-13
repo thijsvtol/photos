@@ -538,12 +538,12 @@ const EventGallery: React.FC = () => {
                   }}
                 >
                   {/* Date header */}
-                  <div className="mb-4 pb-2 border-b-2 border-gray-200 flex items-center justify-between">
+                  <div className="mb-4 pb-2 border-b-2 border-gray-200 dark:border-gray-700 flex items-center justify-between">
                     <div>
-                      <h2 className="text-xl sm:text-2xl font-bold text-gray-900">
+                      <h2 className="text-xl sm:text-2xl font-bold text-gray-900 dark:text-white">
                         {formattedDate}
                       </h2>
-                      <p className="text-sm text-gray-500 mt-1">
+                      <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
                         {datePhotos.length} {datePhotos.length === 1 ? 'photo' : 'photos'}
                       </p>
                     </div>
