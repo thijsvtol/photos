@@ -59,8 +59,9 @@ export class MobileAuthService {
       await Preferences.set({ key: 'oauth_state', value: state });
 
       const config = getConfig();
-      // First go to /api/mobile-login to ensure user is authenticated, then auto-redirect to mobile-auth
-      const authUrl = `${config.apiUrl}/api/mobile-login?state=${state}`;
+      // Use domain instead of apiUrl to avoid double /api prefix
+      const domain = config.domain.startsWith('http') ? config.domain : `https://${config.domain}`;
+      const authUrl = `${domain}/api/mobile-login?state=${state}`;
       
       try {
         await Browser.open({

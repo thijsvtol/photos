@@ -7,6 +7,7 @@ import Footer from '../components/Footer';
 import PhotoCard from '../components/PhotoCard';
 import DateTimeline from '../components/DateTimeline';
 import SEO from '../components/SEO';
+import { useRefresh } from '../contexts/RefreshContext';
 import { EventPasswordForm } from '../components/EventPasswordForm';
 import { GallerySortFilter } from '../components/GallerySortFilter';
 import { ShareEventButton } from '../components/ShareEventButton';
@@ -20,6 +21,7 @@ import { config } from '../config';
 const EventGallery: React.FC = () => {
   const { slug } = useParams<{ slug: string }>();
   const { isAuthenticated, login, user } = useAuth();
+  const { registerRefreshHandler, unregisterRefreshHandler } = useRefresh();
   const isAdmin = user?.isAdmin === true;
   const [event, setEvent] = useState<Event | null>(null);
   const [photos, setPhotos] = useState<Photo[]>([]);
@@ -48,6 +50,14 @@ const EventGallery: React.FC = () => {
       loadEvent();
     }
   }, [slug]);
+
+  // Register refresh handler
+  useEffect(() => {
+    if (authenticated) {
+      registerRefreshHandler(handleRefresh);
+      return () => unregisterRefreshHandler();
+    }
+  }, [authenticated]);
 
   useEffect(() => {
     // Load user favorites and check collaborator status if authenticated
@@ -175,6 +185,12 @@ const EventGallery: React.FC = () => {
       setPhotos(photoData);
     } catch (err) {
       console.error(err);
+    }
+  };
+
+  const handleRefresh = async () => {
+    if (authenticated) {
+      await Promise.all([loadEvent(), loadPhotos()]);
     }
   };
 

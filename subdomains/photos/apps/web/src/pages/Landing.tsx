@@ -4,6 +4,7 @@ import { ChevronDown, Heart, MapPin, Loader2 } from 'lucide-react';
 import ContactForm from '../components/ContactForm';
 import Footer from '../components/Footer';
 import SEO from '../components/SEO';
+import { useRefresh } from '../contexts/RefreshContext';
 import { getAbsoluteUrl } from '../utils/urlUtils';
 import { getFeaturedPhotos } from '../api';
 import { getConfig } from '../config';
@@ -16,28 +17,43 @@ interface FeaturedPhoto {
 }
 
 export default function Landing() {
+  const { registerRefreshHandler, unregisterRefreshHandler } = useRefresh();
   const [featuredPhotos, setFeaturedPhotos] = useState<FeaturedPhoto[]>([]);
   const [currentSlide, setCurrentSlide] = useState(0);
   const [loading, setLoading] = useState(true);
   const [scrollY, setScrollY] = useState(0);
 
+  const loadFeaturedPhotos = async () => {
+    try {
+      setLoading(true);
+      const photos = await getFeaturedPhotos(10);
+      // Map Photo type to FeaturedPhoto interface
+      const featured = photos.map(p => ({
+        id: p.id,
+        event_slug: p.event_slug || '',
+        event_name: p.event_name || '',
+        blur_placeholder: p.blur_placeholder,
+      }));
+      setFeaturedPhotos(featured);
+    } catch (err) {
+      console.error('Failed to load featured photos:', err);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleRefresh = async () => {
+    await loadFeaturedPhotos();
+  };
+
   useEffect(() => {
-    getFeaturedPhotos(10)
-      .then(photos => {
-        // Map Photo type to FeaturedPhoto interface
-        const featured = photos.map(p => ({
-          id: p.id,
-          event_slug: p.event_slug || '',
-          event_name: p.event_name || '',
-          blur_placeholder: p.blur_placeholder,
-        }));
-        setFeaturedPhotos(featured);
-        setLoading(false);
-      })
-      .catch(err => {
-        console.error('Failed to load featured photos:', err);
-        setLoading(false);
-      });
+    loadFeaturedPhotos();
+  }, []);
+
+  // Register refresh handler
+  useEffect(() => {
+    registerRefreshHandler(handleRefresh);
+    return () => unregisterRefreshHandler();
   }, []);
 
   useEffect(() => {

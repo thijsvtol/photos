@@ -140,8 +140,12 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
 
   const logout = () => {
     if (Capacitor.isNativePlatform()) {
+      // Clear token and user state
       MobileAuthService.clearToken();
       setUser(null);
+      
+      // Navigate to home page
+      window.location.href = '/';
       return;
     }
     

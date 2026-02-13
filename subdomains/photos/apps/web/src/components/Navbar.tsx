@@ -40,8 +40,15 @@ const Navbar: React.FC = () => {
       : `${base} text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700`;
   };
 
-  const handleLogout = () => {
+  const handleLogout = async () => {
     setShowUserMenu(false);
+    
+    // Show confirmation for mobile users
+    if (Capacitor.isNativePlatform()) {
+      const confirmed = window.confirm('Are you sure you want to log out?');
+      if (!confirmed) return;
+    }
+    
     logout();
   };
 

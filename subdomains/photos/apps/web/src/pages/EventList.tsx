@@ -4,11 +4,13 @@ import { Tag as TagIcon, MapPin, Calendar, ChevronRight, Loader2, Filter, X, Che
 import Navbar from '../components/Navbar';
 import Footer from '../components/Footer';
 import SEO from '../components/SEO';
+import { useRefresh } from '../contexts/RefreshContext';
 import { getEvents, getTags, getPreviewUrl } from '../api';
 import type { Event, Tag } from '../types';
 import { config } from '../config';
 
 const EventList: React.FC = () => {
+  const { registerRefreshHandler, unregisterRefreshHandler } = useRefresh();
   const [events, setEvents] = useState<Event[]>([]);
   const [allEvents, setAllEvents] = useState<Event[]>([]); // Store all events for filtering
   const [tags, setTags] = useState<Tag[]>([]);
@@ -22,6 +24,12 @@ const EventList: React.FC = () => {
   useEffect(() => {
     loadTags();
     loadEvents();
+  }, []);
+
+  // Register refresh handler
+  useEffect(() => {
+    registerRefreshHandler(handleRefresh);
+    return () => unregisterRefreshHandler();
   }, []);
 
   const loadTags = async () => {
@@ -51,6 +59,10 @@ const EventList: React.FC = () => {
     } finally {
       setLoading(false);
     }
+  };
+
+  const handleRefresh = async () => {
+    await Promise.all([loadEvents(), loadTags()]);
   };
 
   const filterByTag = async (tagSlug: string | null) => {

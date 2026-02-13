@@ -6,12 +6,14 @@ import Navbar from '../components/Navbar';
 import Footer from '../components/Footer';
 import PhotoCard from '../components/PhotoCard';
 import SEO from '../components/SEO';
+import { useRefresh } from '../contexts/RefreshContext';
 import { getUserFavorites, removeFavorite as removeFavoriteAPI, requestZip, downloadZip, type FavoritePhoto } from '../api';
 import { useAuth } from '../contexts/AuthContext';
 import { config } from '../config';
 
 const MyFavorites: React.FC = () => {
   const { isAuthenticated, loading: authLoading, login } = useAuth();
+  const { registerRefreshHandler, unregisterRefreshHandler } = useRefresh();
   const [photos, setPhotos] = useState<FavoritePhoto[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -27,6 +29,14 @@ const MyFavorites: React.FC = () => {
     }
   }, [isAuthenticated, authLoading]);
 
+  // Register refresh handler
+  useEffect(() => {
+    if (isAuthenticated) {
+      registerRefreshHandler(handleRefresh);
+      return () => unregisterRefreshHandler();
+    }
+  }, [isAuthenticated]);
+
   const loadFavorites = async () => {
     try {
       setLoading(true);
@@ -39,6 +49,10 @@ const MyFavorites: React.FC = () => {
     } finally {
       setLoading(false);
     }
+  };
+
+  const handleRefresh = async () => {
+    await loadFavorites();
   };
 
   const handleRemoveFavorite = async (photoId: string) => {
