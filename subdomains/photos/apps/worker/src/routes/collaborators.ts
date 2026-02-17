@@ -1,6 +1,6 @@
 import { Hono } from 'hono';
 import type { Env, InviteCollaboratorRequest, CollaboratorWithUser, User } from '../types';
-import { requireAdmin, extractUser } from '../auth';
+import { requireAdmin, extractUser, requireUploadPermission } from '../auth';
 import { requireFeature } from '../features';
 import { getConfig } from '../config';
 
@@ -581,10 +581,11 @@ app.post('/api/events/:slug/invite-links', requireAdmin, async (c) => {
 
 /**
  * GET /api/events/:slug/invite-links
- * Get all active invite links for an event (admin only)
+ * Get all active invite links for an event (admin and collaborators)
  */
-app.get('/api/events/:slug/invite-links', requireAdmin, async (c) => {
+app.get('/api/events/:slug/invite-links', requireUploadPermission, async (c) => {
   const slug = c.req.param('slug');
+  const user = c.get('user');
   
   try {
     // Get event
@@ -595,6 +596,9 @@ app.get('/api/events/:slug/invite-links', requireAdmin, async (c) => {
     if (!event) {
       return c.json({ error: 'Event not found' }, 404);
     }
+    
+    // Verify user has access to this event (either admin or collaborator)
+    // This is already verified by requireUploadPermission middleware
     
     // Get active invite links
     const links = await c.env.DB.prepare(`

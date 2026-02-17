@@ -1,6 +1,6 @@
 import React, { useEffect, useState, useRef } from 'react';
 import { useParams, Link } from 'react-router-dom';
-import { Upload } from 'lucide-react';
+import { Upload, Copy, Check } from 'lucide-react';
 import Masonry from 'react-masonry-css';
 import Navbar from '../components/Navbar';
 import Footer from '../components/Footer';
@@ -11,8 +11,8 @@ import { useRefresh } from '../contexts/RefreshContext';
 import { EventPasswordForm } from '../components/EventPasswordForm';
 import { GallerySortFilter } from '../components/GallerySortFilter';
 import { ShareEventButton } from '../components/ShareEventButton';
-import { getEvent, getPhotos, loginToEvent, getPreviewUrl, requestZip, downloadZip, setPhotoFeatured, getUserFavoriteIds, toggleFavorite as toggleFavoriteAPI, bulkDeletePhotos, getUserCollaborations, getCollaborators } from '../api';
-import type { Event, Photo, Collaborator } from '../types';
+import { getEvent, getPhotos, loginToEvent, getPreviewUrl, requestZip, downloadZip, setPhotoFeatured, getUserFavoriteIds, toggleFavorite as toggleFavoriteAPI, bulkDeletePhotos, getUserCollaborations, getCollaborators, getInviteLinks, createInviteLink } from '../api';
+import type { Event, Photo, Collaborator, InviteLink } from '../types';
 import { CollaboratorAvatars } from '../components/CollaboratorAvatars';
 import { useAuth } from '../contexts/AuthContext';
 import { usePhotoSelection } from '../hooks/usePhotoSelection';
@@ -33,8 +33,11 @@ const EventGallery: React.FC = () => {
   const [deleting, setDeleting] = useState(false);
   const [isCollaborator, setIsCollaborator] = useState(false);
   const [collaborators, setCollaborators] = useState<Collaborator[]>([]);
+  const [inviteLink, setInviteLink] = useState<InviteLink | null>(null);
+  const [copied, setCopied] = useState(false);
   const [activeDate, setActiveDate] = useState<string | null>(null);
   const dateRefs = useRef<Map<string, HTMLDivElement>>(new Map());
+  const [isMobile, setIsMobile] = useState(false);
   
   // Use custom hook for photo selection
   const {
@@ -44,6 +47,16 @@ const EventGallery: React.FC = () => {
     toggleDateSelection,
     isDateFullySelected,
   } = usePhotoSelection(photos);
+
+  // Detect mobile screen size
+  useEffect(() => {
+    const checkMobile = () => {
+      setIsMobile(window.innerWidth < 640); // sm breakpoint
+    };
+    checkMobile();
+    window.addEventListener('resize', checkMobile);
+    return () => window.removeEventListener('resize', checkMobile);
+  }, []);
 
   useEffect(() => {
     if (slug) {
@@ -102,6 +115,47 @@ const EventGallery: React.FC = () => {
     };
     loadCollaborators();
   }, [event, slug]);
+
+  // Load invite link for collaborators-only events (admin and collaborators)
+  useEffect(() => {
+    const loadInviteLink = async () => {
+      if (event && event.visibility === 'collaborators_only' && slug && (isAdmin || isCollaborator)) {
+        try {
+          const links = await getInviteLinks(slug);
+          if (links.length > 0) {
+            // Use the first active link
+            setInviteLink(links[0]);
+          } else if (isAdmin) {
+            // Only admins can create new invite links
+            const newLink = await createInviteLink(slug);
+            setInviteLink(newLink);
+          }
+        } catch (err) {
+          console.error('Failed to load/create invite link:', err);
+          // Silently fail - invite link is optional
+        }
+      } else {
+        setInviteLink(null);
+      }
+    };
+    loadInviteLink();
+  }, [event, slug, isAdmin, isCollaborator]);
+
+  const copyCollaborationLink = async () => {
+    if (!inviteLink) return;
+    
+    const fullUrl = `${window.location.origin}/invite/${inviteLink.token}`;
+    
+    try {
+      await navigator.clipboard.writeText(fullUrl);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch (err) {
+      console.error('Failed to copy link:', err);
+      alert('Failed to copy link to clipboard');
+    }
+  };
+
 
   // Restore scroll position when returning to gallery
   useEffect(() => {
@@ -429,16 +483,21 @@ const EventGallery: React.FC = () => {
         structuredData={structuredData}
       />
       <Navbar />
-      <div className="max-w-7xl mx-auto px-3 sm:px-4 lg:px-8 py-4 sm:py-8 flex-grow w-full">
-        <div className="mb-6 sm:mb-8">
-          <Link to="/events" className="text-blue-600 dark:text-blue-400 hover:text-blue-700 dark:hover:text-blue-300 mb-3 sm:mb-4 inline-block text-sm sm:text-base">
+      {/* Add padding when photos are selected to account for fixed action bar */}
+      <div className={`max-w-7xl mx-auto px-3 sm:px-4 lg:px-8 py-4 sm:py-8 flex-grow w-full transition-all ${
+        selectedPhotos.size > 0 ? 'pt-16 sm:pt-20' : ''
+      }`}>
+        <div className="mb-4 sm:mb-6">
+          <Link to="/events" className="text-blue-600 dark:text-blue-400 hover:text-blue-700 dark:hover:text-blue-300 mb-2 inline-block text-sm">
             ← Back to Events
           </Link>
-          <div className="flex justify-between items-start gap-4">
-            <div className="flex-1">
-              <h1 className="text-3xl sm:text-4xl font-bold text-gray-900 dark:text-white">{event?.name}</h1>
+          
+          {/* Header: Title, Badge, and Share Button */}
+          <div className="flex justify-between items-start gap-4 mb-3">
+            <div className="flex-1 flex items-center gap-3 flex-wrap">
+              <h1 className="text-2xl sm:text-3xl font-bold text-gray-900 dark:text-white">{event?.name}</h1>
               {event && (
-                <span className={`inline-block mt-2 px-2 py-1 text-xs rounded-full ${
+                <span className={`px-2.5 py-0.5 text-xs font-medium rounded-full ${
                   event.requires_password
                     ? 'bg-amber-100 dark:bg-amber-900/30 text-amber-800 dark:text-amber-300'
                     : event.visibility === 'public' 
@@ -450,40 +509,60 @@ const EventGallery: React.FC = () => {
                   {event.requires_password
                     ? 'Password Protected'
                     : event.visibility === 'public' 
-                    ? 'Public Gallery'
+                    ? 'Public'
                     : event.visibility === 'collaborators_only'
                     ? 'Invite Only'
-                    : 'Private Gallery'}
+                    : 'Private'}
                 </span>
               )}
-              {event && event.visibility === 'collaborators_only' && collaborators.length > 0 && (
-                <div className="mt-4">
-                  <CollaboratorAvatars collaborators={collaborators} />
-                </div>
-              )}
             </div>
-            {/* Share button */}
             {event && <ShareEventButton event={event} slug={slug!} photos={photos} />}
           </div>
-        </div>
 
-        {/* Upload button for admins and collaborators */}
-        {(isAdmin || isCollaborator) && (
-          <div className="mb-4">
-            <Link
-              to={`/admin/events/${slug}/upload`}
-              className="inline-flex items-center gap-2 px-6 py-3 bg-indigo-600 text-white rounded-xl hover:bg-indigo-700 active:scale-95 transition-all text-sm font-semibold shadow-md"
-            >
-              <Upload className="w-5 h-5" />
-              Upload Photos/Videos
-            </Link>
-            {isCollaborator && !isAdmin && (
-              <p className="text-xs text-gray-500 dark:text-gray-400 mt-2">
-                You've been invited to contribute to this event
-              </p>
-            )}
-          </div>
-        )}
+          {/* Collaborators and Copy Link - Compact Row */}
+          {event && event.visibility === 'collaborators_only' && collaborators.length > 0 && (
+            <div className="flex items-center gap-3 mb-3">
+              <CollaboratorAvatars collaborators={collaborators} />
+              {(isAdmin || isCollaborator) && inviteLink && (
+                <button
+                  onClick={copyCollaborationLink}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-md transition-colors text-xs font-medium"
+                  title="Share this link with others to invite them as collaborators"
+                >
+                  {copied ? (
+                    <>
+                      <Check className="w-3.5 h-3.5" />
+                      <span>Copied</span>
+                    </>
+                  ) : (
+                    <>
+                      <Copy className="w-3.5 h-3.5" />
+                      <span>Copy Link</span>
+                    </>
+                  )}
+                </button>
+              )}
+            </div>
+          )}
+
+          {/* Action Buttons Row */}
+          {(isAdmin || isCollaborator) && (
+            <div className="flex items-center gap-2 flex-wrap">
+              <Link
+                to={`/admin/events/${slug}/upload`}
+                className="inline-flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors text-sm font-medium"
+              >
+                <Upload className="w-4 h-4" />
+                Upload Photos/Videos
+              </Link>
+              {isCollaborator && !isAdmin && (
+                <span className="text-xs text-gray-500 dark:text-gray-400">
+                  (Collaborator)
+                </span>
+              )}
+            </div>
+          )}
+        </div>
 
         {/* Sort & Filter Options - Mobile optimized */}
         <GallerySortFilter
@@ -502,7 +581,8 @@ const EventGallery: React.FC = () => {
             <DateTimeline 
               dates={dates} 
               activeDate={activeDate} 
-              onDateClick={handleDateClick} 
+              onDateClick={handleDateClick}
+              topOffset={selectedPhotos.size > 0 ? (isMobile ? 115 : 120) : 64}
             />
           </div>
         )}

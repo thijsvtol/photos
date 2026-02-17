@@ -5,9 +5,10 @@ interface DateTimelineProps {
   dates: string[]; // Array of dates in YYYY-MM-DD format
   activeDate: string | null;
   onDateClick: (date: string) => void;
+  topOffset?: number; // Offset from top when sticky (in pixels)
 }
 
-const DateTimeline: React.FC<DateTimelineProps> = ({ dates, activeDate, onDateClick }) => {
+const DateTimeline: React.FC<DateTimelineProps> = ({ dates, activeDate, onDateClick, topOffset = 0 }) => {
   const [isSticky, setIsSticky] = useState(false);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
 
@@ -78,11 +79,12 @@ const DateTimeline: React.FC<DateTimelineProps> = ({ dates, activeDate, onDateCl
   return (
     <div 
       className={`bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 transition-all duration-300 z-40 ${
-        isSticky ? 'fixed top-0 left-0 right-0 shadow-md' : 'relative'
+        isSticky ? 'fixed left-0 right-0 shadow-md' : 'relative'
       }`}
+      style={isSticky ? { top: `${topOffset}px` } : undefined}
     >
       <div className="max-w-7xl mx-auto px-3 sm:px-4 lg:px-8">
-        <div className="flex items-center py-3 gap-2">
+        <div className={`flex items-center gap-2 ${isSticky ? 'py-1.5' : 'py-2'}`}>
           {/* Icon and label - hidden on very small screens */}
           <div className="hidden sm:flex items-center gap-2 text-gray-600 dark:text-gray-400 mr-2 flex-shrink-0">
             <Calendar className="w-5 h-5" />
@@ -106,7 +108,7 @@ const DateTimeline: React.FC<DateTimelineProps> = ({ dates, activeDate, onDateCl
           {/* Scrollable date buttons */}
           <div 
             ref={scrollContainerRef}
-            className="flex-1 overflow-x-auto scrollbar-hide flex gap-2 py-1"
+            className="flex-1 overflow-x-auto scrollbar-hide flex gap-2"
             style={{ 
               scrollbarWidth: 'none',
               msOverflowStyle: 'none',
@@ -144,9 +146,6 @@ const DateTimeline: React.FC<DateTimelineProps> = ({ dates, activeDate, onDateCl
           </button>
         </div>
       </div>
-
-      {/* Spacer when fixed to prevent content jump */}
-      {isSticky && <div className="h-14" />}
     </div>
   );
 };

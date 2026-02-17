@@ -774,7 +774,7 @@ const PhotoDetail: React.FC = () => {
       )}
       <Navbar />
       {/* Header - Mobile optimized */}
-      <div className="sticky top-0 z-50 bg-gray-900/95 backdrop-blur-sm border-b border-gray-800">
+      <div className="sticky top-16 z-50 bg-gray-900/95 backdrop-blur-sm border-b border-gray-800">
         <div className="max-w-7xl mx-auto px-3 sm:px-4 lg:px-8 py-3">
           <div className="flex justify-between items-center">
             <button
