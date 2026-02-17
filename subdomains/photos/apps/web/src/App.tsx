@@ -5,6 +5,7 @@ import { AuthProvider } from './contexts/AuthContext';
 import { ThemeProvider } from './contexts/ThemeContext';
 import { RefreshProvider } from './contexts/RefreshContext';
 import PullToRefresh from './components/PullToRefresh';
+import { AndroidAppPrompt } from './components/AndroidAppPrompt';
 
 // Lazy load route components for better code splitting
 const Landing = lazy(() => import('./pages/Landing'));
@@ -59,6 +60,7 @@ function App() {
                   </Routes>
                 </Suspense>
               </PullToRefresh>
+              <AndroidAppPrompt />
             </BrowserRouter>
           </RefreshProvider>
         </AuthProvider>
