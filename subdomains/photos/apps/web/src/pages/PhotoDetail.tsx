@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useRef } from 'react';
+import React, { useEffect, useState, useRef, useCallback } from 'react';
 import { useParams, Link, useNavigate, useLocation } from 'react-router-dom';
 import { Maximize, Minimize, Share2, X, Heart, Play, Pause } from 'lucide-react';
 import Navbar from '../components/Navbar';
@@ -32,11 +32,16 @@ const PhotoDetail: React.FC = () => {
   const [isSlideshow, setIsSlideshow] = useState(false);
   const [slideshowSpeed, setSlideshowSpeed] = useState(3000); // milliseconds
   const [showSlideshowSettings, setShowSlideshowSettings] = useState(false);
+  const [preloadedImages, setPreloadedImages] = useState<Set<string>>(new Set());
+  const [isTransitioning, setIsTransitioning] = useState(false);
+  const [slideDirection, setSlideDirection] = useState<'left' | 'right' | null>(null);
   const touchStartX = useRef<number | null>(null);
   const touchEndX = useRef<number | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const imageContainerRef = useRef<HTMLDivElement>(null);
   const slideshowTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const preloadRefs = useRef<{ [key: string]: HTMLImageElement }>({});
+  const transitionTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [isZoomed, setIsZoomed] = useState(false);
   const [containerReady, setContainerReady] = useState(false);
   const handlersAttachedRef = useRef<boolean>(false);
@@ -76,6 +81,76 @@ const PhotoDetail: React.FC = () => {
     }
   }, [photoId, allPhotos, displayPhotos]);
 
+  // Preload adjacent images for smooth navigation
+  useEffect(() => {
+    if (!photo || displayPhotos.length === 0) return;
+
+    const loadedUrls: string[] = [];
+
+    const preloadImage = (photoToPreload: Photo) => {
+      const url = getPreviewUrl(slug!, photoToPreload.id, photoToPreload.file_type);
+      
+      // Skip if already preloaded or is a video
+      if (preloadedImages.has(url) || photoToPreload.file_type === 'video/mp4') return;
+
+      // Create and cache the image
+      const img = new Image();
+      img.src = url;
+      preloadRefs.current[url] = img;
+      
+      img.onload = () => {
+        loadedUrls.push(url);
+        setPreloadedImages(prev => {
+          const newSet = new Set(prev);
+          newSet.add(url);
+          // Limit Set size to prevent memory buildup (keep last 10 images)
+          if (newSet.size > 10) {
+            const firstItem = Array.from(newSet)[0];
+            newSet.delete(firstItem);
+            // Clean up the preload ref
+            delete preloadRefs.current[firstItem];
+          }
+          return newSet;
+        });
+      };
+      
+      img.onerror = () => {
+        // Silently handle preload errors - the main image load will show error if needed
+        delete preloadRefs.current[url];
+      };
+    };
+
+    const photosToUse = displayPhotos.length > 0 ? displayPhotos : allPhotos;
+    
+    // Preload next photo
+    if (currentIndex >= 0 && currentIndex < photosToUse.length - 1) {
+      preloadImage(photosToUse[currentIndex + 1]);
+    } else if (currentIndex === photosToUse.length - 1 && photosToUse.length > 0) {
+      // Preload first photo for loop
+      preloadImage(photosToUse[0]);
+    }
+
+    // Preload previous photo
+    if (currentIndex > 0) {
+      preloadImage(photosToUse[currentIndex - 1]);
+    } else if (currentIndex === 0 && photosToUse.length > 1) {
+      // Preload last photo for loop
+      preloadImage(photosToUse[photosToUse.length - 1]);
+    }
+
+    // Cleanup function
+    return () => {
+      // Remove event handlers from images that were loaded during this effect
+      loadedUrls.forEach(url => {
+        const img = preloadRefs.current[url];
+        if (img) {
+          img.onload = null;
+          img.onerror = null;
+        }
+      });
+    };
+  }, [currentIndex, displayPhotos, allPhotos, photo, slug, preloadedImages]);
+
   // Check if current photo is favorited
   useEffect(() => {
     const loadFavoriteStatus = async () => {
@@ -109,11 +184,17 @@ const PhotoDetail: React.FC = () => {
     };
   }, [isSlideshow, currentIndex, slideshowSpeed, imageLoaded]);
 
-  // Keyboard navigation
+  // Keyboard navigation - using refs for stable event handlers
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'ArrowLeft') navigateToPrevious();
-      if (e.key === 'ArrowRight') navigateToNext();
+      if (e.key === 'ArrowLeft') {
+        e.preventDefault();
+        navigatePrevRef.current?.();
+      }
+      if (e.key === 'ArrowRight') {
+        e.preventDefault();
+        navigateNextRef.current?.();
+      }
       if (e.key === ' ' || e.key === 'Spacebar') {
         e.preventDefault();
         toggleSlideshow();
@@ -128,12 +209,13 @@ const PhotoDetail: React.FC = () => {
         }
       }
       if (e.key === 'f' || e.key === 'F') toggleFullscreen();
-      if (e.key === 'i' || e.key === 'I') setShowDetails(!showDetails);
-      if (e.key === '?' || e.key === 'h' || e.key === 'H') setShowKeyboardHelp(!showKeyboardHelp);
+      if (e.key === 'i' || e.key === 'I') setShowDetails(prev => !prev);
+      if (e.key === '?' || e.key === 'h' || e.key === 'H') setShowKeyboardHelp(prev => !prev);
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [currentIndex, displayPhotos, slug, isFullscreen, showDetails, showKeyboardHelp, fromFavorites, isSlideshow]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [slug, isFullscreen, fromFavorites, isSlideshow]);
 
   // Continuously monitor zoom state
   useEffect(() => {
@@ -165,6 +247,18 @@ const PhotoDetail: React.FC = () => {
       setContainerReady(true);
     }
   });
+
+  // Cleanup all timeouts on unmount
+  useEffect(() => {
+    return () => {
+      if (transitionTimeoutRef.current) {
+        clearTimeout(transitionTimeoutRef.current);
+      }
+      if (slideshowTimerRef.current) {
+        clearTimeout(slideshowTimerRef.current);
+      }
+    };
+  }, []);
 
   const loadPhoto = async () => {
     try {
@@ -227,7 +321,9 @@ const PhotoDetail: React.FC = () => {
     }
   };
 
-  const navigateToNext = () => {
+  const navigateToNext = useCallback(() => {
+    if (isTransitioning) return; // Prevent rapid navigation
+
     // When viewing favorites, always navigate through the favoritePhotos list across all events
     if (fromFavorites && favoritePhotos.length > 0) {
       const currentFavIndex = favoritePhotos.findIndex((fav: { id: string; slug: string }) => fav.id === photoId && fav.slug === slug);
@@ -249,22 +345,58 @@ const PhotoDetail: React.FC = () => {
       if (currentIndex >= 0 && currentIndex < photosToUse.length - 1) {
         const nextIndex = currentIndex + 1;
         const nextPhoto = photosToUse[nextIndex];
+        
+        // Start transition with slide animation
+        setIsTransitioning(true);
+        setSlideDirection('left'); // Sliding left = next photo
+        
+        // Check if image is preloaded
+        const imageUrl = getPreviewUrl(slug!, nextPhoto.id, nextPhoto.file_type);
+        const isPreloaded = preloadedImages.has(imageUrl);
+        
         setCurrentIndex(nextIndex);
         setPhoto(nextPhoto);
-        setImageLoaded(false);
+        setImageLoaded(isPreloaded); // If preloaded, mark as loaded immediately
+        
         window.history.pushState(null, '', `/p/${slug}/${nextPhoto.id}`);
+        
+        // End transition and reset slide direction
+        if (transitionTimeoutRef.current) {
+          clearTimeout(transitionTimeoutRef.current);
+        }
+        transitionTimeoutRef.current = setTimeout(() => {
+          setIsTransitioning(false);
+          setSlideDirection(null);
+          transitionTimeoutRef.current = null;
+        }, 350);
       } else if (currentIndex === photosToUse.length - 1 && photosToUse.length > 0) {
         // Loop back to first photo
         const firstPhoto = photosToUse[0];
+        const imageUrl = getPreviewUrl(slug!, firstPhoto.id, firstPhoto.file_type);
+        const isPreloaded = preloadedImages.has(imageUrl);
+        
+        setIsTransitioning(true);
+        setSlideDirection('left');
         setCurrentIndex(0);
         setPhoto(firstPhoto);
-        setImageLoaded(false);
+        setImageLoaded(isPreloaded);
+        
         window.history.pushState(null, '', `/p/${slug}/${firstPhoto.id}`);
+        if (transitionTimeoutRef.current) {
+          clearTimeout(transitionTimeoutRef.current);
+        }
+        transitionTimeoutRef.current = setTimeout(() => {
+          setIsTransitioning(false);
+          setSlideDirection(null);
+          transitionTimeoutRef.current = null;
+        }, 350);
       }
     }
-  };
+  }, [isTransitioning, fromFavorites, favoritePhotos, photoId, slug, navigate, displayPhotos, allPhotos, currentIndex, preloadedImages]);
 
-  const navigateToPrevious = () => {
+  const navigateToPrevious = useCallback(() => {
+    if (isTransitioning) return; // Prevent rapid navigation
+
     // When viewing favorites, always navigate through the favoritePhotos list across all events
     if (fromFavorites && favoritePhotos.length > 0) {
       const currentFavIndex = favoritePhotos.findIndex((fav: { id: string; slug: string }) => fav.id === photoId && fav.slug === slug);
@@ -286,13 +418,54 @@ const PhotoDetail: React.FC = () => {
       if (currentIndex > 0) {
         const prevIndex = currentIndex - 1;
         const prevPhoto = photosToUse[prevIndex];
+        
+        // Start transition with slide animation
+        setIsTransitioning(true);
+        setSlideDirection('right'); // Sliding right = previous photo
+        
+        // Check if image is preloaded
+        const imageUrl = getPreviewUrl(slug!, prevPhoto.id, prevPhoto.file_type);
+        const isPreloaded = preloadedImages.has(imageUrl);
+        
         setCurrentIndex(prevIndex);
         setPhoto(prevPhoto);
-        setImageLoaded(false);
+        setImageLoaded(isPreloaded); // If preloaded, mark as loaded immediately
+        
         window.history.pushState(null, '', `/p/${slug}/${prevPhoto.id}`);
+        
+        // End transition and reset slide direction
+        if (transitionTimeoutRef.current) {
+          clearTimeout(transitionTimeoutRef.current);
+        }
+        transitionTimeoutRef.current = setTimeout(() => {
+          setIsTransitioning(false);
+          setSlideDirection(null);
+          transitionTimeoutRef.current = null;
+        }, 350);
+      } else if (currentIndex === 0 && photosToUse.length > 1) {
+        // Loop back to last photo
+        const lastPhoto = photosToUse[photosToUse.length - 1];
+        const imageUrl = getPreviewUrl(slug!, lastPhoto.id, lastPhoto.file_type);
+        const isPreloaded = preloadedImages.has(imageUrl);
+        
+        setIsTransitioning(true);
+        setSlideDirection('right');
+        setCurrentIndex(photosToUse.length - 1);
+        setPhoto(lastPhoto);
+        setImageLoaded(isPreloaded);
+        
+        window.history.pushState(null, '', `/p/${slug}/${lastPhoto.id}`);
+        if (transitionTimeoutRef.current) {
+          clearTimeout(transitionTimeoutRef.current);
+        }
+        transitionTimeoutRef.current = setTimeout(() => {
+          setIsTransitioning(false);
+          setSlideDirection(null);
+          transitionTimeoutRef.current = null;
+        }, 350);
       }
     }
-  };
+  }, [isTransitioning, fromFavorites, favoritePhotos, photoId, slug, navigate, displayPhotos, allPhotos, currentIndex, preloadedImages]);
 
   // Keep refs updated for stable event handlers
   navigateNextRef.current = navigateToNext;
@@ -841,6 +1014,13 @@ const PhotoDetail: React.FC = () => {
               WebkitOverflowScrolling: 'touch'
             }}
           >
+            <div
+              key={`${photo?.id}-${slideDirection}`}
+              className={`${
+                slideDirection === 'left' ? 'animate-slide-in-right' :
+                slideDirection === 'right' ? 'animate-slide-in-left' : ''
+              }`}
+            >
             {photo?.file_type === 'video/mp4' ? (
               <video
                 src={getPreviewUrl(slug!, photo?.id || photoId!, photo?.file_type)}
@@ -855,17 +1035,20 @@ const PhotoDetail: React.FC = () => {
                   <img
                     src={photo.blur_placeholder}
                     alt="Loading..."
-                    className={`w-full h-auto ${isFullscreen ? 'max-h-screen' : 'max-h-[70vh] md:max-h-[80vh]'} object-contain blur-xl`}
+                    className={`w-full h-auto ${isFullscreen ? 'max-h-screen' : 'max-h-[70vh] md:max-h-[80vh]'} object-contain blur-xl transition-opacity duration-200`}
                   />
                 )}
                 <img
                   src={getPreviewUrl(slug!, photo?.id || photoId!, photo?.file_type)}
                   alt={photo?.original_filename}
-                  className={`w-full h-auto ${isFullscreen ? 'max-h-screen' : 'max-h-[70vh] md:max-h-[80vh]'} object-contain transition-opacity duration-500 ${imageLoaded ? 'opacity-100' : 'opacity-0'} ${photo?.blur_placeholder && !imageLoaded ? 'absolute inset-0' : ''}`}
+                  className={`w-full h-auto ${isFullscreen ? 'max-h-screen' : 'max-h-[70vh] md:max-h-[80vh]'} object-contain transition-opacity duration-300 ${imageLoaded ? 'opacity-100' : 'opacity-0'} ${photo?.blur_placeholder && !imageLoaded ? 'absolute inset-0' : ''}`}
                   onLoad={() => setImageLoaded(true)}
+                  loading="eager"
+                  decoding="async"
                 />
               </>
             )}
+            </div>
           </div>
         </div>
 
