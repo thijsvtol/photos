@@ -245,6 +245,7 @@ cd subdomains/photos/apps/web
 ### Build fails
 - Check workflow logs in GitHub Actions
 - Verify Node.js and Java versions
+- Do not hardcode `org.gradle.java.home` to a local absolute path; use CI `setup-java` / `JAVA_HOME`
 - Try building locally first
 
 ## Security Best Practices
