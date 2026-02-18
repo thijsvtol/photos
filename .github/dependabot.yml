@@ -8,8 +8,12 @@ updates:
     groups:
       root-deps:
         update-types:
+          - "patch"
           - "minor"
-          - "major"
+    ignore:
+      - dependency-name: "*"
+        update-types:
+          - "version-update:semver-major"
 
   - package-ecosystem: "npm"
     directory: "/apps/worker"
@@ -19,8 +23,12 @@ updates:
     groups:
       worker-deps:
         update-types:
+          - "patch"
           - "minor"
-          - "major"
+    ignore:
+      - dependency-name: "*"
+        update-types:
+          - "version-update:semver-major"
 
   - package-ecosystem: "npm"
     directory: "/apps/web"
@@ -30,8 +38,12 @@ updates:
     groups:
       web-deps:
         update-types:
+          - "patch"
           - "minor"
-          - "major"
+    ignore:
+      - dependency-name: "*"
+        update-types:
+          - "version-update:semver-major"
 
   - package-ecosystem: "gradle"
     directory: "/apps/android"
@@ -41,8 +53,12 @@ updates:
     groups:
       android-deps:
         update-types:
+          - "patch"
           - "minor"
-          - "major"
+    ignore:
+      - dependency-name: "*"
+        update-types:
+          - "version-update:semver-major"
 
   - package-ecosystem: "github-actions"
     directory: "/"
@@ -52,5 +68,9 @@ updates:
     groups:
       github-actions:
         update-types:
+          - "patch"
           - "minor"
-          - "major"
+    ignore:
+      - dependency-name: "*"
+        update-types:
+          - "version-update:semver-major"
