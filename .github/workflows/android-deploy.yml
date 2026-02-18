@@ -19,6 +19,9 @@ on:
         default: true
         type: boolean
 
+permissions:
+  contents: write
+
 jobs:
   build-and-deploy:
     runs-on: ubuntu-latest
@@ -56,6 +59,15 @@ jobs:
           CURRENT_VERSION_NAME=$(grep "versionName" build.gradle | awk '{print $2}' | tr -d '"')
           echo "VERSION_CODE=$NEW_VERSION_CODE" >> $GITHUB_ENV
           echo "VERSION_NAME=$CURRENT_VERSION_NAME" >> $GITHUB_ENV
+      
+      - name: Commit version bump
+        if: ${{ github.event.inputs.version_bump == 'true' }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add android/app/build.gradle
+          git commit -m "chore(android): bump version to ${{ env.VERSION_CODE }}"
+          git push
       
       - name: Get current version
         if: ${{ github.event.inputs.version_bump == 'false' }}
