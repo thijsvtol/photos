@@ -108,16 +108,34 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     // On native platform, use OAuth flow
     if (Capacitor.isNativePlatform()) {
       setLoading(true);
+      
+      // Store current path to return to after login
+      const currentPath = window.location.pathname + window.location.search + window.location.hash;
+      sessionStorage.setItem('auth_redirect', currentPath);
+      
       const token = await MobileAuthService.startAuthFlow();
       
       if (token) {
         // Fetch user data
         await fetchUser();
+        
+        // Get stored redirect path, default to events page
+        const redirectPath = sessionStorage.getItem('auth_redirect') || '/events';
+        sessionStorage.removeItem('auth_redirect');
+        
+        // Navigate to the stored path or refresh current page
+        if (redirectPath === window.location.pathname) {
+          // If we're already on the target page, force a reload to re-trigger logic
+          window.location.reload();
+        } else {
+          // Navigate to the stored path
+          window.location.href = redirectPath;
+        }
       } else {
         alert('Authentication failed. Please try again.');
+        setLoading(false);
       }
       
-      setLoading(false);
       return;
     }
     

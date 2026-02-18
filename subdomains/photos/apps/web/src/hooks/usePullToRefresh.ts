@@ -34,6 +34,13 @@ export const usePullToRefresh = ({
     }
 
     const handleTouchStart = (e: TouchEvent) => {
+      // Check if touch started within a no-pull-refresh zone (like modals)
+      const target = e.target as HTMLElement;
+      const isInNoPullZone = target.closest('[data-no-pull-refresh]');
+      if (isInNoPullZone) {
+        return;
+      }
+      
       // Check if we're at the top of the page
       isAtTopRef.current = window.scrollY === 0;
       if (isAtTopRef.current && !isRefreshingRef.current) {

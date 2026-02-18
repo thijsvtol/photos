@@ -6,6 +6,7 @@ import { ulid } from 'ulid';
 import { getPendingUploads, updateQueueItem } from '../uploadQueue';
 import { startUpload, uploadPart, completeUpload } from '../api';
 import { folderSyncService } from './folderSync';
+import ProgressNotification from '../plugins/ProgressNotification';
 
 const CHUNK_SIZE = 5 * 1024 * 1024; // 5MB chunks
 
@@ -80,13 +81,44 @@ class BackgroundSyncService {
 
     let successCount = 0;
     let failCount = 0;
+    const notificationId = Math.floor(Math.random() * 2147483647);
+    
+    // Track which event we're uploading to (use first upload's event)
+    const eventSlug = pendingUploads.length > 0 ? pendingUploads[0].eventSlug : null;
 
-    for (const upload of pendingUploads) {
+    // Show initial progress notification
+    await ProgressNotification.show({
+      id: notificationId,
+      title: 'Uploading Photos',
+      body: `0 of ${pendingUploads.length} completed`,
+      progress: 0,
+      maxProgress: pendingUploads.length,
+      indeterminate: false,
+      ongoing: true,
+      eventSlug: eventSlug || undefined,
+    });
+
+    for (let idx = 0; idx < pendingUploads.length; idx++) {
+      const upload = pendingUploads[idx];
+      
       try {
         // Skip if already uploading
         if (upload.status === 'uploading') {
           continue;
         }
+
+        // Update progress notification
+        await ProgressNotification.show({
+          id: notificationId,
+          title: 'Uploading Photos',
+          body: `${idx} of ${pendingUploads.length} completed`,
+          largeBody: `Currently uploading: ${upload.file.name}`,
+          progress: idx,
+          maxProgress: pendingUploads.length,
+          indeterminate: false,
+          ongoing: true,
+          eventSlug: eventSlug || undefined,
+        });
 
         // Update status to uploading
         await updateQueueItem(upload.id, { status: 'uploading' });
@@ -138,6 +170,21 @@ class BackgroundSyncService {
           // Update progress
           const progress = Math.round(((i + 1) / totalChunks) * 100);
           await updateQueueItem(upload.id, { progress });
+          
+          // Update notification with chunk progress
+          if (i % 2 === 0 || i === totalChunks - 1) { // Update every 2 chunks or on last chunk
+            await ProgressNotification.show({
+              id: notificationId,
+              title: 'Uploading Photos',
+              body: `${idx} of ${pendingUploads.length} completed`,
+              largeBody: `Current file: ${upload.file.name} (${progress}%)`,
+              progress: idx,
+              maxProgress: pendingUploads.length,
+              indeterminate: false,
+              ongoing: true,
+              eventSlug: eventSlug || undefined,
+            });
+          }
         }
 
         // Complete upload
@@ -169,14 +216,48 @@ class BackgroundSyncService {
       }
     }
 
-    // Show notification if any uploads completed
-    if (successCount > 0 || failCount > 0) {
+    // Show completion notification
+    // First cancel the progress notification
+    await ProgressNotification.cancel({ id: notificationId });
+    
+    if (successCount > 0 && failCount === 0) {
+      // All succeeded
       await LocalNotifications.schedule({
         notifications: [{
-          title: 'Photo Upload Complete',
-          body: `${successCount} uploaded successfully${failCount > 0 ? `, ${failCount} failed` : ''}`,
-          id: Math.floor(Math.random() * 2147483647),
-          schedule: { at: new Date(Date.now() + 1000) },
+          title: '✓ Upload Complete',
+          body: `Successfully uploaded ${successCount} photo${successCount > 1 ? 's' : ''}. Tap to view.`,
+          id: notificationId,
+          ongoing: false,
+          actionTypeId: 'VIEW_EVENT',
+          extra: {
+            eventSlug: eventSlug,
+            action: 'view_event'
+          }
+        }],
+      });
+    } else if (successCount > 0 && failCount > 0) {
+      // Partial success
+      await LocalNotifications.schedule({
+        notifications: [{
+          title: 'Upload Completed',
+          body: `${successCount} uploaded, ${failCount} failed. Tap to view.`,
+          id: notificationId,
+          ongoing: false,
+          actionTypeId: 'VIEW_EVENT',
+          extra: {
+            eventSlug: eventSlug,
+            action: 'view_event'
+          }
+        }],
+      });
+    } else if (failCount > 0) {
+      // All failed
+      await LocalNotifications.schedule({
+        notifications: [{
+          title: '✗ Upload Failed',
+          body: `Failed to upload ${failCount} photo${failCount > 1 ? 's' : ''}. Check your connection and try again.`,
+          id: notificationId,
+          ongoing: false,
         }],
       });
     }

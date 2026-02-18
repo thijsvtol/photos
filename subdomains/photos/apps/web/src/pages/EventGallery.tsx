@@ -2,6 +2,7 @@ import React, { useEffect, useState, useRef } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { Upload, Copy, Check } from 'lucide-react';
 import Masonry from 'react-masonry-css';
+import { Capacitor } from '@capacitor/core';
 import Navbar from '../components/Navbar';
 import Footer from '../components/Footer';
 import PhotoCard from '../components/PhotoCard';
@@ -38,6 +39,7 @@ const EventGallery: React.FC = () => {
   const [activeDate, setActiveDate] = useState<string | null>(null);
   const dateRefs = useRef<Map<string, HTMLDivElement>>(new Map());
   const [isMobile, setIsMobile] = useState(false);
+  const isAndroid = Capacitor.getPlatform() === 'android';
   
   // Use custom hook for photo selection
   const {
@@ -582,7 +584,11 @@ const EventGallery: React.FC = () => {
               dates={dates} 
               activeDate={activeDate} 
               onDateClick={handleDateClick}
-              topOffset={selectedPhotos.size > 0 ? (isMobile ? 115 : 120) : 64}
+              topOffset={
+                selectedPhotos.size > 0 
+                  ? (isMobile ? (isAndroid ? 147 : 115) : (isAndroid ? 152 : 120))
+                  : (isAndroid ? 96 : 64)
+              }
             />
           </div>
         )}

@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { X } from 'lucide-react';
+import { Capacitor } from '@capacitor/core';
 
 const DISMISSED_KEY = 'android_app_prompt_dismissed';
 const PLAY_STORE_URL = 'https://play.google.com/store/apps/details?id=nl.thijsvtol.photos';
@@ -8,6 +9,11 @@ export const AndroidAppPrompt: React.FC = () => {
   const [isVisible, setIsVisible] = useState(false);
 
   useEffect(() => {
+    // Don't show prompt if already in the native app
+    if (Capacitor.isNativePlatform()) {
+      return;
+    }
+    
     // Check if user is on Android
     const isAndroid = /Android/i.test(navigator.userAgent);
     

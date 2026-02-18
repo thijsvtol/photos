@@ -1,3 +1,5 @@
+import { Capacitor } from '@capacitor/core';
+
 interface GallerySortFilterProps {
   sortBy: string;
   onSortChange: (value: string) => void;
@@ -20,11 +22,13 @@ export function GallerySortFilter({
   isAdmin = false,
   isDeleting = false,
 }: GallerySortFilterProps) {
+  const isAndroid = Capacitor.getPlatform() === 'android';
+  
   return (
     <>
       {/* Fixed action bar when photos are selected */}
       {selectedCount > 0 && (
-        <div className="fixed top-16 left-0 right-0 bg-indigo-600 dark:bg-indigo-700 shadow-lg z-40 border-b-2 border-indigo-700 dark:border-indigo-800">
+        <div className={`fixed ${isAndroid ? 'top-24' : 'top-16'} left-0 right-0 bg-indigo-600 dark:bg-indigo-700 shadow-lg z-40 border-b-2 border-indigo-700 dark:border-indigo-800`}>
           <div className="max-w-7xl mx-auto px-3 sm:px-4 lg:px-8">
             <div className="flex items-center justify-between py-2 sm:py-2.5 gap-3">
               <span className="text-white font-medium text-sm">
