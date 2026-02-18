@@ -22,7 +22,7 @@ app.use('/*', async (c, next) => {
   if (path.includes('/uploads/')) {
     await next();
   } else {
-    await requireAdmin(c, next);
+    return requireAdmin(c, next);
   }
 });
 
