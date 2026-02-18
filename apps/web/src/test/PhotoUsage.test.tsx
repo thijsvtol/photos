@@ -5,6 +5,8 @@ import { HelmetProvider } from 'react-helmet-async';
 import PhotoUsage from '../pages/PhotoUsage';
 import { getConfig } from '../config';
 
+const normalizeText = (text: string | null) => (text ?? '').replace(/\s+/g, ' ').trim();
+
 vi.mock('../contexts/AuthContext', () => ({
   useAuth: () => ({
     user: null,
@@ -95,8 +97,16 @@ describe('PhotoUsage Page', () => {
     
     const currentYear = new Date().getFullYear();
     const config = getConfig();
-    expect(screen.getByText(/Copyright Notice:/)).toBeInTheDocument();
-    expect(screen.getByText(new RegExp(`All photos on this website are © ${currentYear} ${config.copyrightHolder}`))).toBeInTheDocument();
+    const copyrightLabel = screen.getByText(/Copyright Notice:/);
+    expect(copyrightLabel).toBeInTheDocument();
+
+    const copyrightParagraph = copyrightLabel.closest('p');
+    expect(copyrightParagraph).not.toBeNull();
+
+    const text = normalizeText(copyrightParagraph?.textContent ?? null);
+    expect(text).toContain('All photos on this website are');
+    expect(text).toContain(`© ${currentYear}`);
+    expect(text).toContain(config.copyrightHolder);
   });
 
   it('has proper semantic heading hierarchy', () => {

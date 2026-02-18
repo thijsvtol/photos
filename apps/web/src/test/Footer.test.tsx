@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { render, screen } from '@testing-library/react';
 import { BrowserRouter } from 'react-router-dom';
 import Footer from '../components/Footer';
+import { getConfig } from '../config';
 
 describe('Footer Component', () => {
   it('renders copyright text with current year', () => {
@@ -12,7 +13,8 @@ describe('Footer Component', () => {
     );
     
     const currentYear = new Date().getFullYear();
-    expect(screen.getByText(new RegExp(`© ${currentYear} Thijs van Tol`))).toBeInTheDocument();
+    const config = getConfig();
+    expect(screen.getByText(new RegExp(`© ${currentYear} ${config.copyrightHolder}`))).toBeInTheDocument();
   });
 
   it('renders photo usage rights link', () => {
