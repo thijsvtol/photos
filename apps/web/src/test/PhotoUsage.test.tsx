@@ -3,6 +3,7 @@ import { render, screen } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { HelmetProvider } from 'react-helmet-async';
 import PhotoUsage from '../pages/PhotoUsage';
+import { getConfig } from '../config';
 
 vi.mock('../contexts/AuthContext', () => ({
   useAuth: () => ({
@@ -93,8 +94,9 @@ describe('PhotoUsage Page', () => {
     );
     
     const currentYear = new Date().getFullYear();
+    const config = getConfig();
     expect(screen.getByText(/Copyright Notice:/)).toBeInTheDocument();
-    expect(screen.getByText(new RegExp(`All photos on this website are © ${currentYear} Thijs van Tol`))).toBeInTheDocument();
+    expect(screen.getByText(new RegExp(`All photos on this website are © ${currentYear} ${config.copyrightHolder}`))).toBeInTheDocument();
   });
 
   it('has proper semantic heading hierarchy', () => {
