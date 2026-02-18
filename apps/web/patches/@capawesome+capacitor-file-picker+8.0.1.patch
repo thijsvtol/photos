@@ -1,0 +1,275 @@
+diff --git a/node_modules/@capawesome/capacitor-file-picker/android/build.gradle b/node_modules/@capawesome/capacitor-file-picker/android/build.gradle
+index e963d55..f6031d7 100644
+--- a/node_modules/@capawesome/capacitor-file-picker/android/build.gradle
++++ b/node_modules/@capawesome/capacitor-file-picker/android/build.gradle
+@@ -30,7 +30,7 @@ android {
+     buildTypes {
+         release {
+             minifyEnabled false
+-            proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
++            proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
+         }
+     }
+     lintOptions {
+diff --git a/node_modules/@capawesome/capacitor-file-picker/android/build/.transforms/bf11f01700c33a0090e07b6b0d2e6ed9/results.bin b/node_modules/@capawesome/capacitor-file-picker/android/build/.transforms/bf11f01700c33a0090e07b6b0d2e6ed9/results.bin
+new file mode 100644
+index 0000000..0d259dd
+--- /dev/null
++++ b/node_modules/@capawesome/capacitor-file-picker/android/build/.transforms/bf11f01700c33a0090e07b6b0d2e6ed9/results.bin
+@@ -0,0 +1 @@
++o/classes
+diff --git a/node_modules/@capawesome/capacitor-file-picker/android/build/.transforms/bf11f01700c33a0090e07b6b0d2e6ed9/transformed/classes/classes_dex/classes.dex b/node_modules/@capawesome/capacitor-file-picker/android/build/.transforms/bf11f01700c33a0090e07b6b0d2e6ed9/transformed/classes/classes_dex/classes.dex
+new file mode 100644
+index 0000000..29e2aa8
+Binary files /dev/null and b/node_modules/@capawesome/capacitor-file-picker/android/build/.transforms/bf11f01700c33a0090e07b6b0d2e6ed9/transformed/classes/classes_dex/classes.dex differ
+diff --git a/node_modules/@capawesome/capacitor-file-picker/android/build/.transforms/f42c5e7c5796dffa64e7348c023b5d9f/results.bin b/node_modules/@capawesome/capacitor-file-picker/android/build/.transforms/f42c5e7c5796dffa64e7348c023b5d9f/results.bin
+new file mode 100644
+index 0000000..7ed749e
+--- /dev/null
++++ b/node_modules/@capawesome/capacitor-file-picker/android/build/.transforms/f42c5e7c5796dffa64e7348c023b5d9f/results.bin
+@@ -0,0 +1 @@
++o/bundleLibRuntimeToDirDebug
+diff --git a/node_modules/@capawesome/capacitor-file-picker/android/build/.transforms/f42c5e7c5796dffa64e7348c023b5d9f/transformed/bundleLibRuntimeToDirDebug/bundleLibRuntimeToDirDebug_dex/io/capawesome/capacitorjs/plugins/filepicker/FilePicker.dex b/node_modules/@capawesome/capacitor-file-picker/android/build/.transforms/f42c5e7c5796dffa64e7348c023b5d9f/transformed/bundleLibRuntimeToDirDebug/bundleLibRuntimeToDirDebug_dex/io/capawesome/capacitorjs/plugins/filepicker/FilePicker.dex
+new file mode 100644
+index 0000000..d12f924
+Binary files /dev/null and b/node_modules/@capawesome/capacitor-file-picker/android/build/.transforms/f42c5e7c5796dffa64e7348c023b5d9f/transformed/bundleLibRuntimeToDirDebug/bundleLibRuntimeToDirDebug_dex/io/capawesome/capacitorjs/plugins/filepicker/FilePicker.dex differ
+diff --git a/node_modules/@capawesome/capacitor-file-picker/android/build/.transforms/f42c5e7c5796dffa64e7348c023b5d9f/transformed/bundleLibRuntimeToDirDebug/bundleLibRuntimeToDirDebug_dex/io/capawesome/capacitorjs/plugins/filepicker/FilePickerPlugin.dex b/node_modules/@capawesome/capacitor-file-picker/android/build/.transforms/f42c5e7c5796dffa64e7348c023b5d9f/transformed/bundleLibRuntimeToDirDebug/bundleLibRuntimeToDirDebug_dex/io/capawesome/capacitorjs/plugins/filepicker/FilePickerPlugin.dex
+new file mode 100644
+index 0000000..4c45b10
+Binary files /dev/null and b/node_modules/@capawesome/capacitor-file-picker/android/build/.transforms/f42c5e7c5796dffa64e7348c023b5d9f/transformed/bundleLibRuntimeToDirDebug/bundleLibRuntimeToDirDebug_dex/io/capawesome/capacitorjs/plugins/filepicker/FilePickerPlugin.dex differ
+diff --git a/node_modules/@capawesome/capacitor-file-picker/android/build/.transforms/f42c5e7c5796dffa64e7348c023b5d9f/transformed/bundleLibRuntimeToDirDebug/bundleLibRuntimeToDirDebug_dex/io/capawesome/capacitorjs/plugins/filepicker/FileResolution.dex b/node_modules/@capawesome/capacitor-file-picker/android/build/.transforms/f42c5e7c5796dffa64e7348c023b5d9f/transformed/bundleLibRuntimeToDirDebug/bundleLibRuntimeToDirDebug_dex/io/capawesome/capacitorjs/plugins/filepicker/FileResolution.dex
+new file mode 100644
+index 0000000..7971d9c
+Binary files /dev/null and b/node_modules/@capawesome/capacitor-file-picker/android/build/.transforms/f42c5e7c5796dffa64e7348c023b5d9f/transformed/bundleLibRuntimeToDirDebug/bundleLibRuntimeToDirDebug_dex/io/capawesome/capacitorjs/plugins/filepicker/FileResolution.dex differ
+diff --git a/node_modules/@capawesome/capacitor-file-picker/android/build/.transforms/f42c5e7c5796dffa64e7348c023b5d9f/transformed/bundleLibRuntimeToDirDebug/desugar_graph.bin b/node_modules/@capawesome/capacitor-file-picker/android/build/.transforms/f42c5e7c5796dffa64e7348c023b5d9f/transformed/bundleLibRuntimeToDirDebug/desugar_graph.bin
+new file mode 100644
+index 0000000..601f245
+Binary files /dev/null and b/node_modules/@capawesome/capacitor-file-picker/android/build/.transforms/f42c5e7c5796dffa64e7348c023b5d9f/transformed/bundleLibRuntimeToDirDebug/desugar_graph.bin differ
+diff --git a/node_modules/@capawesome/capacitor-file-picker/android/build/intermediates/aapt_friendly_merged_manifests/debug/processDebugManifest/aapt/AndroidManifest.xml b/node_modules/@capawesome/capacitor-file-picker/android/build/intermediates/aapt_friendly_merged_manifests/debug/processDebugManifest/aapt/AndroidManifest.xml
+new file mode 100644
+index 0000000..eb79cc8
+--- /dev/null
++++ b/node_modules/@capawesome/capacitor-file-picker/android/build/intermediates/aapt_friendly_merged_manifests/debug/processDebugManifest/aapt/AndroidManifest.xml
+@@ -0,0 +1,7 @@
++<?xml version="1.0" encoding="utf-8"?>
++<manifest xmlns:android="http://schemas.android.com/apk/res/android"
++    package="io.capawesome.capacitorjs.plugins.filepicker" >
++
++    <uses-sdk android:minSdkVersion="26" />
++
++</manifest>
+\ No newline at end of file
+diff --git a/node_modules/@capawesome/capacitor-file-picker/android/build/intermediates/aapt_friendly_merged_manifests/debug/processDebugManifest/aapt/output-metadata.json b/node_modules/@capawesome/capacitor-file-picker/android/build/intermediates/aapt_friendly_merged_manifests/debug/processDebugManifest/aapt/output-metadata.json
+new file mode 100644
+index 0000000..eac0f88
+--- /dev/null
++++ b/node_modules/@capawesome/capacitor-file-picker/android/build/intermediates/aapt_friendly_merged_manifests/debug/processDebugManifest/aapt/output-metadata.json
+@@ -0,0 +1,18 @@
++{
++  "version": 3,
++  "artifactType": {
++    "type": "AAPT_FRIENDLY_MERGED_MANIFESTS",
++    "kind": "Directory"
++  },
++  "applicationId": "io.capawesome.capacitorjs.plugins.filepicker",
++  "variantName": "debug",
++  "elements": [
++    {
++      "type": "SINGLE",
++      "filters": [],
++      "attributes": [],
++      "outputFile": "AndroidManifest.xml"
++    }
++  ],
++  "elementType": "File"
++}
+\ No newline at end of file
+diff --git a/node_modules/@capawesome/capacitor-file-picker/android/build/intermediates/aar_metadata/debug/writeDebugAarMetadata/aar-metadata.properties b/node_modules/@capawesome/capacitor-file-picker/android/build/intermediates/aar_metadata/debug/writeDebugAarMetadata/aar-metadata.properties
+new file mode 100644
+index 0000000..ba000c0
+--- /dev/null
++++ b/node_modules/@capawesome/capacitor-file-picker/android/build/intermediates/aar_metadata/debug/writeDebugAarMetadata/aar-metadata.properties
+@@ -0,0 +1,6 @@
++aarFormatVersion=1.0
++aarMetadataVersion=1.0
++minCompileSdk=36
++minCompileSdkExtension=0
++minAndroidGradlePluginVersion=1.0.0
++coreLibraryDesugaringEnabled=false
+diff --git a/node_modules/@capawesome/capacitor-file-picker/android/build/intermediates/annotation_processor_list/debug/javaPreCompileDebug/annotationProcessors.json b/node_modules/@capawesome/capacitor-file-picker/android/build/intermediates/annotation_processor_list/debug/javaPreCompileDebug/annotationProcessors.json
+new file mode 100644
+index 0000000..9e26dfe
+--- /dev/null
++++ b/node_modules/@capawesome/capacitor-file-picker/android/build/intermediates/annotation_processor_list/debug/javaPreCompileDebug/annotationProcessors.json
+@@ -0,0 +1 @@
++{}
+\ No newline at end of file
+diff --git a/node_modules/@capawesome/capacitor-file-picker/android/build/intermediates/compile_library_classes_jar/debug/bundleLibCompileToJarDebug/classes.jar b/node_modules/@capawesome/capacitor-file-picker/android/build/intermediates/compile_library_classes_jar/debug/bundleLibCompileToJarDebug/classes.jar
+new file mode 100644
+index 0000000..95a7fca
+Binary files /dev/null and b/node_modules/@capawesome/capacitor-file-picker/android/build/intermediates/compile_library_classes_jar/debug/bundleLibCompileToJarDebug/classes.jar differ
+diff --git a/node_modules/@capawesome/capacitor-file-picker/android/build/intermediates/compile_r_class_jar/debug/generateDebugRFile/R.jar b/node_modules/@capawesome/capacitor-file-picker/android/build/intermediates/compile_r_class_jar/debug/generateDebugRFile/R.jar
+new file mode 100644
+index 0000000..29082b4
+Binary files /dev/null and b/node_modules/@capawesome/capacitor-file-picker/android/build/intermediates/compile_r_class_jar/debug/generateDebugRFile/R.jar differ
+diff --git a/node_modules/@capawesome/capacitor-file-picker/android/build/intermediates/compile_symbol_list/debug/generateDebugRFile/R.txt b/node_modules/@capawesome/capacitor-file-picker/android/build/intermediates/compile_symbol_list/debug/generateDebugRFile/R.txt
+new file mode 100644
+index 0000000..e69de29
+diff --git a/node_modules/@capawesome/capacitor-file-picker/android/build/intermediates/incremental/debug/packageDebugResources/compile-file-map.properties b/node_modules/@capawesome/capacitor-file-picker/android/build/intermediates/incremental/debug/packageDebugResources/compile-file-map.properties
+new file mode 100644
+index 0000000..3378181
+--- /dev/null
++++ b/node_modules/@capawesome/capacitor-file-picker/android/build/intermediates/incremental/debug/packageDebugResources/compile-file-map.properties
+@@ -0,0 +1 @@
++#Wed Feb 18 22:00:43 CET 2026
+diff --git a/node_modules/@capawesome/capacitor-file-picker/android/build/intermediates/incremental/debug/packageDebugResources/merger.xml b/node_modules/@capawesome/capacitor-file-picker/android/build/intermediates/incremental/debug/packageDebugResources/merger.xml
+new file mode 100644
+index 0000000..0c5e3eb
+--- /dev/null
++++ b/node_modules/@capawesome/capacitor-file-picker/android/build/intermediates/incremental/debug/packageDebugResources/merger.xml
+@@ -0,0 +1,2 @@
++<?xml version="1.0" encoding="utf-8"?>
++<merger version="3"><dataSet aapt-namespace="http://schemas.android.com/apk/res-auto" config="main$Generated" generated="true" ignore_pattern="!.svn:!.git:!.ds_store:!*.scc:.*:&lt;dir>_*:!CVS:!thumbs.db:!picasa.ini:!*~"><source path="/Users/pnl0nr50/Library/CloudStorage/OneDrive-AholdDelhaize.com/Documents/github/thijsvtol/thijsvtol-site/apps/web/node_modules/@capawesome/capacitor-file-picker/android/src/main/res"/></dataSet><dataSet aapt-namespace="http://schemas.android.com/apk/res-auto" config="main" generated-set="main$Generated" ignore_pattern="!.svn:!.git:!.ds_store:!*.scc:.*:&lt;dir>_*:!CVS:!thumbs.db:!picasa.ini:!*~:!&lt;dir>navigation"><source path="/Users/pnl0nr50/Library/CloudStorage/OneDrive-AholdDelhaize.com/Documents/github/thijsvtol/thijsvtol-site/apps/web/node_modules/@capawesome/capacitor-file-picker/android/src/main/res"/></dataSet><dataSet aapt-namespace="http://schemas.android.com/apk/res-auto" config="debug$Generated" generated="true" ignore_pattern="!.svn:!.git:!.ds_store:!*.scc:.*:&lt;dir>_*:!CVS:!thumbs.db:!picasa.ini:!*~"><source path="/Users/pnl0nr50/Library/CloudStorage/OneDrive-AholdDelhaize.com/Documents/github/thijsvtol/thijsvtol-site/apps/web/node_modules/@capawesome/capacitor-file-picker/android/src/debug/res"/></dataSet><dataSet aapt-namespace="http://schemas.android.com/apk/res-auto" config="debug" generated-set="debug$Generated" ignore_pattern="!.svn:!.git:!.ds_store:!*.scc:.*:&lt;dir>_*:!CVS:!thumbs.db:!picasa.ini:!*~:!&lt;dir>navigation"><source path="/Users/pnl0nr50/Library/CloudStorage/OneDrive-AholdDelhaize.com/Documents/github/thijsvtol/thijsvtol-site/apps/web/node_modules/@capawesome/capacitor-file-picker/android/src/debug/res"/></dataSet><dataSet aapt-namespace="http://schemas.android.com/apk/res-auto" config="generated$Generated" generated="true" ignore_pattern="!.svn:!.git:!.ds_store:!*.scc:.*:&lt;dir>_*:!CVS:!thumbs.db:!picasa.ini:!*~"/><dataSet aapt-namespace="http://schemas.android.com/apk/res-auto" config="generated" generated-set="generated$Generated" ignore_pattern="!.svn:!.git:!.ds_store:!*.scc:.*:&lt;dir>_*:!CVS:!thumbs.db:!picasa.ini:!*~:!&lt;dir>navigation"/><mergedItems/></merger>
+\ No newline at end of file
+diff --git a/node_modules/@capawesome/capacitor-file-picker/android/build/intermediates/incremental/mergeDebugAssets/merger.xml b/node_modules/@capawesome/capacitor-file-picker/android/build/intermediates/incremental/mergeDebugAssets/merger.xml
+new file mode 100644
+index 0000000..b8d649a
+--- /dev/null
++++ b/node_modules/@capawesome/capacitor-file-picker/android/build/intermediates/incremental/mergeDebugAssets/merger.xml
+@@ -0,0 +1,2 @@
++<?xml version="1.0" encoding="utf-8"?>
++<merger version="3"><dataSet config="main" ignore_pattern="!.svn:!.git:!.ds_store:!*.scc:.*:&lt;dir>_*:!CVS:!thumbs.db:!picasa.ini:!*~"><source path="/Users/pnl0nr50/Library/CloudStorage/OneDrive-AholdDelhaize.com/Documents/github/thijsvtol/thijsvtol-site/apps/web/node_modules/@capawesome/capacitor-file-picker/android/src/main/assets"/></dataSet><dataSet config="debug" ignore_pattern="!.svn:!.git:!.ds_store:!*.scc:.*:&lt;dir>_*:!CVS:!thumbs.db:!picasa.ini:!*~"><source path="/Users/pnl0nr50/Library/CloudStorage/OneDrive-AholdDelhaize.com/Documents/github/thijsvtol/thijsvtol-site/apps/web/node_modules/@capawesome/capacitor-file-picker/android/src/debug/assets"/></dataSet></merger>
+\ No newline at end of file
+diff --git a/node_modules/@capawesome/capacitor-file-picker/android/build/intermediates/incremental/mergeDebugJniLibFolders/merger.xml b/node_modules/@capawesome/capacitor-file-picker/android/build/intermediates/incremental/mergeDebugJniLibFolders/merger.xml
+new file mode 100644
+index 0000000..5fb9d20
+--- /dev/null
++++ b/node_modules/@capawesome/capacitor-file-picker/android/build/intermediates/incremental/mergeDebugJniLibFolders/merger.xml
+@@ -0,0 +1,2 @@
++<?xml version="1.0" encoding="utf-8"?>
++<merger version="3"><dataSet config="main" ignore_pattern="!.svn:!.git:!.ds_store:!*.scc:.*:&lt;dir>_*:!CVS:!thumbs.db:!picasa.ini:!*~"><source path="/Users/pnl0nr50/Library/CloudStorage/OneDrive-AholdDelhaize.com/Documents/github/thijsvtol/thijsvtol-site/apps/web/node_modules/@capawesome/capacitor-file-picker/android/src/main/jniLibs"/></dataSet><dataSet config="debug" ignore_pattern="!.svn:!.git:!.ds_store:!*.scc:.*:&lt;dir>_*:!CVS:!thumbs.db:!picasa.ini:!*~"><source path="/Users/pnl0nr50/Library/CloudStorage/OneDrive-AholdDelhaize.com/Documents/github/thijsvtol/thijsvtol-site/apps/web/node_modules/@capawesome/capacitor-file-picker/android/src/debug/jniLibs"/></dataSet></merger>
+\ No newline at end of file
+diff --git a/node_modules/@capawesome/capacitor-file-picker/android/build/intermediates/javac/debug/compileDebugJavaWithJavac/classes/io/capawesome/capacitorjs/plugins/filepicker/FilePicker.class b/node_modules/@capawesome/capacitor-file-picker/android/build/intermediates/javac/debug/compileDebugJavaWithJavac/classes/io/capawesome/capacitorjs/plugins/filepicker/FilePicker.class
+new file mode 100644
+index 0000000..287db78
+Binary files /dev/null and b/node_modules/@capawesome/capacitor-file-picker/android/build/intermediates/javac/debug/compileDebugJavaWithJavac/classes/io/capawesome/capacitorjs/plugins/filepicker/FilePicker.class differ
+diff --git a/node_modules/@capawesome/capacitor-file-picker/android/build/intermediates/javac/debug/compileDebugJavaWithJavac/classes/io/capawesome/capacitorjs/plugins/filepicker/FilePickerPlugin.class b/node_modules/@capawesome/capacitor-file-picker/android/build/intermediates/javac/debug/compileDebugJavaWithJavac/classes/io/capawesome/capacitorjs/plugins/filepicker/FilePickerPlugin.class
+new file mode 100644
+index 0000000..6d97cf3
+Binary files /dev/null and b/node_modules/@capawesome/capacitor-file-picker/android/build/intermediates/javac/debug/compileDebugJavaWithJavac/classes/io/capawesome/capacitorjs/plugins/filepicker/FilePickerPlugin.class differ
+diff --git a/node_modules/@capawesome/capacitor-file-picker/android/build/intermediates/javac/debug/compileDebugJavaWithJavac/classes/io/capawesome/capacitorjs/plugins/filepicker/FileResolution.class b/node_modules/@capawesome/capacitor-file-picker/android/build/intermediates/javac/debug/compileDebugJavaWithJavac/classes/io/capawesome/capacitorjs/plugins/filepicker/FileResolution.class
+new file mode 100644
+index 0000000..401332d
+Binary files /dev/null and b/node_modules/@capawesome/capacitor-file-picker/android/build/intermediates/javac/debug/compileDebugJavaWithJavac/classes/io/capawesome/capacitorjs/plugins/filepicker/FileResolution.class differ
+diff --git a/node_modules/@capawesome/capacitor-file-picker/android/build/intermediates/local_only_symbol_list/debug/parseDebugLocalResources/R-def.txt b/node_modules/@capawesome/capacitor-file-picker/android/build/intermediates/local_only_symbol_list/debug/parseDebugLocalResources/R-def.txt
+new file mode 100644
+index 0000000..78ac5b8
+--- /dev/null
++++ b/node_modules/@capawesome/capacitor-file-picker/android/build/intermediates/local_only_symbol_list/debug/parseDebugLocalResources/R-def.txt
+@@ -0,0 +1,2 @@
++R_DEF: Internal format may change without notice
++local
+diff --git a/node_modules/@capawesome/capacitor-file-picker/android/build/intermediates/manifest_merge_blame_file/debug/processDebugManifest/manifest-merger-blame-debug-report.txt b/node_modules/@capawesome/capacitor-file-picker/android/build/intermediates/manifest_merge_blame_file/debug/processDebugManifest/manifest-merger-blame-debug-report.txt
+new file mode 100644
+index 0000000..027c7cb
+--- /dev/null
++++ b/node_modules/@capawesome/capacitor-file-picker/android/build/intermediates/manifest_merge_blame_file/debug/processDebugManifest/manifest-merger-blame-debug-report.txt
+@@ -0,0 +1,7 @@
++1<?xml version="1.0" encoding="utf-8"?>
++2<manifest xmlns:android="http://schemas.android.com/apk/res/android"
++3    package="io.capawesome.capacitorjs.plugins.filepicker" >
++4
++5    <uses-sdk android:minSdkVersion="26" />
++6
++7</manifest>
+diff --git a/node_modules/@capawesome/capacitor-file-picker/android/build/intermediates/merged_manifest/debug/processDebugManifest/AndroidManifest.xml b/node_modules/@capawesome/capacitor-file-picker/android/build/intermediates/merged_manifest/debug/processDebugManifest/AndroidManifest.xml
+new file mode 100644
+index 0000000..eb79cc8
+--- /dev/null
++++ b/node_modules/@capawesome/capacitor-file-picker/android/build/intermediates/merged_manifest/debug/processDebugManifest/AndroidManifest.xml
+@@ -0,0 +1,7 @@
++<?xml version="1.0" encoding="utf-8"?>
++<manifest xmlns:android="http://schemas.android.com/apk/res/android"
++    package="io.capawesome.capacitorjs.plugins.filepicker" >
++
++    <uses-sdk android:minSdkVersion="26" />
++
++</manifest>
+\ No newline at end of file
+diff --git a/node_modules/@capawesome/capacitor-file-picker/android/build/intermediates/navigation_json/debug/extractDeepLinksDebug/navigation.json b/node_modules/@capawesome/capacitor-file-picker/android/build/intermediates/navigation_json/debug/extractDeepLinksDebug/navigation.json
+new file mode 100644
+index 0000000..0637a08
+--- /dev/null
++++ b/node_modules/@capawesome/capacitor-file-picker/android/build/intermediates/navigation_json/debug/extractDeepLinksDebug/navigation.json
+@@ -0,0 +1 @@
++[]
+\ No newline at end of file
+diff --git a/node_modules/@capawesome/capacitor-file-picker/android/build/intermediates/nested_resources_validation_report/debug/generateDebugResources/nestedResourcesValidationReport.txt b/node_modules/@capawesome/capacitor-file-picker/android/build/intermediates/nested_resources_validation_report/debug/generateDebugResources/nestedResourcesValidationReport.txt
+new file mode 100644
+index 0000000..08f4ebe
+--- /dev/null
++++ b/node_modules/@capawesome/capacitor-file-picker/android/build/intermediates/nested_resources_validation_report/debug/generateDebugResources/nestedResourcesValidationReport.txt
+@@ -0,0 +1 @@
++0 Warning/Error
+\ No newline at end of file
+diff --git a/node_modules/@capawesome/capacitor-file-picker/android/build/intermediates/runtime_library_classes_dir/debug/bundleLibRuntimeToDirDebug/io/capawesome/capacitorjs/plugins/filepicker/FilePicker.class b/node_modules/@capawesome/capacitor-file-picker/android/build/intermediates/runtime_library_classes_dir/debug/bundleLibRuntimeToDirDebug/io/capawesome/capacitorjs/plugins/filepicker/FilePicker.class
+new file mode 100644
+index 0000000..287db78
+Binary files /dev/null and b/node_modules/@capawesome/capacitor-file-picker/android/build/intermediates/runtime_library_classes_dir/debug/bundleLibRuntimeToDirDebug/io/capawesome/capacitorjs/plugins/filepicker/FilePicker.class differ
+diff --git a/node_modules/@capawesome/capacitor-file-picker/android/build/intermediates/runtime_library_classes_dir/debug/bundleLibRuntimeToDirDebug/io/capawesome/capacitorjs/plugins/filepicker/FilePickerPlugin.class b/node_modules/@capawesome/capacitor-file-picker/android/build/intermediates/runtime_library_classes_dir/debug/bundleLibRuntimeToDirDebug/io/capawesome/capacitorjs/plugins/filepicker/FilePickerPlugin.class
+new file mode 100644
+index 0000000..6d97cf3
+Binary files /dev/null and b/node_modules/@capawesome/capacitor-file-picker/android/build/intermediates/runtime_library_classes_dir/debug/bundleLibRuntimeToDirDebug/io/capawesome/capacitorjs/plugins/filepicker/FilePickerPlugin.class differ
+diff --git a/node_modules/@capawesome/capacitor-file-picker/android/build/intermediates/runtime_library_classes_dir/debug/bundleLibRuntimeToDirDebug/io/capawesome/capacitorjs/plugins/filepicker/FileResolution.class b/node_modules/@capawesome/capacitor-file-picker/android/build/intermediates/runtime_library_classes_dir/debug/bundleLibRuntimeToDirDebug/io/capawesome/capacitorjs/plugins/filepicker/FileResolution.class
+new file mode 100644
+index 0000000..401332d
+Binary files /dev/null and b/node_modules/@capawesome/capacitor-file-picker/android/build/intermediates/runtime_library_classes_dir/debug/bundleLibRuntimeToDirDebug/io/capawesome/capacitorjs/plugins/filepicker/FileResolution.class differ
+diff --git a/node_modules/@capawesome/capacitor-file-picker/android/build/intermediates/runtime_library_classes_jar/debug/bundleLibRuntimeToJarDebug/classes.jar b/node_modules/@capawesome/capacitor-file-picker/android/build/intermediates/runtime_library_classes_jar/debug/bundleLibRuntimeToJarDebug/classes.jar
+new file mode 100644
+index 0000000..77af02c
+Binary files /dev/null and b/node_modules/@capawesome/capacitor-file-picker/android/build/intermediates/runtime_library_classes_jar/debug/bundleLibRuntimeToJarDebug/classes.jar differ
+diff --git a/node_modules/@capawesome/capacitor-file-picker/android/build/intermediates/symbol_list_with_package_name/debug/generateDebugRFile/package-aware-r.txt b/node_modules/@capawesome/capacitor-file-picker/android/build/intermediates/symbol_list_with_package_name/debug/generateDebugRFile/package-aware-r.txt
+new file mode 100644
+index 0000000..66a5e75
+--- /dev/null
++++ b/node_modules/@capawesome/capacitor-file-picker/android/build/intermediates/symbol_list_with_package_name/debug/generateDebugRFile/package-aware-r.txt
+@@ -0,0 +1 @@
++io.capawesome.capacitorjs.plugins.filepicker
+diff --git a/node_modules/@capawesome/capacitor-file-picker/android/build/outputs/logs/manifest-merger-debug-report.txt b/node_modules/@capawesome/capacitor-file-picker/android/build/outputs/logs/manifest-merger-debug-report.txt
+new file mode 100644
+index 0000000..6799fac
+--- /dev/null
++++ b/node_modules/@capawesome/capacitor-file-picker/android/build/outputs/logs/manifest-merger-debug-report.txt
+@@ -0,0 +1,16 @@
++-- Merging decision tree log ---
++manifest
++ADDED from /Users/pnl0nr50/Library/CloudStorage/OneDrive-AholdDelhaize.com/Documents/github/thijsvtol/thijsvtol-site/apps/web/node_modules/@capawesome/capacitor-file-picker/android/src/main/AndroidManifest.xml:1:1-2:12
++INJECTED from /Users/pnl0nr50/Library/CloudStorage/OneDrive-AholdDelhaize.com/Documents/github/thijsvtol/thijsvtol-site/apps/web/node_modules/@capawesome/capacitor-file-picker/android/src/main/AndroidManifest.xml:1:1-2:12
++	package
++		INJECTED from /Users/pnl0nr50/Library/CloudStorage/OneDrive-AholdDelhaize.com/Documents/github/thijsvtol/thijsvtol-site/apps/web/node_modules/@capawesome/capacitor-file-picker/android/src/main/AndroidManifest.xml
++	xmlns:android
++		ADDED from /Users/pnl0nr50/Library/CloudStorage/OneDrive-AholdDelhaize.com/Documents/github/thijsvtol/thijsvtol-site/apps/web/node_modules/@capawesome/capacitor-file-picker/android/src/main/AndroidManifest.xml:1:11-69
++uses-sdk
++INJECTED from /Users/pnl0nr50/Library/CloudStorage/OneDrive-AholdDelhaize.com/Documents/github/thijsvtol/thijsvtol-site/apps/web/node_modules/@capawesome/capacitor-file-picker/android/src/main/AndroidManifest.xml reason: use-sdk injection requested
++INJECTED from /Users/pnl0nr50/Library/CloudStorage/OneDrive-AholdDelhaize.com/Documents/github/thijsvtol/thijsvtol-site/apps/web/node_modules/@capawesome/capacitor-file-picker/android/src/main/AndroidManifest.xml
++INJECTED from /Users/pnl0nr50/Library/CloudStorage/OneDrive-AholdDelhaize.com/Documents/github/thijsvtol/thijsvtol-site/apps/web/node_modules/@capawesome/capacitor-file-picker/android/src/main/AndroidManifest.xml
++	android:targetSdkVersion
++		INJECTED from /Users/pnl0nr50/Library/CloudStorage/OneDrive-AholdDelhaize.com/Documents/github/thijsvtol/thijsvtol-site/apps/web/node_modules/@capawesome/capacitor-file-picker/android/src/main/AndroidManifest.xml
++	android:minSdkVersion
++		INJECTED from /Users/pnl0nr50/Library/CloudStorage/OneDrive-AholdDelhaize.com/Documents/github/thijsvtol/thijsvtol-site/apps/web/node_modules/@capawesome/capacitor-file-picker/android/src/main/AndroidManifest.xml
+diff --git a/node_modules/@capawesome/capacitor-file-picker/android/build/tmp/compileDebugJavaWithJavac/previous-compilation-data.bin b/node_modules/@capawesome/capacitor-file-picker/android/build/tmp/compileDebugJavaWithJavac/previous-compilation-data.bin
+new file mode 100644
+index 0000000..105d0b0
+Binary files /dev/null and b/node_modules/@capawesome/capacitor-file-picker/android/build/tmp/compileDebugJavaWithJavac/previous-compilation-data.bin differ
+diff --git a/node_modules/@capawesome/capacitor-file-picker/android/src/main/java/io/capawesome/capacitorjs/plugins/filepicker/FilePickerPlugin.java b/node_modules/@capawesome/capacitor-file-picker/android/src/main/java/io/capawesome/capacitorjs/plugins/filepicker/FilePickerPlugin.java
+index 57ac7be..e395ed5 100644
+--- a/node_modules/@capawesome/capacitor-file-picker/android/src/main/java/io/capawesome/capacitorjs/plugins/filepicker/FilePickerPlugin.java
++++ b/node_modules/@capawesome/capacitor-file-picker/android/src/main/java/io/capawesome/capacitorjs/plugins/filepicker/FilePickerPlugin.java
+@@ -267,6 +267,7 @@ public class FilePickerPlugin extends Plugin {
+         }
+     }
+ 
++    @SuppressWarnings("deprecation")
+     private JSObject createPickFilesResult(@Nullable Intent data, boolean readData) {
+         JSObject callResult = new JSObject();
+         List<JSObject> filesResultList = new ArrayList<>();

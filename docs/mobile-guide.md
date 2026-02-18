@@ -52,6 +52,8 @@ npx cap sync
 
 This copies the web build to iOS and Android folders and updates native dependencies.
 
+> Run Capacitor commands from `apps/web` (not from repo root with `--prefix`) so platform resolution works correctly.
+
 ## Running the Apps
 
 ### iOS
@@ -239,6 +241,13 @@ npx cap sync
 # Reinstall Capacitor plugins
 npm install @capacitor/core @capacitor/filesystem @capacitor/local-notifications @capacitor/network @capawesome/capacitor-background-task
 npx cap sync
+```
+
+If Android build fails in a Capacitor plugin with `proguard-android.txt is no longer supported`, this project uses `patch-package` to apply a persistent fix for `@capacitor/haptics` after install.
+
+```bash
+# Re-apply all patches manually (also runs automatically on npm install)
+npx patch-package
 ```
 
 ## File Structure

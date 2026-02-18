@@ -7,7 +7,7 @@ buildscript {
         mavenCentral()
     }
     dependencies {
-        classpath 'com.android.tools.build:gradle:8.13.0'
+        classpath 'com.android.tools.build:gradle:9.0.1'
         classpath 'com.google.gms:google-services:4.4.4'
 
         // NOTE: Do not place your application dependencies here; they belong
@@ -21,6 +21,22 @@ allprojects {
     repositories {
         google()
         mavenCentral()
+    }
+}
+
+subprojects { project ->
+    if (project.name == 'capawesome-capacitor-file-picker') {
+        tasks.withType(JavaCompile).configureEach {
+            options.compilerArgs += ['-Xlint:-deprecation']
+        }
+    }
+
+    if (project.name == 'capacitor-filesystem') {
+        tasks.matching { it.name.toLowerCase().contains('compile') && it.name.toLowerCase().contains('kotlin') }.configureEach {
+            if (it.hasProperty('kotlinOptions')) {
+                it.kotlinOptions.suppressWarnings = true
+            }
+        }
     }
 }
 
