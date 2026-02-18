@@ -1,4 +1,5 @@
 import React, { createContext, useContext, useState, useCallback } from 'react';
+import { createPortal } from 'react-dom';
 import { CheckCircle, AlertCircle, Info, X } from 'lucide-react';
 
 type ToastType = 'success' | 'error' | 'info';
@@ -52,18 +53,23 @@ export const ToastProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   return (
     <ToastContext.Provider value={{ showToast, showSuccess, showError, showInfo }}>
       {children}
-      
+
       {/* Toast Container */}
-      <div className="fixed top-0 left-0 right-0 z-[9999] flex flex-col items-center sm:items-end gap-2 px-3 pb-3 pt-safe-top sm:px-4 sm:pt-4 pointer-events-none">
-        {toasts.map(toast => (
-          <div
-            key={toast.id}
-            className="pointer-events-auto animate-in slide-in-from-top-2 duration-300 w-full sm:w-auto max-w-sm"
-          >
-            <ToastItem toast={toast} onClose={() => removeToast(toast.id)} />
-          </div>
-        ))}
-      </div>
+      {typeof document !== 'undefined'
+        ? createPortal(
+            <div className="fixed top-0 left-0 right-0 z-[99999] flex flex-col items-center sm:items-end gap-2 px-3 pb-3 pt-safe-top sm:px-4 sm:pt-4 pointer-events-none">
+              {toasts.map(toast => (
+                <div
+                  key={toast.id}
+                  className="pointer-events-auto animate-in slide-in-from-top-2 duration-300 w-full sm:w-auto max-w-sm"
+                >
+                  <ToastItem toast={toast} onClose={() => removeToast(toast.id)} />
+                </div>
+              ))}
+            </div>,
+            document.body
+          )
+        : null}
     </ToastContext.Provider>
   );
 };
@@ -83,11 +89,11 @@ const ToastItem: React.FC<{ toast: Toast; onClose: () => void }> = ({ toast, onC
   const getStyles = () => {
     switch (toast.type) {
       case 'success':
-        return 'bg-green-50 dark:bg-green-900/20 border-green-200 dark:border-green-800';
+        return 'bg-green-50 dark:bg-green-900 border-green-200 dark:border-green-800';
       case 'error':
-        return 'bg-red-50 dark:bg-red-900/20 border-red-200 dark:border-red-800';
+        return 'bg-red-50 dark:bg-red-900 border-red-200 dark:border-red-800';
       case 'info':
-        return 'bg-blue-50 dark:bg-blue-900/20 border-blue-200 dark:border-blue-800';
+        return 'bg-blue-50 dark:bg-blue-900 border-blue-200 dark:border-blue-800';
     }
   };
 
