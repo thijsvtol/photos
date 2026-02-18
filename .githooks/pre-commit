@@ -1,0 +1,12 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+repo_root="$(git rev-parse --show-toplevel)"
+cd "$repo_root"
+
+echo "Running pre-commit checks..."
+
+npm run validate
+npm --prefix apps/web run lint
+npm run test:all
+

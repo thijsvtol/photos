@@ -1,44 +1,27 @@
 # Mobile OAuth Deployment Guide
 
-## What Was Implemented
+## Overview
 
-### Frontend (Mobile App)
-- ✅ Deep link handling: `photos://auth/callback`
-- ✅ OAuth flow with browser authentication
-- ✅ Secure token storage using Capacitor Preferences
-- ✅ Automatic Bearer token injection in API requests
-- ✅ AuthContext updated for mobile login flow
-
-### Backend (Cloudflare Worker)
-- ✅ New route: `/mobile-auth` for OAuth token generation
-- ✅ Bearer token verification in `auth.ts`
-- ✅ JWT generation with 30-day expiration
-- ✅ Updated middleware to accept both Cloudflare Access cookies and Bearer tokens
-
-## Local Development Setup
-
-JWT_SECRET has been added to `.dev.vars`:
-```
-JWT_SECRET=CNavn7dPjCywA9zh/S6GE6toPqaX2ZzqywZSJ9Dh+Xo=
-```
+This guide explains how to set up OAuth authentication for the mobile app (Android). The mobile app uses Cloudflare Access for authentication with deep linking support.
 
 ## Production Deployment
 
 ### 1. Set JWT_SECRET in Cloudflare Worker
 
-From the photos directory, run:
+Generate a secure random JWT secret and set it in your Cloudflare Worker:
 
 ```bash
-cd subdomains/photos
+cd apps/worker
 
-# Set the JWT secret in production
-echo "CNavn7dPjCywA9zh/S6GE6toPqaX2ZzqywZSJ9Dh+Xo=" | npx wrangler secret put JWT_SECRET
+# Generate a secure random secret (min 32 characters)
+wrangler secret put JWT_SECRET
+# Paste your secure random string when prompted
 ```
 
 Or use the Cloudflare dashboard:
-1. Go to Workers & Pages > photos-worker
+1. Go to Workers & Pages > your-worker-name
 2. Settings > Variables and Secrets
-3. Add environment variable: `JWT_SECRET` = `CNavn7dPjCywA9zh/S6GE6toPqaX2ZzqywZSJ9Dh+Xo=`
+3. Add secret: `JWT_SECRET` = (your secure random string)
 
 ### 2. Configure Cloudflare Access for /mobile-auth
 
@@ -57,14 +40,14 @@ Or create a new policy:
 ### 3. Deploy Backend
 
 ```bash
-cd subdomains/photos/apps/worker
+cd apps/worker
 npm run deploy
 ```
 
 ### 4. Build and Deploy Mobile App
 
 ```bash
-cd subdomains/photos/apps/web
+cd apps/web
 
 # Build web app
 npm run build
@@ -139,29 +122,4 @@ After login, all API requests should automatically include the Bearer token:
 4. **Token Storage**: Stored in Capacitor Preferences (encrypted by Android OS keychain).
 5. **State Parameter**: CSRF protection - validates deep link callback matches original request.
 
-## Files Changed
 
-### Backend
-- `apps/worker/src/auth.ts` - Added Bearer token verification
-- `apps/worker/src/routes/mobileAuth.ts` - New OAuth endpoint
-- `apps/worker/src/index.ts` - Registered mobileAuth routes
-- `apps/worker/src/types.ts` - Added JWT_SECRET to Env interface
-- `apps/worker/package.json` - Added `jose` dependency
-- `.dev.vars` - Added JWT_SECRET for local dev
-
-### Frontend
-- `apps/web/src/services/mobileAuth.ts` - OAuth service with deep link handling
-- `apps/web/src/contexts/AuthContext.tsx` - Mobile login flow
-- `apps/web/src/api.ts` - Automatic Bearer token injection
-- `apps/web/src/main.tsx` - Initialize OAuth listener
-- `apps/web/capacitor.config.ts` - Deep link scheme configuration
-- `apps/web/android/app/src/main/AndroidManifest.xml` - Deep link intent filter
-- `apps/web/package.json` - Added `@capacitor/app` and `@capacitor/preferences`
-
-## Next Steps
-
-1. Deploy backend with JWT_SECRET
-2. Configure Cloudflare Access for /mobile-auth
-3. Build and test mobile app
-4. Consider adding token revocation endpoint for security
-5. Monitor token usage in worker logs

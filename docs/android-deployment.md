@@ -80,7 +80,7 @@ cat ~/photos-release-key.keystore | base64 -w 0      # Linux
 
 ## Step 3: Update Android Build Configuration
 
-Update `subdomains/photos/apps/web/android/app/build.gradle`:
+Update `apps/android/app/build.gradle`:
 
 **Change the versionName from "1.0" to "1.0.0"** and **add signing configuration**:
 
@@ -152,11 +152,13 @@ The entire contents of the service account JSON file from Step 2.2
 Before GitHub Actions can deploy, you need to manually upload the first version:
 
 ```bash
-cd subdomains/photos/apps/web
-
-# Build the app
+# Build web app
+cd apps/web
 npm run build
 npx cap sync android
+
+# Navigate to Android project
+cd ../android
 
 # Open in Android Studio
 npx cap open android
@@ -213,19 +215,19 @@ When running the workflow, set "Bump version code" to `true` to automatically in
 
 ### Manual Version Bumping
 ```bash
-cd subdomains/photos/apps/web
+cd apps/android/app
 
 # Bump patch version (1.0.0 → 1.0.1)
-./scripts/bump-version.sh patch
+../../../scripts/bump-version.sh patch
 
 # Bump minor version (1.0.0 → 1.1.0)
-./scripts/bump-version.sh minor
+../../../scripts/bump-version.sh minor
 
 # Bump major version (1.0.0 → 2.0.0)
-./scripts/bump-version.sh major
+../../../scripts/bump-version.sh major
 
 # Just bump version code
-./scripts/bump-version.sh
+../../../scripts/bump-version.sh
 ```
 
 ## Troubleshooting
@@ -261,8 +263,8 @@ cd subdomains/photos/apps/web
 The following files have been created for Android deployment:
 
 - `.github/workflows/android-deploy.yml` - GitHub Actions workflow
-- `subdomains/photos/apps/web/scripts/bump-version.sh` - Version management script (executable)
-- `ANDROID_DEPLOYMENT_SETUP.md` - This setup guide
+- `scripts/bump-version.sh` - Version management script (executable)
+- `android-deployment.md` - This setup guide
 
 ## Next Steps
 

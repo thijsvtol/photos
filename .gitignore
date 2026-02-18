@@ -26,12 +26,3 @@ npm-debug.log*
 # OS files
 .DS_Store
 Thumbs.db
-
-# Temporary files
-tmp/
-temp/
-
-# Playwright test reports
-playwright-report/
-test-results/
-

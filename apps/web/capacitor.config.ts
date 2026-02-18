@@ -19,6 +19,10 @@ const config: CapacitorConfig = {
   android: {
     allowMixedContent: true,
   },
+  server: {
+    androidScheme: 'https',
+  },
+  projectId: 'photos-app',
 };
 
 export default config;

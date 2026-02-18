@@ -91,7 +91,7 @@ This document provides a technical overview of the photo sharing application arc
 ## Project Structure
 
 ```
-subdomains/photos/
+.
 ├── apps/
 │   ├── web/                    # Frontend React application
 │   │   ├── src/
@@ -134,7 +134,8 @@ subdomains/photos/
 ├── migrations/                 # D1 database migrations
 │   └── *.sql                   # SQL migration files
 │
-└── *.md                        # Documentation files
+├── docs/                       # Documentation files
+└── scripts/                    # Utility and setup scripts
 ```
 
 ## Core Modules

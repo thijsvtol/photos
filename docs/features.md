@@ -646,7 +646,7 @@ We continuously improve based on user feedback. Common requests:
 
 **Share Your Ideas:**
 - GitHub Issues
-- Email: [See CONFIGURATION.md for contact]
+- Email: [See configuration.md for contact]
 - Discussions forum
 
 ---
@@ -731,7 +731,7 @@ A: See CONTRIBUTING.md for guidelines!
 ---
 
 For more information:
-- [Configuration Guide](CONFIGURATION.md)
-- [API Documentation](API.md)
-- [Architecture Overview](ARCHITECTURE.md)
-- [Contributing Guide](CONTRIBUTING.md)
+- [Configuration Guide](configuration.md)
+- [API Documentation](api-reference.md)
+- [Architecture Overview](architecture.md)
+- [Contributing Guide](contributing.md)

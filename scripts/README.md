@@ -154,7 +154,26 @@ npm run deploy:helper
 
 3. **Follow prompts** to deploy resources
 
-4. **Deploy frontend** to Cloudflare Pages (see CONFIGURATION.md)
+4. **Deploy frontend** to Cloudflare Pages (see configuration.md in docs/)
+
+---
+
+## Pre-Commit Hook
+
+A repository-local pre-commit hook is provided in `.githooks/pre-commit`.
+
+### Enable the hook
+
+```bash
+git config core.hooksPath .githooks
+chmod +x .githooks/pre-commit
+```
+
+### What it runs
+
+- `npm run validate`
+- `npm --prefix apps/web run lint`
+- `npm run test:all`
 
 ---
 
@@ -245,7 +264,7 @@ mv .dev.vars.backup .dev.vars
 
 ## Related Documentation
 
-- [CONFIGURATION.md](../CONFIGURATION.md) - Complete configuration guide
+- [configuration.md](../docs/configuration.md) - Complete configuration guide
 - [CONTRIBUTING.md](../CONTRIBUTING.md) - Development workflow
 - [README.md](../README.md) - Project overview
 

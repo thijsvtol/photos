@@ -36,7 +36,7 @@ All existing web features work on mobile, including:
 
 ### 1. Install Dependencies
 ```bash
-cd subdomains/photos/apps/web
+cd apps/web
 npm install
 ```
 
@@ -244,18 +244,29 @@ npx cap sync
 ## File Structure
 
 ```
-subdomains/photos/apps/web/
-├── src/
-│   ├── services/
-│   │   ├── backgroundSync.ts    # Background upload service
-│   │   └── folderSync.ts        # Folder sync service
-│   ├── components/
-│   │   └── FolderSyncManager.tsx # Folder sync UI
-│   └── main.tsx                 # Capacitor initialization
-├── ios/                         # iOS native project
-├── android/                     # Android native project
-├── capacitor.config.ts          # Capacitor configuration
-└── package.json
+apps/
+├── web/                         # Web app (React + Vite)
+│   ├── src/
+│   │   ├── services/
+│   │   │   ├── backgroundSync.ts    # Background upload service
+│   │   │   └── folderSync.ts        # Folder sync service
+│   │   ├── components/
+│   │   │   └── FolderSyncManager.tsx # Folder sync UI
+│   │   └── main.tsx                 # Capacitor initialization
+│   ├── capacitor.config.ts          # Capacitor configuration
+│   └── package.json
+│
+└── android/                     # Android native project
+    ├── app/
+    │   ├── src/
+    │   │   └── main/
+    │   │       ├── AndroidManifest.xml
+    │   │       ├── assets/           # Web assets (synced from web/dist)
+    │   │       └── java/
+    │   └── build.gradle
+    ├── build.gradle
+    ├── settings.gradle
+    └── gradlew
 ```
 
 ## Resources

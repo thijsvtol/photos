@@ -75,7 +75,7 @@ Don't be afraid to ask questions in discussions or issue comments!
 ```bash
 # Fork the repository on GitHub, then clone your fork
 git clone https://github.com/YOUR_USERNAME/photo-sharing-app.git
-cd photo-sharing-app/subdomains/photos
+cd photo-sharing-app
 ```
 
 ### 2. Install Dependencies
@@ -170,7 +170,7 @@ npm run dev
 ## Project Structure
 
 ```
-subdomains/photos/
+.
 ├── apps/
 │   ├── worker/               # Backend (Cloudflare Worker)
 │   │   ├── src/
@@ -195,7 +195,9 @@ subdomains/photos/
 │       ├── android/          # Capacitor Android
 │       └── package.json
 │
-└── migrations/               # D1 database migrations
+├── migrations/               # D1 database migrations
+├── docs/                     # Documentation
+└── scripts/                  # Utility scripts
 ```
 
 ## Development Workflow
@@ -800,8 +802,8 @@ Any other relevant information.
 ### Documentation Files
 
 - **README.md** - Project overview
-- **CONFIGURATION.md** - Setup guide
-- **API.md** - API reference
+- **configuration.md** - Setup guide
+- **api-reference.md** - API reference
 - **ARCHITECTURE.md** - Technical overview
 - **FEATURES.md** - Feature descriptions
 - **CONTRIBUTING.md** - This file
@@ -845,7 +847,7 @@ Thank you for contributing! 🎉
 ```bash
 # Setup
 git clone <fork>
-cd subdomains/photos/apps/worker && npm install
+cd apps/worker && npm install
 cd ../web && npm install
 
 # Development

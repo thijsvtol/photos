@@ -208,7 +208,6 @@ The application supports Google Analytics 4 (GA4) for tracking user interactions
 
 ```bash
 git clone <repository-url>
-cd subdomains/photos
 npm install
 ```
 
@@ -330,5 +329,5 @@ After deployment, verify your configuration:
 
 - Read [FEATURES.md](./FEATURES.md) to understand available features
 - Review [ARCHITECTURE.md](./ARCHITECTURE.md) for technical details
-- Check [API.md](./API.md) for API documentation
+- Check [API documentation](./api-reference.md) for API documentation
 - See [CONTRIBUTING.md](./CONTRIBUTING.md) to contribute

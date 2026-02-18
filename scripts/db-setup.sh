@@ -133,4 +133,4 @@ echo -e "     ${YELLOW}npm --prefix apps/worker run dev${NC}\n"
 echo -e "  3. Start the web app:"
 echo -e "     ${YELLOW}npm --prefix apps/web run dev${NC}\n"
 
-echo -e "${CYAN}For production database setup, see CONFIGURATION.md${NC}\n"
+echo -e "${CYAN}For production database setup, see docs/CONFIGURATION.md${NC}\n"

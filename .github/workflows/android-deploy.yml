@@ -28,7 +28,7 @@ jobs:
     
     defaults:
       run:
-        working-directory: subdomains/photos/apps/web
+        working-directory: apps/web
     
     steps:
       - name: Checkout code
@@ -100,30 +100,33 @@ jobs:
         run: npx vite build
       
       - name: Sync Capacitor
-        run: npx cap sync android
+        run: |
+          npx cap sync android
+          # Copy web dist to Android assets
+          cp -r dist ../android/app/src/main/assets/public
       
       - name: Decode Keystore
         run: |
           echo "${{ secrets.ANDROID_KEYSTORE_BASE64 }}" | base64 -d > release-key.keystore
-        working-directory: subdomains/photos/apps/web/android/app
+        working-directory: apps/android/app
       
       - name: Build Android App Bundle (AAB)
         run: |
-          cd android
+          cd ../android
           chmod +x ./gradlew
           ./gradlew bundleRelease
         env:
-          RELEASE_KEYSTORE_FILE: ${{ github.workspace }}/subdomains/photos/apps/web/android/app/release-key.keystore
+          RELEASE_KEYSTORE_FILE: ${{ github.workspace }}/apps/android/app/release-key.keystore
           RELEASE_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
           RELEASE_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
           RELEASE_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
       
       - name: Build APK
         run: |
-          cd android
+          cd ../android
           ./gradlew assembleRelease
         env:
-          RELEASE_KEYSTORE_FILE: ${{ github.workspace }}/subdomains/photos/apps/web/android/app/release-key.keystore
+          RELEASE_KEYSTORE_FILE: ${{ github.workspace }}/apps/android/app/release-key.keystore
           RELEASE_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
           RELEASE_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
           RELEASE_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
@@ -133,24 +136,24 @@ jobs:
         with:
           serviceAccountJsonPlainText: ${{ secrets.GOOGLE_PLAY_SERVICE_ACCOUNT_JSON }}
           packageName: nl.thijsvtol.photos
-          releaseFiles: subdomains/photos/apps/web/android/app/build/outputs/bundle/release/app-release.aab
+          releaseFiles: apps/android/app/build/outputs/bundle/release/app-release.aab
           track: ${{ github.event.inputs.track }}
           status: 'draft' # Set to 'completed' after app is live.
           inAppUpdatePriority: 2
-          whatsNewDirectory: subdomains/photos/apps/web/release-notes
+          whatsNewDirectory: apps/web/release-notes
       
       - name: Upload APK as artifact
         uses: actions/upload-artifact@v4
         with:
           name: app-release-v${{ env.VERSION_CODE }}
-          path: subdomains/photos/apps/web/android/app/build/outputs/apk/release/app-release.apk
+          path: apps/android/app/build/outputs/apk/release/app-release.apk
           retention-days: 30
       
       - name: Upload AAB as artifact
         uses: actions/upload-artifact@v4
         with:
           name: app-bundle-v${{ env.VERSION_CODE }}
-          path: subdomains/photos/apps/web/android/app/build/outputs/bundle/release/app-release.aab
+          path: apps/android/app/build/outputs/bundle/release/app-release.aab
           retention-days: 30
       
       - name: Create GitHub Release
@@ -159,15 +162,15 @@ jobs:
         with:
           tag_name: android-v${{ env.VERSION_NAME }}-${{ env.VERSION_CODE }}
           name: Android v${{ env.VERSION_NAME }} (Build ${{ env.VERSION_CODE }})
-          body_path: subdomains/photos/apps/web/release-notes/en-US.txt
+          body_path: apps/web/release-notes/en-US.txt
           files: |
-            subdomains/photos/apps/web/android/app/build/outputs/apk/release/app-release.apk
-            subdomains/photos/apps/web/android/app/build/outputs/bundle/release/app-release.aab
+            apps/android/app/build/outputs/apk/release/app-release.apk
+            apps/android/app/build/outputs/bundle/release/app-release.aab
       
       - name: Clean up keystore
         if: always()
         run: rm -f release-key.keystore
-        working-directory: subdomains/photos/apps/web/android/app
+        working-directory: apps/android/app
       
       - name: Deployment Summary
         if: success()
