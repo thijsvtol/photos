@@ -43,3 +43,14 @@ updates:
         update-types:
           - "minor"
           - "major"
+
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 1
+    groups:
+      github-actions:
+        update-types:
+          - "minor"
+          - "major"
