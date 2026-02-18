@@ -28,7 +28,7 @@ jobs:
     
     defaults:
       run:
-        working-directory: apps/web
+        working-directory: apps/android
     
     steps:
       - name: Checkout code
@@ -50,7 +50,7 @@ jobs:
       - name: Bump version code
         if: ${{ github.event.inputs.version_bump == 'true' }}
         run: |
-          cd android/app
+          cd app
           CURRENT_VERSION_CODE=$(grep "versionCode" build.gradle | awk '{print $2}')
           NEW_VERSION_CODE=$((CURRENT_VERSION_CODE + 1))
           echo "Bumping version from $CURRENT_VERSION_CODE to $NEW_VERSION_CODE"
@@ -65,14 +65,14 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add android/app/build.gradle
+          git add app/build.gradle
           git commit -m "chore(android): bump version to ${{ env.VERSION_CODE }}"
           git push
       
       - name: Get current version
         if: ${{ github.event.inputs.version_bump == 'false' }}
         run: |
-          cd android/app
+          cd app
           VERSION_CODE=$(grep "versionCode" build.gradle | awk '{print $2}')
           VERSION_NAME=$(grep "versionName" build.gradle | awk '{print $2}' | tr -d '"')
           echo "VERSION_CODE=$VERSION_CODE" >> $GITHUB_ENV
@@ -80,26 +80,29 @@ jobs:
       
       - name: Generate release notes
         run: |
-          mkdir -p release-notes
-          echo "Version ${{ env.VERSION_NAME }} (Build ${{ env.VERSION_CODE }})" > release-notes/en-US.txt
-          echo "" >> release-notes/en-US.txt
-          echo "Recent changes:" >> release-notes/en-US.txt
-          git log -10 --pretty=format:"• %s" --no-merges >> release-notes/en-US.txt
+          mkdir -p ../web/release-notes
+          echo "Version ${{ env.VERSION_NAME }} (Build ${{ env.VERSION_CODE }})" > ../web/release-notes/en-US.txt
+          echo "" >> ../web/release-notes/en-US.txt
+          echo "Recent changes:" >> ../web/release-notes/en-US.txt
+          git log -10 --pretty=format:"• %s" --no-merges >> ../web/release-notes/en-US.txt
           
           # Truncate to 500 chars (Play Store limit)
-          head -c 500 release-notes/en-US.txt > release-notes/en-US-truncated.txt
-          mv release-notes/en-US-truncated.txt release-notes/en-US.txt
+          head -c 500 ../web/release-notes/en-US.txt > ../web/release-notes/en-US-truncated.txt
+          mv ../web/release-notes/en-US-truncated.txt ../web/release-notes/en-US.txt
           
           echo "Release notes:"
-          cat release-notes/en-US.txt
+          cat ../web/release-notes/en-US.txt
       
       - name: Install dependencies
+        working-directory: apps/web
         run: npm install --legacy-peer-deps
       
       - name: Build web app
+        working-directory: apps/web
         run: npx vite build
       
       - name: Sync Capacitor
+        working-directory: apps/web
         run: |
           npx cap sync android
           # Copy web dist to Android assets
@@ -112,7 +115,6 @@ jobs:
       
       - name: Build Android App Bundle (AAB)
         run: |
-          cd ../android
           chmod +x ./gradlew
           ./gradlew bundleRelease
         env:
@@ -122,9 +124,7 @@ jobs:
           RELEASE_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
       
       - name: Build APK
-        run: |
-          cd ../android
-          ./gradlew assembleRelease
+        run: ./gradlew assembleRelease
         env:
           RELEASE_KEYSTORE_FILE: ${{ github.workspace }}/apps/android/app/release-key.keystore
           RELEASE_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
