@@ -36,6 +36,29 @@
     <!-- Preconnect for performance -->
     <link rel="preconnect" href="https://api.photos.thijsvtol.nl" />
     
+    <!-- Google Analytics 4 -->
+    <script>
+      window.GA_MEASUREMENT_ID = '%VITE_GA_MEASUREMENT_ID%';
+      // Only load GA if measurement ID is configured and not placeholder
+      if (window.GA_MEASUREMENT_ID && window.GA_MEASUREMENT_ID !== 'G-PLACEHOLDER' && !window.GA_MEASUREMENT_ID.includes('%')) {
+        // Initialize dataLayer
+        window.dataLayer = window.dataLayer || [];
+        function gtag(){dataLayer.push(arguments);}
+        window.gtag = gtag;
+        gtag('js', new Date());
+        gtag('config', window.GA_MEASUREMENT_ID, {
+          send_page_view: false, // We'll handle page views manually via React Router
+          anonymize_ip: true,
+        });
+        
+        // Load gtag.js script
+        var script = document.createElement('script');
+        script.async = true;
+        script.src = 'https://www.googletagmanager.com/gtag/js?id=' + window.GA_MEASUREMENT_ID;
+        document.head.appendChild(script);
+      }
+    </script>
+    
     <!-- Sitemap -->
     <link rel="sitemap" type="application/xml" href="/sitemap.xml" />
   </head>

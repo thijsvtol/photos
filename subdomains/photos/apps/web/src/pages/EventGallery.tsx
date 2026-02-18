@@ -21,6 +21,7 @@ import { config } from '../config';
 import { useToast } from '../components/Toast';
 import { useConfirm } from '../components/ConfirmDialog';
 import { haptics } from '../utils/haptics';
+import { trackPhotoDownload, trackFavorite } from '../services/analytics';
 
 const EventGallery: React.FC = () => {
   const { slug } = useParams<{ slug: string }>();
@@ -287,6 +288,9 @@ const EventGallery: React.FC = () => {
       // Haptic feedback
       await haptics.light();
       
+      // Track favorite action
+      trackFavorite(parseInt(photoId), isFavorited ? 'remove' : 'add');
+      
       // Update local state
       const newFavorites = new Set(userFavorites);
       if (isFavorited) {
@@ -335,6 +339,9 @@ const EventGallery: React.FC = () => {
       // Download using platform-specific method
       const timestamp = new Date().toISOString().split('T')[0];
       await downloadZip(zipBlob, `${slug}_${timestamp}.zip`);
+      
+      // Track bulk download
+      trackPhotoDownload('bulk', slug!, true, selected.length);
     } catch (error) {
       console.error('Error downloading ZIP:', error);
       toast.showError('Failed to download ZIP file');

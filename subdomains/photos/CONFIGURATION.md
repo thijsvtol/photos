@@ -46,6 +46,10 @@ wrangler secret put ACCESS_TEAM_DOMAIN
 
 wrangler secret put ACCESS_AUD
 # Enter: Your Cloudflare Access Application Audience ID
+
+# Optional: Google Analytics 4
+wrangler secret put GA_MEASUREMENT_ID
+# Enter: Your GA4 Measurement ID (format: G-XXXXXXXXXX)
 ```
 
 ### Optional Email Features (Mailgun)
@@ -109,17 +113,59 @@ Features are automatically enabled based on configuration:
 | Collaborators | Email sending enabled | ✓ |
 | Favorites | Always available | ✓ |
 | Geocoding | Always available | ✓ |
-| Analytics | Always available | ✓ |
+| Analytics (GA4) | GA_MEASUREMENT_ID configured | ✓ |
 
-## Branding Customization
+### Google Analytics 4 Setup
 
-### Application Name & Branding
+The application supports Google Analytics 4 (GA4) for tracking user interactions.
 
-- `APP_NAME` - Full application name (e.g., "Smith Family Photos", "My Photo Gallery")
-- `BRAND_NAME` - Short brand name used in UI (e.g., "Smith Family", "MyPhotos")
-- `COPYRIGHT_HOLDER` - Name shown in footer copyright
+**What is tracked:**
+- Page views (automatic on route changes)
+- Photo views (when users open detail view)
+- Photo downloads (single and bulk ZIP downloads)
+- Favorite actions (add/remove favorites)
 
-### Domain Configuration
+**Configuration:**
+
+1. **Get your GA4 Measurement ID:**
+   - Go to [Google Analytics](https://analytics.google.com/)
+   - Create a new GA4 property or use an existing one
+   - Navigate to Admin → Data Streams → Web Stream
+   - Copy your Measurement ID (format: `G-XXXXXXXXXX`)
+
+2. **Configure for Production:**
+   Set as a Cloudflare Worker secret:
+   ```bash
+   cd apps/worker
+   wrangler secret put GA_MEASUREMENT_ID
+   # Enter: G-XXXXXXXXXX
+   ```
+
+3. **Configure for Development:**
+   Add to `apps/web/.env` (you may need to create this file from `.env.example`):
+   ```bash
+   VITE_GA_MEASUREMENT_ID="G-XXXXXXXXXX"
+   ```
+   
+   Or use the placeholder ID for testing:
+   ```bash
+   VITE_GA_MEASUREMENT_ID="G-PLACEHOLDER"
+   ```
+
+4. **Disable Analytics:**
+   To disable tracking:
+   - Don't set the `GA_MEASUREMENT_ID` secret (or delete it with `wrangler secret delete GA_MEASUREMENT_ID`)
+   - For development, remove `VITE_GA_MEASUREMENT_ID` from `.env` or set it to `G-PLACEHOLDER`
+
+**Privacy Considerations:**
+- IP anonymization is enabled by default
+- No personally identifiable information (PII) is sent to GA4
+- Consider adding a cookie consent banner if required by your jurisdiction (GDPR, CCPA, etc.)
+
+**Verification:**
+- After deploying, visit your site and navigate through pages
+- Open Google Analytics → Reports → Realtime
+- You should see your activity appear within ~30 seconds
 
 - `APP_DOMAIN` - Primary domain without protocol (e.g., "photos.example.com")
 - Used for CORS, email links, SEO metadata, and API URLs
@@ -145,6 +191,7 @@ Features are automatically enabled based on configuration:
 | `EVENT_COOKIE_SECRET` | Secret | Yes | Cookie signing secret (32+ chars) |
 | `ACCESS_TEAM_DOMAIN` | Secret | Yes | Cloudflare Access team domain |
 | `ACCESS_AUD` | Secret | Yes | Cloudflare Access audience ID |
+| `GA_MEASUREMENT_ID` | Secret | No | Google Analytics 4 Measurement ID |
 | `MAILGUN_API_KEY` | Secret | No | Mailgun API key for emails |
 | `MAILGUN_DOMAIN` | Secret | No | Mailgun sending domain |
 
@@ -153,6 +200,7 @@ Features are automatically enabled based on configuration:
 | Variable | Type | Required | Description |
 |----------|------|----------|-------------|
 | `VITE_API_URL` | String | Dev only | Worker URL for local development |
+| `VITE_GA_MEASUREMENT_ID` | String | No | Google Analytics 4 Measurement ID |
 
 ## Quick Start Configuration
 

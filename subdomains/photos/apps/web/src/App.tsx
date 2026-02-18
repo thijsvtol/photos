@@ -8,6 +8,7 @@ import { RefreshProvider } from './contexts/RefreshContext';
 import { ToastProvider } from './components/Toast';
 import PullToRefresh from './components/PullToRefresh';
 import { AndroidAppPrompt } from './components/AndroidAppPrompt';
+import { initAnalytics, trackPageView } from './services/analytics';
 
 // Lazy load route components for better code splitting
 const Landing = lazy(() => import('./pages/Landing'));
@@ -174,7 +175,24 @@ const ShareIntentHandler = () => {
   return null;
 };
 
+// Page view tracker component
+const PageViewTracker = () => {
+  const location = useLocation();
+
+  useEffect(() => {
+    // Track page view on location change
+    trackPageView(location.pathname + location.search, document.title);
+  }, [location]);
+
+  return null;
+};
+
 function App() {
+  // Initialize analytics on app mount
+  useEffect(() => {
+    initAnalytics();
+  }, []);
+  
   // Log App render on native platform
   if (Capacitor.isNativePlatform()) {
     import('@capacitor/core').then(({ registerPlugin }) => {
@@ -194,6 +212,7 @@ function App() {
             <ToastProvider>
               <BrowserRouter>
                 <ShareIntentHandler />
+                <PageViewTracker />
                 <PullToRefresh>
                   <Suspense fallback={<LoadingFallback />}>
                     <Routes>

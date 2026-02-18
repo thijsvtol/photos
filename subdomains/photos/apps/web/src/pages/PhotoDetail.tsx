@@ -11,6 +11,7 @@ import { config } from '../config';
 import { useToast } from '../components/Toast';
 import { useConfirm } from '../components/ConfirmDialog';
 import { haptics } from '../utils/haptics';
+import { trackPhotoView, trackPhotoDownload, trackFavorite } from '../services/analytics';
 
 const PhotoDetail: React.FC = () => {
   const { slug, photoId } = useParams<{ slug: string; photoId: string }>();
@@ -291,6 +292,9 @@ const PhotoDetail: React.FC = () => {
         if (index >= 0 && photosToUse[index]) {
           setPhoto(photosToUse[index]);
         }
+        
+        // Track photo view
+        trackPhotoView(parseInt(photoId!), slug!);
       } catch {
         setAuthenticated(false);
       }
@@ -676,10 +680,25 @@ const PhotoDetail: React.FC = () => {
       await toggleFavoriteAPI(photo.id, isFavorited);
       await haptics.light();
       setIsFavorited(!isFavorited);
+      
+      // Track favorite action
+      trackFavorite(parseInt(photo.id), isFavorited ? 'remove' : 'add');
     } catch (err) {
       console.error('Failed to toggle favorite:', err);
       toast.showError('Failed to update favorite. Please try again.');
     }
+  };
+
+  const handleDownloadOriginal = () => {
+    if (!slug || !photo) return;
+    downloadOriginal(slug, photo.id);
+    trackPhotoDownload(parseInt(photo.id), slug, false, 1);
+  };
+
+  const handleDownloadSmall = () => {
+    if (!slug || !photo) return;
+    downloadSmall(slug, photo.id);
+    trackPhotoDownload(parseInt(photo.id), slug, false, 1);
   };
 
   if (loading) {
@@ -810,7 +829,7 @@ const PhotoDetail: React.FC = () => {
             {/* Desktop download buttons */}
             <div className="hidden md:flex gap-2">
               <button
-                onClick={() => downloadOriginal(slug!, photo?.id || photoId!)}
+                onClick={handleDownloadOriginal}
                 className="px-3 py-1.5 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition text-sm flex items-center gap-1.5"
               >
                 <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -1139,7 +1158,7 @@ const PhotoDetail: React.FC = () => {
           {/* Download buttons */}
           <div className="flex gap-2">
             <button
-              onClick={() => downloadOriginal(slug!, photo?.id || photoId!)}
+              onClick={handleDownloadOriginal}
               className="flex-1 px-4 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 active:bg-blue-800 transition text-center font-medium flex items-center justify-center gap-2"
             >
               <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -1148,7 +1167,7 @@ const PhotoDetail: React.FC = () => {
               <span className="text-sm">Original</span>
             </button>
             <button
-              onClick={() => downloadSmall(slug!, photo?.id || photoId!)}
+              onClick={handleDownloadSmall}
               className="flex-1 px-4 py-3 bg-purple-600 text-white rounded-lg hover:bg-purple-700 active:bg-purple-800 transition text-center font-medium flex items-center justify-center gap-2"
             >
               <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">

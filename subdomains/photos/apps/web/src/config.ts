@@ -16,6 +16,9 @@ export interface AppConfig {
   // Contact
   contactEmail: string;
   
+  // Analytics
+  gaMeasurementId?: string;
+  
   // Feature flags
   features: {
     enableCollaborators: boolean;
@@ -60,6 +63,7 @@ export function getConfig(): AppConfig {
     domain: import.meta.env.VITE_DOMAIN || defaultConfig.domain,
     apiUrl: import.meta.env.VITE_API_URL || defaultConfig.apiUrl,
     contactEmail: import.meta.env.VITE_CONTACT_EMAIL || defaultConfig.contactEmail,
+    gaMeasurementId: import.meta.env.VITE_GA_MEASUREMENT_ID,
     features: defaultConfig.features,
   };
 }
