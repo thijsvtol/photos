@@ -8,7 +8,6 @@ import type { User } from '../types';
 import { createEventCookie } from '../cookies';
 import {
   MockD1Database,
-  createEnv,
   createBucket,
   type TestEnv,
   type EventRecord,

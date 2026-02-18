@@ -9,6 +9,47 @@ import { createEnv, createBucket, MockD1Database, type TestEnv, type EventRecord
 let currentUser: User | null = null;
 let currentIsAdmin = false;
 
+function makeEventRecord(overrides: Partial<EventRecord> = {}): EventRecord {
+  return {
+    id: 1,
+    slug: 'default-event',
+    name: 'Default Event',
+    inferred_date: null,
+    created_at: new Date().toISOString(),
+    visibility: 'public',
+    password_hash: null,
+    ...overrides,
+  };
+}
+
+function makePhotoRecord(overrides: Partial<PhotoRecord> = {}): PhotoRecord {
+  return {
+    id: 'photo-default',
+    event_id: 1,
+    original_filename: 'default.jpg',
+    file_type: 'image/jpeg',
+    capture_time: new Date().toISOString(),
+    uploaded_at: new Date().toISOString(),
+    uploaded_by: null,
+    width: null,
+    height: null,
+    iso: null,
+    aperture: null,
+    shutter_speed: null,
+    focal_length: null,
+    camera_make: null,
+    camera_model: null,
+    lens_model: null,
+    latitude: null,
+    longitude: null,
+    favorites_count: 0,
+    blur_placeholder: null,
+    is_featured: 0,
+    city: null,
+    ...overrides,
+  };
+}
+
 vi.mock('../auth', () => {
   return {
     optionalAuth: async (c: any, next: any) => {
@@ -220,10 +261,10 @@ describe('Data Integrity & Security', () => {
       const db = new MockD1Database();
 
       // Setup: Create event with photos and collaborators
-      db.events = [{ id: 1, slug: 'test-event', name: 'Test', visibility: 'public' }];
+      db.events = [makeEventRecord({ id: 1, slug: 'test-event', name: 'Test', visibility: 'public' })];
       db.photos = [
-        { id: 'photo-1', event_id: 1, original_filename: 'test.jpg', file_type: 'image/jpeg' },
-        { id: 'photo-2', event_id: 1, original_filename: 'test2.jpg', file_type: 'image/jpeg' },
+        makePhotoRecord({ id: 'photo-1', event_id: 1, original_filename: 'test.jpg' }),
+        makePhotoRecord({ id: 'photo-2', event_id: 1, original_filename: 'test2.jpg' }),
       ];
       db.collaborators = [
         { event_id: 1, user_email: 'collab@example.com' },
@@ -250,7 +291,7 @@ describe('Data Integrity & Security', () => {
 
       // Setup
       db.photos = [
-        { id: 'photo-1', event_id: 1, original_filename: 'test.jpg', file_type: 'image/jpeg' },
+        makePhotoRecord({ id: 'photo-1', event_id: 1, original_filename: 'test.jpg' }),
       ];
       db.favorites = [
         { photo_id: 'photo-1', user_email: 'user1@example.com' },
@@ -274,11 +315,11 @@ describe('Data Integrity & Security', () => {
       const db = new MockD1Database();
 
       db.events = [
-        { id: 1, slug: 'event-1', name: 'Event 1', visibility: 'public' },
+        makeEventRecord({ id: 1, slug: 'event-1', name: 'Event 1', visibility: 'public' }),
       ];
       db.photos = [
-        { id: 'photo-1', event_id: 1, original_filename: 'test.jpg', file_type: 'image/jpeg' },
-        { id: 'photo-2', event_id: 2, original_filename: 'test2.jpg', file_type: 'image/jpeg' },
+        makePhotoRecord({ id: 'photo-1', event_id: 1, original_filename: 'test.jpg' }),
+        makePhotoRecord({ id: 'photo-2', event_id: 2, original_filename: 'test2.jpg' }),
       ];
       db.favorites = [
         { photo_id: 'photo-1', user_email: 'user@example.com' },
@@ -425,11 +466,11 @@ describe('Data Integrity & Security', () => {
       const db = new MockD1Database();
 
       db.events = [
-        { id: 1, slug: 'test', name: 'Test', visibility: 'public' },
+        makeEventRecord({ id: 1, slug: 'test', name: 'Test', visibility: 'public' }),
       ];
       db.photos = [
-        { id: 'photo-1', event_id: 1, original_filename: 'test.jpg', file_type: 'image/jpeg' },
-        { id: 'photo-2', event_id: 1, original_filename: 'test2.jpg', file_type: 'image/jpeg' },
+        makePhotoRecord({ id: 'photo-1', event_id: 1, original_filename: 'test.jpg' }),
+        makePhotoRecord({ id: 'photo-2', event_id: 1, original_filename: 'test2.jpg' }),
       ];
       db.collaborators = [
         { event_id: 1, user_email: 'collab@example.com' },
