@@ -1,8 +1,21 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { render, screen } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { HelmetProvider } from 'react-helmet-async';
 import PhotoUsage from '../pages/PhotoUsage';
+
+vi.mock('../contexts/AuthContext', () => ({
+  useAuth: () => ({
+    user: null,
+    isAuthenticated: false,
+    login: () => {},
+    logout: () => {},
+  }),
+}));
+
+vi.mock('../components/UserSettings', () => ({
+  default: () => null,
+}));
 
 describe('PhotoUsage Page', () => {
   it('renders main heading', () => {
@@ -41,7 +54,7 @@ describe('PhotoUsage Page', () => {
     
     expect(screen.getByRole('heading', { name: /Required Attribution/i })).toBeInTheDocument();
     expect(screen.getByText(/📷 Photo by/)).toBeInTheDocument();
-    expect(screen.getByText(/photos.thijsvtol.nl/)).toBeInTheDocument();
+    expect(screen.getByText(new RegExp(window.location.hostname))).toBeInTheDocument();
   });
 
   it('displays commercial use section', () => {
@@ -67,7 +80,7 @@ describe('PhotoUsage Page', () => {
     
     const contactButton = screen.getByRole('link', { name: /Contact via Form/i });
     expect(contactButton).toBeInTheDocument();
-    expect(contactButton).toHaveAttribute('href', 'https://photos.thijsvtol.nl/#contact');
+    expect(contactButton).toHaveAttribute('href', '/#contact');
   });
 
   it('displays copyright notice with current year', () => {

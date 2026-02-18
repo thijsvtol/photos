@@ -3,6 +3,21 @@ import { render, screen } from '@testing-library/react';
 import { BrowserRouter } from 'react-router-dom';
 import Navbar from '../components/Navbar';
 
+const authState = {
+  user: { id: '1', email: 'admin@example.com', name: 'Admin', isAdmin: true },
+  isAuthenticated: true,
+  login: vi.fn(),
+  logout: vi.fn(),
+};
+
+vi.mock('../contexts/AuthContext', () => ({
+  useAuth: () => authState,
+}));
+
+vi.mock('../components/UserSettings', () => ({
+  default: () => null,
+}));
+
 // Mock the api module
 vi.mock('../api', () => ({
   adminLogout: vi.fn(),
@@ -47,27 +62,28 @@ describe('Navbar Component', () => {
     expect(adminLinks[0].closest('a')).toHaveAttribute('href', '/admin');
   });
 
-  it('does not show logout button when not admin', () => {
+  it('hides Admin link when user is not admin', () => {
+    authState.user = { id: '2', email: 'user@example.com', name: 'User', isAdmin: false };
+
     render(
       <BrowserRouter>
         <Navbar />
       </BrowserRouter>
     );
-    
-    expect(screen.queryByText('Logout')).not.toBeInTheDocument();
+
+    expect(screen.queryByText('Admin')).not.toBeInTheDocument();
   });
 
-  it('shows logout button when isAdmin is true', () => {
-    localStorage.setItem('isAdmin', 'true');
-    
+  it('shows user menu trigger when authenticated', () => {
+    authState.user = { id: '1', email: 'admin@example.com', name: 'Admin', isAdmin: true };
+
     render(
       <BrowserRouter>
         <Navbar />
       </BrowserRouter>
     );
-    
-    // Use getAllByText because we have duplicate spans
-    expect(screen.getAllByText('Logout')[0]).toBeInTheDocument();
+
+    expect(screen.getByLabelText('User menu')).toBeInTheDocument();
   });
 
   it('has proper semantic HTML structure', () => {

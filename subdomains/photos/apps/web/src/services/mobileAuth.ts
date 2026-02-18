@@ -50,37 +50,41 @@ export class MobileAuthService {
    * Start OAuth flow - opens browser for authentication
    */
   static async startAuthFlow(): Promise<AuthToken | null> {
-    return new Promise(async (resolve) => {
-      // Store resolve callback for deep link handler
-      this.tokenCallbackResolve = resolve;
+    return new Promise((resolve) => {
+      const run = async () => {
+        // Store resolve callback for deep link handler
+        this.tokenCallbackResolve = resolve;
 
-      // Generate random state for CSRF protection
-      const state = Math.random().toString(36).substring(7);
-      await Preferences.set({ key: 'oauth_state', value: state });
+        // Generate random state for CSRF protection
+        const state = Math.random().toString(36).substring(7);
+        await Preferences.set({ key: 'oauth_state', value: state });
 
-      const config = getConfig();
-      // Use domain instead of apiUrl to avoid double /api prefix
-      const domain = config.domain.startsWith('http') ? config.domain : `https://${config.domain}`;
-      const authUrl = `${domain}/api/mobile-login?state=${state}`;
-      
-      try {
-        await Browser.open({
-          url: authUrl,
-          presentationStyle: 'popover'
-        });
-      } catch (error) {
-        console.error('[MobileAuth] Failed to open browser:', error);
-        resolve(null);
-      }
+        const config = getConfig();
+        // Use domain instead of apiUrl to avoid double /api prefix
+        const domain = config.domain.startsWith('http') ? config.domain : `https://${config.domain}`;
+        const authUrl = `${domain}/api/mobile-login?state=${state}`;
 
-      // Timeout after 5 minutes
-      setTimeout(() => {
-        if (this.tokenCallbackResolve === resolve) {
-          console.log('[MobileAuth] Auth flow timeout');
-          this.tokenCallbackResolve = null;
+        try {
+          await Browser.open({
+            url: authUrl,
+            presentationStyle: 'popover'
+          });
+        } catch (error) {
+          console.error('[MobileAuth] Failed to open browser:', error);
           resolve(null);
         }
-      }, 300000);
+
+        // Timeout after 5 minutes
+        setTimeout(() => {
+          if (this.tokenCallbackResolve === resolve) {
+            console.log('[MobileAuth] Auth flow timeout');
+            this.tokenCallbackResolve = null;
+            resolve(null);
+          }
+        }, 300000);
+      };
+
+      void run();
     });
   }
 

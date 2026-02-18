@@ -5,6 +5,7 @@ import { Capacitor } from '@capacitor/core';
 import { AuthProvider } from './contexts/AuthContext';
 import { ThemeProvider } from './contexts/ThemeContext';
 import { RefreshProvider } from './contexts/RefreshContext';
+import { ToastProvider } from './components/Toast';
 import PullToRefresh from './components/PullToRefresh';
 import { AndroidAppPrompt } from './components/AndroidAppPrompt';
 
@@ -190,31 +191,33 @@ function App() {
       <ThemeProvider>
         <AuthProvider>
           <RefreshProvider>
-            <BrowserRouter>
-              <ShareIntentHandler />
-              <PullToRefresh>
-                <Suspense fallback={<LoadingFallback />}>
-                  <Routes>
-                    <Route path="/" element={<Landing />} />
-                    <Route path="/events" element={<EventList />} />
-                    <Route path="/events/:slug" element={<EventGallery />} />
-                    <Route path="/p/:slug/:photoId" element={<PhotoDetail />} />
-                    <Route path="/favorites" element={<MyFavorites />} />
-                    <Route path="/invite/:token" element={<InviteAccept />} />
-                    <Route path="/logout" element={<Logout />} />
-                    <Route path="/map" element={<MapView />} />
-                    <Route path="/usage" element={<PhotoUsage />} />
-                    <Route path="/privacy" element={<PrivacyPolicy />} />
-                    <Route path="/share-upload" element={<ShareUpload />} />
-                    <Route path="/admin" element={<AdminDashboard />} />
-                    <Route path="/admin/events/:slug/upload" element={<AdminEventUpload />} />
-                    <Route path="/admin/events/:slug/photos" element={<AdminPhotoManager />} />
-                    <Route path="/admin/tags" element={<AdminTagManager />} />
-                  </Routes>
-                </Suspense>
-              </PullToRefresh>
-              <AndroidAppPrompt />
-            </BrowserRouter>
+            <ToastProvider>
+              <BrowserRouter>
+                <ShareIntentHandler />
+                <PullToRefresh>
+                  <Suspense fallback={<LoadingFallback />}>
+                    <Routes>
+                      <Route path="/" element={<Landing />} />
+                      <Route path="/events" element={<EventList />} />
+                      <Route path="/events/:slug" element={<EventGallery />} />
+                      <Route path="/p/:slug/:photoId" element={<PhotoDetail />} />
+                      <Route path="/favorites" element={<MyFavorites />} />
+                      <Route path="/invite/:token" element={<InviteAccept />} />
+                      <Route path="/logout" element={<Logout />} />
+                      <Route path="/map" element={<MapView />} />
+                      <Route path="/usage" element={<PhotoUsage />} />
+                      <Route path="/privacy" element={<PrivacyPolicy />} />
+                      <Route path="/share-upload" element={<ShareUpload />} />
+                      <Route path="/admin" element={<AdminDashboard />} />
+                      <Route path="/admin/events/:slug/upload" element={<AdminEventUpload />} />
+                      <Route path="/admin/events/:slug/photos" element={<AdminPhotoManager />} />
+                      <Route path="/admin/tags" element={<AdminTagManager />} />
+                    </Routes>
+                  </Suspense>
+                </PullToRefresh>
+                <AndroidAppPrompt />
+              </BrowserRouter>
+            </ToastProvider>
           </RefreshProvider>
         </AuthProvider>
       </ThemeProvider>

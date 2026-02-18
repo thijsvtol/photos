@@ -5,7 +5,7 @@ import CollaboratorManager from '../components/CollaboratorManager';
 import * as api from '../api';
 
 // Mock the API
-vi.mock('../../api');
+vi.mock('../api');
 
 describe('CollaboratorManager', () => {
   const mockEventSlug = 'test-event';
@@ -36,6 +36,19 @@ describe('CollaboratorManager', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    vi.mocked(api.getInviteLinks).mockResolvedValue([]);
+    vi.mocked(api.searchUsers).mockResolvedValue([]);
+    vi.mocked(api.createInviteLink).mockResolvedValue({
+      id: 1,
+      token: 'invite-token',
+      event_id: 1,
+      created_by: 'admin1',
+      created_at: '2024-01-01T00:00:00Z',
+      revoked_at: null,
+      use_count: 0,
+      last_used_at: null,
+    });
+    vi.mocked(api.revokeInviteLink).mockResolvedValue(undefined);
   });
 
   it('renders loading state initially', () => {

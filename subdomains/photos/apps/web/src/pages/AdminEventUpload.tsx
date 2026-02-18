@@ -13,6 +13,9 @@ import { getEvent, startUpload, uploadPart, completeUpload, regenerateThumbnails
 import { addToQueue, updateQueueItem, getQueueItems, getPendingUploads } from '../uploadQueue';
 import { createPreview } from '../imageUtils';
 import type { Event, UploadQueueItem, EventStats } from '../types';
+import { useToast } from '../components/Toast';
+import { useConfirm } from '../components/ConfirmDialog';
+import { haptics } from '../utils/haptics';
 
 // Fix Leaflet marker icons
 delete (L.Icon.Default.prototype as any)._getIconUrl;
@@ -26,6 +29,8 @@ const CHUNK_SIZE = 5 * 1024 * 1024; // 5MB chunks
 
 const AdminEventUpload: React.FC = () => {
   const { slug } = useParams<{ slug: string }>();
+  const toast = useToast();
+  const { confirm, ConfirmDialog } = useConfirm();
   const [event, setEvent] = useState<Event | null>(null);
   const [stats, setStats] = useState<EventStats | null>(null);
   const [queueItems, setQueueItems] = useState<UploadQueueItem[]>([]);
@@ -412,7 +417,8 @@ const AdminEventUpload: React.FC = () => {
     
     try {
       const result = await regenerateThumbnails(slug);
-      alert(`Regenerating thumbnails for ${result.count} photos. This may take a few moments.`);
+      await haptics.success();
+      toast.showSuccess(`Regenerating thumbnails for ${result.count} photos. This may take a few moments.`);
     } catch (err) {
       setError('Failed to regenerate thumbnails');
       console.error(err);
@@ -422,20 +428,28 @@ const AdminEventUpload: React.FC = () => {
   };
 
   const handleGeocodePhotos = async () => {
-    if (!slug || !confirm('This will fetch city names for all photos with GPS coordinates. This may take a while. Continue?')) {
-      return;
-    }
+    if (!slug) return;
+    
+    const confirmed = await confirm(
+      'Geocode Photos',
+      'This will fetch city names for all photos with GPS coordinates. This may take a while. Continue?'
+    );
+    
+    if (!confirmed) return;
+    
     try {
       setIsGeocoding(true);
       const result = await geocodeEventPhotos(slug);
       if (result.updated === 0) {
-        alert('No photos needed geocoding. All photos with GPS already have city names.');
+        toast.showInfo('No photos needed geocoding. All photos with GPS already have city names.');
       } else {
-        alert(`Successfully geocoded ${result.updated} of ${result.total} photos`);
+        await haptics.success();
+        toast.showSuccess(`Successfully geocoded ${result.updated} of ${result.total} photos`);
         loadEvent();
       }
     } catch (err) {
-      alert('Failed to geocode photos');
+      await haptics.error();
+      toast.showError('Failed to geocode photos');
       console.error(err);
     } finally {
       setIsGeocoding(false);
@@ -447,7 +461,8 @@ const AdminEventUpload: React.FC = () => {
     
     try {
       const result = await setEventLocation(slug, lat, lng);
-      alert(`Successfully set GPS location for ${result.updated_count} photos without GPS data.`);
+      await haptics.success();
+      toast.showSuccess(`Successfully set GPS location for ${result.updated_count} photos without GPS data.`);
       setShowLocationPicker(false);
     } catch (err) {
       setError('Failed to set event location');
@@ -457,6 +472,7 @@ const AdminEventUpload: React.FC = () => {
 
   return (
     <div className="min-h-screen bg-gray-50 dark:bg-gray-900">
+      {ConfirmDialog}
       <Navbar />
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6 sm:py-8">
         

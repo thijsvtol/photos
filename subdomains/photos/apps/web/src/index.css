@@ -36,6 +36,26 @@ html {
   .pb-safe {
     padding-bottom: max(1rem, env(safe-area-inset-bottom));
   }
+
+  .pt-safe-top {
+    padding-top: max(0.75rem, env(safe-area-inset-top));
+  }
+
+  .top-nav-offset {
+    top: calc(4rem + env(safe-area-inset-top));
+  }
+
+  .top-nav-offset-android {
+    top: calc(6rem + env(safe-area-inset-top));
+  }
+}
+
+.top-nav-offset {
+  top: 4rem;
+}
+
+.top-nav-offset-android {
+  top: 6rem;
 }
 
 /* Hide scrollbar while maintaining scroll functionality */

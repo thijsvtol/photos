@@ -289,8 +289,8 @@ describe('Mobile Browser Touch Scenarios', () => {
     });
 
     it('should allow swipe after safety delay has passed', () => {
-      let isZoomed = false;
-      let lastPinchEndTime = 1000;
+      const isZoomed = false;
+      const lastPinchEndTime = 1000;
       let touchStartX: number | null = null;
       const SAFETY_DELAY = 200;
 

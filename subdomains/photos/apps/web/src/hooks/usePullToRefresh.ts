@@ -1,5 +1,6 @@
 import { useEffect, useState, useRef } from 'react';
 import { Capacitor } from '@capacitor/core';
+import { haptics } from '../utils/haptics';
 
 interface PullToRefreshOptions {
   onRefresh: () => Promise<void>;
@@ -87,10 +88,12 @@ export const usePullToRefresh = ({
 
       // Trigger refresh if pulled beyond threshold
       if (currentPullDistance >= threshold) {
+        await haptics.light();
         isRefreshingRef.current = true;
         setIsRefreshing(true);
         try {
           await onRefresh();
+          await haptics.success();
         } finally {
           isRefreshingRef.current = false;
           setIsRefreshing(false);

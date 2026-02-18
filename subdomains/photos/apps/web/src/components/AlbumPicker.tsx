@@ -1,7 +1,9 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef } from 'react';
 import { X, Upload, Folder, Lock, Users } from 'lucide-react';
+import { Capacitor } from '@capacitor/core';
 import { Event } from '../types';
 import { getEvents, getPreviewUrl } from '../api';
+import { haptics } from '../utils/haptics';
 
 interface AlbumPickerProps {
   isOpen: boolean;
@@ -17,6 +19,10 @@ export default function AlbumPicker({ isOpen, onClose, onSelectAlbum }: AlbumPic
   const [events, setEvents] = useState<Event[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [pullDistance, setPullDistance] = useState(0);
+  const startYRef = useRef(0);
+  const isPullingRef = useRef(false);
+  const modalRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     if (isOpen) {
@@ -41,10 +47,68 @@ export default function AlbumPicker({ isOpen, onClose, onSelectAlbum }: AlbumPic
     }
   };
 
-  const handleSelectAlbum = (eventSlug: string) => {
+  const handleSelectAlbum = async (eventSlug: string) => {
+    await haptics.light();
     onSelectAlbum(eventSlug);
     onClose();
   };
+
+  // Pull-down-to-close gesture
+  useEffect(() => {
+    if (!isOpen || !Capacitor.isNativePlatform()) return;
+
+    const handleTouchStart = (e: TouchEvent) => {
+      const target = e.target as HTMLElement;
+      const content = modalRef.current?.querySelector('[data-no-pull-refresh]');
+      
+      // Only allow pull from content area that's scrolled to top
+      if (content && content.contains(target) && content.scrollTop === 0) {
+        startYRef.current = e.touches[0].clientY;
+        isPullingRef.current = true;
+      }
+    };
+
+    const handleTouchMove = (e: TouchEvent) => {
+      if (!isPullingRef.current) return;
+
+      const currentY = e.touches[0].clientY;
+      const distance = currentY - startYRef.current;
+
+      // Only allow pulling down
+      if (distance > 0) {
+        const resistedDistance = Math.min(distance * 0.4, 200);
+        setPullDistance(resistedDistance);
+
+        if (distance > 10) {
+          e.preventDefault();
+        }
+      }
+    };
+
+    const handleTouchEnd = async () => {
+      if (!isPullingRef.current) return;
+
+      isPullingRef.current = false;
+
+      // Close modal if pulled beyond threshold
+      if (pullDistance >= 100) {
+        await haptics.light();
+        onClose();
+      }
+
+      setPullDistance(0);
+    };
+
+    document.addEventListener('touchstart', handleTouchStart, { passive: true });
+    document.addEventListener('touchmove', handleTouchMove, { passive: false });
+    document.addEventListener('touchend', handleTouchEnd, { passive: true });
+
+    return () => {
+      document.removeEventListener('touchstart', handleTouchStart);
+      document.removeEventListener('touchmove', handleTouchMove);
+      document.removeEventListener('touchend', handleTouchEnd);
+    };
+  }, [isOpen, onClose, pullDistance]);
 
   const getVisibilityIcon = (visibility: string) => {
     switch (visibility) {
@@ -61,7 +125,18 @@ export default function AlbumPicker({ isOpen, onClose, onSelectAlbum }: AlbumPic
 
   return (
     <div className="fixed inset-0 bg-black/75 backdrop-blur-sm flex items-end sm:items-center justify-center z-50 sm:p-4 animate-in fade-in duration-200">
-      <div className="bg-white dark:bg-gray-800 rounded-t-xl sm:rounded-xl max-w-2xl w-full max-h-[95vh] sm:max-h-[85vh] flex flex-col shadow-2xl animate-in slide-in-from-bottom-4 duration-300">
+      <div 
+        ref={modalRef}
+        className="bg-white dark:bg-gray-800 rounded-t-xl sm:rounded-xl max-w-2xl w-full max-h-[95vh] sm:max-h-[85vh] flex flex-col shadow-2xl animate-in slide-in-from-bottom-4 duration-300 transition-transform"
+        style={{ transform: `translateY(${pullDistance}px)` }}
+      >
+        {/* Pull indicator */}
+        {Capacitor.isNativePlatform() && (
+          <div className="pt-2 pb-1 flex justify-center flex-shrink-0">
+            <div className="w-10 h-1 bg-gray-300 dark:bg-gray-600 rounded-full" />
+          </div>
+        )}
+
         {/* Header */}
         <div className="p-4 border-b border-gray-200 dark:border-gray-700 flex justify-between items-start gap-3 flex-shrink-0">
           <div className="flex-1 min-w-0">

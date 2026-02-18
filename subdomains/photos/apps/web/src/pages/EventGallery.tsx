@@ -18,11 +18,16 @@ import { CollaboratorAvatars } from '../components/CollaboratorAvatars';
 import { useAuth } from '../contexts/AuthContext';
 import { usePhotoSelection } from '../hooks/usePhotoSelection';
 import { config } from '../config';
+import { useToast } from '../components/Toast';
+import { useConfirm } from '../components/ConfirmDialog';
+import { haptics } from '../utils/haptics';
 
 const EventGallery: React.FC = () => {
   const { slug } = useParams<{ slug: string }>();
   const { isAuthenticated, login, user } = useAuth();
   const { registerRefreshHandler, unregisterRefreshHandler } = useRefresh();
+  const toast = useToast();
+  const { confirm, ConfirmDialog } = useConfirm();
   const isAdmin = user?.isAdmin === true;
   const [event, setEvent] = useState<Event | null>(null);
   const [photos, setPhotos] = useState<Photo[]>([]);
@@ -44,11 +49,17 @@ const EventGallery: React.FC = () => {
   // Use custom hook for photo selection
   const {
     selectedPhotos,
-    togglePhotoSelection,
+    togglePhotoSelection: togglePhotoSelectionBase,
     clearSelection,
     toggleDateSelection,
     isDateFullySelected,
   } = usePhotoSelection(photos);
+
+  // Wrapper to add haptic feedback to photo selection
+  const togglePhotoSelection = async (photoId: string) => {
+    await haptics.selectionChanged();
+    togglePhotoSelectionBase(photoId);
+  };
 
   // Detect mobile screen size
   useEffect(() => {
@@ -154,7 +165,7 @@ const EventGallery: React.FC = () => {
       setTimeout(() => setCopied(false), 2000);
     } catch (err) {
       console.error('Failed to copy link:', err);
-      alert('Failed to copy link to clipboard');
+      toast.showError('Failed to copy link to clipboard');
     }
   };
 
@@ -260,7 +271,10 @@ const EventGallery: React.FC = () => {
   const toggleFavorite = async (photoId: string, isFavorited: boolean) => {
     // Require authentication for favorites
     if (!isAuthenticated) {
-      const shouldLogin = window.confirm('You need to be logged in to save favorites. Would you like to login now?');
+      const shouldLogin = await confirm(
+        'Login Required',
+        'You need to be logged in to save favorites. Would you like to login now?'
+      );
       if (shouldLogin) {
         login();
       }
@@ -269,6 +283,9 @@ const EventGallery: React.FC = () => {
     
     try {
       await toggleFavoriteAPI(photoId, isFavorited);
+      
+      // Haptic feedback
+      await haptics.light();
       
       // Update local state
       const newFavorites = new Set(userFavorites);
@@ -280,7 +297,7 @@ const EventGallery: React.FC = () => {
       setUserFavorites(newFavorites);
     } catch (err) {
       console.error('Failed to toggle favorite:', err);
-      alert('Failed to update favorite. Please try again.');
+      toast.showError('Failed to update favorite. Please try again.');
     }
   };
 
@@ -293,21 +310,23 @@ const EventGallery: React.FC = () => {
       ));
     } catch (err) {
       console.error('Failed to toggle featured status:', err);
-      alert('Failed to update featured status. You may need admin access.');
+      toast.showError('Failed to update featured status. You may need admin access.');
     }
   };
 
   const downloadSelected = async () => {
     const selected = Array.from(selectedPhotos);
     if (selected.length === 0) {
-      alert('No photos selected');
+      toast.showInfo('No photos selected');
       return;
     }
     
     if (selected.length > 50) {
-      alert('Maximum 50 photos can be downloaded at once');
+      toast.showInfo('Maximum 50 photos can be downloaded at once');
       return;
     }
+    
+    await haptics.light();
     
     try {
       // Request ZIP file from server
@@ -318,19 +337,21 @@ const EventGallery: React.FC = () => {
       await downloadZip(zipBlob, `${slug}_${timestamp}.zip`);
     } catch (error) {
       console.error('Error downloading ZIP:', error);
-      alert('Failed to download ZIP file');
+      toast.showError('Failed to download ZIP file');
     }
   };
 
   const handleBulkDelete = async () => {
     const selected = Array.from(selectedPhotos);
     if (selected.length === 0) {
-      alert('No photos selected');
+      toast.showInfo('No photos selected');
       return;
     }
     
-    const confirmed = window.confirm(
-      `Are you sure you want to delete ${selected.length} selected photo(s)? This cannot be undone!`
+    const confirmed = await confirm(
+      'Delete Photos',
+      `Are you sure you want to delete ${selected.length} selected photo(s)? This cannot be undone!`,
+      { variant: 'danger' }
     );
     
     if (!confirmed) return;
@@ -346,13 +367,16 @@ const EventGallery: React.FC = () => {
       clearSelection();
       
       if (result.deletedCount === result.totalRequested) {
-        alert(`Successfully deleted ${result.deletedCount} photo(s)`);
+        await haptics.success();
+        toast.showSuccess(`Successfully deleted ${result.deletedCount} photo(s)`);
       } else {
-        alert(`Deleted ${result.deletedCount} of ${result.totalRequested} photo(s). Some photos may have failed to delete.`);
+        await haptics.warning();
+        toast.showInfo(`Deleted ${result.deletedCount} of ${result.totalRequested} photo(s). Some photos may have failed to delete.`);
       }
     } catch (error) {
       console.error('Error deleting photos:', error);
-      alert('Failed to delete photos. Please try again.');
+      await haptics.error();
+      toast.showError('Failed to delete photos. Please try again.');
     } finally {
       setDeleting(false);
     }
@@ -475,6 +499,7 @@ const EventGallery: React.FC = () => {
 
   return (
     <div className="min-h-screen bg-gray-50 dark:bg-gray-900 flex flex-col">
+      {ConfirmDialog}
       <SEO
         title={`${event?.name || 'Event Gallery'} - ${config.appName}`}
         description={`Browse ${photos.length} photos from ${event?.name}${event?.cities && event.cities.length > 0 ? ` in ${event.cities.join(', ')}` : ''}. Professional event photography featuring ice skating and inline skating.`}

@@ -14,6 +14,7 @@ import com.getcapacitor.PluginCall;
 import com.getcapacitor.PluginMethod;
 import com.getcapacitor.annotation.CapacitorPlugin;
 import nl.thijsvtol.photos.MainActivity;
+import nl.thijsvtol.photos.R;
 
 @CapacitorPlugin(name = "ProgressNotification")
 public class ProgressNotificationPlugin extends Plugin {
@@ -75,7 +76,7 @@ public class ProgressNotificationPlugin extends Plugin {
         NotificationCompat.Builder builder = new NotificationCompat.Builder(getContext(), CHANNEL_ID)
             .setContentTitle(title)
             .setContentText(body)
-            .setSmallIcon(android.R.drawable.stat_sys_upload)
+            .setSmallIcon(R.drawable.ic_notification)
             .setOngoing(ongoing)
             .setOnlyAlertOnce(true) // Don't make sound/vibration on updates
             .setContentIntent(pendingIntent)

@@ -8,12 +8,17 @@ import { getEvent, getPhoto, getPhotos, loginToEvent, getPreviewUrl, downloadOri
 import type { Event, Photo } from '../types';
 import { useAuth } from '../contexts/AuthContext';
 import { config } from '../config';
+import { useToast } from '../components/Toast';
+import { useConfirm } from '../components/ConfirmDialog';
+import { haptics } from '../utils/haptics';
 
 const PhotoDetail: React.FC = () => {
   const { slug, photoId } = useParams<{ slug: string; photoId: string }>();
   const navigate = useNavigate();
   const location = useLocation();
   const { isAuthenticated, login } = useAuth();
+  const toast = useToast();
+  const { confirm, ConfirmDialog } = useConfirm();
   const [event, setEvent] = useState<Event | null>(null);
   const [photo, setPhoto] = useState<Photo | null>(null);
   const [allPhotos, setAllPhotos] = useState<Photo[]>([]);
@@ -635,7 +640,7 @@ const PhotoDetail: React.FC = () => {
       case 'instagram':
         // Instagram doesn't support direct URL sharing, so copy link with instruction
         navigator.clipboard.writeText(url);
-        alert('Link copied! Open Instagram and paste in your story or bio.');
+        toast.showSuccess('Link copied! Open Instagram and paste in your story or bio.');
         break;
       case 'snapchat':
         // Snapchat web share (limited support)
@@ -646,7 +651,7 @@ const PhotoDetail: React.FC = () => {
         break;
       case 'copy':
         navigator.clipboard.writeText(url);
-        alert('Link copied to clipboard!');
+        toast.showSuccess('Link copied to clipboard!');
         break;
     }
     setShowShareMenu(false);
@@ -657,7 +662,10 @@ const PhotoDetail: React.FC = () => {
     
     // Require authentication for favorites
     if (!isAuthenticated) {
-      const shouldLogin = window.confirm('You need to be logged in to save favorites. Would you like to login now?');
+      const shouldLogin = await confirm(
+        'Login Required',
+        'You need to be logged in to save favorites. Would you like to login now?'
+      );
       if (shouldLogin) {
         login();
       }
@@ -666,10 +674,11 @@ const PhotoDetail: React.FC = () => {
     
     try {
       await toggleFavoriteAPI(photo.id, isFavorited);
+      await haptics.light();
       setIsFavorited(!isFavorited);
     } catch (err) {
       console.error('Failed to toggle favorite:', err);
-      alert('Failed to update favorite. Please try again.');
+      toast.showError('Failed to update favorite. Please try again.');
     }
   };
 
@@ -761,6 +770,7 @@ const PhotoDetail: React.FC = () => {
 
   return (
     <div className="min-h-screen bg-gray-900 flex flex-col">
+      {ConfirmDialog}
       {photo && (
         <SEO
           title={`Photo from ${event?.name} - ${config.appName}`}

@@ -10,10 +10,13 @@ import { useRefresh } from '../contexts/RefreshContext';
 import { getUserFavorites, removeFavorite as removeFavoriteAPI, requestZip, downloadZip, type FavoritePhoto } from '../api';
 import { useAuth } from '../contexts/AuthContext';
 import { config } from '../config';
+import { useToast } from '../components/Toast';
+import { haptics } from '../utils/haptics';
 
 const MyFavorites: React.FC = () => {
   const { isAuthenticated, loading: authLoading, login } = useAuth();
   const { registerRefreshHandler, unregisterRefreshHandler } = useRefresh();
+  const toast = useToast();
   const [photos, setPhotos] = useState<FavoritePhoto[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -58,21 +61,22 @@ const MyFavorites: React.FC = () => {
   const handleRemoveFavorite = async (photoId: string) => {
     try {
       await removeFavoriteAPI(photoId);
+      await haptics.light();
       setPhotos(photos.filter(p => p.id !== photoId));
     } catch (err) {
       console.error('Failed to remove favorite:', err);
-      alert('Failed to remove from favorites. Please try again.');
+      toast.showError('Failed to remove from favorites. Please try again.');
     }
   };
 
   const downloadAllFavorites = async () => {
     if (photos.length === 0) {
-      alert('No favorites to download');
+      toast.showInfo('No favorites to download');
       return;
     }
 
     if (photos.length > 50) {
-      alert('Maximum 50 photos can be downloaded at once. Please remove some favorites first.');
+      toast.showInfo('Maximum 50 photos can be downloaded at once. Please remove some favorites first.');
       return;
     }
 
@@ -100,10 +104,12 @@ const MyFavorites: React.FC = () => {
         await new Promise(resolve => setTimeout(resolve, 500));
       }
 
-      alert(`Downloaded ${Object.keys(photosByEvent).length} ZIP file(s)`);
+      await haptics.success();
+      toast.showSuccess(`Downloaded ${Object.keys(photosByEvent).length} ZIP file(s)`);
     } catch (error) {
       console.error('Error downloading favorites:', error);
-      alert('Failed to download some files. Please try again.');
+      await haptics.error();
+      toast.showError('Failed to download some files. Please try again.');
     } finally {
       setDownloading(false);
     }

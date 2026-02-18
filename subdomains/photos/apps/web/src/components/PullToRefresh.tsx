@@ -31,7 +31,7 @@ const PullToRefresh: React.FC<PullToRefreshProps> = ({
       {/* Pull indicator */}
       {isActive && (
         <div
-          className="fixed top-0 left-0 right-0 z-[9999] flex items-center justify-center pointer-events-none"
+          className="fixed top-0 left-0 right-0 z-[9999] pt-safe-top flex items-center justify-center pointer-events-none"
           style={{
             transform: `translateY(${Math.min(pullDistance - 20, 60)}px)`,
             opacity,
