@@ -2,7 +2,7 @@ import type { CapacitorConfig } from '@capacitor/cli';
 
 const config: CapacitorConfig = {
   appId: 'nl.thijsvtol.photos',
-  appName: 'Photos',
+  appName: 'TvT Photos',
   webDir: 'dist',
   plugins: {
     LocalNotifications: {
@@ -17,6 +17,7 @@ const config: CapacitorConfig = {
     },
   },
   android: {
+    path: '../android',
     allowMixedContent: true,
   },
   server: {
