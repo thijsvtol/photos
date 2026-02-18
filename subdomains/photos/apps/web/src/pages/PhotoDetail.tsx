@@ -173,7 +173,7 @@ const PhotoDetail: React.FC = () => {
   useEffect(() => {
     if (isSlideshow && imageLoaded) {
       slideshowTimerRef.current = setTimeout(() => {
-        navigateToNext();
+        navigateNextRef.current?.();
       }, slideshowSpeed);
     }
     
@@ -358,7 +358,7 @@ const PhotoDetail: React.FC = () => {
         setPhoto(nextPhoto);
         setImageLoaded(isPreloaded); // If preloaded, mark as loaded immediately
         
-        window.history.pushState(null, '', `/p/${slug}/${nextPhoto.id}`);
+        navigate(`/p/${slug}/${nextPhoto.id}`, { replace: true });
         
         // End transition and reset slide direction
         if (transitionTimeoutRef.current) {
@@ -381,7 +381,7 @@ const PhotoDetail: React.FC = () => {
         setPhoto(firstPhoto);
         setImageLoaded(isPreloaded);
         
-        window.history.pushState(null, '', `/p/${slug}/${firstPhoto.id}`);
+        navigate(`/p/${slug}/${firstPhoto.id}`, { replace: true });
         if (transitionTimeoutRef.current) {
           clearTimeout(transitionTimeoutRef.current);
         }
@@ -431,7 +431,7 @@ const PhotoDetail: React.FC = () => {
         setPhoto(prevPhoto);
         setImageLoaded(isPreloaded); // If preloaded, mark as loaded immediately
         
-        window.history.pushState(null, '', `/p/${slug}/${prevPhoto.id}`);
+        navigate(`/p/${slug}/${prevPhoto.id}`, { replace: true });
         
         // End transition and reset slide direction
         if (transitionTimeoutRef.current) {
@@ -454,7 +454,7 @@ const PhotoDetail: React.FC = () => {
         setPhoto(lastPhoto);
         setImageLoaded(isPreloaded);
         
-        window.history.pushState(null, '', `/p/${slug}/${lastPhoto.id}`);
+        navigate(`/p/${slug}/${lastPhoto.id}`, { replace: true });
         if (transitionTimeoutRef.current) {
           clearTimeout(transitionTimeoutRef.current);
         }
@@ -1008,7 +1008,7 @@ const PhotoDetail: React.FC = () => {
           {/* Main image/video with swipe support and progressive loading */}
           <div 
             ref={imageContainerRef} 
-            className="relative overflow-auto select-none touch-pan-x touch-pan-y touch-pinch-zoom" 
+            className={`relative select-none touch-pan-x touch-pan-y touch-pinch-zoom ${isZoomed ? 'overflow-auto' : 'overflow-hidden'}`}
             style={{ 
               touchAction: 'pan-x pan-y pinch-zoom',
               WebkitOverflowScrolling: 'touch'
@@ -1021,33 +1021,33 @@ const PhotoDetail: React.FC = () => {
                 slideDirection === 'right' ? 'animate-slide-in-left' : ''
               }`}
             >
-            {photo?.file_type === 'video/mp4' ? (
-              <video
-                src={getPreviewUrl(slug!, photo?.id || photoId!, photo?.file_type)}
-                controls
-                autoPlay
-                loop
-                className={`w-full h-auto ${isFullscreen ? 'max-h-screen' : 'max-h-[70vh] md:max-h-[80vh]'} object-contain`}
-              />
-            ) : (
-              <>
-                {photo?.blur_placeholder && !imageLoaded && (
-                  <img
-                    src={photo.blur_placeholder}
-                    alt="Loading..."
-                    className={`w-full h-auto ${isFullscreen ? 'max-h-screen' : 'max-h-[70vh] md:max-h-[80vh]'} object-contain blur-xl transition-opacity duration-200`}
-                  />
-                )}
-                <img
+              {photo?.file_type === 'video/mp4' ? (
+                <video
                   src={getPreviewUrl(slug!, photo?.id || photoId!, photo?.file_type)}
-                  alt={photo?.original_filename}
-                  className={`w-full h-auto ${isFullscreen ? 'max-h-screen' : 'max-h-[70vh] md:max-h-[80vh]'} object-contain transition-opacity duration-300 ${imageLoaded ? 'opacity-100' : 'opacity-0'} ${photo?.blur_placeholder && !imageLoaded ? 'absolute inset-0' : ''}`}
-                  onLoad={() => setImageLoaded(true)}
-                  loading="eager"
-                  decoding="async"
+                  controls
+                  autoPlay
+                  loop
+                  className={`w-full h-auto ${isFullscreen ? 'max-h-screen' : 'max-h-[70vh] md:max-h-[80vh]'} object-contain`}
                 />
-              </>
-            )}
+              ) : (
+                <>
+                  {photo?.blur_placeholder && !imageLoaded && (
+                    <img
+                      src={photo.blur_placeholder}
+                      alt="Loading..."
+                      className={`w-full h-auto ${isFullscreen ? 'max-h-screen' : 'max-h-[70vh] md:max-h-[80vh]'} object-contain blur-xl transition-opacity duration-200`}
+                    />
+                  )}
+                  <img
+                    src={getPreviewUrl(slug!, photo?.id || photoId!, photo?.file_type)}
+                    alt={photo?.original_filename}
+                    className={`w-full h-auto ${isFullscreen ? 'max-h-screen' : 'max-h-[70vh] md:max-h-[80vh]'} object-contain transition-opacity duration-300 ${imageLoaded ? 'opacity-100' : 'opacity-0'} ${photo?.blur_placeholder && !imageLoaded ? 'absolute inset-0' : ''}`}
+                    onLoad={() => setImageLoaded(true)}
+                    loading="eager"
+                    decoding="async"
+                  />
+                </>
+              )}
             </div>
           </div>
         </div>
