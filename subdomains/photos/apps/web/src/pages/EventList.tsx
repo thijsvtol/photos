@@ -20,6 +20,7 @@ const EventList: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
   const [showTagFilters, setShowTagFilters] = useState(false);
   const [showCityFilters, setShowCityFilters] = useState(false);
+  const [showAllCities, setShowAllCities] = useState(false);
 
   useEffect(() => {
     loadTags();
@@ -212,12 +213,21 @@ const EventList: React.FC = () => {
 
         {/* City filters */}
         {(() => {
-          // Extract unique cities from all events
-          const cities = Array.from(
-            new Set(
-              allEvents.flatMap(event => event.cities || [])
-            )
-          ).sort();
+          const cityCounts = new Map<string, number>();
+          allEvents.forEach(event => {
+            (event.cities || []).forEach(city => {
+              cityCounts.set(city, (cityCounts.get(city) || 0) + 1);
+            });
+          });
+
+          const cities = Array.from(cityCounts.entries())
+            .sort((a, b) => {
+              if (b[1] !== a[1]) return b[1] - a[1];
+              return a[0].localeCompare(b[0]);
+            })
+            .map(([city]) => city);
+
+          const visibleCities = showAllCities ? cities : cities.slice(0, 5);
           
           if (cities.length > 0) {
             return (
@@ -244,7 +254,7 @@ const EventList: React.FC = () => {
                   >
                     All Cities
                   </button>
-                  {cities.map((city) => (
+                  {visibleCities.map((city) => (
                     <button
                       key={city}
                       onClick={() => filterByCity(city)}
@@ -257,6 +267,14 @@ const EventList: React.FC = () => {
                       {city}
                     </button>
                   ))}
+                  {cities.length > 5 && (
+                    <button
+                      onClick={() => setShowAllCities(prev => !prev)}
+                      className="px-3 py-1.5 sm:px-4 sm:py-2.5 rounded-full text-xs sm:text-sm font-semibold transition-all active:scale-95 bg-white text-gray-700 border border-gray-300 hover:bg-gray-50 dark:bg-gray-900 dark:text-gray-200 dark:border-gray-700 dark:hover:bg-gray-800"
+                    >
+                      {showAllCities ? 'View less' : `+ ${cities.length - 5} more`}
+                    </button>
+                  )}
                 </div>
               </div>
             );
