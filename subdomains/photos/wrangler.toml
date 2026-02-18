@@ -28,12 +28,12 @@ BRAND_NAME = "Photos"
 COPYRIGHT_HOLDER = "Your Name"
 APP_DOMAIN = "localhost:8787"
 CONTACT_EMAIL = "contact@example.com"
+GA_MEASUREMENT_ID = "G-PLACEHOLDER"
 
 # Secrets (set via wrangler secret put):
 # - EVENT_COOKIE_SECRET: Secret for signing event session cookies
 # - JWT_SECRET: Secret for signing mobile app JWT tokens  
 # - ADMIN_EMAILS: Comma-separated list of admin email addresses
-# - GA_MEASUREMENT_ID: (Optional) Google Analytics 4 Measurement ID (format: G-XXXXXXXXXX)
 # - MAILGUN_API_KEY: (Optional) Mailgun API key for email notifications
 # - MAILGUN_DOMAIN: (Optional) Mailgun domain for sending emails
 
@@ -61,6 +61,7 @@ BRAND_NAME = "Thijs van Tol"
 COPYRIGHT_HOLDER = "Thijs van Tol"
 APP_DOMAIN = "photos.thijsvtol.nl"
 CONTACT_EMAIL = "info@thijsvtol.nl"
+GA_MEASUREMENT_ID = "G-PLACEHOLDER"
 
 [[env.production.d1_databases]]
 binding = "DB"
