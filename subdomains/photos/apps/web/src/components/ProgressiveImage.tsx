@@ -31,7 +31,7 @@ const ProgressiveImage: React.FC<ProgressiveImageProps> = ({
   }, [src]);
 
   return (
-    <div className="relative overflow-hidden">
+    <div className="relative overflow-hidden w-full h-full">
       {blurDataUrl && !imageLoaded && (
         <img
           src={blurDataUrl}

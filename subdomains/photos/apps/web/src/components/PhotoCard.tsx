@@ -63,7 +63,7 @@ const PhotoCard: React.FC<PhotoCardProps> = ({
         {isVideo ? (
           <video
             src={getPreviewUrl(slug, photo.id, photo.file_type)}
-            className="w-full h-full object-cover"
+            className="w-full h-full object-cover object-center"
             muted
             playsInline
             onMouseEnter={(e) => e.currentTarget.play()}
@@ -77,7 +77,7 @@ const PhotoCard: React.FC<PhotoCardProps> = ({
             src={getPreviewUrl(slug, photo.id, photo.file_type)}
             blurDataUrl={photo.blur_placeholder}
             alt={photo.original_filename}
-            className="w-full h-full object-cover"
+            className="w-full h-full object-cover object-center"
             loading="lazy"
           />
         )}
