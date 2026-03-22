@@ -33,6 +33,63 @@ app.put('/:photoId/featured', async (c) => {
 });
 
 /**
+ * PUT /photos/:photoId/replace
+ * Replace a photo's original and preview images (admin-only, for image editing)
+ */
+app.put('/:photoId/replace', async (c) => {
+  const photoId = c.req.param('photoId');
+
+  try {
+    // Get photo and event slug for R2 key construction
+    const photo = await c.env.DB
+      .prepare(`
+        SELECT p.id, p.width, p.height, e.slug
+        FROM photos p
+        JOIN events e ON p.event_id = e.id
+        WHERE p.id = ?
+      `)
+      .bind(photoId)
+      .first<{ id: string; width: number | null; height: number | null; slug: string }>();
+
+    if (!photo) {
+      return c.json({ error: 'Photo not found' }, 404);
+    }
+
+    const formData = await c.req.formData();
+    const originalFile = formData.get('original') as File | null;
+    const previewFile = formData.get('preview') as File | null;
+
+    if (!originalFile || !previewFile) {
+      return c.json({ error: 'Both original and preview files are required' }, 400);
+    }
+
+    // Overwrite original in R2
+    const originalKey = `original/${photo.slug}/${photo.id}.jpg`;
+    await c.env.PHOTOS_BUCKET.put(originalKey, await originalFile.arrayBuffer(), {
+      httpMetadata: { contentType: 'image/jpeg' },
+    });
+
+    // Overwrite preview in R2
+    const previewKey = `preview/${photo.slug}/${photo.id}.jpg`;
+    await c.env.PHOTOS_BUCKET.put(previewKey, await previewFile.arrayBuffer(), {
+      httpMetadata: { contentType: 'image/jpeg' },
+    });
+
+    // Delete stale Instagram export if it exists
+    try {
+      await c.env.PHOTOS_BUCKET.delete(`ig/${photo.slug}/${photo.id}.jpg`);
+    } catch {
+      // Ignore if ig version doesn't exist
+    }
+
+    return c.json({ success: true });
+  } catch (error) {
+    console.error('Error replacing photo:', error);
+    return c.json({ error: 'Failed to replace photo' }, 500);
+  }
+});
+
+/**
  * DELETE /photos/:photoId
  * Delete a photo
  */

@@ -1,10 +1,12 @@
-import React, { useEffect, useState, useRef, useCallback } from 'react';
+import React, { useEffect, useState, useRef, useCallback, lazy, Suspense } from 'react';
 import { useParams, Link, useNavigate, useLocation } from 'react-router-dom';
-import { Maximize, Minimize, Share2, X, Heart, Play, Pause } from 'lucide-react';
+import { Maximize, Minimize, Share2, X, Heart, Play, Pause, Pencil } from 'lucide-react';
 import Navbar from '../components/Navbar';
 import Footer from '../components/Footer';
 import SEO from '../components/SEO';
-import { getEvent, getPhoto, getPhotos, loginToEvent, getPreviewUrl, downloadOriginal, downloadSmall, downloadInstagram, toggleFavorite as toggleFavoriteAPI, getUserFavoriteIds } from '../api';
+const ImageEditorModal = lazy(() => import('../components/ImageEditorModal'));
+import { getEvent, getPhoto, getPhotos, loginToEvent, getPreviewUrl, getOriginalUrl, downloadOriginal, downloadSmall, downloadInstagram, replacePhoto, toggleFavorite as toggleFavoriteAPI, getUserFavoriteIds } from '../api';
+import { createPreview } from '../imageUtils';
 import type { Event, Photo } from '../types';
 import { useAuth } from '../contexts/AuthContext';
 import { config } from '../config';
@@ -17,7 +19,7 @@ const PhotoDetail: React.FC = () => {
   const { slug, photoId } = useParams<{ slug: string; photoId: string }>();
   const navigate = useNavigate();
   const location = useLocation();
-  const { isAuthenticated, login } = useAuth();
+  const { isAuthenticated, login, user } = useAuth();
   const toast = useToast();
   const { confirm, ConfirmDialog } = useConfirm();
   const [event, setEvent] = useState<Event | null>(null);
@@ -41,6 +43,7 @@ const PhotoDetail: React.FC = () => {
   const [preloadedImages, setPreloadedImages] = useState<Set<string>>(new Set());
   const [isTransitioning, setIsTransitioning] = useState(false);
   const [slideDirection, setSlideDirection] = useState<'left' | 'right' | null>(null);
+  const [showEditor, setShowEditor] = useState(false);
   const touchStartX = useRef<number | null>(null);
   const touchEndX = useRef<number | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -689,6 +692,28 @@ const PhotoDetail: React.FC = () => {
     }
   };
 
+  const handleEditorSave = async (editedBlob: Blob) => {
+    if (!slug || !photo) return;
+    try {
+      // Generate preview from the edited blob
+      const editedFile = new File([editedBlob], 'edited.jpg', { type: 'image/jpeg' });
+      const previewBlob = await createPreview(editedFile);
+      
+      // Upload both original and preview to replace the current photo
+      await replacePhoto(slug, photo.id, editedBlob, previewBlob);
+      
+      toast.showSuccess('Photo saved successfully!');
+      setShowEditor(false);
+      
+      // Force reload the photo to show the updated version
+      setImageLoaded(false);
+      await loadPhoto();
+    } catch (err) {
+      console.error('Failed to save edited photo:', err);
+      toast.showError('Failed to save photo. Please try again.');
+    }
+  };
+
   const handleDownloadOriginal = () => {
     if (!slug || !photo) return;
     downloadOriginal(slug, photo.id);
@@ -887,6 +912,18 @@ const PhotoDetail: React.FC = () => {
           {/* Action buttons - Desktop only */}
           <div className="hidden md:flex absolute top-4 right-4 z-20 gap-2 items-center">
             
+            {/* Edit button - admin only, images only */}
+            {user?.isAdmin && photo?.file_type !== 'video/mp4' && (
+              <button
+                onClick={() => setShowEditor(true)}
+                className="bg-black/50 hover:bg-black/75 text-white p-2 rounded-full transition backdrop-blur-sm w-9 h-9 flex items-center justify-center"
+                aria-label="Edit photo"
+                title="Edit photo"
+              >
+                <Pencil className="w-5 h-5" />
+              </button>
+            )}
+
             {/* Favorite button */}
             <button
               onClick={toggleFavorite}
@@ -1170,6 +1207,18 @@ const PhotoDetail: React.FC = () => {
               {isSlideshow ? <Pause className="w-5 h-5" /> : <Play className="w-5 h-5" />}
               <span className="text-sm font-medium">{isSlideshow ? 'Pause' : 'Play'}</span>
             </button>
+
+            {/* Edit button - admin only, images only (mobile) */}
+            {user?.isAdmin && photo?.file_type !== 'video/mp4' && (
+              <button
+                onClick={() => setShowEditor(true)}
+                className="px-4 py-2.5 bg-amber-600 text-white rounded-lg transition flex items-center gap-2 min-w-[110px] justify-center"
+                aria-label="Edit photo"
+              >
+                <Pencil className="w-5 h-5" />
+                <span className="text-sm font-medium">Edit</span>
+              </button>
+            )}
           </div>
           
           {/* Download buttons */}
@@ -1353,6 +1402,24 @@ const PhotoDetail: React.FC = () => {
           )}
         </div>
       </div>
+
+      {/* Image Editor Modal */}
+      {showEditor && photo && slug && photo.file_type !== 'video/mp4' && (
+        <Suspense fallback={
+          <div className="fixed inset-0 z-[200] flex items-center justify-center bg-gray-900">
+            <div className="text-center">
+              <div className="inline-block animate-spin rounded-full h-12 w-12 border-b-2 border-white"></div>
+              <p className="mt-4 text-gray-400">Loading editor...</p>
+            </div>
+          </div>
+        }>
+          <ImageEditorModal
+            imageUrl={getOriginalUrl(slug, photo.id, photo.file_type)}
+            onSave={handleEditorSave}
+            onClose={() => setShowEditor(false)}
+          />
+        </Suspense>
+      )}
 
       {/* Keyboard Help Modal */}
       {showKeyboardHelp && (

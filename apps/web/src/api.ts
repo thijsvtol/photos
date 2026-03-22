@@ -800,6 +800,22 @@ export const searchUsers = async (query: string) => {
   return response.data.users;
 };
 
+export const replacePhoto = async (_slug: string, photoId: string, originalBlob: Blob, previewBlob: Blob): Promise<void> => {
+  const formData = new FormData();
+  formData.append('original', originalBlob, 'original.jpg');
+  formData.append('preview', previewBlob, 'preview.jpg');
+  await api.put(
+    `/admin/photos/${photoId}/replace`,
+    formData,
+    {
+      headers: {
+        ...getAdminHeaders(),
+        'Content-Type': 'multipart/form-data',
+      },
+    }
+  );
+};
+
 export const getCollaborationHistory = async (eventSlug: string) => {
   const response = await api.get<{ 
     history: Array<{
