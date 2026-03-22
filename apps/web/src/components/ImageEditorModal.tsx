@@ -118,6 +118,7 @@ const ImageEditorModal: React.FC<ImageEditorModalProps> = ({ imageUrl, onSave, o
       await onSave(blob);
     } catch (err) {
       console.error('Failed to save:', err);
+      throw err;
     } finally {
       setSaving(false);
     }

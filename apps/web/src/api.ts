@@ -808,10 +808,7 @@ export const replacePhoto = async (_slug: string, photoId: string, originalBlob:
     `/admin/photos/${photoId}/replace`,
     formData,
     {
-      headers: {
-        ...getAdminHeaders(),
-        'Content-Type': 'multipart/form-data',
-      },
+      headers: getAdminHeaders(),
     }
   );
 };
