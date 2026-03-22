@@ -103,18 +103,19 @@ export async function createPreview(file: File): Promise<Blob> {
 }
 
 /**
- * Process an image for optimal Instagram upload quality.
+ * Process an image for optimal Instagram post quality.
  *
- * Instagram specs:
- * - Recommended width: 1080px
- * - Portrait (4:5): 1080×1350 — max portrait ratio allowed
- * - Square (1:1): 1080×1080
- * - Landscape (1.91:1): 1080×566 — max landscape ratio allowed
+ * Always produces a fixed 4:5 vertical portrait canvas (1080 × 1350 px),
+ * which is the highest-engagement format on Instagram. The original photo
+ * is scaled to fit inside the canvas (contain mode) and centred on a white
+ * background. A minimum 3 % white border is guaranteed on every side so
+ * the image never bleeds to the edge.
  *
- * Photos whose aspect ratio falls within Instagram's accepted range keep
- * their original ratio at 1080px wide. Photos outside the range are
- * letterboxed with white borders to fit the nearest accepted ratio.
- * A minimum 10% white border is applied on all sides in every case.
+ * Best practices applied:
+ * - Fixed 1080 × 1350 output (4:5) for maximum feed real-estate
+ * - High-quality JPEG at 95 % to stay well within Instagram's re-compression
+ * - High-quality image smoothing for clean down-scaling
+ * - Clean white (#ffffff) background for a professional look
  */
 export async function processForInstagram(imageUrl: string): Promise<Blob> {
   return new Promise((resolve, reject) => {
@@ -123,22 +124,13 @@ export async function processForInstagram(imageUrl: string): Promise<Blob> {
 
     img.onload = () => {
       try {
-        const originalRatio = img.width / img.height;
-
-        // Instagram's accepted aspect-ratio range
-        const MIN_RATIO = 4 / 5;   // 0.8  — most portrait allowed
-        const MAX_RATIO = 1.91;    // max landscape allowed
-        const TARGET_WIDTH = 1080;
-
-        // Clamp to Instagram's accepted range
-        const clampedRatio = Math.max(MIN_RATIO, Math.min(MAX_RATIO, originalRatio));
-
-        const canvasWidth = TARGET_WIDTH;
-        const canvasHeight = Math.round(TARGET_WIDTH / clampedRatio);
+        // Fixed 4:5 portrait canvas — optimal for Instagram feed visibility
+        const CANVAS_WIDTH = 1080;
+        const CANVAS_HEIGHT = 1350;
 
         const canvas = document.createElement('canvas');
-        canvas.width = canvasWidth;
-        canvas.height = canvasHeight;
+        canvas.width = CANVAS_WIDTH;
+        canvas.height = CANVAS_HEIGHT;
 
         const ctx = canvas.getContext('2d');
         if (!ctx) {
@@ -146,22 +138,22 @@ export async function processForInstagram(imageUrl: string): Promise<Blob> {
           return;
         }
 
-        // White border background
+        // White background fill
         ctx.fillStyle = '#ffffff';
-        ctx.fillRect(0, 0, canvasWidth, canvasHeight);
+        ctx.fillRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
 
-        // Reserve at least 10% border on every side, so the image occupies
-        // at most 80% of each canvas dimension.
-        const BORDER_FRACTION = 0.10; // 10% per side
-        const maxDrawWidth = Math.round(canvasWidth * (1 - BORDER_FRACTION * 2));
-        const maxDrawHeight = Math.round(canvasHeight * (1 - BORDER_FRACTION * 2));
+        // Reserve at least 3 % border on every side so the photo never
+        // touches the canvas edge.
+        const BORDER_FRACTION = 0.03; // 3 % per side
+        const maxDrawWidth = Math.round(CANVAS_WIDTH * (1 - BORDER_FRACTION * 2));
+        const maxDrawHeight = Math.round(CANVAS_HEIGHT * (1 - BORDER_FRACTION * 2));
 
         // Scale image to fit within the inner area (contain)
         const scale = Math.min(maxDrawWidth / img.width, maxDrawHeight / img.height);
         const drawWidth = Math.round(img.width * scale);
         const drawHeight = Math.round(img.height * scale);
-        const offsetX = Math.round((canvasWidth - drawWidth) / 2);
-        const offsetY = Math.round((canvasHeight - drawHeight) / 2);
+        const offsetX = Math.round((CANVAS_WIDTH - drawWidth) / 2);
+        const offsetY = Math.round((CANVAS_HEIGHT - drawHeight) / 2);
 
         ctx.imageSmoothingEnabled = true;
         ctx.imageSmoothingQuality = 'high';
