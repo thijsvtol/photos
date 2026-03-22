@@ -113,7 +113,8 @@ export async function createPreview(file: File): Promise<Blob> {
  *
  * Photos whose aspect ratio falls within Instagram's accepted range keep
  * their original ratio at 1080px wide. Photos outside the range are
- * letterboxed with black bars to fit the nearest accepted ratio.
+ * letterboxed with white borders to fit the nearest accepted ratio.
+ * A minimum 10% white border is applied on all sides in every case.
  */
 export async function processForInstagram(imageUrl: string): Promise<Blob> {
   return new Promise((resolve, reject) => {
@@ -145,12 +146,18 @@ export async function processForInstagram(imageUrl: string): Promise<Blob> {
           return;
         }
 
-        // Black letterbox background
-        ctx.fillStyle = '#000000';
+        // White border background
+        ctx.fillStyle = '#ffffff';
         ctx.fillRect(0, 0, canvasWidth, canvasHeight);
 
-        // Scale image to fit within canvas (contain, not cover)
-        const scale = Math.min(canvasWidth / img.width, canvasHeight / img.height);
+        // Reserve at least 10% border on every side, so the image occupies
+        // at most 80% of each canvas dimension.
+        const BORDER_FRACTION = 0.10; // 10% per side
+        const maxDrawWidth = Math.round(canvasWidth * (1 - BORDER_FRACTION * 2));
+        const maxDrawHeight = Math.round(canvasHeight * (1 - BORDER_FRACTION * 2));
+
+        // Scale image to fit within the inner area (contain)
+        const scale = Math.min(maxDrawWidth / img.width, maxDrawHeight / img.height);
         const drawWidth = Math.round(img.width * scale);
         const drawHeight = Math.round(img.height * scale);
         const offsetX = Math.round((canvasWidth - drawWidth) / 2);
