@@ -59,9 +59,9 @@ app.get('/api/events', optionalAuth, async (c) => {
         let preview_photo_id = null;
         
         if (!(event as any).requires_password) {
-          // Get the first photo for this event as preview
+          // Get the first featured photo for this event as preview, fallback to first photo
           const photo = await c.env.DB
-            .prepare('SELECT id FROM photos WHERE event_id = ? ORDER BY capture_time ASC LIMIT 1')
+            .prepare('SELECT id FROM photos WHERE event_id = ? ORDER BY is_featured DESC, capture_time ASC LIMIT 1')
             .bind(event.id)
             .first<{ id: string }>();
           
