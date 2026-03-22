@@ -217,9 +217,12 @@ app.get('/api/user/profile', optionalAuth, async (c) => {
     console.log('[GET /api/user/profile] Full DB query result:', dbUser);
     console.log('[GET /api/user/profile] Name from DB:', dbUser?.name);
     
-    return c.json({ 
-      user: dbUser ? { ...dbUser, id: user.id, isAdmin: isAdmin(c) } : null 
-    });
+    // Always return user info if authenticated, even when no DB row exists yet
+    const userResponse = dbUser 
+      ? { ...dbUser, id: user.id, isAdmin: isAdmin(c) }
+      : { id: user.id, email: user.email, name: user.name || null, favorites_count: 0, isAdmin: isAdmin(c) };
+    
+    return c.json({ user: userResponse });
   } catch (error) {
     console.error('[GET /api/user/profile] Error fetching user profile:', error);
     return c.json({ error: 'Failed to fetch profile' }, 500);
