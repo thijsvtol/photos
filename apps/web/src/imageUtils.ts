@@ -101,3 +101,82 @@ export async function createPreview(file: File): Promise<Blob> {
     quality: 0.85,
   });
 }
+
+/**
+ * Process an image for optimal Instagram upload quality.
+ *
+ * Instagram specs:
+ * - Recommended width: 1080px
+ * - Portrait (4:5): 1080×1350 — max portrait ratio allowed
+ * - Square (1:1): 1080×1080
+ * - Landscape (1.91:1): 1080×566 — max landscape ratio allowed
+ *
+ * Photos whose aspect ratio falls within Instagram's accepted range keep
+ * their original ratio at 1080px wide. Photos outside the range are
+ * letterboxed with black bars to fit the nearest accepted ratio.
+ */
+export async function processForInstagram(imageUrl: string): Promise<Blob> {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.crossOrigin = 'anonymous';
+
+    img.onload = () => {
+      try {
+        const originalRatio = img.width / img.height;
+
+        // Instagram's accepted aspect-ratio range
+        const MIN_RATIO = 4 / 5;   // 0.8  — most portrait allowed
+        const MAX_RATIO = 1.91;    // max landscape allowed
+        const TARGET_WIDTH = 1080;
+
+        // Clamp to Instagram's accepted range
+        const clampedRatio = Math.max(MIN_RATIO, Math.min(MAX_RATIO, originalRatio));
+
+        const canvasWidth = TARGET_WIDTH;
+        const canvasHeight = Math.round(TARGET_WIDTH / clampedRatio);
+
+        const canvas = document.createElement('canvas');
+        canvas.width = canvasWidth;
+        canvas.height = canvasHeight;
+
+        const ctx = canvas.getContext('2d');
+        if (!ctx) {
+          reject(new Error('Failed to get canvas context'));
+          return;
+        }
+
+        // Black letterbox background
+        ctx.fillStyle = '#000000';
+        ctx.fillRect(0, 0, canvasWidth, canvasHeight);
+
+        // Scale image to fit within canvas (contain, not cover)
+        const scale = Math.min(canvasWidth / img.width, canvasHeight / img.height);
+        const drawWidth = Math.round(img.width * scale);
+        const drawHeight = Math.round(img.height * scale);
+        const offsetX = Math.round((canvasWidth - drawWidth) / 2);
+        const offsetY = Math.round((canvasHeight - drawHeight) / 2);
+
+        ctx.imageSmoothingEnabled = true;
+        ctx.imageSmoothingQuality = 'high';
+        ctx.drawImage(img, offsetX, offsetY, drawWidth, drawHeight);
+
+        canvas.toBlob(
+          (blob) => {
+            if (blob) {
+              resolve(blob);
+            } else {
+              reject(new Error('Failed to create Instagram blob from canvas'));
+            }
+          },
+          'image/jpeg',
+          0.95
+        );
+      } catch (error) {
+        reject(error);
+      }
+    };
+
+    img.onerror = () => reject(new Error('Failed to load image for Instagram processing'));
+    img.src = imageUrl;
+  });
+}

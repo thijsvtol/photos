@@ -418,6 +418,83 @@ export const downloadSmall = async (slug: string, photoId: string): Promise<void
   await downloadPhoto(url, `${slug}_${photoId}_small.jpg`);
 };
 
+export const downloadInstagram = async (slug: string, photoId: string): Promise<void> => {
+  console.log('[downloadInstagram] Called with slug:', slug, 'photoId:', photoId);
+  const isNative = Capacitor.isNativePlatform();
+
+  try {
+    // Fetch the original image
+    const originalUrl = getOriginalUrl(slug, photoId);
+    console.log('[downloadInstagram] Fetching original:', originalUrl);
+    const response = await fetch(originalUrl);
+    if (!response.ok) throw new Error(`Failed to fetch original: ${response.statusText}`);
+    const originalBlob = await response.blob();
+
+    // Process into an Instagram-optimised image via canvas
+    const { processForInstagram } = await import('./imageUtils');
+    const objectUrl = URL.createObjectURL(originalBlob);
+    let igBlob: Blob;
+    try {
+      igBlob = await processForInstagram(objectUrl);
+    } finally {
+      URL.revokeObjectURL(objectUrl);
+    }
+
+    const filename = `${slug}_${photoId}_instagram.jpg`;
+
+    if (isNative) {
+      // Native app: convert blob to base64 and save via Capacitor Filesystem
+      const base64 = await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onloadend = () => {
+          const result = reader.result as string;
+          if (result) {
+            resolve(result.split(',')[1]);
+          } else {
+            reject(new Error('Failed to convert to base64'));
+          }
+        };
+        reader.onerror = () => reject(new Error('FileReader error'));
+        reader.readAsDataURL(igBlob);
+      });
+
+      const customPath = localStorage.getItem('download_path') || '/storage/emulated/0/Download';
+
+      try {
+        await Filesystem.writeFile({
+          path: `${customPath}/${filename}`,
+          data: base64,
+          directory: Directory.ExternalStorage,
+          recursive: true,
+        });
+        alert(`Instagram photo saved: ${filename}`);
+      } catch {
+        await Filesystem.writeFile({
+          path: filename,
+          data: base64,
+          directory: Directory.Documents,
+          recursive: true,
+        });
+        alert(`Instagram photo saved to Documents: ${filename}`);
+      }
+    } else {
+      // Browser: use a temporary object URL
+      const downloadUrl = URL.createObjectURL(igBlob);
+      const link = document.createElement('a');
+      link.href = downloadUrl;
+      link.download = filename;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(downloadUrl);
+    }
+  } catch (error) {
+    console.error('[downloadInstagram] Error:', error);
+    alert(`Instagram download failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    throw error;
+  }
+};
+
 /**
  * Download a ZIP file (works on both native and web platforms)
  */
