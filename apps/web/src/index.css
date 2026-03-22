@@ -98,3 +98,103 @@ html {
 .animate-slide-in-left {
   animation: slide-in-from-left 0.35s ease-out;
 }
+
+/* Filerobot Image Editor dark mode overrides */
+.FIE_root {
+  background-color: #1f2937 !important;
+  color: #f9fafb !important;
+}
+
+.FIE_root * {
+  border-color: #374151 !important;
+}
+
+/* Canvas/Konva stage area */
+.FIE_root canvas {
+  background-color: transparent !important;
+}
+
+/* Scaleflex UI inputs */
+.FIE_root .SfxInput-root,
+.FIE_root .SfxInput-Base {
+  background-color: #111827 !important;
+  color: #f9fafb !important;
+  border-color: #374151 !important;
+}
+
+/* Scaleflex UI labels */
+.FIE_root .SfxLabel-root {
+  color: #d1d5db !important;
+}
+
+/* Scaleflex UI slider */
+.FIE_root .SfxSlider-root .SfxSlider-rail {
+  background-color: #374151 !important;
+}
+
+.FIE_root .SfxSlider-root .SfxSlider-track {
+  background-color: #2563eb !important;
+}
+
+.FIE_root .SfxSlider-root .SfxSlider-thumb {
+  background-color: #2563eb !important;
+  border-color: #2563eb !important;
+}
+
+/* Scaleflex UI buttons */
+.FIE_root .SfxButton-root {
+  color: #d1d5db !important;
+}
+
+.FIE_root .SfxButton-root[color="primary"] {
+  background-color: #2563eb !important;
+  color: #ffffff !important;
+}
+
+/* Scaleflex UI menu / popovers */
+.SfxMenu-root,
+.SfxPopover-root,
+.SfxModalContent-root {
+  background-color: #1f2937 !important;
+  color: #f9fafb !important;
+  border-color: #374151 !important;
+}
+
+.SfxMenuItem-root {
+  color: #d1d5db !important;
+}
+
+.SfxMenuItem-root:hover {
+  background-color: #374151 !important;
+}
+
+/* Scaleflex UI tabs */
+.FIE_root .SfxTab-root {
+  color: #d1d5db !important;
+}
+
+/* Drawer backdrop */
+.FIE_root .SfxDrawer-root {
+  background-color: #1f2937 !important;
+}
+
+/* Scrollbar styling inside editor */
+.FIE_root ::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+.FIE_root ::-webkit-scrollbar-track {
+  background: #111827;
+}
+
+.FIE_root ::-webkit-scrollbar-thumb {
+  background: #4b5563;
+  border-radius: 3px;
+}
+
+/* Top bar / tools bar */
+.FIE_root [class*="ToolsBar"],
+.FIE_root [class*="TopBar"] {
+  background-color: #1f2937 !important;
+}
