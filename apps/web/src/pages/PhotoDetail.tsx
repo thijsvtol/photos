@@ -1,6 +1,6 @@
 import React, { useEffect, useState, useRef, useCallback, lazy, Suspense } from 'react';
 import { useParams, Link, useNavigate, useLocation } from 'react-router-dom';
-import { Maximize, Minimize, Share2, X, Heart, Play, Pause, Pencil } from 'lucide-react';
+import { Maximize, Minimize, Share2, X, Heart, Play, Pause, Pencil, MoreVertical } from 'lucide-react';
 import Navbar from '../components/Navbar';
 import Footer from '../components/Footer';
 import SEO from '../components/SEO';
@@ -44,6 +44,7 @@ const PhotoDetail: React.FC = () => {
   const [isTransitioning, setIsTransitioning] = useState(false);
   const [slideDirection, setSlideDirection] = useState<'left' | 'right' | null>(null);
   const [showEditor, setShowEditor] = useState(false);
+  const [showMobileMenu, setShowMobileMenu] = useState(false);
   const [cacheBuster, setCacheBuster] = useState<number>(0);
   const touchStartX = useRef<number | null>(null);
   const touchEndX = useRef<number | null>(null);
@@ -1210,16 +1211,34 @@ const PhotoDetail: React.FC = () => {
               <span className="text-sm font-medium">{isSlideshow ? 'Pause' : 'Play'}</span>
             </button>
 
-            {/* Edit button - admin only, images only (mobile) */}
+            {/* More menu - admin only */}
             {user?.isAdmin && photo?.file_type !== 'video/mp4' && (
-              <button
-                onClick={() => setShowEditor(true)}
-                className="px-4 py-2.5 bg-amber-600 text-white rounded-lg transition flex items-center gap-2 min-w-[110px] justify-center"
-                aria-label="Edit photo"
-              >
-                <Pencil className="w-5 h-5" />
-                <span className="text-sm font-medium">Edit</span>
-              </button>
+              <div className="relative">
+                <button
+                  onClick={() => setShowMobileMenu(!showMobileMenu)}
+                  className="px-3 py-2.5 bg-gray-800 text-white rounded-lg transition flex items-center justify-center"
+                  aria-label="More options"
+                >
+                  <MoreVertical className="w-5 h-5" />
+                </button>
+                {showMobileMenu && (
+                  <>
+                    <div className="fixed inset-0 z-30" onClick={() => setShowMobileMenu(false)} />
+                    <div className="absolute bottom-full mb-2 right-0 z-40 bg-gray-800 rounded-lg shadow-xl border border-gray-700 py-1 min-w-[160px]">
+                      <button
+                        onClick={() => {
+                          setShowMobileMenu(false);
+                          setShowEditor(true);
+                        }}
+                        className="w-full px-4 py-2.5 text-white text-sm font-medium flex items-center gap-2 hover:bg-gray-700 active:bg-gray-600 transition"
+                      >
+                        <Pencil className="w-4 h-4" />
+                        Edit Photo
+                      </button>
+                    </div>
+                  </>
+                )}
+              </div>
             )}
           </div>
           
