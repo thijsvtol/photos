@@ -44,6 +44,7 @@ const PhotoDetail: React.FC = () => {
   const [isTransitioning, setIsTransitioning] = useState(false);
   const [slideDirection, setSlideDirection] = useState<'left' | 'right' | null>(null);
   const [showEditor, setShowEditor] = useState(false);
+  const [cacheBuster, setCacheBuster] = useState<number>(0);
   const touchStartX = useRef<number | null>(null);
   const touchEndX = useRef<number | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -707,6 +708,7 @@ const PhotoDetail: React.FC = () => {
       
       // Force reload the photo to show the updated version
       setImageLoaded(false);
+      setCacheBuster(Date.now());
       await loadPhoto();
     } catch (err) {
       console.error('Failed to save edited photo:', err);
@@ -1122,7 +1124,7 @@ const PhotoDetail: React.FC = () => {
                     />
                   )}
                   <img
-                    src={getPreviewUrl(slug!, photo?.id || photoId!, photo?.file_type)}
+                    src={`${getPreviewUrl(slug!, photo?.id || photoId!, photo?.file_type)}${cacheBuster ? `?v=${cacheBuster}` : ''}`}
                     alt={photo?.original_filename}
                     className={`w-full h-auto ${isFullscreen ? 'max-h-screen' : 'max-h-[70vh] md:max-h-[80vh]'} object-contain transition-opacity duration-300 ${imageLoaded ? 'opacity-100' : 'opacity-0'} ${photo?.blur_placeholder && !imageLoaded ? 'absolute inset-0' : ''}`}
                     onLoad={() => setImageLoaded(true)}
@@ -1414,7 +1416,7 @@ const PhotoDetail: React.FC = () => {
           </div>
         }>
           <ImageEditorModal
-            imageUrl={getOriginalUrl(slug, photo.id, photo.file_type)}
+            imageUrl={`${getOriginalUrl(slug, photo.id, photo.file_type)}${cacheBuster ? `?v=${cacheBuster}` : ''}`}
             onSave={handleEditorSave}
             onClose={() => setShowEditor(false)}
           />
