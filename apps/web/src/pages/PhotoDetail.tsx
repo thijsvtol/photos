@@ -78,6 +78,36 @@ const PhotoDetail: React.FC = () => {
   const displayPhotos = fromFavorites && favoritePhotos.length > 0
     ? allPhotos.filter(p => favoritePhotos.some((fav: { id: string; slug: string }) => fav.id === p.id && fav.slug === slug))
     : allPhotos;
+  const photosToUse = displayPhotos.length > 0 ? displayPhotos : allPhotos;
+
+  const swipePreviewPhoto = (() => {
+    if (swipeOffset === 0 || currentIndex < 0 || photosToUse.length < 2) {
+      return null;
+    }
+
+    if (swipeOffset < 0) {
+      if (currentIndex < photosToUse.length - 1) {
+        return photosToUse[currentIndex + 1];
+      }
+      return photosToUse[0] ?? null;
+    }
+
+    if (currentIndex > 0) {
+      return photosToUse[currentIndex - 1];
+    }
+
+    return photosToUse[photosToUse.length - 1] ?? null;
+  })();
+
+  const swipePreviewUrl = swipePreviewPhoto
+    ? getPreviewUrl(slug!, swipePreviewPhoto.id, swipePreviewPhoto.file_type)
+    : null;
+  const showSwipePreview = Boolean(
+    swipePreviewPhoto &&
+    swipePreviewUrl &&
+    swipePreviewPhoto.file_type !== 'video/mp4' &&
+    preloadedImages.has(swipePreviewUrl)
+  );
 
   useEffect(() => {
     if (slug && photoId) {
@@ -88,7 +118,6 @@ const PhotoDetail: React.FC = () => {
   // Update photo when photoId changes in URL (for browser back/forward)
   useEffect(() => {
     if (photoId && allPhotos.length > 0) {
-      const photosToUse = displayPhotos.length > 0 ? displayPhotos : allPhotos;
       const index = photosToUse.findIndex(p => p.id === photoId);
       if (index >= 0 && index !== currentIndex) {
         setCurrentIndex(index);
@@ -142,8 +171,6 @@ const PhotoDetail: React.FC = () => {
       };
     };
 
-    const photosToUse = displayPhotos.length > 0 ? displayPhotos : allPhotos;
-    
     // Preload next photo
     if (currentIndex >= 0 && currentIndex < photosToUse.length - 1) {
       preloadImage(photosToUse[currentIndex + 1]);
@@ -369,7 +396,6 @@ const PhotoDetail: React.FC = () => {
       }
     } else {
       // Normal event gallery navigation
-      const photosToUse = displayPhotos.length > 0 ? displayPhotos : allPhotos;
       if (currentIndex >= 0 && currentIndex < photosToUse.length - 1) {
         const nextIndex = currentIndex + 1;
         const nextPhoto = photosToUse[nextIndex];
@@ -450,7 +476,6 @@ const PhotoDetail: React.FC = () => {
       }
     } else {
       // Normal event gallery navigation
-      const photosToUse = displayPhotos.length > 0 ? displayPhotos : allPhotos;
       if (currentIndex > 0) {
         const prevIndex = currentIndex - 1;
         const prevPhoto = photosToUse[prevIndex];
@@ -1317,9 +1342,29 @@ const PhotoDetail: React.FC = () => {
               WebkitOverflowScrolling: 'touch'
             }}
           >
+            {showSwipePreview && swipePreviewPhoto && swipePreviewUrl && (
+              <div
+                className="absolute inset-0 z-0 flex items-center justify-center pointer-events-none"
+                style={{
+                  transform: swipeOffset < 0
+                    ? `translate3d(calc(100% + ${swipeOffset}px), 0, 0)`
+                    : `translate3d(calc(-100% + ${swipeOffset}px), 0, 0)`,
+                  transition: isSwiping ? 'none' : 'transform 320ms cubic-bezier(0.22, 1, 0.36, 1), opacity 260ms ease-out',
+                  opacity: Math.min(1, Math.max(0.38, Math.abs(swipeOffset) / 180)),
+                  willChange: 'transform, opacity',
+                }}
+              >
+                <img
+                  src={swipePreviewUrl}
+                  alt={swipePreviewPhoto.original_filename}
+                  className={`w-full h-auto ${isFullscreen ? 'max-h-screen' : 'max-h-[70vh] md:max-h-[80vh]'} object-contain`}
+                  draggable={false}
+                />
+              </div>
+            )}
             <div
               key={`${photo?.id}-${slideDirection}`}
-              className={`${
+              className={`relative z-10 ${
                 slideDirection === 'left' ? 'animate-slide-in-right' :
                 slideDirection === 'right' ? 'animate-slide-in-left' : ''
               }`}
