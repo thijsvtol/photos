@@ -126,7 +126,10 @@ const AdminDashboard: React.FC = () => {
         await setEventTags(editingEvent.slug, editTagIds);
       }
       
-      await updateEvent(editingEvent.slug, updates);
+      // Only call updateEvent if there are actual event updates
+      if (Object.keys(updates).length > 0) {
+        await updateEvent(editingEvent.slug, updates);
+      }
       
       setSuccess('Event updated successfully!');
       setEditingEvent(null);
