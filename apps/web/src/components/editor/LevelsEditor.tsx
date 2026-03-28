@@ -80,9 +80,11 @@ const LevelsEditor: React.FC<LevelsEditorProps> = ({ imageData, onApply }) => {
   });
 
   const [histograms, setHistograms] = useState<ReturnType<typeof computeHistograms> | null>(null);
+  const [hasUserEdits, setHasUserEdits] = useState(false);
 
   useEffect(() => {
     setHistograms(computeHistograms(imageData));
+    setHasUserEdits(false);
   }, [imageData]);
 
   const drawHistogram = useCallback(() => {
@@ -136,6 +138,7 @@ const LevelsEditor: React.FC<LevelsEditorProps> = ({ imageData, onApply }) => {
   const currentLevels = levels[channel];
 
   const updateLevel = (key: string, value: number) => {
+    setHasUserEdits(true);
     setLevels((prev) => ({
       ...prev,
       [channel]: { ...prev[channel], [key]: value },
@@ -143,6 +146,7 @@ const LevelsEditor: React.FC<LevelsEditorProps> = ({ imageData, onApply }) => {
   };
 
   const handleReset = () => {
+    setHasUserEdits(true);
     setLevels((prev) => ({
       ...prev,
       [channel]: { inBlack: 0, inWhite: 255, gamma: 1.0, outBlack: 0, outWhite: 255 },
@@ -150,12 +154,14 @@ const LevelsEditor: React.FC<LevelsEditorProps> = ({ imageData, onApply }) => {
   };
 
   const handleResetAll = () => {
+    setHasUserEdits(true);
     const defaults = { inBlack: 0, inWhite: 255, gamma: 1.0, outBlack: 0, outWhite: 255 };
     setLevels({ rgb: { ...defaults }, red: { ...defaults }, green: { ...defaults }, blue: { ...defaults } });
   };
 
   const handleAutoLevels = () => {
     if (!histograms) return;
+    setHasUserEdits(true);
     const histData = channel === 'rgb' ? histograms.lum
       : channel === 'red' ? histograms.r
       : channel === 'green' ? histograms.g
@@ -203,10 +209,11 @@ const LevelsEditor: React.FC<LevelsEditorProps> = ({ imageData, onApply }) => {
     onApply(result);
   }, [imageData, levels, onApply]);
 
-  // Live preview: apply levels immediately when any slider value changes.
+  // Live preview: only apply after the user changes a control.
   useEffect(() => {
+    if (!hasUserEdits) return;
     applyLevels();
-  }, [applyLevels]);
+  }, [applyLevels, hasUserEdits]);
 
   const channels: { key: Channel; label: string }[] = [
     { key: 'rgb', label: 'RGB' },

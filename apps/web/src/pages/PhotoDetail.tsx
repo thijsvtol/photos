@@ -1,12 +1,12 @@
 import React, { useEffect, useState, useRef, useCallback, lazy, Suspense } from 'react';
 import { useParams, Link, useNavigate, useLocation } from 'react-router-dom';
-import { Maximize, Minimize, Share2, X, Heart, Play, Pause, Pencil, MoreVertical } from 'lucide-react';
+import { Maximize, Minimize, Share2, X, Heart, Play, Pause, Pencil, MoreVertical, Star, Trash2 } from 'lucide-react';
 import Navbar from '../components/Navbar';
 import Footer from '../components/Footer';
 import SEO from '../components/SEO';
 const ImageEditorModal = lazy(() => import('../components/ImageEditorModal'));
 const VideoEditorModal = lazy(() => import('../components/VideoEditorModal'));
-import { getEvent, getPhoto, getPhotos, loginToEvent, getPreviewUrl, getOriginalUrl, downloadOriginal, downloadSmall, downloadInstagram, replacePhoto, toggleFavorite as toggleFavoriteAPI, getUserFavoriteIds } from '../api';
+import { getEvent, getPhoto, getPhotos, loginToEvent, getPreviewUrl, getOriginalUrl, downloadOriginal, downloadSmall, downloadInstagram, replacePhoto, toggleFavorite as toggleFavoriteAPI, getUserFavoriteIds, setPhotoFeatured, deletePhoto } from '../api';
 import { createPreview } from '../imageUtils';
 import type { Event, Photo } from '../types';
 import { useAuth } from '../contexts/AuthContext';
@@ -812,6 +812,70 @@ const PhotoDetail: React.FC = () => {
     trackPhotoDownload(parseInt(photo.id), slug, false, 1);
   };
 
+  const handleToggleFeatured = async () => {
+    if (!photo || !user?.isAdmin) return;
+
+    const nextFeaturedState = !photo.is_featured;
+    try {
+      await setPhotoFeatured(photo.id, nextFeaturedState);
+      await haptics.light();
+
+      setPhoto((prev) => (prev ? { ...prev, is_featured: nextFeaturedState } : prev));
+      setAllPhotos((prev) => prev.map((p) => (
+        p.id === photo.id ? { ...p, is_featured: nextFeaturedState } : p
+      )));
+
+      toast.showSuccess(nextFeaturedState ? 'Photo marked as featured' : 'Featured status removed');
+      setShowMobileMenu(false);
+    } catch (err) {
+      console.error('Failed to update featured status:', err);
+      await haptics.error();
+      toast.showError('Failed to update featured status. You may need admin access.');
+    }
+  };
+
+  const handleDeletePhoto = async () => {
+    if (!photo || !user?.isAdmin || !slug) return;
+
+    const confirmed = await confirm(
+      'Delete Photo',
+      'Are you sure you want to delete this photo? This action cannot be undone.',
+      { variant: 'danger' }
+    );
+
+    if (!confirmed) return;
+
+    const currentPhotoId = photo.id;
+
+    try {
+      await deletePhoto(currentPhotoId);
+      await haptics.success();
+      toast.showSuccess('Photo deleted successfully');
+      setShowMobileMenu(false);
+
+      const remainingPhotos = allPhotos.filter((p) => p.id !== currentPhotoId);
+      const remainingDisplayPhotos = fromFavorites && favoritePhotos.length > 0
+        ? remainingPhotos.filter((p) => favoritePhotos.some((fav: { id: string; slug: string }) => fav.id === p.id && fav.slug === slug))
+        : remainingPhotos;
+
+      if (remainingDisplayPhotos.length > 0) {
+        const currentDisplayIndex = Math.max(0, (displayPhotos.length > 0 ? displayPhotos : allPhotos).findIndex((p) => p.id === currentPhotoId));
+        const nextIndex = Math.min(currentDisplayIndex, remainingDisplayPhotos.length - 1);
+        const nextPhoto = remainingDisplayPhotos[nextIndex];
+        navigate(`/p/${slug}/${nextPhoto.id}`, {
+          replace: true,
+          state: location.state,
+        });
+      } else {
+        navigate(fromFavorites ? '/favorites' : `/events/${slug}`, { replace: true });
+      }
+    } catch (err) {
+      console.error('Failed to delete photo:', err);
+      await haptics.error();
+      toast.showError('Failed to delete photo. Please try again.');
+    }
+  };
+
   if (loading) {
     return (
       <div className="min-h-screen bg-gray-50 dark:bg-gray-900 flex items-center justify-center">
@@ -1001,6 +1065,32 @@ const PhotoDetail: React.FC = () => {
                 title={`Edit ${photo?.file_type === 'video/mp4' ? 'video' : 'photo'}`}
               >
                 <Pencil className="w-5 h-5" />
+              </button>
+            )}
+
+            {user?.isAdmin && (
+              <button
+                onClick={() => {
+                  void handleToggleFeatured();
+                }}
+                className="bg-black/50 hover:bg-black/75 text-white p-2 rounded-full transition backdrop-blur-sm w-9 h-9 flex items-center justify-center"
+                aria-label={photo?.is_featured ? 'Unfeature photo' : 'Feature photo'}
+                title={photo?.is_featured ? 'Unfeature photo' : 'Feature photo'}
+              >
+                <Star className={`w-5 h-5 ${photo?.is_featured ? 'fill-yellow-400 text-yellow-400' : ''}`} />
+              </button>
+            )}
+
+            {user?.isAdmin && (
+              <button
+                onClick={() => {
+                  void handleDeletePhoto();
+                }}
+                className="bg-black/50 hover:bg-red-600/80 text-white p-2 rounded-full transition backdrop-blur-sm w-9 h-9 flex items-center justify-center"
+                aria-label="Delete photo"
+                title="Delete photo"
+              >
+                <Trash2 className="w-5 h-5" />
               </button>
             )}
 
@@ -1277,7 +1367,9 @@ const PhotoDetail: React.FC = () => {
               className="flex-1 min-w-0 px-4 py-2.5 bg-gray-800 text-white rounded-lg transition flex items-center gap-2 justify-center"
               aria-label="Favorite"
             >
-              <Heart className={`w-5 h-5 ${isFavorited ? 'fill-red-500 text-red-500' : ''}`} />
+              <span className={`rounded-full p-1 ${isFavorited ? 'bg-red-500/20' : 'bg-white/10'}`}>
+                <Heart className={`w-6 h-6 ${isFavorited ? 'fill-red-500 text-red-500' : 'text-red-200'}`} />
+              </span>
               <span className="text-sm font-medium">{isFavorited ? 'Favorited' : 'Favorite'}</span>
             </button>
             
@@ -1333,6 +1425,24 @@ const PhotoDetail: React.FC = () => {
                       >
                         <Pencil className="w-4 h-4" />
                         Edit Photo
+                      </button>
+                      <button
+                        onClick={() => {
+                          void handleToggleFeatured();
+                        }}
+                        className="w-full px-4 py-2.5 text-white text-sm font-medium flex items-center gap-2 hover:bg-gray-700 active:bg-gray-600 transition"
+                      >
+                        <Star className={`w-4 h-4 ${photo?.is_featured ? 'fill-yellow-400 text-yellow-400' : ''}`} />
+                        {photo?.is_featured ? 'Unfeature Photo' : 'Feature Photo'}
+                      </button>
+                      <button
+                        onClick={() => {
+                          void handleDeletePhoto();
+                        }}
+                        className="w-full px-4 py-2.5 text-red-300 text-sm font-medium flex items-center gap-2 hover:bg-red-500/20 active:bg-red-500/30 transition"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                        Delete Photo
                       </button>
                     </div>
                   </>
