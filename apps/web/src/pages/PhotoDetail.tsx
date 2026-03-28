@@ -51,6 +51,10 @@ const PhotoDetail: React.FC = () => {
   const touchStartX = useRef<number | null>(null);
   const touchStartY = useRef<number | null>(null);
   const touchEndX = useRef<number | null>(null);
+  const swipeVelocityRef = useRef(0);
+  const swipeLastXRef = useRef<number | null>(null);
+  const swipeLastTimeRef = useRef<number | null>(null);
+  const swipeNavigateTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [swipeOffset, setSwipeOffset] = useState(0);
   const [isSwiping, setIsSwiping] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -271,6 +275,9 @@ const PhotoDetail: React.FC = () => {
     return () => {
       if (transitionTimeoutRef.current) {
         clearTimeout(transitionTimeoutRef.current);
+      }
+      if (swipeNavigateTimeoutRef.current) {
+        clearTimeout(swipeNavigateTimeoutRef.current);
       }
       if (slideshowTimerRef.current) {
         clearTimeout(slideshowTimerRef.current);
@@ -525,12 +532,25 @@ const PhotoDetail: React.FC = () => {
 
   // Native touch handlers with stable references using useCallback
   // CRITICAL: No dependencies that change - these must be stable function references
+  const getSwipeResistance = (deltaX: number, width: number): number => {
+    const normalizedDistance = Math.min(Math.abs(deltaX) / Math.max(width, 1), 1);
+    return Math.max(0.58, 0.92 - normalizedDistance * 0.28);
+  };
+
   const handleTouchStartNative = React.useCallback((e: TouchEvent) => {
     // Only track single-finger swipes for navigation
     if (e.touches.length === 1) {
+      if (swipeNavigateTimeoutRef.current) {
+        clearTimeout(swipeNavigateTimeoutRef.current);
+        swipeNavigateTimeoutRef.current = null;
+      }
+
       touchStartX.current = e.touches[0].clientX;
       touchStartY.current = e.touches[0].clientY;
       touchEndX.current = e.touches[0].clientX;
+      swipeLastXRef.current = e.touches[0].clientX;
+      swipeLastTimeRef.current = performance.now();
+      swipeVelocityRef.current = 0;
       setSwipeOffset(0);
       setIsSwiping(false);
     } else {
@@ -538,6 +558,9 @@ const PhotoDetail: React.FC = () => {
       touchStartX.current = null;
       touchStartY.current = null;
       touchEndX.current = null;
+      swipeLastXRef.current = null;
+      swipeLastTimeRef.current = null;
+      swipeVelocityRef.current = 0;
       setSwipeOffset(0);
       setIsSwiping(false);
     }
@@ -550,6 +573,16 @@ const PhotoDetail: React.FC = () => {
       const currentY = e.touches[0].clientY;
       const deltaX = currentX - touchStartX.current;
       const deltaY = touchStartY.current !== null ? currentY - touchStartY.current : 0;
+      const now = performance.now();
+      const containerWidth = imageContainerRef.current?.clientWidth || window.innerWidth || 1;
+
+      if (swipeLastXRef.current !== null && swipeLastTimeRef.current !== null) {
+        const timeDelta = Math.max(now - swipeLastTimeRef.current, 1);
+        swipeVelocityRef.current = (currentX - swipeLastXRef.current) / timeDelta;
+      }
+
+      swipeLastXRef.current = currentX;
+      swipeLastTimeRef.current = now;
 
       touchEndX.current = currentX;
 
@@ -557,13 +590,16 @@ const PhotoDetail: React.FC = () => {
       if (Math.abs(deltaX) > Math.abs(deltaY)) {
         e.preventDefault();
         setIsSwiping(true);
-        setSwipeOffset(deltaX * 0.9);
+        setSwipeOffset(deltaX * getSwipeResistance(deltaX, containerWidth));
       }
     } else {
       // Multiple fingers or no start - clear tracking
       touchStartX.current = null;
       touchStartY.current = null;
       touchEndX.current = null;
+      swipeLastXRef.current = null;
+      swipeLastTimeRef.current = null;
+      swipeVelocityRef.current = 0;
       setSwipeOffset(0);
       setIsSwiping(false);
     }
@@ -573,21 +609,30 @@ const PhotoDetail: React.FC = () => {
     // Check if we should navigate based on swipe
     if (touchStartX.current !== null && touchEndX.current !== null) {
       const diff = touchStartX.current - touchEndX.current;
-      const threshold = 60;
+      const containerWidth = imageContainerRef.current?.clientWidth || window.innerWidth || 320;
+      const threshold = Math.min(96, Math.max(48, containerWidth * 0.18));
+      const absVelocity = Math.abs(swipeVelocityRef.current);
+      const shouldNavigate = isSwiping && (Math.abs(diff) > threshold || absVelocity > 0.42);
       
-      // Only navigate if swipe was significant
-      if (Math.abs(diff) > threshold && isSwiping) {
-        setSwipeOffset(diff > 0 ? -140 : 140);
+      setIsSwiping(false);
 
-        // Navigate using refs to avoid stale closures
-        setTimeout(() => {
+      if (shouldNavigate) {
+        const targetOffset = diff > 0 ? -containerWidth * 0.92 : containerWidth * 0.92;
+        setSwipeOffset(targetOffset);
+
+        if (swipeNavigateTimeoutRef.current) {
+          clearTimeout(swipeNavigateTimeoutRef.current);
+        }
+
+        swipeNavigateTimeoutRef.current = setTimeout(() => {
           if (diff > 0) {
             navigateNextRef.current?.();
           } else {
             navigatePrevRef.current?.();
           }
           setSwipeOffset(0);
-        }, 90);
+          swipeNavigateTimeoutRef.current = null;
+        }, 180);
       } else {
         // Snap back smoothly if threshold not reached.
         setSwipeOffset(0);
@@ -598,13 +643,18 @@ const PhotoDetail: React.FC = () => {
     touchStartX.current = null;
     touchStartY.current = null;
     touchEndX.current = null;
-    setIsSwiping(false);
+    swipeLastXRef.current = null;
+    swipeLastTimeRef.current = null;
+    swipeVelocityRef.current = 0;
   }, [isSwiping]);
 
   const handleTouchCancelNative = React.useCallback(() => {
     touchStartX.current = null;
     touchStartY.current = null;
     touchEndX.current = null;
+    swipeLastXRef.current = null;
+    swipeLastTimeRef.current = null;
+    swipeVelocityRef.current = 0;
     setSwipeOffset(0);
     setIsSwiping(false);
   }, []);
@@ -1275,8 +1325,8 @@ const PhotoDetail: React.FC = () => {
               }`}
               style={{
                 transform: `translate3d(${swipeOffset}px, 0, 0)`,
-                transition: isSwiping ? 'none' : 'transform 220ms ease-out',
-                opacity: Math.max(0.78, 1 - Math.abs(swipeOffset) / 700),
+                transition: isSwiping ? 'none' : 'transform 320ms cubic-bezier(0.22, 1, 0.36, 1), opacity 260ms ease-out',
+                opacity: Math.max(0.88, 1 - Math.abs(swipeOffset) / 1200),
                 willChange: 'transform, opacity',
               }}
             >
