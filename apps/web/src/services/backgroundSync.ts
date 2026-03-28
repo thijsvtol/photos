@@ -9,6 +9,8 @@ import { folderSyncService } from './folderSync';
 import ProgressNotification from '../plugins/ProgressNotification';
 
 const CHUNK_SIZE = 5 * 1024 * 1024; // 5MB chunks
+const MAX_RETRIES = 3; // Maximum retry attempts
+const RETRY_DELAY_MS = 1000; // Initial retry delay: 1 second
 
 /**
  * Background sync service for uploading photos when app is in background
@@ -17,6 +19,33 @@ const CHUNK_SIZE = 5 * 1024 * 1024; // 5MB chunks
 class BackgroundSyncService {
   private taskId: string | null = null;
   private isRunning = false;
+
+  /**
+   * Calculate exponential backoff delay in milliseconds
+   * Formula: RETRY_DELAY_MS * (2 ^ retryCount)
+   */
+  private getBackoffDelay(retryCount: number): number {
+    return RETRY_DELAY_MS * Math.pow(2, retryCount);
+  }
+
+  /**
+   * Check if an upload should be retried based on retry count and backoff delay
+   */
+  private shouldRetry(upload: any): boolean {
+    const retries = upload.retries || 0;
+    
+    // Don't retry if max retries exceeded
+    if (retries >= MAX_RETRIES) {
+      return false;
+    }
+    
+    // Check if enough time has passed for exponential backoff
+    const lastRetryTime = upload.lastRetryTime || 0;
+    const backoffDelay = this.getBackoffDelay(retries);
+    const timeSinceLastRetry = Date.now() - lastRetryTime;
+    
+    return timeSinceLastRetry >= backoffDelay;
+  }
 
   async initialize() {
     if (!Capacitor.isNativePlatform()) {
@@ -104,6 +133,19 @@ class BackgroundSyncService {
       try {
         // Skip if already uploading
         if (upload.status === 'uploading') {
+          continue;
+        }
+
+        // Skip if failed and not ready to retry yet
+        if (upload.status === 'failed' && !this.shouldRetry(upload)) {
+          failCount++;
+          continue;
+        }
+
+        // Skip if failed after max retries
+        const retries = upload.retries || 0;
+        if (upload.status === 'failed' && retries >= MAX_RETRIES) {
+          failCount++;
           continue;
         }
 
@@ -206,13 +248,33 @@ class BackgroundSyncService {
       } catch (error) {
         console.error(`Failed to upload ${upload.file.name}:`, error);
         
-        // Mark as failed
-        await updateQueueItem(upload.id, { 
-          status: 'failed',
-          error: error instanceof Error ? error.message : 'Upload failed'
-        });
-
-        failCount++;
+        const currentRetries = upload.retries || 0;
+        
+        // If retries remaining, reschedule for retry with exponential backoff
+        if (currentRetries < MAX_RETRIES) {
+          const backoffDelay = this.getBackoffDelay(currentRetries);
+          console.log(
+            `Scheduling retry ${currentRetries + 1}/${MAX_RETRIES} for ${upload.file.name} in ${backoffDelay}ms`
+          );
+          
+          await updateQueueItem(upload.id, {
+            status: 'failed',
+            retries: currentRetries + 1,
+            lastRetryTime: Date.now(),
+            error: error instanceof Error ? error.message : 'Upload failed',
+          });
+        } else {
+          // Max retries exceeded, mark as permanently failed
+          console.error(
+            `Max retries (${MAX_RETRIES}) exceeded for ${upload.file.name}, marking as permanently failed`
+          );
+          await updateQueueItem(upload.id, {
+            status: 'failed',
+            retries: MAX_RETRIES,
+            error: `Upload failed after ${MAX_RETRIES} retries: ${error instanceof Error ? error.message : 'Unknown error'}`,
+          });
+          failCount++;
+        }
       }
     }
 

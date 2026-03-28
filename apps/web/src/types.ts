@@ -116,6 +116,8 @@ export interface UploadQueueItem {
   latitude?: number;
   longitude?: number;
   blurPlaceholder?: string;
+  retries?: number; // Number of retry attempts (0-3 before marking failed)
+  lastRetryTime?: number; // Timestamp of last retry attempt for exponential backoff
 }
 
 export interface Collaborator {
