@@ -9,6 +9,8 @@ interface EventLocationPickerProps {
   onSetLocation: (lat: number, lng: number) => void;
 }
 
+const DEFAULT_MAP_CENTER: [number, number] = [52.6324, 4.7534];
+
 export default function EventLocationPicker({ isOpen, onClose, onSetLocation }: EventLocationPickerProps) {
   const [selectedLocation, setSelectedLocation] = useState<[number, number] | null>(null);
 
@@ -60,7 +62,7 @@ export default function EventLocationPicker({ isOpen, onClose, onSetLocation }: 
         </div>
         <div className="flex-1 relative">
           <MapContainer
-            center={selectedLocation || [51.505, -0.09]}
+            center={selectedLocation || DEFAULT_MAP_CENTER}
             zoom={13}
             style={{ height: '100%', width: '100%' }}
           >
