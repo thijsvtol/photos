@@ -104,7 +104,7 @@ app.get('/api/events', optionalAuth, async (c) => {
  * Returns event details (without sensitive data)
  */
 app.get('/api/events/:slug', optionalAuth, async (c) => {
-  const slug = c.req.param('slug');
+  const slug = c.req.param('slug')!;
   
   try {
     const user = getUser(c);
@@ -166,7 +166,7 @@ app.get('/api/events/:slug', optionalAuth, async (c) => {
  * Supports query params: sort (date_asc, date_desc, name_asc, name_desc)
  */
 app.get('/api/events/:slug/photos', optionalAuth, async (c) => {
-  const slug = c.req.param('slug');
+  const slug = c.req.param('slug')!;
   const sort = c.req.query('sort') || 'date_asc';
   
   try {
@@ -256,7 +256,7 @@ app.get('/api/events/:slug/photos', optionalAuth, async (c) => {
  * Returns single photo details (requires authentication if password protected)
  */
 app.get('/api/events/:slug/photos/:photoId', optionalAuth, async (c) => {
-  const slug = c.req.param('slug');
+  const slug = c.req.param('slug')!;
   const photoId = c.req.param('photoId');
   
   try {

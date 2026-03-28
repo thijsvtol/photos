@@ -1171,11 +1171,11 @@ const PhotoDetail: React.FC = () => {
         {/* Mobile Action Bar */}
         <div className="md:hidden mt-4 space-y-3">
           {/* Quick actions */}
-          <div className="flex gap-2 justify-center">
+          <div className="flex flex-wrap gap-2">
             {/* Favorite button */}
             <button
               onClick={toggleFavorite}
-              className="px-4 py-2.5 bg-gray-800 text-white rounded-lg transition flex items-center gap-2 min-w-[110px] justify-center"
+              className="flex-1 min-w-0 px-4 py-2.5 bg-gray-800 text-white rounded-lg transition flex items-center gap-2 justify-center"
               aria-label="Favorite"
             >
               <Heart className={`w-5 h-5 ${isFavorited ? 'fill-red-500 text-red-500' : ''}`} />
@@ -1192,7 +1192,7 @@ const PhotoDetail: React.FC = () => {
                   setShowShareMenu(!showShareMenu);
                 }
               }}
-              className="px-4 py-2.5 bg-gray-800 text-white rounded-lg transition flex items-center gap-2 min-w-[110px] justify-center"
+              className="flex-1 min-w-0 px-4 py-2.5 bg-gray-800 text-white rounded-lg transition flex items-center gap-2 justify-center"
               aria-label="Share"
             >
               <Share2 className="w-5 h-5" />
@@ -1202,7 +1202,7 @@ const PhotoDetail: React.FC = () => {
             {/* Slideshow button */}
             <button
               onClick={toggleSlideshow}
-              className={`px-4 py-2.5 bg-gray-800 text-white rounded-lg transition flex items-center gap-2 min-w-[110px] justify-center ${
+              className={`flex-1 min-w-0 px-4 py-2.5 bg-gray-800 text-white rounded-lg transition flex items-center gap-2 justify-center ${
                 isSlideshow ? 'ring-2 ring-blue-500' : ''
               }`}
               aria-label="Slideshow"
@@ -1213,10 +1213,10 @@ const PhotoDetail: React.FC = () => {
 
             {/* More menu - admin only */}
             {user?.isAdmin && photo?.file_type !== 'video/mp4' && (
-              <div className="relative">
+              <div className="relative flex-1 min-w-0">
                 <button
                   onClick={() => setShowMobileMenu(!showMobileMenu)}
-                  className="px-3 py-2.5 bg-gray-800 text-white rounded-lg transition flex items-center justify-center"
+                  className="w-full px-3 py-2.5 bg-gray-800 text-white rounded-lg transition flex items-center justify-center"
                   aria-label="More options"
                 >
                   <MoreVertical className="w-5 h-5" />

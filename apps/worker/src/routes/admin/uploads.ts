@@ -16,7 +16,7 @@ const app = new Hono<{ Bindings: Env; Variables: Variables }>();
  * Accessible by admins and event collaborators
  */
 app.post('/start', requireUploadPermission, async (c) => {
-  const slug = c.req.param('slug');
+  const slug = c.req.param('slug')!;
   
   try {
     const body = await c.req.json<StartUploadRequest & { isPreview?: boolean }>();
@@ -105,7 +105,7 @@ app.post('/start', requireUploadPermission, async (c) => {
  * Uploads a part directly to R2 (supports preview uploads via query param)
  */
 app.put('/:photoId/parts/:partNumber', async (c) => {
-  const slug = c.req.param('slug');
+  const slug = c.req.param('slug')!;
   const photoId = c.req.param('photoId');
   const partNumber = parseInt(c.req.param('partNumber'));
   const isPreview = c.req.query('preview') === 'true';
@@ -150,7 +150,7 @@ app.put('/:photoId/parts/:partNumber', async (c) => {
  * Accessible by admins and event collaborators
  */
 app.post('/:photoId/complete', requireUploadPermission, async (c) => {
-  const slug = c.req.param('slug');
+  const slug = c.req.param('slug')!;
   const photoId = c.req.param('photoId');
   const isPreview = c.req.query('preview') === 'true';
   

@@ -19,7 +19,7 @@ app.use('/*', requireFeature('enableCollaborators'));
  * Public endpoint - allows anyone who can view the event to see collaborators
  */
 app.get('/api/events/:slug/collaborators', async (c) => {
-  const slug = c.req.param('slug');
+  const slug = c.req.param('slug')!;
   
   try {
     // Get event ID from slug
@@ -57,7 +57,7 @@ app.get('/api/events/:slug/collaborators', async (c) => {
  * Invite a user to collaborate on an event (admin only)
  */
 app.post('/api/events/:slug/collaborators', requireAdmin, async (c) => {
-  const slug = c.req.param('slug');
+  const slug = c.req.param('slug')!;
   console.log('[Invite Collaborator] Starting for event:', slug);
   
   const body = await c.req.json<InviteCollaboratorRequest>();
@@ -166,7 +166,7 @@ app.post('/api/events/:slug/collaborators', requireAdmin, async (c) => {
  * Remove a collaborator from an event (admin only)
  */
 app.delete('/api/events/:slug/collaborators/:userEmail', requireAdmin, async (c) => {
-  const slug = c.req.param('slug');
+  const slug = c.req.param('slug')!;
   const userEmail = c.req.param('userEmail');
   
   try {
@@ -269,7 +269,7 @@ app.get('/api/users/search', requireAdmin, async (c) => {
  * Get collaboration history for an event (admin only)
  */
 app.get('/api/events/:slug/collaboration-history', requireAdmin, async (c) => {
-  const slug = c.req.param('slug');
+  const slug = c.req.param('slug')!;
   
   try {
     // Get event ID from slug
@@ -523,7 +523,7 @@ export async function sendUploadNotification(env: Env, params: {
  * Create a shareable invite link for an event (admin only)
  */
 app.post('/api/events/:slug/invite-links', requireAdmin, async (c) => {
-  const slug = c.req.param('slug');
+  const slug = c.req.param('slug')!;
   const user = c.get('user');
   
   try {
@@ -584,7 +584,7 @@ app.post('/api/events/:slug/invite-links', requireAdmin, async (c) => {
  * Get all active invite links for an event (admin and collaborators)
  */
 app.get('/api/events/:slug/invite-links', requireUploadPermission, async (c) => {
-  const slug = c.req.param('slug');
+  const slug = c.req.param('slug')!;
   const user = c.get('user');
   
   try {
@@ -623,7 +623,7 @@ app.get('/api/events/:slug/invite-links', requireUploadPermission, async (c) => 
  * Revoke an invite link (admin only)
  */
 app.delete('/api/events/:slug/invite-links/:token', requireAdmin, async (c) => {
-  const slug = c.req.param('slug');
+  const slug = c.req.param('slug')!;
   const token = c.req.param('token');
   const user = c.get('user');
   
