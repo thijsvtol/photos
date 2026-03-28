@@ -45,6 +45,12 @@ const EventGallery: React.FC = () => {
   const [activeDate, setActiveDate] = useState<string | null>(null);
   const dateRefs = useRef<Map<string, HTMLDivElement>>(new Map());
   const [isMobile, setIsMobile] = useState(false);
+  const [supportsHover, setSupportsHover] = useState(true);
+  const [visibleDateCount, setVisibleDateCount] = useState(8);
+  const [visibleSinglePhotoCount, setVisibleSinglePhotoCount] = useState(140);
+  const loadMoreRef = useRef<HTMLDivElement | null>(null);
+  const lastScrollYRef = useRef(0);
+  const prefetchedPhotoIdsRef = useRef<Set<string>>(new Set());
   const isAndroid = Capacitor.getPlatform() === 'android';
   
   // Use custom hook for photo selection
@@ -71,6 +77,31 @@ const EventGallery: React.FC = () => {
     window.addEventListener('resize', checkMobile);
     return () => window.removeEventListener('resize', checkMobile);
   }, []);
+
+  // Detect whether hover interactions are available.
+  useEffect(() => {
+    const mediaQuery = window.matchMedia('(hover: hover) and (pointer: fine)');
+    const updateSupportsHover = () => setSupportsHover(mediaQuery.matches);
+
+    updateSupportsHover();
+    mediaQuery.addEventListener('change', updateSupportsHover);
+    return () => mediaQuery.removeEventListener('change', updateSupportsHover);
+  }, []);
+
+  // One-time discoverability hint for touch devices.
+  useEffect(() => {
+    if (loading || photos.length === 0 || supportsHover) {
+      return;
+    }
+
+    const hintKey = 'gallery_long_press_hint_seen_v1';
+    if (localStorage.getItem(hintKey)) {
+      return;
+    }
+
+    toast.showInfo('Tip: Long-press a photo to start multi-select.');
+    localStorage.setItem(hintKey, '1');
+  }, [loading, photos.length, supportsHover, toast]);
 
   useEffect(() => {
     if (slug) {
@@ -503,6 +534,291 @@ const EventGallery: React.FC = () => {
 
   const previewPhoto = photos.find(p => p.is_featured) || photos[0];
   const previewImageUrl = previewPhoto ? getPreviewUrl(slug!, previewPhoto.id) : undefined;
+  const isMultiDateView = dates.length > 1;
+  const visibleDates = isMultiDateView ? dates.slice(0, visibleDateCount) : dates;
+  const visibleSingleDatePhotos = isMultiDateView ? photos : photos.slice(0, visibleSinglePhotoCount);
+  const visiblePhotosForActions = isMultiDateView
+    ? visibleDates.flatMap((date) => photosByDate.get(date) || [])
+    : visibleSingleDatePhotos;
+  const hasMoreGalleryItems = isMultiDateView
+    ? visibleDateCount < dates.length
+    : visibleSinglePhotoCount < photos.length;
+
+  const selectAllVisiblePhotos = async () => {
+    let selectedNew = 0;
+
+    visiblePhotosForActions.forEach((photo) => {
+      if (!selectedPhotos.has(photo.id)) {
+        togglePhotoSelectionBase(photo.id);
+        selectedNew += 1;
+      }
+    });
+
+    if (selectedNew > 0) {
+      await haptics.light();
+    }
+  };
+
+  const toggleFavoriteForSelected = async () => {
+    if (selectedPhotos.size === 0) {
+      return;
+    }
+
+    if (!isAuthenticated) {
+      const shouldLogin = await confirm(
+        'Login Required',
+        'You need to be logged in to update favorites. Would you like to login now?'
+      );
+      if (shouldLogin) {
+        login();
+      }
+      return;
+    }
+
+    try {
+      const selectedIds = Array.from(selectedPhotos);
+      const allAlreadyFavorited = selectedIds.every((id) => userFavorites.has(id));
+
+      await Promise.all(selectedIds.map((id) => toggleFavoriteAPI(id, allAlreadyFavorited)));
+
+      setUserFavorites((prev) => {
+        const next = new Set(prev);
+        selectedIds.forEach((id) => {
+          if (allAlreadyFavorited) {
+            next.delete(id);
+          } else {
+            next.add(id);
+          }
+        });
+        return next;
+      });
+
+      await haptics.light();
+      toast.showSuccess(allAlreadyFavorited ? 'Removed selected photos from favorites' : 'Added selected photos to favorites');
+    } catch (err) {
+      console.error('Failed to update selected favorites:', err);
+      toast.showError('Failed to update favorites. Please try again.');
+    }
+  };
+
+  const toggleFeaturedForSelected = async () => {
+    if (!isAdmin || selectedPhotos.size === 0) {
+      return;
+    }
+
+    try {
+      const selectedIds = new Set(selectedPhotos);
+      const shouldEnableFeatured = photos
+        .filter((photo) => selectedIds.has(photo.id))
+        .some((photo) => !photo.is_featured);
+
+      await Promise.all(
+        Array.from(selectedIds).map((id) => setPhotoFeatured(id, shouldEnableFeatured))
+      );
+
+      setPhotos((prev) =>
+        prev.map((photo) =>
+          selectedIds.has(photo.id)
+            ? { ...photo, is_featured: shouldEnableFeatured }
+            : photo
+        )
+      );
+
+      await haptics.light();
+      toast.showSuccess(shouldEnableFeatured ? 'Selected photos marked as featured' : 'Removed featured status from selected photos');
+    } catch (err) {
+      console.error('Failed to update selected featured status:', err);
+      toast.showError('Failed to update featured status. You may need admin access.');
+    }
+  };
+
+  const handleClearSelection = async () => {
+    if (selectedPhotos.size === 0) {
+      return;
+    }
+    clearSelection();
+    await haptics.selectionChanged();
+  };
+
+  // Reset lazy-render windows when gallery context changes.
+  useEffect(() => {
+    setVisibleDateCount(8);
+    setVisibleSinglePhotoCount(140);
+    prefetchedPhotoIdsRef.current.clear();
+  }, [slug, sortBy, photos.length]);
+
+  // Load additional sections/photos when scrolling near the sentinel.
+  useEffect(() => {
+    if (!loadMoreRef.current || !hasMoreGalleryItems) {
+      return;
+    }
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        entries.forEach((entry) => {
+          if (!entry.isIntersecting) {
+            return;
+          }
+
+          if (isMultiDateView) {
+            setVisibleDateCount((prev) => Math.min(prev + 4, dates.length));
+          } else {
+            setVisibleSinglePhotoCount((prev) => Math.min(prev + 80, photos.length));
+          }
+        });
+      },
+      { rootMargin: '600px 0px' }
+    );
+
+    observer.observe(loadMoreRef.current);
+    return () => observer.disconnect();
+  }, [hasMoreGalleryItems, isMultiDateView, dates.length, photos.length]);
+
+  // Prefetch upcoming preview images based on scroll direction.
+  useEffect(() => {
+    const prefetchPhotos = (candidatePhotos: Photo[]) => {
+      candidatePhotos.forEach((photo) => {
+        const cacheKey = `${slug}-${photo.id}`;
+        if (prefetchedPhotoIdsRef.current.has(cacheKey)) {
+          return;
+        }
+
+        const image = new Image();
+        image.src = getPreviewUrl(slug!, photo.id, photo.file_type);
+        prefetchedPhotoIdsRef.current.add(cacheKey);
+      });
+    };
+
+    let ticking = false;
+
+    const onScroll = () => {
+      if (ticking) {
+        return;
+      }
+
+      ticking = true;
+      requestAnimationFrame(() => {
+        const currentScrollY = window.scrollY;
+        const scrollingDown = currentScrollY >= lastScrollYRef.current;
+        lastScrollYRef.current = currentScrollY;
+
+        if (scrollingDown) {
+          if (isMultiDateView) {
+            const nextDates = dates.slice(visibleDateCount, visibleDateCount + 2);
+            const upcoming = nextDates.flatMap((date) => photosByDate.get(date) || []).slice(0, 24);
+            prefetchPhotos(upcoming);
+          } else {
+            const upcoming = photos.slice(visibleSinglePhotoCount, visibleSinglePhotoCount + 24);
+            prefetchPhotos(upcoming);
+          }
+        } else {
+          if (isMultiDateView) {
+            const previousStart = Math.max(0, visibleDateCount - 4);
+            const previousDates = dates.slice(previousStart, Math.max(previousStart, visibleDateCount - 1));
+            const previous = previousDates.flatMap((date) => photosByDate.get(date) || []).slice(-24);
+            prefetchPhotos(previous);
+          } else {
+            const previousStart = Math.max(0, visibleSinglePhotoCount - 48);
+            const previous = photos.slice(previousStart, previousStart + 24);
+            prefetchPhotos(previous);
+          }
+        }
+
+        ticking = false;
+      });
+    };
+
+    window.addEventListener('scroll', onScroll, { passive: true });
+    onScroll();
+    return () => window.removeEventListener('scroll', onScroll);
+  }, [dates, isMultiDateView, photos, photosByDate, slug, visibleDateCount, visibleSinglePhotoCount]);
+
+  // Mobile convenience: tap outside cards/controls to exit selection mode.
+  useEffect(() => {
+    if (selectedPhotos.size === 0 || supportsHover || !isMobile) {
+      return;
+    }
+
+    const handlePointerDown = (event: PointerEvent) => {
+      const target = event.target as HTMLElement | null;
+      if (!target) {
+        return;
+      }
+
+      if (
+        target.closest('[data-photo-card="true"]') ||
+        target.closest('[data-selection-toolbar="true"]') ||
+        target.closest('[data-gallery-controls="true"]') ||
+        target.closest('button, a, input, select, textarea, [role="button"]')
+      ) {
+        return;
+      }
+
+      clearSelection();
+    };
+
+    document.addEventListener('pointerdown', handlePointerDown);
+    return () => document.removeEventListener('pointerdown', handlePointerDown);
+  }, [clearSelection, isMobile, selectedPhotos.size, supportsHover]);
+
+  // Keyboard support for power users.
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      const target = event.target as HTMLElement | null;
+      if (
+        target &&
+        (target.tagName === 'INPUT' ||
+          target.tagName === 'TEXTAREA' ||
+          target.tagName === 'SELECT' ||
+          target.isContentEditable)
+      ) {
+        return;
+      }
+
+      if (event.key === 'Escape' && selectedPhotos.size > 0) {
+        event.preventDefault();
+        clearSelection();
+        return;
+      }
+
+      if ((event.key === 'a' || event.key === 'A') && photos.length > 0) {
+        event.preventDefault();
+
+        if (isMultiDateView && activeDate) {
+          const activeDatePhotos = photosByDate.get(activeDate) || [];
+          activeDatePhotos.forEach((photo) => {
+            if (!selectedPhotos.has(photo.id)) {
+              togglePhotoSelectionBase(photo.id);
+            }
+          });
+        } else {
+          visiblePhotosForActions.forEach((photo) => {
+            if (!selectedPhotos.has(photo.id)) {
+              togglePhotoSelectionBase(photo.id);
+            }
+          });
+        }
+        return;
+      }
+
+      if ((event.key === 'f' || event.key === 'F') && selectedPhotos.size > 0) {
+        event.preventDefault();
+        void toggleFavoriteForSelected();
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [
+    activeDate,
+    clearSelection,
+    isMultiDateView,
+    photos.length,
+    photosByDate,
+    selectedPhotos,
+    togglePhotoSelectionBase,
+    visiblePhotosForActions,
+  ]);
 
   return (
     <div className="min-h-screen bg-gradient-to-b from-white to-slate-50 dark:from-gray-900 dark:to-gray-950 flex flex-col">
@@ -603,6 +919,21 @@ const EventGallery: React.FC = () => {
           sortBy={sortBy}
           onSortChange={setSortBy}
           selectedCount={selectedPhotos.size}
+          onSelectAllVisible={selectAllVisiblePhotos}
+          onClearSelection={() => {
+            void handleClearSelection();
+          }}
+          onToggleFavoriteSelected={() => {
+            void toggleFavoriteForSelected();
+          }}
+          onToggleFeaturedSelected={
+            isAdmin
+              ? () => {
+                  void toggleFeaturedForSelected();
+                }
+              : undefined
+          }
+          showFeaturedAction={isAdmin}
           onDownloadSelected={downloadSelected}
           onDeleteSelected={isAdmin ? handleBulkDelete : undefined}
           isAdmin={isAdmin}
@@ -610,7 +941,7 @@ const EventGallery: React.FC = () => {
         />
 
         {/* Date Timeline - Only show for multi-day events */}
-        {dates.length > 1 && (
+        {isMultiDateView && (
           <div className="-mx-3 sm:-mx-4 lg:-mx-8 mb-6">
             <DateTimeline 
               dates={dates} 
@@ -630,10 +961,10 @@ const EventGallery: React.FC = () => {
           <div className="text-center py-12">
             <p className="text-gray-600">No photos found.</p>
           </div>
-        ) : dates.length > 1 ? (
+        ) : isMultiDateView ? (
           // Multi-date view with date headers
           <div className="space-y-7">
-            {dates.map((date) => {
+            {visibleDates.map((date) => {
               const datePhotos = photosByDate.get(date) || [];
               const dateObj = new Date(date);
               const formattedDate = dateObj.toLocaleDateString('en-US', { 
@@ -724,7 +1055,7 @@ const EventGallery: React.FC = () => {
             className="flex -ml-2 sm:-ml-3 w-auto"
             columnClassName="pl-2 sm:pl-3 bg-clip-padding"
           >
-            {photos.map((photo) => (
+            {visibleSingleDatePhotos.map((photo) => (
               <PhotoCard
                 key={photo.id}
                 photo={photo}
@@ -743,6 +1074,10 @@ const EventGallery: React.FC = () => {
               />
             ))}
           </Masonry>
+        )}
+
+        {hasMoreGalleryItems && (
+          <div ref={loadMoreRef} className="h-12" aria-hidden="true" />
         )}
       </div>
       <Footer />

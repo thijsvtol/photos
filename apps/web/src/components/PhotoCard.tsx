@@ -101,7 +101,7 @@ const PhotoCard: React.FC<PhotoCardProps> = ({
 
   if (albumMode) {
     return (
-      <div className="mb-2 sm:mb-3 relative group">
+      <div data-photo-card="true" className="mb-2 sm:mb-3 relative group">
         <Link
           to={`/p/${slug}/${photo.id}`}
           state={fromFavorites && favoritePhotos ? {
@@ -208,7 +208,7 @@ const PhotoCard: React.FC<PhotoCardProps> = ({
   }
 
   return (
-    <div className="mb-2 sm:mb-4 relative group bg-white dark:bg-gray-800 rounded-xl overflow-hidden shadow-md hover:shadow-lg active:scale-[0.98] transition-all">
+    <div data-photo-card="true" className="mb-2 sm:mb-4 relative group bg-white dark:bg-gray-800 rounded-xl overflow-hidden shadow-md hover:shadow-lg active:scale-[0.98] transition-all">
       <Link
         to={`/p/${slug}/${photo.id}`}
         state={fromFavorites && favoritePhotos ? {

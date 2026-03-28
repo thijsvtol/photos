@@ -4,6 +4,11 @@ interface GallerySortFilterProps {
   sortBy: string;
   onSortChange: (value: string) => void;
   selectedCount: number;
+  onSelectAllVisible?: () => void;
+  onClearSelection?: () => void;
+  onToggleFavoriteSelected?: () => void;
+  onToggleFeaturedSelected?: () => void;
+  showFeaturedAction?: boolean;
   onDownloadSelected: () => void;
   onDeleteSelected?: () => void;
   isAdmin?: boolean;
@@ -17,6 +22,11 @@ export function GallerySortFilter({
   sortBy,
   onSortChange,
   selectedCount,
+  onSelectAllVisible,
+  onClearSelection,
+  onToggleFavoriteSelected,
+  onToggleFeaturedSelected,
+  showFeaturedAction = false,
   onDownloadSelected,
   onDeleteSelected,
   isAdmin = false,
@@ -28,14 +38,35 @@ export function GallerySortFilter({
     <>
       {/* Fixed action bar when photos are selected */}
       {selectedCount > 0 && (
-        <div className={`fixed ${isAndroid ? 'top-nav-offset-android' : 'top-nav-offset'} left-0 right-0 bg-indigo-600 dark:bg-indigo-700 shadow-lg z-40 border-b-2 border-indigo-700 dark:border-indigo-800`}>
+        <div
+          data-selection-toolbar="true"
+          className={`fixed ${isAndroid ? 'top-nav-offset-android' : 'top-nav-offset'} left-0 right-0 bg-indigo-600 dark:bg-indigo-700 shadow-lg z-40 border-b-2 border-indigo-700 dark:border-indigo-800`}
+        >
           <div className="max-w-7xl mx-auto px-3 sm:px-4 lg:px-8">
-            <div className="flex items-center justify-between py-2 sm:py-2.5 gap-3">
+            <div className="flex items-center justify-between py-2 sm:py-2.5 gap-3 flex-wrap">
               <span className="text-white font-medium text-sm">
                 {selectedCount} {selectedCount === 1 ? 'photo' : 'photos'} selected
               </span>
               
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-2 flex-wrap justify-end">
+                {onSelectAllVisible && (
+                  <button
+                    onClick={onSelectAllVisible}
+                    className="px-3 sm:px-4 py-1.5 sm:py-2 bg-white/10 text-white rounded-lg hover:bg-white/20 transition-colors text-sm font-medium border border-white/20"
+                  >
+                    Select Visible
+                  </button>
+                )}
+
+                {onClearSelection && (
+                  <button
+                    onClick={onClearSelection}
+                    className="px-3 sm:px-4 py-1.5 sm:py-2 bg-white/10 text-white rounded-lg hover:bg-white/20 transition-colors text-sm font-medium border border-white/20"
+                  >
+                    Deselect
+                  </button>
+                )}
+
                 <button
                   onClick={onDownloadSelected}
                   className="px-3 sm:px-4 py-1.5 sm:py-2 bg-white dark:bg-gray-800 text-indigo-600 dark:text-indigo-400 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors text-sm font-medium flex items-center gap-2 border border-white/20"
@@ -46,6 +77,24 @@ export function GallerySortFilter({
                   <span className="hidden sm:inline">Download</span>
                   <span className="sm:hidden">Download</span>
                 </button>
+
+                {onToggleFavoriteSelected && (
+                  <button
+                    onClick={onToggleFavoriteSelected}
+                    className="px-3 sm:px-4 py-1.5 sm:py-2 bg-white/10 text-white rounded-lg hover:bg-white/20 transition-colors text-sm font-medium border border-white/20"
+                  >
+                    Favorite
+                  </button>
+                )}
+
+                {showFeaturedAction && onToggleFeaturedSelected && (
+                  <button
+                    onClick={onToggleFeaturedSelected}
+                    className="px-3 sm:px-4 py-1.5 sm:py-2 bg-white/10 text-white rounded-lg hover:bg-white/20 transition-colors text-sm font-medium border border-white/20"
+                  >
+                    Feature
+                  </button>
+                )}
 
                 {isAdmin && onDeleteSelected && (
                   <button
@@ -67,7 +116,7 @@ export function GallerySortFilter({
       )}
 
       {/* Sort controls - always visible */}
-      <div className="bg-white dark:bg-gray-800 rounded-lg shadow p-3 sm:p-4 mb-6">
+      <div data-gallery-controls="true" className="bg-white dark:bg-gray-800 rounded-lg shadow p-3 sm:p-4 mb-6">
         <div className="flex items-center">
           <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mr-3">
             Sort by
