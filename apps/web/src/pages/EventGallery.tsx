@@ -505,7 +505,7 @@ const EventGallery: React.FC = () => {
   const previewImageUrl = previewPhoto ? getPreviewUrl(slug!, previewPhoto.id) : undefined;
 
   return (
-    <div className="min-h-screen bg-gray-50 dark:bg-gray-900 flex flex-col">
+    <div className="min-h-screen bg-gradient-to-b from-white to-slate-50 dark:from-gray-900 dark:to-gray-950 flex flex-col">
       {ConfirmDialog}
       <SEO
         title={`${event?.name || 'Event Gallery'} - ${config.appName}`}
@@ -518,18 +518,18 @@ const EventGallery: React.FC = () => {
       />
       <Navbar />
       {/* Add padding when photos are selected to account for fixed action bar */}
-      <div className={`max-w-7xl mx-auto px-3 sm:px-4 lg:px-8 py-4 sm:py-8 flex-grow w-full transition-all ${
+      <div className={`max-w-[1600px] mx-auto px-3 sm:px-5 lg:px-8 py-4 sm:py-6 flex-grow w-full transition-all ${
         selectedPhotos.size > 0 ? 'pt-16 sm:pt-20' : ''
       }`}>
         <div className="mb-4 sm:mb-6">
-          <Link to="/events" className="text-blue-600 dark:text-blue-400 hover:text-blue-700 dark:hover:text-blue-300 mb-2 inline-block text-sm">
+          <Link to="/events" className="text-blue-600 dark:text-blue-400 hover:text-blue-700 dark:hover:text-blue-300 mb-2 inline-block text-sm font-medium">
             ← Back to Events
           </Link>
           
           {/* Header: Title, Badge, and Share Button */}
           <div className="flex justify-between items-start gap-4 mb-3">
             <div className="flex-1 flex items-center gap-3 flex-wrap">
-              <h1 className="text-2xl sm:text-3xl font-bold text-gray-900 dark:text-white">{event?.name}</h1>
+              <h1 className="text-2xl sm:text-3xl font-semibold tracking-tight text-gray-900 dark:text-white">{event?.name}</h1>
               {event && (
                 <span className={`px-2.5 py-0.5 text-xs font-medium rounded-full ${
                   event.requires_password
@@ -584,7 +584,7 @@ const EventGallery: React.FC = () => {
             <div className="flex items-center gap-2 flex-wrap">
               <Link
                 to={`/admin/events/${slug}/upload`}
-                className="inline-flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors text-sm font-medium"
+                className="inline-flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-full hover:bg-indigo-700 transition-colors text-sm font-medium shadow-sm"
               >
                 <Upload className="w-4 h-4" />
                 Upload Photos/Videos
@@ -632,7 +632,7 @@ const EventGallery: React.FC = () => {
           </div>
         ) : dates.length > 1 ? (
           // Multi-date view with date headers
-          <div className="space-y-8">
+          <div className="space-y-7">
             {dates.map((date) => {
               const datePhotos = photosByDate.get(date) || [];
               const dateObj = new Date(date);
@@ -656,9 +656,9 @@ const EventGallery: React.FC = () => {
                   }}
                 >
                   {/* Date header */}
-                  <div className="mb-4 pb-2 border-b-2 border-gray-200 dark:border-gray-700 flex items-center justify-between">
+                  <div className="mb-3 sm:mb-4 flex items-center justify-between sticky top-20 z-20 backdrop-blur-sm bg-white/80 dark:bg-gray-900/70 rounded-xl px-3 py-2 border border-gray-200/70 dark:border-gray-700/70">
                     <div>
-                      <h2 className="text-xl sm:text-2xl font-bold text-gray-900 dark:text-white">
+                      <h2 className="text-lg sm:text-xl font-semibold text-gray-900 dark:text-white">
                         {formattedDate}
                       </h2>
                       <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
@@ -667,7 +667,7 @@ const EventGallery: React.FC = () => {
                     </div>
                     <button
                       onClick={() => toggleDateSelection(datePhotos)}
-                      className="px-3 py-1.5 text-sm bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors"
+                      className="px-3 py-1.5 text-sm bg-blue-600 hover:bg-blue-700 text-white rounded-full transition-colors"
                       title={isDateFullySelected(datePhotos) ? 'Deselect all' : 'Select all'}
                     >
                       {isDateFullySelected(datePhotos) ? 'Deselect All' : 'Select All'}
@@ -677,21 +677,23 @@ const EventGallery: React.FC = () => {
                   {/* Photos for this date */}
                   <Masonry
                     breakpointCols={{
-                      default: 4,
-                      1536: 4,
-                      1280: 3,
+                      default: 5,
+                      1536: 5,
+                      1280: 4,
                       1024: 3,
                       768: 2,
                       640: 2
                     }}
-                    className="flex -ml-2 sm:-ml-4 w-auto"
-                    columnClassName="pl-2 sm:pl-4 bg-clip-padding"
+                    className="flex -ml-2 sm:-ml-3 w-auto"
+                    columnClassName="pl-2 sm:pl-3 bg-clip-padding"
                   >
                     {datePhotos.map((photo) => (
                       <PhotoCard
                         key={photo.id}
                         photo={photo}
                         slug={slug!}
+                        albumMode={true}
+                        forceControlsVisible={selectedPhotos.size > 0}
                         sortBy={sortBy}
                         showSelection={true}
                         isSelected={selectedPhotos.has(photo.id)}
@@ -712,21 +714,23 @@ const EventGallery: React.FC = () => {
           // Single-date view (original masonry without date headers)
           <Masonry
             breakpointCols={{
-              default: 4,
-              1536: 4,
-              1280: 3,
+              default: 5,
+              1536: 5,
+              1280: 4,
               1024: 3,
               768: 2,
               640: 2
             }}
-            className="flex -ml-2 sm:-ml-4 w-auto"
-            columnClassName="pl-2 sm:pl-4 bg-clip-padding"
+            className="flex -ml-2 sm:-ml-3 w-auto"
+            columnClassName="pl-2 sm:pl-3 bg-clip-padding"
           >
             {photos.map((photo) => (
               <PhotoCard
                 key={photo.id}
                 photo={photo}
                 slug={slug!}
+                albumMode={true}
+                forceControlsVisible={selectedPhotos.size > 0}
                 sortBy={sortBy}
                 showSelection={true}
                 isSelected={selectedPhotos.has(photo.id)}

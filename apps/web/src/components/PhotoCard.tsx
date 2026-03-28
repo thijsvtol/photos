@@ -1,6 +1,6 @@
-import React from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { Heart, Star } from 'lucide-react';
+import { Heart, Star, Check } from 'lucide-react';
 import ProgressiveImage from './ProgressiveImage';
 import { getPreviewUrl, downloadOriginal, downloadSmall } from '../api';
 import type { Photo } from '../types';
@@ -8,6 +8,8 @@ import type { Photo } from '../types';
 interface PhotoCardProps {
   photo: Photo;
   slug: string;
+  albumMode?: boolean;
+  forceControlsVisible?: boolean;
   // Optional props for different contexts
   fromFavorites?: boolean;
   favoritePhotos?: Array<{ id: string; slug: string }>;
@@ -40,9 +42,171 @@ const PhotoCard: React.FC<PhotoCardProps> = ({
   showRemoveFavorite = false,
   onRemoveFavorite,
   userFavorites = new Set(),
+  albumMode = false,
+  forceControlsVisible = false,
 }) => {
   const isVideo = photo.file_type === 'video/mp4';
-  
+  const [supportsHover, setSupportsHover] = useState(true);
+  const [touchControlsVisible, setTouchControlsVisible] = useState(false);
+  const longPressTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const suppressNextClickRef = useRef(false);
+
+  useEffect(() => {
+    const mediaQuery = window.matchMedia('(hover: hover) and (pointer: fine)');
+    const updateSupportsHover = () => setSupportsHover(mediaQuery.matches);
+    updateSupportsHover();
+
+    mediaQuery.addEventListener('change', updateSupportsHover);
+    return () => mediaQuery.removeEventListener('change', updateSupportsHover);
+  }, []);
+
+  useEffect(() => {
+    if (supportsHover && touchControlsVisible) {
+      setTouchControlsVisible(false);
+    }
+  }, [supportsHover, touchControlsVisible]);
+
+  useEffect(() => {
+    return () => {
+      if (longPressTimerRef.current) {
+        clearTimeout(longPressTimerRef.current);
+      }
+    };
+  }, []);
+
+  const clearLongPressTimer = () => {
+    if (longPressTimerRef.current) {
+      clearTimeout(longPressTimerRef.current);
+      longPressTimerRef.current = null;
+    }
+  };
+
+  const startLongPress = () => {
+    if (supportsHover) return;
+    clearLongPressTimer();
+    longPressTimerRef.current = setTimeout(() => {
+      setTouchControlsVisible(true);
+      suppressNextClickRef.current = true;
+      longPressTimerRef.current = null;
+    }, 380);
+  };
+
+  const controlsRevealClass = forceControlsVisible
+    ? 'opacity-100 pointer-events-auto'
+    : supportsHover
+      ? 'opacity-0 pointer-events-none group-hover:opacity-100 group-hover:pointer-events-auto focus-within:opacity-100 focus-within:pointer-events-auto'
+      : touchControlsVisible
+        ? 'opacity-100 pointer-events-auto'
+        : 'opacity-0 pointer-events-none';
+
+  if (albumMode) {
+    return (
+      <div className="mb-2 sm:mb-3 relative group">
+        <Link
+          to={`/p/${slug}/${photo.id}`}
+          state={fromFavorites && favoritePhotos ? {
+            fromFavorites: true,
+            favoritePhotos,
+            sortBy
+          } : sortBy ? {
+            sortBy
+          } : undefined}
+          className="block relative overflow-hidden rounded-xl bg-gray-100 dark:bg-gray-800"
+          style={{ aspectRatio: photo.width && photo.height ? `${photo.width} / ${photo.height}` : '4 / 3' }}
+          onClick={(e) => {
+            if (!supportsHover && suppressNextClickRef.current) {
+              e.preventDefault();
+              e.stopPropagation();
+              suppressNextClickRef.current = false;
+              return;
+            }
+            sessionStorage.setItem(`gallery_scroll_${slug}`, window.scrollY.toString());
+          }}
+          onTouchStart={startLongPress}
+          onTouchEnd={clearLongPressTimer}
+          onTouchMove={clearLongPressTimer}
+          onTouchCancel={clearLongPressTimer}
+        >
+          {isVideo ? (
+            <video
+              src={getPreviewUrl(slug, photo.id, photo.file_type)}
+              className="w-full h-full object-cover object-center transition-transform duration-300 group-hover:scale-[1.02]"
+              muted
+              playsInline
+              onMouseEnter={(e) => e.currentTarget.play()}
+              onMouseLeave={(e) => {
+                e.currentTarget.pause();
+                e.currentTarget.currentTime = 0;
+              }}
+            />
+          ) : (
+            <ProgressiveImage
+              src={getPreviewUrl(slug, photo.id, photo.file_type)}
+              blurDataUrl={photo.blur_placeholder}
+              alt={photo.original_filename}
+              className="w-full h-full object-cover object-center transition-transform duration-300 group-hover:scale-[1.02]"
+              loading="lazy"
+            />
+          )}
+
+          <div className={`absolute inset-x-0 bottom-0 h-16 bg-gradient-to-t from-black/55 to-transparent pointer-events-none transition-opacity duration-150 ${controlsRevealClass}`} />
+
+          {showSelection && onToggleSelection && (
+            <button
+              onClick={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                onToggleSelection(photo.id);
+              }}
+              className={`absolute top-2 left-2 w-7 h-7 rounded-full border-2 flex items-center justify-center transition-all duration-150 ${
+                isSelected
+                  ? 'bg-blue-600 border-blue-600 text-white opacity-100 pointer-events-auto'
+                  : `bg-black/40 border-white/70 text-transparent hover:text-white ${controlsRevealClass}`
+              }`}
+              aria-label={isSelected ? 'Deselect photo' : 'Select photo'}
+            >
+              <Check className="w-4 h-4" />
+            </button>
+          )}
+
+          {showAddToFavorites && onToggleFavorite && (
+            <button
+              onClick={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                onToggleFavorite(photo.id, userFavorites.has(photo.id));
+              }}
+              className={`absolute top-2 right-2 bg-black/45 backdrop-blur-sm text-white p-1.5 rounded-full transition-all duration-150 hover:bg-black/60 ${controlsRevealClass}`}
+              title={userFavorites.has(photo.id) ? 'Remove from favorites' : 'Add to favorites'}
+            >
+              <Heart className={`w-4 h-4 ${userFavorites.has(photo.id) ? 'fill-red-500 text-red-500' : ''}`} />
+            </button>
+          )}
+
+          {showFeatured && onToggleFeatured && (
+            <button
+              onClick={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                onToggleFeatured(photo.id, photo.is_featured);
+              }}
+              className={`absolute ${showAddToFavorites ? 'right-12' : 'right-2'} top-2 backdrop-blur-sm text-white p-1.5 rounded-full transition-all duration-150 ${
+                photo.is_featured ? 'bg-yellow-500/90 hover:bg-yellow-500' : 'bg-black/45 hover:bg-black/60'
+              } ${controlsRevealClass}`}
+              title={photo.is_featured ? 'Remove from featured' : 'Mark as featured'}
+            >
+              <Star className={`w-4 h-4 ${photo.is_featured ? 'fill-white' : ''}`} />
+            </button>
+          )}
+
+          <div className={`absolute left-3 right-3 bottom-2 text-white transition-opacity duration-150 ${controlsRevealClass}`}>
+            <p className="text-[11px] sm:text-xs truncate font-medium">{photo.original_filename}</p>
+          </div>
+        </Link>
+      </div>
+    );
+  }
+
   return (
     <div className="mb-2 sm:mb-4 relative group bg-white dark:bg-gray-800 rounded-xl overflow-hidden shadow-md hover:shadow-lg active:scale-[0.98] transition-all">
       <Link
