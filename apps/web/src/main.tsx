@@ -117,6 +117,24 @@ if (Capacitor.isNativePlatform()) {
   });
 }
 
+// Suppress Filerobot's harmless internal tab communication error
+// This error occurs when Filerobot tries to communicate with a non-existent tabs system
+// in web environments, but doesn't affect functionality
+window.addEventListener('error', (event) => {
+  if (event.message?.includes('No Listener: tabs:outgoing.message.ready')) {
+    event.preventDefault();
+    return;
+  }
+});
+
+// Also suppress unhandled promise rejections for the same error
+window.addEventListener('unhandledrejection', (event) => {
+  if (event.reason?.message?.includes('No Listener: tabs:outgoing.message.ready')) {
+    event.preventDefault();
+    return;
+  }
+});
+
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
     <App />
