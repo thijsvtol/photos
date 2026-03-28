@@ -77,7 +77,13 @@ export interface EventStats {
   photosWithoutGPS: number;
   featuredCount: number;
   totalFavorites: number;
-  topFavorites: Array<{ id: string; original_filename: string; favorites_count: number }>;
+  topFavorites: Array<{
+    id: string;
+    original_filename: string;
+    favorites_count: number;
+    file_type?: string;
+    cache_version?: number;
+  }>;
   cameraModels: Array<{ camera_model: string; count: number }>;
 }
 
