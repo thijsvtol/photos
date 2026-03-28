@@ -1,16 +1,8 @@
 import { FFmpeg } from '@ffmpeg/ffmpeg';
+import { toBlobURL } from '@ffmpeg/util';
 
 let ffmpegInstance: FFmpeg | null = null;
 let ffmpegReady = false;
-
-/**
- * Convert blob URL to fetch Data URL for FFmpeg
- */
-async function toBlobURL(url: string, mimeType: string): Promise<string> {
-  const response = await fetch(url);
-  const blob = await response.blob();
-  return URL.createObjectURL(new Blob([blob], { type: mimeType }));
-}
 
 /**
  * Initialize FFmpeg.wasm (lazy-loaded on first use)
@@ -33,11 +25,29 @@ export async function initFFmpeg(): Promise<FFmpeg> {
   });
 
   try {
-    const baseURL = 'https://cdn.jsdelivr.net/npm/@ffmpeg/core@0.12.6/dist/umd';
-    await ffmpegInstance.load({
-      coreURL: await toBlobURL(`${baseURL}/ffmpeg-core.js`, 'text/javascript'),
-      wasmURL: await toBlobURL(`${baseURL}/ffmpeg-core.wasm`, 'application/wasm'),
-    });
+    const baseURLs = [
+      'https://cdn.jsdelivr.net/npm/@ffmpeg/core@0.12.10/dist/esm',
+      'https://unpkg.com/@ffmpeg/core@0.12.10/dist/esm',
+    ];
+
+    let lastError: unknown = null;
+    for (const baseURL of baseURLs) {
+      try {
+        await ffmpegInstance.load({
+          coreURL: await toBlobURL(`${baseURL}/ffmpeg-core.js`, 'text/javascript'),
+          wasmURL: await toBlobURL(`${baseURL}/ffmpeg-core.wasm`, 'application/wasm'),
+          workerURL: await toBlobURL(`${baseURL}/ffmpeg-core.worker.js`, 'text/javascript'),
+        });
+        lastError = null;
+        break;
+      } catch (err) {
+        lastError = err;
+      }
+    }
+
+    if (lastError) {
+      throw lastError;
+    }
 
     ffmpegReady = true;
     console.log('[FFmpeg] Initialized successfully');
@@ -46,7 +56,7 @@ export async function initFFmpeg(): Promise<FFmpeg> {
     console.error('[FFmpeg] Failed to initialize:', error);
     ffmpegReady = false;
     ffmpegInstance = null;
-    throw new Error('Failed to initialize video editor. Please ensure JavaScript is enabled.');
+    throw new Error('Failed to initialize video editor. Could not load FFmpeg core files.');
   }
 }
 
