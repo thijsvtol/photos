@@ -1135,7 +1135,7 @@ const PhotoDetail: React.FC = () => {
             {user?.isAdmin && (
               <button
                 onClick={() => setShowEditor(true)}
-                className="bg-black/50 hover:bg-black/75 text-white p-2 rounded-full transition backdrop-blur-sm w-9 h-9 flex items-center justify-center"
+                className="text-white p-2 transition hover:text-gray-300 flex items-center justify-center"
                 aria-label={`Edit ${photo?.file_type === 'video/mp4' ? 'video' : 'photo'}`}
                 title={`Edit ${photo?.file_type === 'video/mp4' ? 'video' : 'photo'}`}
               >
@@ -1148,7 +1148,7 @@ const PhotoDetail: React.FC = () => {
                 onClick={() => {
                   void handleToggleFeatured();
                 }}
-                className="bg-black/50 hover:bg-black/75 text-white p-2 rounded-full transition backdrop-blur-sm w-9 h-9 flex items-center justify-center"
+                className="text-white p-2 transition hover:text-gray-300 flex items-center justify-center"
                 aria-label={photo?.is_featured ? 'Unfeature photo' : 'Feature photo'}
                 title={photo?.is_featured ? 'Unfeature photo' : 'Feature photo'}
               >
@@ -1161,7 +1161,7 @@ const PhotoDetail: React.FC = () => {
                 onClick={() => {
                   void handleDeletePhoto();
                 }}
-                className="bg-black/50 hover:bg-red-600/80 text-white p-2 rounded-full transition backdrop-blur-sm w-9 h-9 flex items-center justify-center"
+                className="text-white p-2 transition hover:text-red-300 flex items-center justify-center"
                 aria-label="Delete photo"
                 title="Delete photo"
               >
@@ -1172,7 +1172,7 @@ const PhotoDetail: React.FC = () => {
             {/* Favorite button */}
             <button
               onClick={toggleFavorite}
-              className="bg-black/50 hover:bg-black/75 text-white p-2 rounded-full transition backdrop-blur-sm w-9 h-9 flex items-center justify-center"
+              className="text-white p-2 transition hover:text-gray-300 flex items-center justify-center"
               aria-label="Favorite"
             >
               <Heart className={`w-5 h-5 ${isFavorited ? 'fill-red-500 text-red-500' : ''}`} />
@@ -1182,7 +1182,7 @@ const PhotoDetail: React.FC = () => {
             <div className="relative">
               <button
                 onClick={() => setShowShareMenu(!showShareMenu)}
-                className="bg-black/50 hover:bg-black/75 text-white p-2 rounded-full transition backdrop-blur-sm w-9 h-9 flex items-center justify-center"
+                className="text-white p-2 transition hover:text-gray-300 flex items-center justify-center"
                 aria-label="Share"
               >
                 <Share2 className="w-5 h-5" />
@@ -1234,7 +1234,7 @@ const PhotoDetail: React.FC = () => {
             {/* Fullscreen button */}
             <button
               onClick={toggleFullscreen}
-              className="bg-black/50 hover:bg-black/75 text-white p-2 rounded-full transition backdrop-blur-sm w-9 h-9 flex items-center justify-center"
+              className="text-white p-2 transition hover:text-gray-300 flex items-center justify-center"
               aria-label="Fullscreen"
             >
               {isFullscreen ? <Minimize className="w-5 h-5" /> : <Maximize className="w-5 h-5" />}
@@ -1249,7 +1249,7 @@ const PhotoDetail: React.FC = () => {
                     setShowSlideshowSettings(true);
                   }
                 }}
-                className={`bg-black/50 hover:bg-black/75 text-white p-2 rounded-full transition backdrop-blur-sm w-9 h-9 flex items-center justify-center ${
+                className={`text-white p-2 transition hover:text-gray-300 flex items-center justify-center ${
                   isSlideshow ? 'ring-2 ring-blue-500' : ''
                 }`}
                 aria-label="Slideshow"
@@ -1314,7 +1314,7 @@ const PhotoDetail: React.FC = () => {
             {/* Help button */}
             <button
               onClick={() => setShowKeyboardHelp(true)}
-              className="bg-black/50 hover:bg-black/75 text-white p-2 rounded-full transition backdrop-blur-sm w-9 h-9 flex items-center justify-center"
+              className="text-white p-2 transition hover:text-gray-300 flex items-center justify-center"
               aria-label="Keyboard shortcuts"
               title="Keyboard shortcuts (? or H)"
             >
@@ -1325,7 +1325,7 @@ const PhotoDetail: React.FC = () => {
             {isFullscreen && (
               <button
                 onClick={exitFullscreen}
-                className="bg-black/50 hover:bg-black/75 text-white p-2 rounded-full transition backdrop-blur-sm w-9 h-9 flex items-center justify-center"
+                className="text-white p-2 transition hover:text-gray-300 flex items-center justify-center"
                 aria-label="Close"
               >
                 <X className="w-5 h-5" />
@@ -1427,7 +1427,7 @@ const PhotoDetail: React.FC = () => {
           <div className="flex justify-center items-center gap-4 mt-4">
             <button
               onClick={navigateToPrevious}
-              className="bg-gray-800 hover:bg-gray-700 active:bg-gray-600 text-white p-3 rounded-full transition touch-manipulation shadow-lg"
+              className="bg-gray-800 hover:bg-gray-700 active:bg-gray-600 text-white p-3 rounded-lg transition touch-manipulation shadow-lg"
               aria-label="Previous photo"
             >
               <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -1442,7 +1442,7 @@ const PhotoDetail: React.FC = () => {
             </span>
             <button
               onClick={navigateToNext}
-              className="bg-gray-800 hover:bg-gray-700 active:bg-gray-600 text-white p-3 rounded-full transition touch-manipulation shadow-lg"
+              className="bg-gray-800 hover:bg-gray-700 active:bg-gray-600 text-white p-3 rounded-lg transition touch-manipulation shadow-lg"
               aria-label="Next photo"
             >
               <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -1462,9 +1462,7 @@ const PhotoDetail: React.FC = () => {
               className="flex min-h-[52px] flex-1 min-w-0 items-center justify-center gap-2.5 rounded-xl border border-white/10 bg-gray-800/95 px-4 text-white shadow-[0_10px_24px_rgba(0,0,0,0.2)] transition hover:bg-gray-700/95 active:scale-[0.98]"
               aria-label="Favorite"
             >
-              <span className={`flex h-8 w-8 items-center justify-center rounded-full ${isFavorited ? 'bg-red-500/20' : 'bg-white/10'}`}>
-                <Heart className={`h-5 w-5 ${isFavorited ? 'fill-red-500 text-red-500' : 'text-red-200'}`} />
-              </span>
+              <Heart className={`h-5 w-5 ${isFavorited ? 'fill-red-500 text-red-500' : 'text-red-200'}`} />
               <span className="text-sm font-medium">{isFavorited ? 'Favorited' : 'Favorite'}</span>
             </button>
             
@@ -1481,9 +1479,7 @@ const PhotoDetail: React.FC = () => {
               className="flex min-h-[52px] flex-1 min-w-0 items-center justify-center gap-2.5 rounded-xl border border-white/10 bg-gray-800/95 px-4 text-white shadow-[0_10px_24px_rgba(0,0,0,0.2)] transition hover:bg-gray-700/95 active:scale-[0.98]"
               aria-label="Share"
             >
-              <span className="flex h-8 w-8 items-center justify-center rounded-full bg-white/10">
-                <Share2 className="h-4.5 w-4.5" />
-              </span>
+              <Share2 className="h-4.5 w-4.5" />
               <span className="text-sm font-medium">Share</span>
             </button>
 
@@ -1494,9 +1490,7 @@ const PhotoDetail: React.FC = () => {
                 className="flex h-[52px] w-full items-center justify-center rounded-xl border border-white/10 bg-gray-800/95 text-white shadow-[0_10px_24px_rgba(0,0,0,0.2)] transition hover:bg-gray-700/95 active:scale-[0.98]"
                 aria-label="More options"
               >
-                <span className="flex h-8 w-8 items-center justify-center rounded-full bg-white/10">
-                  <MoreVertical className="h-4.5 w-4.5" />
-                </span>
+                <MoreVertical className="h-4.5 w-4.5" />
               </button>
               {showMobileMenu && (
                 <>
@@ -1557,22 +1551,18 @@ const PhotoDetail: React.FC = () => {
               onClick={handleDownloadOriginal}
               className="flex min-h-[52px] flex-1 items-center justify-center gap-2.5 rounded-xl border border-blue-400/30 bg-blue-500/90 px-3.5 text-center text-white shadow-[0_10px_24px_rgba(37,99,235,0.2)] transition hover:bg-blue-500 active:scale-[0.98]"
             >
-              <span className="flex h-8 w-8 items-center justify-center rounded-full bg-white/15">
-                <svg className="h-4.5 w-4.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
-                </svg>
-              </span>
+              <svg className="h-4.5 w-4.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+              </svg>
               <span className="text-sm font-medium">Original</span>
             </button>
             <button
               onClick={handleDownloadSmall}
               className="flex min-h-[52px] flex-1 items-center justify-center gap-2.5 rounded-xl border border-violet-400/30 bg-violet-500/90 px-3.5 text-center text-white shadow-[0_10px_24px_rgba(139,92,246,0.2)] transition hover:bg-violet-500 active:scale-[0.98]"
             >
-              <span className="flex h-8 w-8 items-center justify-center rounded-full bg-white/15">
-                <svg className="h-4.5 w-4.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
-                </svg>
-              </span>
+              <svg className="h-4.5 w-4.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+              </svg>
               <span className="text-sm font-medium">Small</span>
             </button>
             {photo?.file_type !== 'video/mp4' && (
@@ -1580,11 +1570,9 @@ const PhotoDetail: React.FC = () => {
                 onClick={handleDownloadInstagram}
                 className="flex min-h-[52px] flex-1 items-center justify-center gap-2.5 rounded-xl border border-pink-300/30 bg-gradient-to-r from-pink-500 via-red-500 to-amber-400 px-3.5 text-center text-white shadow-[0_10px_24px_rgba(244,63,94,0.22)] transition hover:opacity-95 active:scale-[0.98]"
               >
-                <span className="flex h-8 w-8 items-center justify-center rounded-full bg-white/15">
-                  <svg className="h-4.5 w-4.5" fill="currentColor" viewBox="0 0 24 24">
-                    <path d="M12 2.163c3.204 0 3.584.012 4.85.07 3.252.148 4.771 1.691 4.919 4.919.058 1.265.069 1.645.069 4.849 0 3.205-.012 3.584-.069 4.849-.149 3.225-1.664 4.771-4.919 4.919-1.266.058-1.644.07-4.85.07-3.204 0-3.584-.012-4.849-.07-3.26-.149-4.771-1.699-4.919-4.92-.058-1.265-.07-1.644-.07-4.849 0-3.204.013-3.583.07-4.849.149-3.227 1.664-4.771 4.919-4.919 1.266-.057 1.645-.069 4.849-.069zm0-2.163c-3.259 0-3.667.014-4.947.072-4.358.2-6.78 2.618-6.98 6.98-.059 1.281-.073 1.689-.073 4.948 0 3.259.014 3.668.072 4.948.2 4.358 2.618 6.78 6.98 6.98 1.281.058 1.689.072 4.948.072 3.259 0 3.668-.014 4.948-.072 4.354-.2 6.782-2.618 6.979-6.98.059-1.28.073-1.689.073-4.948 0-3.259-.014-3.667-.072-4.947-.196-4.354-2.617-6.78-6.979-6.98-1.281-.059-1.69-.073-4.949-.073zm0 5.838c-3.403 0-6.162 2.759-6.162 6.162s2.759 6.163 6.162 6.163 6.162-2.759 6.162-6.163c0-3.403-2.759-6.162-6.162-6.162zm0 10.162c-2.209 0-4-1.79-4-4 0-2.209 1.791-4 4-4s4 1.791 4 4c0 2.21-1.791 4-4 4zm6.406-11.845c-.796 0-1.441.645-1.441 1.44s.645 1.44 1.441 1.44c.795 0 1.439-.645 1.439-1.44s-.644-1.44-1.439-1.44z"/>
-                  </svg>
-                </span>
+                <svg className="h-4.5 w-4.5" fill="currentColor" viewBox="0 0 24 24">
+                  <path d="M12 2.163c3.204 0 3.584.012 4.85.07 3.252.148 4.771 1.691 4.919 4.919.058 1.265.069 1.645.069 4.849 0 3.205-.012 3.584-.069 4.849-.149 3.225-1.664 4.771-4.919 4.919-1.266.058-1.644.07-4.85.07-3.204 0-3.584-.012-4.849-.07-3.26-.149-4.771-1.699-4.919-4.92-.058-1.265-.07-1.644-.07-4.849 0-3.204.013-3.583.07-4.849.149-3.227 1.664-4.771 4.919-4.919 1.266-.057 1.645-.069 4.849-.069zm0-2.163c-3.259 0-3.667.014-4.947.072-4.358.2-6.78 2.618-6.98 6.98-.059 1.281-.073 1.689-.073 4.948 0 3.259.014 3.668.072 4.948.2 4.358 2.618 6.78 6.98 6.98 1.281.058 1.689.072 4.948.072 3.259 0 3.668-.014 4.948-.072 4.354-.2 6.782-2.618 6.979-6.98.059-1.28.073-1.689.073-4.948 0-3.259-.014-3.667-.072-4.947-.196-4.354-2.617-6.78-6.979-6.98-1.281-.059-1.69-.073-4.949-.073zm0 5.838c-3.403 0-6.162 2.759-6.162 6.162s2.759 6.163 6.162 6.163 6.162-2.759 6.162-6.163c0-3.403-2.759-6.162-6.162-6.162zm0 10.162c-2.209 0-4-1.79-4-4 0-2.209 1.791-4 4-4s4 1.791 4 4c0 2.21-1.791 4-4 4zm6.406-11.845c-.796 0-1.441.645-1.441 1.44s.645 1.44 1.441 1.44c.795 0 1.439-.645 1.439-1.44s-.644-1.44-1.439-1.44z"/>
+                </svg>
                 <span className="text-sm font-medium">Instagram</span>
               </button>
             )}
