@@ -94,6 +94,8 @@ const PhotoDetail: React.FC = () => {
 
   // Preload adjacent images for smooth navigation
   useEffect(() => {
+    // While editing, avoid background preview fetches to keep network activity deterministic.
+    if (showEditor) return;
     if (!photo || displayPhotos.length === 0) return;
 
     const loadedUrls: string[] = [];
@@ -160,7 +162,7 @@ const PhotoDetail: React.FC = () => {
         }
       });
     };
-  }, [currentIndex, displayPhotos, allPhotos, photo, slug, preloadedImages]);
+  }, [currentIndex, displayPhotos, allPhotos, photo, slug, preloadedImages, showEditor]);
 
   // Check if current photo is favorited
   useEffect(() => {
@@ -1107,7 +1109,9 @@ const PhotoDetail: React.FC = () => {
                 slideDirection === 'right' ? 'animate-slide-in-left' : ''
               }`}
             >
-              {photo?.file_type === 'video/mp4' ? (
+              {showEditor ? (
+                <div className={`w-full ${isFullscreen ? 'h-screen' : 'h-[70vh] md:h-[80vh]'}`} />
+              ) : photo?.file_type === 'video/mp4' ? (
                 <video
                   src={getPreviewUrl(slug!, photo?.id || photoId!, photo?.file_type)}
                   controls
