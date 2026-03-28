@@ -100,7 +100,7 @@ const PhotoDetail: React.FC = () => {
   })();
 
   const swipePreviewUrl = swipePreviewPhoto
-    ? getPreviewUrl(slug!, swipePreviewPhoto.id, swipePreviewPhoto.file_type)
+    ? getPreviewUrl(slug!, swipePreviewPhoto.id, swipePreviewPhoto.file_type, swipePreviewPhoto.cache_version)
     : null;
   const showSwipePreview = Boolean(
     swipePreviewPhoto &&
@@ -139,7 +139,7 @@ const PhotoDetail: React.FC = () => {
     const loadedUrls: string[] = [];
 
     const preloadImage = (photoToPreload: Photo) => {
-      const url = getPreviewUrl(slug!, photoToPreload.id, photoToPreload.file_type);
+      const url = getPreviewUrl(slug!, photoToPreload.id, photoToPreload.file_type, photoToPreload.cache_version);
       
       // Skip if already preloaded or is a video
       if (preloadedImages.has(url) || photoToPreload.file_type === 'video/mp4') return;
@@ -408,7 +408,7 @@ const PhotoDetail: React.FC = () => {
         setSlideDirection('left'); // Sliding left = next photo
         
         // Check if image is preloaded
-        const imageUrl = getPreviewUrl(slug!, nextPhoto.id, nextPhoto.file_type);
+        const imageUrl = getPreviewUrl(slug!, nextPhoto.id, nextPhoto.file_type, nextPhoto.cache_version);
         const isPreloaded = preloadedImages.has(imageUrl);
         
         setCurrentIndex(nextIndex);
@@ -430,7 +430,7 @@ const PhotoDetail: React.FC = () => {
       } else if (currentIndex === photosToUse.length - 1 && photosToUse.length > 0) {
         // Loop back to first photo
         const firstPhoto = photosToUse[0];
-        const imageUrl = getPreviewUrl(slug!, firstPhoto.id, firstPhoto.file_type);
+        const imageUrl = getPreviewUrl(slug!, firstPhoto.id, firstPhoto.file_type, firstPhoto.cache_version);
         const isPreloaded = preloadedImages.has(imageUrl);
         
         // Keep current photo visible for cross-fade
@@ -488,7 +488,7 @@ const PhotoDetail: React.FC = () => {
         setSlideDirection('right'); // Sliding right = previous photo
         
         // Check if image is preloaded
-        const imageUrl = getPreviewUrl(slug!, prevPhoto.id, prevPhoto.file_type);
+        const imageUrl = getPreviewUrl(slug!, prevPhoto.id, prevPhoto.file_type, prevPhoto.cache_version);
         const isPreloaded = preloadedImages.has(imageUrl);
         
         setCurrentIndex(prevIndex);
@@ -510,7 +510,7 @@ const PhotoDetail: React.FC = () => {
       } else if (currentIndex === 0 && photosToUse.length > 1) {
         // Loop back to last photo
         const lastPhoto = photosToUse[photosToUse.length - 1];
-        const imageUrl = getPreviewUrl(slug!, lastPhoto.id, lastPhoto.file_type);
+        const imageUrl = getPreviewUrl(slug!, lastPhoto.id, lastPhoto.file_type, lastPhoto.cache_version);
         const isPreloaded = preloadedImages.has(imageUrl);
         
         // Keep current photo visible for cross-fade
@@ -745,7 +745,7 @@ const PhotoDetail: React.FC = () => {
     if (!platform && 'share' in navigator) {
       try {
         // Try to fetch and share the photo file
-        const imageUrl = getPreviewUrl(slug!, photo?.id || photoId!);
+        const imageUrl = getPreviewUrl(slug!, photo?.id || photoId!, photo?.file_type, photo?.cache_version);
         const shareData: any = {
           title: event?.name || 'Photo',
           text: text,
@@ -1014,7 +1014,7 @@ const PhotoDetail: React.FC = () => {
   const structuredData = photo ? {
     '@context': 'https://schema.org',
     '@type': 'ImageObject',
-    contentUrl: getPreviewUrl(slug!, photo.id),
+    contentUrl: getPreviewUrl(slug!, photo.id, photo.file_type, photo.cache_version),
     name: `Photo from ${event?.name}`,
     caption: `Photo from ${event?.name} event${photo.city ? ` in ${photo.city}` : ''}`,
     creator: {
@@ -1047,7 +1047,7 @@ const PhotoDetail: React.FC = () => {
           keywords={`${event?.name}, photo, ${photo.city || ''}, event photography, ${photo.camera_model || ''}`}
           url={`${window.location.origin}/events/${slug}/${photoId}`}
           type="article"
-          image={getPreviewUrl(slug!, photo.id)}
+          image={getPreviewUrl(slug!, photo.id, photo.file_type, photo.cache_version)}
           structuredData={structuredData}
         />
       )}
@@ -1379,7 +1379,7 @@ const PhotoDetail: React.FC = () => {
                 <div className={`w-full ${isFullscreen ? 'h-screen' : 'h-[70vh] md:h-[80vh]'}`} />
               ) : photo?.file_type === 'video/mp4' ? (
                 <video
-                  src={getPreviewUrl(slug!, photo?.id || photoId!, photo?.file_type)}
+                  src={getPreviewUrl(slug!, photo?.id || photoId!, photo?.file_type, photo?.cache_version)}
                   controls
                   autoPlay
                   loop
@@ -1390,7 +1390,7 @@ const PhotoDetail: React.FC = () => {
                   {/* Previous photo for cross-fade effect */}
                   {previousPhoto && previousPhoto.file_type !== 'video/mp4' && (
                     <img
-                      src={`${getPreviewUrl(slug!, previousPhoto.id, previousPhoto.file_type)}`}
+                      src={getPreviewUrl(slug!, previousPhoto.id, previousPhoto.file_type, previousPhoto.cache_version)}
                       alt="Previous"
                       className={`w-full h-auto ${isFullscreen ? 'max-h-screen' : 'max-h-[70vh] md:max-h-[80vh]'} object-contain absolute inset-0 transition-opacity duration-300 ${
                         imageLoaded ? 'opacity-0' : 'opacity-100'
@@ -1409,7 +1409,7 @@ const PhotoDetail: React.FC = () => {
                   
                   {/* Main image with smooth fade-in */}
                   <img
-                    src={`${getPreviewUrl(slug!, photo?.id || photoId!, photo?.file_type)}${cacheBuster ? `?v=${cacheBuster}` : ''}`}
+                    src={getPreviewUrl(slug!, photo?.id || photoId!, photo?.file_type, cacheBuster || photo?.cache_version)}
                     alt={photo?.original_filename}
                     className={`w-full h-auto ${isFullscreen ? 'max-h-screen' : 'max-h-[70vh] md:max-h-[80vh]'} object-contain transition-opacity duration-300 ${imageLoaded ? 'opacity-100' : 'opacity-0'} ${photo?.blur_placeholder && !imageLoaded ? 'absolute inset-0' : ''}`}
                     onLoad={() => setImageLoaded(true)}
@@ -1750,7 +1750,7 @@ const PhotoDetail: React.FC = () => {
           </div>
         }>
           <ImageEditorModal
-            imageUrl={`${getOriginalUrl(slug, photo.id, photo.file_type)}${cacheBuster ? `?v=${cacheBuster}` : ''}`}
+            imageUrl={getOriginalUrl(slug, photo.id, photo.file_type, cacheBuster || photo.cache_version)}
             onSave={handleEditorSave}
             onClose={() => setShowEditor(false)}
           />
@@ -1768,7 +1768,7 @@ const PhotoDetail: React.FC = () => {
           </div>
         }>
           <VideoEditorModal
-            videoUrl={`${getOriginalUrl(slug, photo.id, photo.file_type)}${cacheBuster ? `?v=${cacheBuster}` : ''}`}
+            videoUrl={getOriginalUrl(slug, photo.id, photo.file_type, cacheBuster || photo.cache_version)}
             onSave={handleEditorSave}
             onClose={() => setShowEditor(false)}
           />

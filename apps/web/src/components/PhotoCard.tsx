@@ -129,7 +129,7 @@ const PhotoCard: React.FC<PhotoCardProps> = ({
         >
           {isVideo ? (
             <video
-              src={getPreviewUrl(slug, photo.id, photo.file_type)}
+              src={getPreviewUrl(slug, photo.id, photo.file_type, photo.cache_version)}
               className="w-full h-full object-cover object-center transition-transform duration-300 group-hover:scale-[1.02]"
               muted
               playsInline
@@ -141,7 +141,7 @@ const PhotoCard: React.FC<PhotoCardProps> = ({
             />
           ) : (
             <ProgressiveImage
-              src={getPreviewUrl(slug, photo.id, photo.file_type)}
+              src={getPreviewUrl(slug, photo.id, photo.file_type, photo.cache_version)}
               blurDataUrl={photo.blur_placeholder}
               alt={photo.original_filename}
               className="w-full h-full object-cover object-center transition-transform duration-300 group-hover:scale-[1.02]"

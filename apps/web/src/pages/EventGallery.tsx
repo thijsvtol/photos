@@ -503,12 +503,12 @@ const EventGallery: React.FC = () => {
         addressLocality: event.cities[0]
       }
     } : undefined,
-    image: photos.length > 0 ? getPreviewUrl(slug!, photos[0].id) : undefined,
+    image: photos.length > 0 ? getPreviewUrl(slug!, photos[0].id, photos[0].file_type, photos[0].cache_version) : undefined,
     description: `Photo gallery for ${event?.name} featuring ${photos.length} photos${event?.cities && event.cities.length > 0 ? ` from ${event.cities.join(', ')}` : ''}`
   };
 
   const previewPhoto = photos.find(p => p.is_featured) || photos[0];
-  const previewImageUrl = previewPhoto ? getPreviewUrl(slug!, previewPhoto.id) : undefined;
+  const previewImageUrl = previewPhoto ? getPreviewUrl(slug!, previewPhoto.id, previewPhoto.file_type, previewPhoto.cache_version) : undefined;
   const isMultiDateView = dates.length > 1;
   const visibleDates = isMultiDateView ? dates.slice(0, visibleDateCount) : dates;
   const visibleSingleDatePhotos = isMultiDateView ? photos : photos.slice(0, visibleSinglePhotoCount);
@@ -659,7 +659,7 @@ const EventGallery: React.FC = () => {
         }
 
         const image = new Image();
-        image.src = getPreviewUrl(slug!, photo.id, photo.file_type);
+        image.src = getPreviewUrl(slug!, photo.id, photo.file_type, photo.cache_version);
         prefetchedPhotoIdsRef.current.add(cacheKey);
       });
     };

@@ -270,32 +270,34 @@ export const getFeaturedPhotos = async (limit: number = 10): Promise<Photo[]> =>
 };
 
 // Helper functions
-export const getPreviewUrl = (slug: string, photoId: string, fileType?: string): string => {
+export const getPreviewUrl = (slug: string, photoId: string, fileType?: string, cacheVersion?: number): string => {
   const isVideo = fileType === 'video/mp4';
   const extension = isVideo ? 'mp4' : 'jpg';
   const relativePath = `/media/${slug}/preview/${photoId}.${extension}`;
+  const pathWithVersion = cacheVersion !== undefined ? `${relativePath}?v=${cacheVersion}` : relativePath;
   
   // In native app (Capacitor), use full production domain for media files
   if (Capacitor.isNativePlatform()) {
     const domain = config.domain.startsWith('http') ? config.domain : `https://${config.domain}`;
-    return `${domain}${relativePath}`;
+    return `${domain}${pathWithVersion}`;
   }
   
-  return relativePath;
+  return pathWithVersion;
 };
 
-export const getOriginalUrl = (slug: string, photoId: string, fileType?: string): string => {
+export const getOriginalUrl = (slug: string, photoId: string, fileType?: string, cacheVersion?: number): string => {
   const isVideo = fileType === 'video/mp4';
   const extension = isVideo ? 'mp4' : 'jpg';
   const relativePath = `/media/${slug}/original/${photoId}.${extension}`;
+  const pathWithVersion = cacheVersion !== undefined ? `${relativePath}?v=${cacheVersion}` : relativePath;
   
   // In native app (Capacitor), use full production domain for media files
   if (Capacitor.isNativePlatform()) {
     const domain = config.domain.startsWith('http') ? config.domain : `https://${config.domain}`;
-    return `${domain}${relativePath}`;
+    return `${domain}${pathWithVersion}`;
   }
   
-  return relativePath;
+  return pathWithVersion;
 };
 
 // Download functions that trigger browser downloads

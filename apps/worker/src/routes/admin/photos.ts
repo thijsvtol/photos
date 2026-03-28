@@ -82,6 +82,12 @@ app.put('/:photoId/replace', async (c) => {
       // Ignore if ig version doesn't exist
     }
 
+    // Increment cache_version so clients can bust stale browser/CDN caches
+    await c.env.DB
+      .prepare('UPDATE photos SET cache_version = cache_version + 1 WHERE id = ?')
+      .bind(photoId)
+      .run();
+
     return c.json({ success: true });
   } catch (error) {
     console.error('Error replacing photo:', error);

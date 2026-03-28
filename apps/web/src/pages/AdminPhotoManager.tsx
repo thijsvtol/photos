@@ -215,7 +215,7 @@ const AdminPhotoManager: React.FC = () => {
               >
                 <div className="aspect-square">
                   <img
-                    src={getPreviewUrl(slug!, photo.id)}
+                    src={getPreviewUrl(slug!, photo.id, photo.file_type, photo.cache_version)}
                     alt={photo.original_filename}
                     className="w-full h-full object-cover"
                     loading="lazy"
@@ -288,7 +288,7 @@ const AdminPhotoManager: React.FC = () => {
                 <h2 className="text-2xl font-bold mb-4 text-red-600">⚠️ Delete Photo</h2>
                 <div className="mb-4">
                   <img
-                    src={getPreviewUrl(slug!, deletingPhoto.id)}
+                    src={getPreviewUrl(slug!, deletingPhoto.id, deletingPhoto.file_type, deletingPhoto.cache_version)}
                     alt={deletingPhoto.original_filename}
                     className="w-full rounded"
                   />

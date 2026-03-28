@@ -45,6 +45,7 @@ export interface Photo {
   favorites_count: number;
   blur_placeholder: string | null;
   is_featured: boolean;
+    cache_version: number;
 }
 
 export interface CreateEventRequest {

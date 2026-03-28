@@ -33,7 +33,7 @@ export function ShareEventButton({ event, slug, photos }: ShareEventButtonProps)
           try {
             // Use first photo or first featured photo as representative
             const representativePhoto = photos.find((p) => p.is_featured) || photos[0];
-            const imageUrl = getPreviewUrl(slug, representativePhoto.id);
+            const imageUrl = getPreviewUrl(slug, representativePhoto.id, representativePhoto.file_type, representativePhoto.cache_version);
 
             const response = await fetch(imageUrl);
             const blob = await response.blob();

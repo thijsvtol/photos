@@ -64,7 +64,7 @@ export default function EventAnalytics({ stats, slug, isExpanded, onToggleExpand
                   {stats.topFavorites.map((photo) => (
                     <div key={photo.id} className="relative group overflow-hidden rounded-lg">
                       <img
-                        src={getPreviewUrl(slug, photo.id)}
+                        src={getPreviewUrl(slug, photo.id, photo.file_type, photo.cache_version)}
                         alt={photo.original_filename}
                         className="w-full aspect-square object-cover rounded-lg shadow-sm group-hover:scale-105 transition-transform duration-300"
                       />
