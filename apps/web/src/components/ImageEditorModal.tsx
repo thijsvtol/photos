@@ -43,7 +43,7 @@ const ImageEditorModal: React.FC<ImageEditorModalProps> = ({ imageUrl, onSave, o
   const [activeTab, setActiveTab] = useState<EditorTab>('adjust');
   const [saving, setSaving] = useState(false);
   const [editedCanvas, setEditedCanvas] = useState<HTMLCanvasElement | null>(null);
-  const [curvesLevelsImageData, setCurvesLevelsImageData] = useState<ImageData | null>(null);
+  const [curvesLevelsBaseImageData, setCurvesLevelsBaseImageData] = useState<ImageData | null>(null);
   const [previewCanvas, setPreviewCanvas] = useState<HTMLCanvasElement | null>(null);
   const getCurrentImgDataRef = useRef<any>(null);
 
@@ -58,7 +58,7 @@ const ImageEditorModal: React.FC<ImageEditorModalProps> = ({ imageUrl, onSave, o
         canvas.height = img.height;
         const ctx = canvas.getContext('2d')!;
         ctx.drawImage(img, 0, 0);
-        setCurvesLevelsImageData(canvasToImageData(canvas));
+        setCurvesLevelsBaseImageData(canvasToImageData(canvas));
         setPreviewCanvas(canvas);
       };
       img.src = imageUrl;
@@ -70,23 +70,47 @@ const ImageEditorModal: React.FC<ImageEditorModalProps> = ({ imageUrl, onSave, o
       if (savedImageData.imageCanvas) {
         const canvas = savedImageData.imageCanvas as HTMLCanvasElement;
         setEditedCanvas(canvas);
-        setCurvesLevelsImageData(canvasToImageData(canvas));
+        setCurvesLevelsBaseImageData(canvasToImageData(canvas));
         setPreviewCanvas(canvas);
       }
     },
     []
   );
 
+  // When entering curves/levels, freeze a fresh base image so live adjustments are stable.
+  useEffect(() => {
+    if (activeTab === 'adjust') {
+      return;
+    }
+
+    let sourceCanvas = editedCanvas;
+
+    if (getCurrentImgDataRef.current) {
+      const { imageData } = getCurrentImgDataRef.current(
+        { quality: 0.92 },
+        false,
+        true
+      );
+      if (imageData?.imageCanvas) {
+        sourceCanvas = imageData.imageCanvas as HTMLCanvasElement;
+      }
+    }
+
+    if (sourceCanvas) {
+      setEditedCanvas(sourceCanvas);
+      setPreviewCanvas(sourceCanvas);
+      setCurvesLevelsBaseImageData(canvasToImageData(sourceCanvas));
+    }
+  }, [activeTab]);
+
   const handleCurvesApply = useCallback((result: ImageData) => {
     const canvas = imageDataToCanvas(result);
-    setCurvesLevelsImageData(result);
     setPreviewCanvas(canvas);
     setEditedCanvas(canvas);
   }, []);
 
   const handleLevelsApply = useCallback((result: ImageData) => {
     const canvas = imageDataToCanvas(result);
-    setCurvesLevelsImageData(result);
     setPreviewCanvas(canvas);
     setEditedCanvas(canvas);
   }, []);
@@ -325,9 +349,9 @@ const ImageEditorModal: React.FC<ImageEditorModalProps> = ({ imageUrl, onSave, o
             {/* Controls */}
             <div className="w-full md:w-80 bg-gray-800 p-4 overflow-y-auto border-t md:border-t-0 md:border-l border-gray-700">
               <h3 className="text-white font-medium text-sm mb-3">Curves</h3>
-              {curvesLevelsImageData ? (
+              {curvesLevelsBaseImageData ? (
                 <CurvesEditor
-                  imageData={curvesLevelsImageData}
+                  imageData={curvesLevelsBaseImageData}
                   onApply={handleCurvesApply}
                 />
               ) : (
@@ -355,9 +379,9 @@ const ImageEditorModal: React.FC<ImageEditorModalProps> = ({ imageUrl, onSave, o
             {/* Controls */}
             <div className="w-full md:w-80 bg-gray-800 p-4 overflow-y-auto border-t md:border-t-0 md:border-l border-gray-700">
               <h3 className="text-white font-medium text-sm mb-3">Levels</h3>
-              {curvesLevelsImageData ? (
+              {curvesLevelsBaseImageData ? (
                 <LevelsEditor
-                  imageData={curvesLevelsImageData}
+                  imageData={curvesLevelsBaseImageData}
                   onApply={handleLevelsApply}
                 />
               ) : (

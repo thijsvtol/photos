@@ -313,7 +313,7 @@ const CurvesEditor: React.FC<CurvesEditorProps> = ({ imageData, onApply }) => {
     });
   };
 
-  const handleApply = () => {
+  const applyCurves = useCallback(() => {
     const rgbLut = splineInterpolate(points.rgb);
     const rLut = splineInterpolate(points.red);
     const gLut = splineInterpolate(points.green);
@@ -332,7 +332,12 @@ const CurvesEditor: React.FC<CurvesEditorProps> = ({ imageData, onApply }) => {
     }
 
     onApply(result);
-  };
+  }, [imageData, onApply, points]);
+
+  // Live preview: recalculate whenever curve points or source image change.
+  useEffect(() => {
+    applyCurves();
+  }, [applyCurves]);
 
   const channels: { key: Channel; label: string }[] = [
     { key: 'rgb', label: 'RGB' },
@@ -393,12 +398,6 @@ const CurvesEditor: React.FC<CurvesEditorProps> = ({ imageData, onApply }) => {
           className="px-3 py-1.5 text-xs bg-gray-700 text-gray-300 rounded hover:bg-gray-600 transition"
         >
           Reset All
-        </button>
-        <button
-          onClick={handleApply}
-          className="px-3 py-1.5 text-xs bg-blue-600 text-white rounded hover:bg-blue-700 transition"
-        >
-          Apply Curves
         </button>
       </div>
     </div>

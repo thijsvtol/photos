@@ -182,7 +182,7 @@ const LevelsEditor: React.FC<LevelsEditorProps> = ({ imageData, onApply }) => {
     updateLevel('inWhite', Math.max(inWhite, inBlack + 1));
   };
 
-  const handleApply = () => {
+  const applyLevels = useCallback(() => {
     const rgbLut = buildLevelsLUT(levels.rgb.inBlack, levels.rgb.inWhite, levels.rgb.gamma, levels.rgb.outBlack, levels.rgb.outWhite);
     const rLut = buildLevelsLUT(levels.red.inBlack, levels.red.inWhite, levels.red.gamma, levels.red.outBlack, levels.red.outWhite);
     const gLut = buildLevelsLUT(levels.green.inBlack, levels.green.inWhite, levels.green.gamma, levels.green.outBlack, levels.green.outWhite);
@@ -201,7 +201,12 @@ const LevelsEditor: React.FC<LevelsEditorProps> = ({ imageData, onApply }) => {
     }
 
     onApply(result);
-  };
+  }, [imageData, levels, onApply]);
+
+  // Live preview: apply levels immediately when any slider value changes.
+  useEffect(() => {
+    applyLevels();
+  }, [applyLevels]);
 
   const channels: { key: Channel; label: string }[] = [
     { key: 'rgb', label: 'RGB' },
@@ -329,12 +334,6 @@ const LevelsEditor: React.FC<LevelsEditorProps> = ({ imageData, onApply }) => {
           className="px-3 py-1.5 text-xs bg-gray-700 text-gray-300 rounded hover:bg-gray-600 transition"
         >
           Reset All
-        </button>
-        <button
-          onClick={handleApply}
-          className="px-3 py-1.5 text-xs bg-blue-600 text-white rounded hover:bg-blue-700 transition"
-        >
-          Apply Levels
         </button>
       </div>
     </div>
