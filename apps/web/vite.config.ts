@@ -34,4 +34,8 @@ export default defineConfig({
     },
     chunkSizeWarningLimit: 600, // Increase slightly from default 500
   },
+  optimizeDeps: {
+    // Exclude FFmpeg from optimization so wasm files are handled correctly
+    exclude: ['@ffmpeg/ffmpeg', '@ffmpeg/util'],
+  },
 });

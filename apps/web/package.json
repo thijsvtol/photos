@@ -36,6 +36,8 @@
     "axios": "^1.14.0",
     "dexie": "^4.4.1",
     "exifreader": "^4.37.0",
+    "@ffmpeg/ffmpeg": "^0.12.10",
+    "@ffmpeg/util": "^0.12.1",
     "filerobot-image-editor": "^4.8.1",
     "jszip": "^3.10.1",
     "konva": "^9.3.22",

@@ -5,6 +5,7 @@ import Navbar from '../components/Navbar';
 import Footer from '../components/Footer';
 import SEO from '../components/SEO';
 const ImageEditorModal = lazy(() => import('../components/ImageEditorModal'));
+const VideoEditorModal = lazy(() => import('../components/VideoEditorModal'));
 import { getEvent, getPhoto, getPhotos, loginToEvent, getPreviewUrl, getOriginalUrl, downloadOriginal, downloadSmall, downloadInstagram, replacePhoto, toggleFavorite as toggleFavoriteAPI, getUserFavoriteIds } from '../api';
 import { createPreview } from '../imageUtils';
 import type { Event, Photo } from '../types';
@@ -699,14 +700,25 @@ const PhotoDetail: React.FC = () => {
   const handleEditorSave = async (editedBlob: Blob) => {
     if (!slug || !photo) return;
     try {
-      // Generate preview from the edited blob
-      const editedFile = new File([editedBlob], 'edited.jpg', { type: 'image/jpeg' });
-      const previewBlob = await createPreview(editedFile);
+      let previewBlob: Blob;
+      
+      // Generate preview based on file type
+      if (photo.file_type === 'video/mp4') {
+        // For videos, create a still frame preview (using first frame)
+        // Using createPreview with a simple approach - just use the original for now
+        // In production, could extract first video frame
+        previewBlob = editedBlob;
+      } else {
+        // For images, create a downsized preview
+        const editedFile = new File([editedBlob], 'edited.jpg', { type: 'image/jpeg' });
+        previewBlob = await createPreview(editedFile);
+      }
       
       // Upload both original and preview to replace the current photo
       await replacePhoto(slug, photo.id, editedBlob, previewBlob);
       
-      toast.showSuccess('Photo saved successfully!');
+      const mediaType = photo.file_type === 'video/mp4' ? 'video' : 'photo';
+      toast.showSuccess(`${mediaType} saved successfully!`);
       setShowEditor(false);
       
       // Force reload the photo to show the updated version
@@ -714,8 +726,8 @@ const PhotoDetail: React.FC = () => {
       setCacheBuster(Date.now());
       await loadPhoto();
     } catch (err) {
-      console.error('Failed to save edited photo:', err);
-      toast.showError('Failed to save photo. Please try again.');
+      console.error('Failed to save edited media:', err);
+      toast.showError('Failed to save. Please try again.');
     }
   };
 
@@ -917,13 +929,13 @@ const PhotoDetail: React.FC = () => {
           {/* Action buttons - Desktop only */}
           <div className="hidden md:flex absolute top-4 right-4 z-20 gap-2 items-center">
             
-            {/* Edit button - admin only, images only */}
-            {user?.isAdmin && photo?.file_type !== 'video/mp4' && (
+            {/* Edit button - admin only */}
+            {user?.isAdmin && (
               <button
                 onClick={() => setShowEditor(true)}
                 className="bg-black/50 hover:bg-black/75 text-white p-2 rounded-full transition backdrop-blur-sm w-9 h-9 flex items-center justify-center"
-                aria-label="Edit photo"
-                title="Edit photo"
+                aria-label={`Edit ${photo?.file_type === 'video/mp4' ? 'video' : 'photo'}`}
+                title={`Edit ${photo?.file_type === 'video/mp4' ? 'video' : 'photo'}`}
               >
                 <Pencil className="w-5 h-5" />
               </button>
@@ -1216,7 +1228,7 @@ const PhotoDetail: React.FC = () => {
             </button>
 
             {/* More menu - admin only */}
-            {user?.isAdmin && photo?.file_type !== 'video/mp4' && (
+            {user?.isAdmin && (
               <div className="relative flex-1 min-w-0">
                 <button
                   onClick={() => setShowMobileMenu(!showMobileMenu)}
@@ -1440,6 +1452,24 @@ const PhotoDetail: React.FC = () => {
         }>
           <ImageEditorModal
             imageUrl={`${getOriginalUrl(slug, photo.id, photo.file_type)}${cacheBuster ? `?v=${cacheBuster}` : ''}`}
+            onSave={handleEditorSave}
+            onClose={() => setShowEditor(false)}
+          />
+        </Suspense>
+      )}
+
+      {/* Video Editor Modal */}
+      {showEditor && photo && slug && photo.file_type === 'video/mp4' && (
+        <Suspense fallback={
+          <div className="fixed inset-0 z-[200] flex items-center justify-center bg-gray-900">
+            <div className="text-center">
+              <div className="inline-block animate-spin rounded-full h-12 w-12 border-b-2 border-white"></div>
+              <p className="mt-4 text-gray-400">Loading video editor...</p>
+            </div>
+          </div>
+        }>
+          <VideoEditorModal
+            videoUrl={`${getOriginalUrl(slug, photo.id, photo.file_type)}${cacheBuster ? `?v=${cacheBuster}` : ''}`}
             onSave={handleEditorSave}
             onClose={() => setShowEditor(false)}
           />
