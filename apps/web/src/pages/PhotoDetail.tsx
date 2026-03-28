@@ -44,11 +44,15 @@ const PhotoDetail: React.FC = () => {
   const [preloadedImages, setPreloadedImages] = useState<Set<string>>(new Set());
   const [isTransitioning, setIsTransitioning] = useState(false);
   const [slideDirection, setSlideDirection] = useState<'left' | 'right' | null>(null);
+  const [previousPhoto, setPreviousPhoto] = useState<Photo | null>(null);
   const [showEditor, setShowEditor] = useState(false);
   const [showMobileMenu, setShowMobileMenu] = useState(false);
   const [cacheBuster, setCacheBuster] = useState<number>(0);
   const touchStartX = useRef<number | null>(null);
+  const touchStartY = useRef<number | null>(null);
   const touchEndX = useRef<number | null>(null);
+  const [swipeOffset, setSwipeOffset] = useState(0);
+  const [isSwiping, setIsSwiping] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
   const imageContainerRef = useRef<HTMLDivElement>(null);
   const slideshowTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -363,6 +367,9 @@ const PhotoDetail: React.FC = () => {
         const nextIndex = currentIndex + 1;
         const nextPhoto = photosToUse[nextIndex];
         
+        // Keep current photo visible for cross-fade
+        setPreviousPhoto(photo);
+        
         // Start transition with slide animation
         setIsTransitioning(true);
         setSlideDirection('left'); // Sliding left = next photo
@@ -382,6 +389,7 @@ const PhotoDetail: React.FC = () => {
           clearTimeout(transitionTimeoutRef.current);
         }
         transitionTimeoutRef.current = setTimeout(() => {
+          setPreviousPhoto(null); // Clear previous photo after transition
           setIsTransitioning(false);
           setSlideDirection(null);
           transitionTimeoutRef.current = null;
@@ -391,6 +399,9 @@ const PhotoDetail: React.FC = () => {
         const firstPhoto = photosToUse[0];
         const imageUrl = getPreviewUrl(slug!, firstPhoto.id, firstPhoto.file_type);
         const isPreloaded = preloadedImages.has(imageUrl);
+        
+        // Keep current photo visible for cross-fade
+        setPreviousPhoto(photo);
         
         setIsTransitioning(true);
         setSlideDirection('left');
@@ -403,13 +414,14 @@ const PhotoDetail: React.FC = () => {
           clearTimeout(transitionTimeoutRef.current);
         }
         transitionTimeoutRef.current = setTimeout(() => {
+          setPreviousPhoto(null);
           setIsTransitioning(false);
           setSlideDirection(null);
           transitionTimeoutRef.current = null;
         }, 350);
       }
     }
-  }, [isTransitioning, fromFavorites, favoritePhotos, photoId, slug, navigate, displayPhotos, allPhotos, currentIndex, preloadedImages]);
+  }, [isTransitioning, fromFavorites, favoritePhotos, photoId, slug, navigate, displayPhotos, allPhotos, currentIndex, preloadedImages, photo]);
 
   const navigateToPrevious = useCallback(() => {
     if (isTransitioning) return; // Prevent rapid navigation
@@ -436,6 +448,9 @@ const PhotoDetail: React.FC = () => {
         const prevIndex = currentIndex - 1;
         const prevPhoto = photosToUse[prevIndex];
         
+        // Keep current photo visible for cross-fade
+        setPreviousPhoto(photo);
+        
         // Start transition with slide animation
         setIsTransitioning(true);
         setSlideDirection('right'); // Sliding right = previous photo
@@ -455,6 +470,7 @@ const PhotoDetail: React.FC = () => {
           clearTimeout(transitionTimeoutRef.current);
         }
         transitionTimeoutRef.current = setTimeout(() => {
+          setPreviousPhoto(null); // Clear previous photo after transition
           setIsTransitioning(false);
           setSlideDirection(null);
           transitionTimeoutRef.current = null;
@@ -464,6 +480,9 @@ const PhotoDetail: React.FC = () => {
         const lastPhoto = photosToUse[photosToUse.length - 1];
         const imageUrl = getPreviewUrl(slug!, lastPhoto.id, lastPhoto.file_type);
         const isPreloaded = preloadedImages.has(imageUrl);
+        
+        // Keep current photo visible for cross-fade
+        setPreviousPhoto(photo);
         
         setIsTransitioning(true);
         setSlideDirection('right');
@@ -476,13 +495,14 @@ const PhotoDetail: React.FC = () => {
           clearTimeout(transitionTimeoutRef.current);
         }
         transitionTimeoutRef.current = setTimeout(() => {
+          setPreviousPhoto(null);
           setIsTransitioning(false);
           setSlideDirection(null);
           transitionTimeoutRef.current = null;
         }, 350);
       }
     }
-  }, [isTransitioning, fromFavorites, favoritePhotos, photoId, slug, navigate, displayPhotos, allPhotos, currentIndex, preloadedImages]);
+  }, [isTransitioning, fromFavorites, favoritePhotos, photoId, slug, navigate, displayPhotos, allPhotos, currentIndex, preloadedImages, photo]);
 
   // Keep refs updated for stable event handlers
   navigateNextRef.current = navigateToNext;
@@ -509,21 +529,43 @@ const PhotoDetail: React.FC = () => {
     // Only track single-finger swipes for navigation
     if (e.touches.length === 1) {
       touchStartX.current = e.touches[0].clientX;
+      touchStartY.current = e.touches[0].clientY;
+      touchEndX.current = e.touches[0].clientX;
+      setSwipeOffset(0);
+      setIsSwiping(false);
     } else {
       // Multiple fingers - clear tracking
       touchStartX.current = null;
+      touchStartY.current = null;
       touchEndX.current = null;
+      setSwipeOffset(0);
+      setIsSwiping(false);
     }
   }, []);
 
   const handleTouchMoveNative = React.useCallback((e: TouchEvent) => {
     // Only track single-finger movement for swipe detection
     if (e.touches.length === 1 && touchStartX.current !== null) {
-      touchEndX.current = e.touches[0].clientX;
+      const currentX = e.touches[0].clientX;
+      const currentY = e.touches[0].clientY;
+      const deltaX = currentX - touchStartX.current;
+      const deltaY = touchStartY.current !== null ? currentY - touchStartY.current : 0;
+
+      touchEndX.current = currentX;
+
+      // Only hijack when gesture is primarily horizontal.
+      if (Math.abs(deltaX) > Math.abs(deltaY)) {
+        e.preventDefault();
+        setIsSwiping(true);
+        setSwipeOffset(deltaX * 0.9);
+      }
     } else {
       // Multiple fingers or no start - clear tracking
       touchStartX.current = null;
+      touchStartY.current = null;
       touchEndX.current = null;
+      setSwipeOffset(0);
+      setIsSwiping(false);
     }
   }, []);
 
@@ -531,22 +573,40 @@ const PhotoDetail: React.FC = () => {
     // Check if we should navigate based on swipe
     if (touchStartX.current !== null && touchEndX.current !== null) {
       const diff = touchStartX.current - touchEndX.current;
-      const threshold = 50;
+      const threshold = 60;
       
       // Only navigate if swipe was significant
-      if (Math.abs(diff) > threshold) {
+      if (Math.abs(diff) > threshold && isSwiping) {
+        setSwipeOffset(diff > 0 ? -140 : 140);
+
         // Navigate using refs to avoid stale closures
-        if (diff > 0) {
-          navigateNextRef.current?.();
-        } else {
-          navigatePrevRef.current?.();
-        }
+        setTimeout(() => {
+          if (diff > 0) {
+            navigateNextRef.current?.();
+          } else {
+            navigatePrevRef.current?.();
+          }
+          setSwipeOffset(0);
+        }, 90);
+      } else {
+        // Snap back smoothly if threshold not reached.
+        setSwipeOffset(0);
       }
     }
     
     // Reset touch tracking
     touchStartX.current = null;
+    touchStartY.current = null;
     touchEndX.current = null;
+    setIsSwiping(false);
+  }, [isSwiping]);
+
+  const handleTouchCancelNative = React.useCallback(() => {
+    touchStartX.current = null;
+    touchStartY.current = null;
+    touchEndX.current = null;
+    setSwipeOffset(0);
+    setIsSwiping(false);
   }, []);
 
   // Conditionally attach/detach touch handlers based on zoom state
@@ -560,6 +620,7 @@ const PhotoDetail: React.FC = () => {
         container.removeEventListener('touchstart', handleTouchStartNative);
         container.removeEventListener('touchmove', handleTouchMoveNative);
         container.removeEventListener('touchend', handleTouchEndNative);
+        container.removeEventListener('touchcancel', handleTouchCancelNative);
         handlersAttachedRef.current = false;
       }
     } else {
@@ -568,6 +629,7 @@ const PhotoDetail: React.FC = () => {
         container.addEventListener('touchstart', handleTouchStartNative, { passive: false });
         container.addEventListener('touchmove', handleTouchMoveNative, { passive: false });
         container.addEventListener('touchend', handleTouchEndNative, { passive: false });
+        container.addEventListener('touchcancel', handleTouchCancelNative, { passive: false });
         handlersAttachedRef.current = true;
       }
     }
@@ -577,10 +639,11 @@ const PhotoDetail: React.FC = () => {
         container.removeEventListener('touchstart', handleTouchStartNative);
         container.removeEventListener('touchmove', handleTouchMoveNative);
         container.removeEventListener('touchend', handleTouchEndNative);
+        container.removeEventListener('touchcancel', handleTouchCancelNative);
         handlersAttachedRef.current = false;
       }
     };
-  }, [isZoomed, containerReady]);
+  }, [isZoomed, containerReady, handleTouchStartNative, handleTouchMoveNative, handleTouchEndNative, handleTouchCancelNative]);
 
   const toggleFullscreen = async () => {
     if (!document.fullscreenElement) {
@@ -1120,6 +1183,12 @@ const PhotoDetail: React.FC = () => {
                 slideDirection === 'left' ? 'animate-slide-in-right' :
                 slideDirection === 'right' ? 'animate-slide-in-left' : ''
               }`}
+              style={{
+                transform: `translate3d(${swipeOffset}px, 0, 0)`,
+                transition: isSwiping ? 'none' : 'transform 220ms ease-out',
+                opacity: Math.max(0.78, 1 - Math.abs(swipeOffset) / 700),
+                willChange: 'transform, opacity',
+              }}
             >
               {showEditor ? (
                 <div className={`w-full ${isFullscreen ? 'h-screen' : 'h-[70vh] md:h-[80vh]'}`} />
@@ -1132,7 +1201,19 @@ const PhotoDetail: React.FC = () => {
                   className={`w-full h-auto ${isFullscreen ? 'max-h-screen' : 'max-h-[70vh] md:max-h-[80vh]'} object-contain`}
                 />
               ) : (
-                <>
+                <div className="relative">
+                  {/* Previous photo for cross-fade effect */}
+                  {previousPhoto && previousPhoto.file_type !== 'video/mp4' && (
+                    <img
+                      src={`${getPreviewUrl(slug!, previousPhoto.id, previousPhoto.file_type)}`}
+                      alt="Previous"
+                      className={`w-full h-auto ${isFullscreen ? 'max-h-screen' : 'max-h-[70vh] md:max-h-[80vh]'} object-contain absolute inset-0 transition-opacity duration-300 ${
+                        imageLoaded ? 'opacity-0' : 'opacity-100'
+                      }`}
+                    />
+                  )}
+                  
+                  {/* Blur placeholder */}
                   {photo?.blur_placeholder && !imageLoaded && (
                     <img
                       src={photo.blur_placeholder}
@@ -1140,6 +1221,8 @@ const PhotoDetail: React.FC = () => {
                       className={`w-full h-auto ${isFullscreen ? 'max-h-screen' : 'max-h-[70vh] md:max-h-[80vh]'} object-contain blur-xl transition-opacity duration-200`}
                     />
                   )}
+                  
+                  {/* Main image with smooth fade-in */}
                   <img
                     src={`${getPreviewUrl(slug!, photo?.id || photoId!, photo?.file_type)}${cacheBuster ? `?v=${cacheBuster}` : ''}`}
                     alt={photo?.original_filename}
@@ -1148,7 +1231,7 @@ const PhotoDetail: React.FC = () => {
                     loading="eager"
                     decoding="async"
                   />
-                </>
+                </div>
               )}
             </div>
           </div>

@@ -1,6 +1,6 @@
-import React, { useState, useRef, useCallback, useEffect } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { X, Scissors, Crop, RotateCw, Radio, Loader2, AlertCircle } from 'lucide-react';
-import { applyVideoTransformations, getVideoDuration, initFFmpeg, unloadFFmpeg } from '../utils/videoEditing';
+import { applyVideoTransformations, initFFmpeg, unloadFFmpeg } from '../utils/videoEditing';
 
 type EditorTab = 'trim' | 'crop' | 'transform' | 'speed';
 
@@ -25,8 +25,8 @@ const VideoEditorModal: React.FC<VideoEditorModalProps> = ({ videoUrl, onSave, o
 
   // Crop state
   const [cropMode, setCropMode] = useState(false);
-  const [cropX, setCropX] = useState(0);
-  const [cropY, setCropY] = useState(0);
+  const cropX = 0;
+  const cropY = 0;
   const [cropWidth, setCropWidth] = useState(0);
   const [cropHeight, setCropHeight] = useState(0);
   const [selectedAspectRatio, setSelectedAspectRatio] = useState<string>('custom');
@@ -151,10 +151,6 @@ const VideoEditorModal: React.FC<VideoEditorModalProps> = ({ videoUrl, onSave, o
       setCropWidth(Math.round(newWidth));
       setCropHeight(Math.round(newHeight));
     }
-  };
-
-  const rotateVideo = () => {
-    setRotation((prev) => (prev + 1) % 4);
   };
 
   const tabs: { key: EditorTab; label: string; icon: React.ReactNode }[] = [
