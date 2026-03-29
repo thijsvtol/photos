@@ -139,7 +139,10 @@ export function ShareEventButton({ event, slug, photos, inviteLink, canInvite = 
     <div className="relative">
       <button
         onClick={() => {
-          if ('share' in navigator) {
+          if (canInvite) {
+            // Always show dropdown when invite option is available
+            setShowShareMenu(!showShareMenu);
+          } else if ('share' in navigator) {
             shareEvent();
           } else {
             setShowShareMenu(!showShareMenu);
