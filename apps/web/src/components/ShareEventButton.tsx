@@ -38,7 +38,10 @@ export function ShareEventButton({ event, slug, photos, inviteLink, canInvite = 
   };
 
   const copyInviteLink = async () => {
-    if (!inviteLink) return;
+    if (!inviteLink) {
+      alert('Invite link is not ready yet. Please try again in a moment.');
+      return;
+    }
     const url = `${window.location.origin}/invite/${inviteLink.token}`;
     try {
       if ('share' in navigator) {
@@ -138,16 +141,7 @@ export function ShareEventButton({ event, slug, photos, inviteLink, canInvite = 
   return (
     <div className="relative">
       <button
-        onClick={() => {
-          if (canInvite) {
-            // Always show dropdown when invite option is available
-            setShowShareMenu(!showShareMenu);
-          } else if ('share' in navigator) {
-            shareEvent();
-          } else {
-            setShowShareMenu(!showShareMenu);
-          }
-        }}
+        onClick={() => setShowShareMenu(!showShareMenu)}
         className="px-3 py-2 sm:px-4 sm:py-2.5 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition flex items-center gap-2 text-sm font-medium"
         aria-label="Share album"
       >
@@ -163,7 +157,7 @@ export function ShareEventButton({ event, slug, photos, inviteLink, canInvite = 
 
           <div className="absolute right-0 mt-2 w-52 bg-white dark:bg-gray-800 rounded-lg shadow-xl border border-gray-200 dark:border-gray-700 overflow-hidden z-30">
             {/* Invite collaborators — shown only when user can invite */}
-            {canInvite && inviteLink && (
+            {canInvite && (
               <>
                 <button
                   onClick={copyInviteLink}

@@ -167,7 +167,11 @@ const EventGallery: React.FC = () => {
       return;
     }
 
-    const mine = collaborators.find((c) => c.email.toLowerCase() === user.email.toLowerCase());
+    const currentUserEmail = user.email.toLowerCase();
+    const mine = collaborators.find((c) => {
+      const candidateEmails = [c.user_email, c.email].filter((value): value is string => typeof value === 'string');
+      return candidateEmails.some((email) => email.toLowerCase() === currentUserEmail);
+    });
     setCollaboratorRole((mine?.role as 'viewer' | 'uploader' | 'editor' | 'admin' | undefined) || null);
   }, [collaborators, user?.email]);
 
@@ -874,7 +878,7 @@ const EventGallery: React.FC = () => {
                 slug={slug!}
                 photos={photos}
                 inviteLink={inviteLink}
-                canInvite={event.visibility === 'collaborators_only' && canCreateInvite && !!inviteLink}
+                canInvite={event.visibility === 'collaborators_only' && canCreateInvite}
               />
             )}
           </div>
