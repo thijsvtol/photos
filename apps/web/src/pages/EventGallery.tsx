@@ -1,6 +1,6 @@
 import React, { useEffect, useState, useRef } from 'react';
 import { useParams, Link } from 'react-router-dom';
-import { Upload, Copy, Check } from 'lucide-react';
+import { Upload } from 'lucide-react';
 import Masonry from 'react-masonry-css';
 import { Capacitor } from '@capacitor/core';
 import Navbar from '../components/Navbar';
@@ -41,7 +41,6 @@ const EventGallery: React.FC = () => {
   const [isCollaborator, setIsCollaborator] = useState(false);
   const [collaborators, setCollaborators] = useState<Collaborator[]>([]);
   const [inviteLink, setInviteLink] = useState<InviteLink | null>(null);
-  const [copied, setCopied] = useState(false);
   const [activeDate, setActiveDate] = useState<string | null>(null);
   const dateRefs = useRef<Map<string, HTMLDivElement>>(new Map());
   const [isMobile, setIsMobile] = useState(false);
@@ -185,21 +184,6 @@ const EventGallery: React.FC = () => {
     };
     loadInviteLink();
   }, [event, slug, isAdmin, isCollaborator]);
-
-  const copyCollaborationLink = async () => {
-    if (!inviteLink) return;
-    
-    const fullUrl = `${window.location.origin}/invite/${inviteLink.token}`;
-    
-    try {
-      await navigator.clipboard.writeText(fullUrl);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
-    } catch (err) {
-      console.error('Failed to copy link:', err);
-      toast.showError('Failed to copy link to clipboard');
-    }
-  };
 
 
   // Restore scroll position when returning to gallery
@@ -866,32 +850,21 @@ const EventGallery: React.FC = () => {
                 </span>
               )}
             </div>
-            {event && <ShareEventButton event={event} slug={slug!} photos={photos} />}
+            {event && (
+              <ShareEventButton
+                event={event}
+                slug={slug!}
+                photos={photos}
+                inviteLink={inviteLink}
+                canInvite={event.visibility === 'collaborators_only' && (isAdmin || isCollaborator) && !!inviteLink}
+              />
+            )}
           </div>
 
-          {/* Collaborators and Copy Link - Compact Row */}
+          {/* Collaborators row */}
           {event && event.visibility === 'collaborators_only' && collaborators.length > 0 && (
             <div className="flex items-center gap-3 mb-3">
               <CollaboratorAvatars collaborators={collaborators} />
-              {(isAdmin || isCollaborator) && inviteLink && (
-                <button
-                  onClick={copyCollaborationLink}
-                  className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-md transition-colors text-xs font-medium"
-                  title="Share this link with others to invite them as collaborators"
-                >
-                  {copied ? (
-                    <>
-                      <Check className="w-3.5 h-3.5" />
-                      <span>Copied</span>
-                    </>
-                  ) : (
-                    <>
-                      <Copy className="w-3.5 h-3.5" />
-                      <span>Copy Link</span>
-                    </>
-                  )}
-                </button>
-              )}
             </div>
           )}
 
