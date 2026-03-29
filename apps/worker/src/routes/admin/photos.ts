@@ -154,9 +154,9 @@ app.post('/bulk-delete', async (c) => {
       return c.json({ error: 'photoIds array is required' }, 400);
     }
     
-    // Limit to 100 photos per request to prevent abuse
-    if (photoIds.length > 100) {
-      return c.json({ error: 'Cannot delete more than 100 photos at once' }, 400);
+    // Limit to 500 photos per request to prevent abuse
+    if (photoIds.length > 500) {
+      return c.json({ error: 'Cannot delete more than 500 photos at once' }, 400);
     }
     
     let deletedCount = 0;
