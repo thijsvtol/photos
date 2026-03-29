@@ -20,6 +20,23 @@ export function ShareEventButton({ event, slug, photos, inviteLink, canInvite = 
   const [showShareMenu, setShowShareMenu] = useState(false);
   const [inviteCopied, setInviteCopied] = useState(false);
 
+  const copyToClipboard = async (value: string) => {
+    if (typeof navigator !== 'undefined' && navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(value);
+      return;
+    }
+
+    const textarea = document.createElement('textarea');
+    textarea.value = value;
+    textarea.style.position = 'fixed';
+    textarea.style.opacity = '0';
+    document.body.appendChild(textarea);
+    textarea.focus();
+    textarea.select();
+    document.execCommand('copy');
+    document.body.removeChild(textarea);
+  };
+
   const copyInviteLink = async () => {
     if (!inviteLink) return;
     const url = `${window.location.origin}/invite/${inviteLink.token}`;
@@ -31,7 +48,7 @@ export function ShareEventButton({ event, slug, photos, inviteLink, canInvite = 
           url,
         });
       } else {
-        await navigator.clipboard.writeText(url);
+        await copyToClipboard(url);
         setInviteCopied(true);
         setTimeout(() => setInviteCopied(false), 2000);
       }
@@ -39,7 +56,7 @@ export function ShareEventButton({ event, slug, photos, inviteLink, canInvite = 
       if ((err as Error).name !== 'AbortError') {
         // Fallback to clipboard if share fails
         try {
-          await navigator.clipboard.writeText(url);
+          await copyToClipboard(url);
           setInviteCopied(true);
           setTimeout(() => setInviteCopied(false), 2000);
         } catch {
@@ -111,7 +128,7 @@ export function ShareEventButton({ event, slug, photos, inviteLink, canInvite = 
         window.open(`https://wa.me/?text=${encodeURIComponent(text + ' ' + url)}`, '_blank');
         break;
       case 'copy':
-        navigator.clipboard.writeText(url);
+        void copyToClipboard(url);
         alert('Link copied to clipboard!');
         break;
     }

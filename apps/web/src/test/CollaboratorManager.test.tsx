@@ -13,24 +13,24 @@ describe('CollaboratorManager', () => {
   
   const mockCollaborators = [
     {
-      id: 1,
       event_id: 1,
-      user_id: 'user1',
+      user_email: 'user1@example.com',
       email: 'user1@example.com',
       name: 'User One',
       invited_by: 'admin1',
       invited_at: '2024-01-01T00:00:00Z',
-      status: 'accepted' as const
+      status: 'accepted' as const,
+      role: 'editor' as const,
     },
     {
-      id: 2,
       event_id: 1,
-      user_id: 'user2',
+      user_email: 'user2@example.com',
       email: 'user2@example.com',
       name: null,
       invited_by: 'admin1',
       invited_at: '2024-01-02T00:00:00Z',
-      status: 'pending' as const
+      status: 'pending' as const,
+      role: 'uploader' as const,
     }
   ];
 
@@ -47,6 +47,7 @@ describe('CollaboratorManager', () => {
       revoked_at: null,
       use_count: 0,
       last_used_at: null,
+      role: 'uploader',
     });
     vi.mocked(api.revokeInviteLink).mockResolvedValue(undefined);
   });
@@ -71,14 +72,14 @@ describe('CollaboratorManager', () => {
     });
   });
 
-  it('shows status badges for collaborators', async () => {
+  it('shows role badges for collaborators', async () => {
     vi.mocked(api.getCollaborators).mockResolvedValue(mockCollaborators);
     
     render(<CollaboratorManager eventSlug={mockEventSlug} eventName={mockEventName} />);
     
     await waitFor(() => {
-      expect(screen.getByText('accepted')).toBeInTheDocument();
-      expect(screen.getByText('pending')).toBeInTheDocument();
+      expect(screen.getByText('editor')).toBeInTheDocument();
+      expect(screen.getByText('uploader')).toBeInTheDocument();
     });
   });
 
@@ -100,7 +101,8 @@ describe('CollaboratorManager', () => {
         user_id: 'user3',
         email: 'newuser@example.com',
         name: null,
-        status: 'pending'
+        status: 'pending',
+        role: 'uploader'
       }
     });
     
@@ -117,7 +119,7 @@ describe('CollaboratorManager', () => {
     fireEvent.click(inviteButton);
     
     await waitFor(() => {
-      expect(api.inviteCollaborator).toHaveBeenCalledWith(mockEventSlug, 'newuser@example.com');
+      expect(api.inviteCollaborator).toHaveBeenCalledWith(mockEventSlug, 'newuser@example.com', 'uploader');
       expect(screen.getByText(/Invitation sent to/)).toBeInTheDocument();
     });
   });

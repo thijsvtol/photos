@@ -51,10 +51,13 @@ const ImageEditorModal: React.FC<ImageEditorModalProps> = ({ imageUrl, nativeWid
   // the original image width.
   const savingPixelRatio = useMemo(() => {
     const dpr = window.devicePixelRatio || 1;
-    if (!nativeWidth) return dpr;
+    if (!nativeWidth && !nativeHeight) return dpr;
     const estimatedCanvasWidth = window.innerWidth * 0.65;
-    return Math.max(dpr, Math.ceil(nativeWidth / estimatedCanvasWidth));
-  }, [nativeWidth]);
+    const estimatedCanvasHeight = window.innerHeight * 0.7;
+    const widthRatio = nativeWidth ? Math.ceil(nativeWidth / estimatedCanvasWidth) : 1;
+    const heightRatio = nativeHeight ? Math.ceil(nativeHeight / estimatedCanvasHeight) : 1;
+    return Math.max(dpr, widthRatio, heightRatio);
+  }, [nativeWidth, nativeHeight]);
   const [activeTab, setActiveTab] = useState<EditorTab>('adjust');
   const [saving, setSaving] = useState(false);
   const [editedCanvas, setEditedCanvas] = useState<HTMLCanvasElement | null>(null);
@@ -247,6 +250,7 @@ const ImageEditorModal: React.FC<ImageEditorModalProps> = ({ imageUrl, nativeWid
             savingPixelRatio={savingPixelRatio}
             defaultSavedImageType="jpeg"
             defaultSavedImageQuality={0.92}
+            previewPixelRatio={1}
             observePluginContainerSize
             showBackButton={false}
             closeAfterSave={false}
