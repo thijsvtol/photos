@@ -211,6 +211,10 @@ app.post('/api/events/:slug/collaborators', requireEventCapability('invite_creat
 app.delete('/api/events/:slug/collaborators/:userEmail', requireEventCapability('collaborator_remove', 'Admin collaborator role required'), async (c) => {
   const slug = c.req.param('slug')!;
   const userEmail = c.req.param('userEmail');
+
+  if (!userEmail) {
+    return c.json({ error: 'Collaborator email is required' }, 400);
+  }
   
   try {
     // Get event ID from slug
@@ -268,6 +272,11 @@ app.delete('/api/events/:slug/collaborators/:userEmail', requireEventCapability(
 app.put('/api/events/:slug/collaborators/:userEmail/role', requireEventCapability('role_change', 'Admin collaborator role required'), async (c) => {
   const slug = c.req.param('slug')!;
   const userEmail = c.req.param('userEmail');
+
+  if (!userEmail) {
+    return c.json({ error: 'Collaborator email is required' }, 400);
+  }
+
   const body = await c.req.json<{ role?: CollaboratorRole }>();
   const nextRole = normalizeRole(body.role);
 
@@ -632,7 +641,9 @@ export async function sendUploadNotification(env: Env, params: {
 app.post('/api/events/:slug/invite-links', requireEventCapability('invite_create', 'Invite permission required'), async (c) => {
   const slug = c.req.param('slug')!;
   const user = c.get('user');
-  const body = await c.req.json<{ role?: CollaboratorRole }>().catch(() => ({}));
+  const body = await c.req
+    .json<{ role?: CollaboratorRole }>()
+    .catch((): { role?: CollaboratorRole } => ({}));
   const requestedRole = normalizeRole(body.role) || 'uploader';
 
   if (!isAdmin(c)) {
