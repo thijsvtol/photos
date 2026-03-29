@@ -1,7 +1,7 @@
 import axios from 'axios';
 import { Capacitor } from '@capacitor/core';
 import { Filesystem, Directory } from '@capacitor/filesystem';
-import type { Event, Photo, CreateEventRequest, Tag, AdminStats, EventStats, UpdateEventRequest, CreateTagRequest, UpdateTagRequest } from './types';
+import type { Event, Photo, CreateEventRequest, Tag, AdminStats, EventStats, UpdateEventRequest, CreateTagRequest, UpdateTagRequest, CollaboratorRole } from './types';
 import type { User } from './contexts/AuthContext';
 import { MobileAuthService } from './services/mobileAuth';
 import { config } from './config';
@@ -720,50 +720,42 @@ export const getCollaborators = async (eventSlug: string) => {
   return response.data.collaborators;
 };
 
-export const inviteCollaborator = async (eventSlug: string, email: string) => {
-  console.log('[API] inviteCollaborator called:', { eventSlug, email });
-  const headers = getAdminHeaders();
-  console.log('[API] Headers:', headers);
-  
+export const inviteCollaborator = async (eventSlug: string, email: string, role?: CollaboratorRole) => {
   const response = await api.post(
     `/events/${eventSlug}/collaborators`,
-    { email },
-    { headers }
+    { email, role }
   );
-  console.log('[API] inviteCollaborator response:', response.data);
+  return response.data;
+};
+
+export const updateCollaboratorRole = async (eventSlug: string, userEmail: string, role: CollaboratorRole) => {
+  const response = await api.put(
+    `/events/${eventSlug}/collaborators/${userEmail}/role`,
+    { role }
+  );
   return response.data;
 };
 
 export const removeCollaborator = async (eventSlug: string, userEmail: string) => {
-  await api.delete(
-    `/events/${eventSlug}/collaborators/${userEmail}`,
-    { headers: getAdminHeaders() }
-  );
+  await api.delete(`/events/${eventSlug}/collaborators/${userEmail}`);
 };
 
 // Invite Links API
-export const createInviteLink = async (eventSlug: string) => {
+export const createInviteLink = async (eventSlug: string, role?: CollaboratorRole) => {
   const response = await api.post<{ inviteLink: import('./types').InviteLink }>(
     `/events/${eventSlug}/invite-links`,
-    {},
-    { headers: getAdminHeaders() }
+    { role }
   );
   return response.data.inviteLink;
 };
 
 export const getInviteLinks = async (eventSlug: string) => {
-  const response = await api.get<{ inviteLinks: import('./types').InviteLink[] }>(
-    `/events/${eventSlug}/invite-links`,
-    { headers: getAdminHeaders() }
-  );
+  const response = await api.get<{ inviteLinks: import('./types').InviteLink[] }>(`/events/${eventSlug}/invite-links`);
   return response.data.inviteLinks;
 };
 
 export const revokeInviteLink = async (eventSlug: string, token: string) => {
-  await api.delete(
-    `/events/${eventSlug}/invite-links/${token}`,
-    { headers: getAdminHeaders() }
-  );
+  await api.delete(`/events/${eventSlug}/invite-links/${token}`);
 };
 
 export const acceptInvite = async (token: string) => {

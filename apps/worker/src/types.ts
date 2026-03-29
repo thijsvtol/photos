@@ -149,11 +149,14 @@ export interface UserFavorite {
   created_at: string;
 }
 
+export type CollaboratorRole = 'viewer' | 'uploader' | 'editor' | 'admin';
+
 // Event collaborator in database
 export interface EventCollaborator {
   event_id: number;
   user_email: string;
   invited_at: string;
+  role: CollaboratorRole;
 }
 
 // Event collaborator with user info
@@ -163,11 +166,13 @@ export interface CollaboratorWithUser {
   email: string;
   name: string | null;
   invited_at: string;
+  role: CollaboratorRole;
 }
 
 // Request to invite a collaborator
 export interface InviteCollaboratorRequest {
   email: string;
+  role?: CollaboratorRole;
 }
 
 // Collaboration history action types
@@ -208,6 +213,7 @@ export interface InviteLink {
   revoked_at: string | null;
   last_used_at: string | null;
   use_count: number;
+  role: CollaboratorRole;
 }
 
 // Invite link with creator info

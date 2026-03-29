@@ -127,19 +127,22 @@ export interface UploadQueueItem {
   lastRetryTime?: number; // Timestamp of last retry attempt for exponential backoff
 }
 
+export type CollaboratorRole = 'viewer' | 'uploader' | 'editor' | 'admin';
+
 export interface Collaborator {
-  id: number;
   event_id: number;
-  user_id: string;
+  user_email?: string;
   email: string;
   name: string | null;
-  invited_by: string;
+  invited_by?: string;
   invited_at: string;
-  status: 'pending' | 'accepted' | 'declined';
+  status?: 'pending' | 'accepted' | 'declined';
+  role: CollaboratorRole;
 }
 
 export interface InviteCollaboratorRequest {
   email: string;
+  role?: CollaboratorRole;
 }
 
 export interface InviteLink {
@@ -151,6 +154,7 @@ export interface InviteLink {
   revoked_at: string | null;
   last_used_at: string | null;
   use_count: number;
+  role: CollaboratorRole;
   creator_name?: string | null;
   event_name?: string | null;
   event_slug?: string | null;

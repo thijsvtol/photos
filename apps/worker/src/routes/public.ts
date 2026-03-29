@@ -215,7 +215,7 @@ app.get('/api/events/:slug/photos', optionalAuth, async (c) => {
       }
     }
     
-    // Build query with sorting and join uploader name
+    // Build query with uploader display name (user name fallback to email)
     let orderBy = 'p.capture_time DESC'; // default
     switch (sort) {
       case 'date_asc':
@@ -233,8 +233,9 @@ app.get('/api/events/:slug/photos', optionalAuth, async (c) => {
     }
     
     const query = `
-      SELECT p.*, p.uploaded_by as uploader_name 
+      SELECT p.*, COALESCE(u.name, u.email, p.uploaded_by) as uploader_name
       FROM photos p
+      LEFT JOIN users u ON p.uploaded_by = u.email
       WHERE p.event_id = ? 
       ORDER BY ${orderBy}
     `;
@@ -305,11 +306,12 @@ app.get('/api/events/:slug/photos/:photoId', optionalAuth, async (c) => {
       }
     }
     
-    // Get photo with uploader name
+    // Get photo with uploader display name
     const photo = await c.env.DB
       .prepare(`
-        SELECT p.*, p.uploaded_by as uploader_name 
+        SELECT p.*, COALESCE(u.name, u.email, p.uploaded_by) as uploader_name
         FROM photos p
+        LEFT JOIN users u ON p.uploaded_by = u.email
         WHERE p.id = ? AND p.event_id = ?
       `)
       .bind(photoId, event.id)

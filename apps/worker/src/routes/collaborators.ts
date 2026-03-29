@@ -1,6 +1,6 @@
 import { Hono } from 'hono';
-import type { Env, InviteCollaboratorRequest, CollaboratorWithUser, User } from '../types';
-import { requireAdmin, extractUser, requireUploadPermission } from '../auth';
+import type { Env, InviteCollaboratorRequest, CollaboratorWithUser, User, CollaboratorRole } from '../types';
+import { requireAdmin, extractUser, requireEventCapability, isAdmin, getCollaboratorRole } from '../auth';
 import { requireFeature } from '../features';
 import { getConfig } from '../config';
 
@@ -9,6 +9,37 @@ type Variables = {
 };
 
 const app = new Hono<{ Bindings: Env; Variables: Variables }>();
+
+const VALID_ROLES: CollaboratorRole[] = ['viewer', 'uploader', 'editor', 'admin'];
+
+const roleRank: Record<CollaboratorRole, number> = {
+  viewer: 0,
+  uploader: 1,
+  editor: 2,
+  admin: 3,
+};
+
+const normalizeRole = (value: unknown): CollaboratorRole | null => {
+  if (typeof value !== 'string') return null;
+  if (VALID_ROLES.includes(value as CollaboratorRole)) {
+    return value as CollaboratorRole;
+  }
+  return null;
+};
+
+async function getEventAdminCount(db: D1Database, eventId: number): Promise<number> {
+  const result = await db.prepare(
+    `SELECT COUNT(*) as count FROM event_collaborators WHERE event_id = ? AND role = 'admin'`
+  ).bind(eventId).first<{ count: number }>();
+  return Number(result?.count || 0);
+}
+
+async function getEventCollaboratorRole(db: D1Database, eventId: number, userEmail: string): Promise<CollaboratorRole | null> {
+  const result = await db.prepare(
+    `SELECT role FROM event_collaborators WHERE event_id = ? AND user_email = ?`
+  ).bind(eventId, userEmail).first<{ role: CollaboratorRole }>();
+  return result?.role ?? null;
+}
 
 // Require collaborators feature to be enabled for all routes
 app.use('/*', requireFeature('enableCollaborators'));
@@ -37,6 +68,7 @@ app.get('/api/events/:slug/collaborators', async (c) => {
         ec.event_id,
         ec.user_email,
         ec.invited_at,
+        ec.role,
         u.email,
         u.name
       FROM event_collaborators ec
@@ -54,9 +86,9 @@ app.get('/api/events/:slug/collaborators', async (c) => {
 
 /**
  * POST /api/events/:slug/collaborators
- * Invite a user to collaborate on an event (admin only)
+ * Invite a user to collaborate on an event (editor/admin)
  */
-app.post('/api/events/:slug/collaborators', requireAdmin, async (c) => {
+app.post('/api/events/:slug/collaborators', requireEventCapability('invite_create', 'Invite permission required'), async (c) => {
   const slug = c.req.param('slug')!;
   console.log('[Invite Collaborator] Starting for event:', slug);
   
@@ -75,7 +107,17 @@ app.post('/api/events/:slug/collaborators', requireAdmin, async (c) => {
   }
   console.log('[Invite Collaborator] Admin user:', adminUser.email);
   
+  const requestedRole = normalizeRole(body.role) || 'uploader';
+
   try {
+        // Editors cannot grant event-admin role
+        if (!isAdmin(c)) {
+          const inviterRole = await getCollaboratorRole(c.env.DB, slug, adminUser.email);
+          if (!inviterRole || roleRank[requestedRole] > roleRank[inviterRole]) {
+            return c.json({ error: 'Cannot assign a role higher than your own' }, 403);
+          }
+        }
+
     // Get event ID from slug
     const event = await c.env.DB.prepare(
       'SELECT id, name FROM events WHERE slug = ?'
@@ -118,9 +160,9 @@ app.post('/api/events/:slug/collaborators', requireAdmin, async (c) => {
     // Create collaborator relationship
     console.log('[Invite Collaborator] Creating collaborator relationship');
     const insertResult = await c.env.DB.prepare(`
-      INSERT INTO event_collaborators (event_id, user_email)
-      VALUES (?, ?)
-    `).bind(event.id, user.email).run();
+      INSERT INTO event_collaborators (event_id, user_email, role)
+      VALUES (?, ?, ?)
+    `).bind(event.id, user.email, requestedRole).run();
     console.log('[Invite Collaborator] Insert result:', insertResult.success, insertResult.meta);
     
     if (!insertResult.success) {
@@ -152,7 +194,8 @@ app.post('/api/events/:slug/collaborators', requireAdmin, async (c) => {
       collaborator: {
         user_email: user.email,
         email: user.email,
-        name: user.name
+        name: user.name,
+        role: requestedRole,
       }
     });
   } catch (error) {
@@ -163,9 +206,9 @@ app.post('/api/events/:slug/collaborators', requireAdmin, async (c) => {
 
 /**
  * DELETE /api/events/:slug/collaborators/:userEmail
- * Remove a collaborator from an event (admin only)
+ * Remove a collaborator from an event (event admin only)
  */
-app.delete('/api/events/:slug/collaborators/:userEmail', requireAdmin, async (c) => {
+app.delete('/api/events/:slug/collaborators/:userEmail', requireEventCapability('collaborator_remove', 'Admin collaborator role required'), async (c) => {
   const slug = c.req.param('slug')!;
   const userEmail = c.req.param('userEmail');
   
@@ -177,6 +220,18 @@ app.delete('/api/events/:slug/collaborators/:userEmail', requireAdmin, async (c)
     
     if (!event) {
       return c.json({ error: 'Event not found' }, 404);
+    }
+
+    const existingRole = await getEventCollaboratorRole(c.env.DB, event.id, userEmail);
+    if (!existingRole) {
+      return c.json({ error: 'Collaborator not found' }, 404);
+    }
+
+    if (existingRole === 'admin') {
+      const adminCount = await getEventAdminCount(c.env.DB, event.id);
+      if (adminCount <= 1) {
+        return c.json({ error: 'Cannot remove the last event admin' }, 400);
+      }
     }
     
     // Delete collaborator relationship
@@ -203,6 +258,58 @@ app.delete('/api/events/:slug/collaborators/:userEmail', requireAdmin, async (c)
   } catch (error) {
     console.error('Error removing collaborator:', error);
     return c.json({ error: 'Failed to remove collaborator' }, 500);
+  }
+});
+
+/**
+ * PUT /api/events/:slug/collaborators/:userEmail/role
+ * Update collaborator role for an event (event admin only)
+ */
+app.put('/api/events/:slug/collaborators/:userEmail/role', requireEventCapability('role_change', 'Admin collaborator role required'), async (c) => {
+  const slug = c.req.param('slug')!;
+  const userEmail = c.req.param('userEmail');
+  const body = await c.req.json<{ role?: CollaboratorRole }>();
+  const nextRole = normalizeRole(body.role);
+
+  if (!nextRole) {
+    return c.json({ error: 'Valid role is required' }, 400);
+  }
+
+  try {
+    const event = await c.env.DB.prepare(
+      'SELECT id FROM events WHERE slug = ?'
+    ).bind(slug).first<{ id: number }>();
+
+    if (!event) {
+      return c.json({ error: 'Event not found' }, 404);
+    }
+
+    const existingRole = await getEventCollaboratorRole(c.env.DB, event.id, userEmail);
+    if (!existingRole) {
+      return c.json({ error: 'Collaborator not found' }, 404);
+    }
+
+    if (existingRole === 'admin' && nextRole !== 'admin') {
+      const adminCount = await getEventAdminCount(c.env.DB, event.id);
+      if (adminCount <= 1) {
+        return c.json({ error: 'Cannot demote the last event admin' }, 400);
+      }
+    }
+
+    const result = await c.env.DB.prepare(`
+      UPDATE event_collaborators
+      SET role = ?
+      WHERE event_id = ? AND user_email = ?
+    `).bind(nextRole, event.id, userEmail).run();
+
+    if (result.meta.changes === 0) {
+      return c.json({ error: 'Collaborator not found' }, 404);
+    }
+
+    return c.json({ success: true, role: nextRole });
+  } catch (error) {
+    console.error('Error updating collaborator role:', error);
+    return c.json({ error: 'Failed to update collaborator role' }, 500);
   }
 });
 
@@ -520,11 +627,20 @@ export async function sendUploadNotification(env: Env, params: {
 
 /**
  * POST /api/events/:slug/invite-links
- * Create a shareable invite link for an event (admin only)
+ * Create a shareable invite link for an event (editor/admin)
  */
-app.post('/api/events/:slug/invite-links', requireAdmin, async (c) => {
+app.post('/api/events/:slug/invite-links', requireEventCapability('invite_create', 'Invite permission required'), async (c) => {
   const slug = c.req.param('slug')!;
   const user = c.get('user');
+  const body = await c.req.json<{ role?: CollaboratorRole }>().catch(() => ({}));
+  const requestedRole = normalizeRole(body.role) || 'uploader';
+
+  if (!isAdmin(c)) {
+    const creatorRole = await getCollaboratorRole(c.env.DB, slug, user.email);
+    if (!creatorRole || roleRank[requestedRole] > roleRank[creatorRole]) {
+      return c.json({ error: 'Cannot create invite with a role higher than your own' }, 403);
+    }
+  }
   
   try {
     // Get event
@@ -545,9 +661,9 @@ app.post('/api/events/:slug/invite-links', requireAdmin, async (c) => {
     
     // Create invite link
     const result = await c.env.DB.prepare(`
-      INSERT INTO invite_links (token, event_id, created_by)
-      VALUES (?, ?, ?)
-    `).bind(token, event.id, user.email).run();
+      INSERT INTO invite_links (token, event_id, created_by, role)
+      VALUES (?, ?, ?, ?)
+    `).bind(token, event.id, user.email, requestedRole).run();
     
     if (!result.success) {
       throw new Error('Failed to create invite link');
@@ -583,7 +699,7 @@ app.post('/api/events/:slug/invite-links', requireAdmin, async (c) => {
  * GET /api/events/:slug/invite-links
  * Get all active invite links for an event (admin and collaborators)
  */
-app.get('/api/events/:slug/invite-links', requireUploadPermission, async (c) => {
+app.get('/api/events/:slug/invite-links', requireEventCapability('invite_create', 'Invite permission required'), async (c) => {
   const slug = c.req.param('slug')!;
   const user = c.get('user');
   
@@ -597,8 +713,7 @@ app.get('/api/events/:slug/invite-links', requireUploadPermission, async (c) => 
       return c.json({ error: 'Event not found' }, 404);
     }
     
-    // Verify user has access to this event (either admin or collaborator)
-    // This is already verified by requireUploadPermission middleware
+    // Access is already verified by requireEventCapability middleware.
     
     // Get active invite links
     const links = await c.env.DB.prepare(`
@@ -620,9 +735,9 @@ app.get('/api/events/:slug/invite-links', requireUploadPermission, async (c) => 
 
 /**
  * DELETE /api/events/:slug/invite-links/:token
- * Revoke an invite link (admin only)
+ * Revoke an invite link (event admin only)
  */
-app.delete('/api/events/:slug/invite-links/:token', requireAdmin, async (c) => {
+app.delete('/api/events/:slug/invite-links/:token', requireEventCapability('invite_revoke', 'Admin collaborator role required'), async (c) => {
   const slug = c.req.param('slug')!;
   const token = c.req.param('token');
   const user = c.get('user');
@@ -700,11 +815,11 @@ app.post('/api/invite/:token/accept', async (c) => {
       }, 400);
     }
     
-    // Add user as collaborator
+    // Add user as collaborator with role granted by invite link
     await c.env.DB.prepare(`
-      INSERT INTO event_collaborators (event_id, user_email)
-      VALUES (?, ?)
-    `).bind(inviteLink.event_id, user.email).run();
+      INSERT INTO event_collaborators (event_id, user_email, role)
+      VALUES (?, ?, ?)
+    `).bind(inviteLink.event_id, user.email, normalizeRole(inviteLink.role) || 'uploader').run();
     
     // Update link usage stats
     await c.env.DB.prepare(`

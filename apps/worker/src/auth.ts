@@ -1,5 +1,5 @@
 import { Context, Next } from 'hono';
-import type { Env, User, CloudflareAccessJWT, DBUser } from './types';
+import type { Env, User, CloudflareAccessJWT, DBUser, CollaboratorRole } from './types';
 import { jwtVerify } from 'jose';
 import { getEventSession } from './cookies';
 
@@ -233,6 +233,88 @@ export function isUserAdmin(user: User, adminEmails: string): boolean {
   return adminList.includes(user.email.toLowerCase());
 }
 
+export type EventCapability =
+  | 'upload'
+  | 'image_edit'
+  | 'photo_delete'
+  | 'bulk_delete'
+  | 'invite_create'
+  | 'invite_revoke'
+  | 'collaborator_remove'
+  | 'role_change'
+  | 'feature_photo';
+
+const roleCapabilities: Record<CollaboratorRole, Set<EventCapability>> = {
+  viewer: new Set(),
+  uploader: new Set(['upload']),
+  editor: new Set(['upload', 'image_edit', 'photo_delete', 'bulk_delete', 'invite_create']),
+  admin: new Set(['upload', 'image_edit', 'photo_delete', 'bulk_delete', 'invite_create', 'invite_revoke', 'collaborator_remove', 'role_change', 'feature_photo']),
+};
+
+export function hasRoleCapability(role: CollaboratorRole | null, capability: EventCapability): boolean {
+  if (!role) return false;
+  return roleCapabilities[role].has(capability);
+}
+
+export async function getCollaboratorRole(
+  db: D1Database,
+  eventSlug: string,
+  userEmail: string
+): Promise<CollaboratorRole | null> {
+  try {
+    const result = await db.prepare(`
+      SELECT ec.role
+      FROM event_collaborators ec
+      JOIN events e ON ec.event_id = e.id
+      WHERE e.slug = ? AND ec.user_email = ?
+    `).bind(eventSlug, userEmail).first<{ role: CollaboratorRole }>();
+
+    return result?.role ?? null;
+  } catch (error) {
+    console.error('Error getting collaborator role:', error);
+    return null;
+  }
+}
+
+export async function getCollaboratorRoleByEventId(
+  db: D1Database,
+  eventId: number,
+  userEmail: string
+): Promise<CollaboratorRole | null> {
+  try {
+    const result = await db.prepare(`
+      SELECT role
+      FROM event_collaborators
+      WHERE event_id = ? AND user_email = ?
+    `).bind(eventId, userEmail).first<{ role: CollaboratorRole }>();
+
+    return result?.role ?? null;
+  } catch (error) {
+    console.error('Error getting collaborator role by event id:', error);
+    return null;
+  }
+}
+
+export async function hasEventCapability(
+  db: D1Database,
+  eventSlug: string,
+  userEmail: string,
+  capability: EventCapability
+): Promise<boolean> {
+  const role = await getCollaboratorRole(db, eventSlug, userEmail);
+  return hasRoleCapability(role, capability);
+}
+
+export async function hasEventCapabilityByEventId(
+  db: D1Database,
+  eventId: number,
+  userEmail: string,
+  capability: EventCapability
+): Promise<boolean> {
+  const role = await getCollaboratorRoleByEventId(db, eventId, userEmail);
+  return hasRoleCapability(role, capability);
+}
+
 /**
  * Check event authentication using both cookies and Bearer tokens
  * Returns true if:
@@ -306,19 +388,39 @@ export async function requireAdmin(c: Context<{ Bindings: Env; Variables: Variab
  * Check if user is a collaborator on a specific event
  */
 export async function isCollaborator(db: D1Database, eventSlug: string, userEmail: string): Promise<boolean> {
-  try {
-    const result = await db.prepare(`
-      SELECT 1
-      FROM event_collaborators ec
-      JOIN events e ON ec.event_id = e.id
-      WHERE e.slug = ? AND ec.user_email = ?
-    `).bind(eventSlug, userEmail).first();
-    
-    return !!result;
-  } catch (error) {
-    console.error('Error checking collaborator status:', error);
-    return false;
-  }
+  const role = await getCollaboratorRole(db, eventSlug, userEmail);
+  return !!role;
+}
+
+export function requireEventCapability(capability: EventCapability, errorMessage?: string) {
+  return async (c: Context<{ Bindings: Env; Variables: Variables }>, next: Next) => {
+    const user = await extractUser(c);
+
+    if (!user) {
+      return c.json({ error: 'Authentication required' }, 401);
+    }
+
+    c.set('user', user);
+    await upsertUser(c.env.DB, user);
+
+    // Global admins can always proceed
+    if (isAdmin(c)) {
+      await next();
+      return;
+    }
+
+    const eventSlug = c.req.param('slug');
+    if (!eventSlug) {
+      return c.json({ error: 'Event context is required' }, 400);
+    }
+
+    const allowed = await hasEventCapability(c.env.DB, eventSlug, user.email, capability);
+    if (!allowed) {
+      return c.json({ error: errorMessage || 'Insufficient permissions for this event' }, 403);
+    }
+
+    await next();
+  };
 }
 
 /**
@@ -344,14 +446,14 @@ export async function requireUploadPermission(c: Context<{ Bindings: Env; Variab
     return;
   }
 
-  // Check if user is a collaborator on this specific event
+  // Check if user has upload capability on this specific event
   const eventSlug = c.req.param('slug');
-  if (eventSlug && await isCollaborator(c.env.DB, eventSlug, user.email)) {
+  if (eventSlug && await hasEventCapability(c.env.DB, eventSlug, user.email, 'upload')) {
     console.log('Upload access granted (collaborator):', user.email, 'for event:', eventSlug);
     await next();
     return;
   }
 
   console.log('Upload access denied for user:', user.email);
-  return c.json({ error: 'Upload permission required. You must be an admin or invited collaborator.' }, 403);
+  return c.json({ error: 'Upload permission required. You must be an admin or have upload access for this event.' }, 403);
 }

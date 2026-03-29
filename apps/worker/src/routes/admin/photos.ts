@@ -1,6 +1,6 @@
-import { Hono } from 'hono';
+import { Hono, Context } from 'hono';
 import type { Env, User } from '../../types';
-import { requireAdmin } from '../../auth';
+import { extractUser, hasEventCapabilityByEventId, isUserAdmin } from '../../auth';
 
 type Variables = {
   user: User;
@@ -39,8 +39,30 @@ async function withRetry<T>(
   throw lastError;
 }
 
-// Apply admin authentication
-app.use('/*', requireAdmin);
+async function requireEventCapabilityById(
+  c: Context<{ Bindings: Env; Variables: Variables }>,
+  eventId: number,
+  capability: 'image_edit' | 'photo_delete' | 'bulk_delete' | 'feature_photo',
+  errorMessage: string
+) {
+  const user = await extractUser(c);
+  if (!user) {
+    return c.json({ error: 'Authentication required' }, 401);
+  }
+
+  c.set('user', user);
+
+  if (isUserAdmin(user, c.env.ADMIN_EMAILS || '')) {
+    return null;
+  }
+
+  const allowed = await hasEventCapabilityByEventId(c.env.DB, eventId, user.email, capability);
+  if (!allowed) {
+    return c.json({ error: errorMessage }, 403);
+  }
+
+  return null;
+}
 
 /**
  * PUT /photos/:photoId/featured
@@ -50,6 +72,23 @@ app.put('/:photoId/featured', async (c) => {
   try {
     const photoId = c.req.param('photoId');
     const { isFeatured } = await c.req.json<{ isFeatured: boolean }>();
+
+    const photo = await c.env.DB
+      .prepare('SELECT event_id FROM photos WHERE id = ?')
+      .bind(photoId)
+      .first<{ event_id: number }>();
+
+    if (!photo) {
+      return c.json({ error: 'Photo not found' }, 404);
+    }
+
+    const permissionError = await requireEventCapabilityById(
+      c,
+      photo.event_id,
+      'feature_photo',
+      'Feature permission required for this event'
+    );
+    if (permissionError) return permissionError;
     
     await c.env.DB
       .prepare('UPDATE photos SET is_featured = ? WHERE id = ?')
@@ -74,17 +113,25 @@ app.put('/:photoId/replace', async (c) => {
     // Get photo and event slug for R2 key construction
     const photo = await c.env.DB
       .prepare(`
-        SELECT p.id, p.width, p.height, e.slug
+        SELECT p.id, p.event_id, p.width, p.height, e.slug
         FROM photos p
         JOIN events e ON p.event_id = e.id
         WHERE p.id = ?
       `)
       .bind(photoId)
-      .first<{ id: string; width: number | null; height: number | null; slug: string }>();
+      .first<{ id: string; event_id: number; width: number | null; height: number | null; slug: string }>();
 
     if (!photo) {
       return c.json({ error: 'Photo not found' }, 404);
     }
+
+    const permissionError = await requireEventCapabilityById(
+      c,
+      photo.event_id,
+      'image_edit',
+      'Edit permission required for this event'
+    );
+    if (permissionError) return permissionError;
 
     const formData = await c.req.formData();
     const originalFile = formData.get('original') as File | null;
@@ -137,17 +184,25 @@ app.delete('/:photoId', async (c) => {
     // Get photo and event slug for R2 cleanup
     const photo = await c.env.DB
       .prepare(`
-        SELECT p.id, e.slug
+        SELECT p.id, p.event_id, e.slug
         FROM photos p
         JOIN events e ON p.event_id = e.id
         WHERE p.id = ?
       `)
       .bind(photoId)
-      .first<{ id: string; slug: string }>();
+      .first<{ id: string; event_id: number; slug: string }>();
     
     if (!photo) {
       return c.json({ error: 'Photo not found' }, 404);
     }
+
+    const permissionError = await requireEventCapabilityById(
+      c,
+      photo.event_id,
+      'photo_delete',
+      'Delete permission required for this event'
+    );
+    if (permissionError) return permissionError;
     
     // Delete from R2
     try {
@@ -196,6 +251,14 @@ app.delete('/:photoId', async (c) => {
  */
 app.post('/bulk-delete', async (c) => {
   try {
+    const user = await extractUser(c);
+    if (!user) {
+      return c.json({ error: 'Authentication required' }, 401);
+    }
+
+    c.set('user', user);
+    const isGlobalAdmin = isUserAdmin(user, c.env.ADMIN_EMAILS || '');
+
     const { photoIds } = await c.req.json<{ photoIds: string[] }>();
     
     if (!Array.isArray(photoIds) || photoIds.length === 0) {
@@ -215,16 +278,27 @@ app.post('/bulk-delete', async (c) => {
     // One query to fetch all existing photos and their event slugs
     const photoRows = await c.env.DB
       .prepare(`
-        SELECT p.id, e.slug
+        SELECT p.id, p.event_id, e.slug
         FROM photos p
         JOIN events e ON p.event_id = e.id
         WHERE p.id IN (${placeholders})
       `)
       .bind(...uniquePhotoIds)
-      .all<{ id: string; slug: string }>();
+      .all<{ id: string; event_id: number; slug: string }>();
 
     const existingPhotos = photoRows.results || [];
     const existingPhotoIds = new Set(existingPhotos.map((p) => p.id));
+
+    if (!isGlobalAdmin && existingPhotos.length > 0) {
+      const eventIds = Array.from(new Set(existingPhotos.map((photo) => photo.event_id)));
+      const permissionChecks = await Promise.all(
+        eventIds.map((eventId) => hasEventCapabilityByEventId(c.env.DB, eventId, user.email, 'bulk_delete'))
+      );
+
+      if (permissionChecks.some((allowed) => !allowed)) {
+        return c.json({ error: 'Bulk delete permission required for one or more events' }, 403);
+      }
+    }
 
     // Record IDs that don't exist
     for (const photoId of uniquePhotoIds) {

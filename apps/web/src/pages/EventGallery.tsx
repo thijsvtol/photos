@@ -12,7 +12,7 @@ import { useRefresh } from '../contexts/RefreshContext';
 import { EventPasswordForm } from '../components/EventPasswordForm';
 import { GallerySortFilter } from '../components/GallerySortFilter';
 import { ShareEventButton } from '../components/ShareEventButton';
-import { getEvent, getPhotos, loginToEvent, getPreviewUrl, requestZip, downloadZip, setPhotoFeatured, getUserFavoriteIds, toggleFavorite as toggleFavoriteAPI, bulkDeletePhotos, getUserCollaborations, getCollaborators, getInviteLinks, createInviteLink } from '../api';
+import { getEvent, getPhotos, loginToEvent, getPreviewUrl, requestZip, downloadZip, setPhotoFeatured, getUserFavoriteIds, toggleFavorite as toggleFavoriteAPI, bulkDeletePhotos, getCollaborators, getInviteLinks, createInviteLink } from '../api';
 import type { Event, Photo, Collaborator, InviteLink } from '../types';
 import { CollaboratorAvatars } from '../components/CollaboratorAvatars';
 import { useAuth } from '../contexts/AuthContext';
@@ -38,7 +38,7 @@ const EventGallery: React.FC = () => {
   const [sortBy, setSortBy] = useState('date_asc');
   const [userFavorites, setUserFavorites] = useState<Set<string>>(new Set());
   const [deleting, setDeleting] = useState(false);
-  const [isCollaborator, setIsCollaborator] = useState(false);
+  const [collaboratorRole, setCollaboratorRole] = useState<'viewer' | 'uploader' | 'editor' | 'admin' | null>(null);
   const [collaborators, setCollaborators] = useState<Collaborator[]>([]);
   const [inviteLink, setInviteLink] = useState<InviteLink | null>(null);
   const [activeDate, setActiveDate] = useState<string | null>(null);
@@ -51,6 +51,10 @@ const EventGallery: React.FC = () => {
   const lastScrollYRef = useRef(0);
   const prefetchedPhotoIdsRef = useRef<Set<string>>(new Set());
   const isAndroid = Capacitor.getPlatform() === 'android';
+  const canUpload = isAdmin || collaboratorRole === 'uploader' || collaboratorRole === 'editor' || collaboratorRole === 'admin';
+  const canDelete = isAdmin || collaboratorRole === 'editor' || collaboratorRole === 'admin';
+  const canCreateInvite = isAdmin || collaboratorRole === 'editor' || collaboratorRole === 'admin';
+  const canFeature = isAdmin || collaboratorRole === 'admin';
   
   // Use custom hook for photo selection
   const {
@@ -106,6 +110,7 @@ const EventGallery: React.FC = () => {
     if (slug) {
       loadEvent();
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [slug]);
 
   // Register refresh handler
@@ -114,6 +119,7 @@ const EventGallery: React.FC = () => {
       registerRefreshHandler(handleRefresh);
       return () => unregisterRefreshHandler();
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [authenticated]);
 
   useEffect(() => {
@@ -121,22 +127,17 @@ const EventGallery: React.FC = () => {
     const loadUserData = async () => {
       if (isAuthenticated && slug) {
         try {
-          const [favorites, collabData] = await Promise.all([
+          const [favorites] = await Promise.all([
             getUserFavoriteIds(),
-            getUserCollaborations()
           ]);
           const favoriteIds = new Set(favorites.map(f => f.photoId));
           setUserFavorites(favoriteIds);
-          
-          // Check if user is a collaborator on this event
-          const isCollab = collabData.collaborations.some(c => c.event_slug === slug);
-          setIsCollaborator(isCollab);
         } catch (err) {
           console.error('Failed to load user data:', err);
         }
       } else {
         setUserFavorites(new Set());
-        setIsCollaborator(false);
+        setCollaboratorRole(null);
       }
     };
     loadUserData();
@@ -160,17 +161,27 @@ const EventGallery: React.FC = () => {
     loadCollaborators();
   }, [event, slug]);
 
+  useEffect(() => {
+    if (!user?.email) {
+      setCollaboratorRole(null);
+      return;
+    }
+
+    const mine = collaborators.find((c) => c.email.toLowerCase() === user.email.toLowerCase());
+    setCollaboratorRole((mine?.role as 'viewer' | 'uploader' | 'editor' | 'admin' | undefined) || null);
+  }, [collaborators, user?.email]);
+
   // Load invite link for collaborators-only events (admin and collaborators)
   useEffect(() => {
     const loadInviteLink = async () => {
-      if (event && event.visibility === 'collaborators_only' && slug && (isAdmin || isCollaborator)) {
+      if (event && event.visibility === 'collaborators_only' && slug && canCreateInvite) {
         try {
           const links = await getInviteLinks(slug);
           if (links.length > 0) {
             // Use the first active link
             setInviteLink(links[0]);
-          } else if (isAdmin) {
-            // Only admins can create new invite links
+          } else if (canCreateInvite) {
+            // Editors/admins can create invite links
             const newLink = await createInviteLink(slug);
             setInviteLink(newLink);
           }
@@ -183,7 +194,7 @@ const EventGallery: React.FC = () => {
       }
     };
     loadInviteLink();
-  }, [event, slug, isAdmin, isCollaborator]);
+  }, [event, slug, canCreateInvite]);
 
 
   // Restore scroll position when returning to gallery
@@ -282,6 +293,7 @@ const EventGallery: React.FC = () => {
     if (authenticated && slug) {
       loadPhotos();
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sortBy]);
 
   const toggleFavorite = async (photoId: string, isFavorited: boolean) => {
@@ -364,6 +376,11 @@ const EventGallery: React.FC = () => {
   };
 
   const handleBulkDelete = async () => {
+    if (!canDelete) {
+      toast.showError('Delete permission required for this event.');
+      return;
+    }
+
     const selected = Array.from(selectedPhotos);
     if (selected.length === 0) {
       toast.showInfo('No photos selected');
@@ -561,7 +578,7 @@ const EventGallery: React.FC = () => {
   };
 
   const toggleFeaturedForSelected = async () => {
-    if (!isAdmin || selectedPhotos.size === 0) {
+    if (!canFeature || selectedPhotos.size === 0) {
       return;
     }
 
@@ -768,6 +785,7 @@ const EventGallery: React.FC = () => {
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
     activeDate,
     clearSelection,
@@ -856,7 +874,7 @@ const EventGallery: React.FC = () => {
                 slug={slug!}
                 photos={photos}
                 inviteLink={inviteLink}
-                canInvite={event.visibility === 'collaborators_only' && (isAdmin || isCollaborator) && !!inviteLink}
+                canInvite={event.visibility === 'collaborators_only' && canCreateInvite && !!inviteLink}
               />
             )}
           </div>
@@ -869,7 +887,7 @@ const EventGallery: React.FC = () => {
           )}
 
           {/* Action Buttons Row */}
-          {(isAdmin || isCollaborator) && (
+          {canUpload && (
             <div className="flex items-center gap-2 flex-wrap">
               <Link
                 to={`/admin/events/${slug}/upload`}
@@ -878,9 +896,9 @@ const EventGallery: React.FC = () => {
                 <Upload className="w-4 h-4" />
                 Upload Photos/Videos
               </Link>
-              {isCollaborator && !isAdmin && (
+              {collaboratorRole && !isAdmin && (
                 <span className="text-xs text-gray-500 dark:text-gray-400">
-                  (Collaborator)
+                  ({collaboratorRole})
                 </span>
               )}
             </div>
@@ -900,16 +918,16 @@ const EventGallery: React.FC = () => {
             void toggleFavoriteForSelected();
           }}
           onToggleFeaturedSelected={
-            isAdmin
+            canFeature
               ? () => {
                   void toggleFeaturedForSelected();
                 }
               : undefined
           }
-          showFeaturedAction={isAdmin}
+          showFeaturedAction={canFeature}
           onDownloadSelected={downloadSelected}
-          onDeleteSelected={isAdmin ? handleBulkDelete : undefined}
-          isAdmin={isAdmin}
+          onDeleteSelected={canDelete ? handleBulkDelete : undefined}
+          isAdmin={canDelete}
           isDeleting={deleting}
         />
 
@@ -1008,7 +1026,7 @@ const EventGallery: React.FC = () => {
                         onToggleSelection={togglePhotoSelection}
                         showAddToFavorites={true}
                         onToggleFavorite={toggleFavorite}
-                        showFeatured={isAdmin}
+                        showFeatured={canFeature}
                         onToggleFeatured={toggleFeatured}
                         userFavorites={userFavorites}
                       />
@@ -1045,7 +1063,7 @@ const EventGallery: React.FC = () => {
                 onToggleSelection={togglePhotoSelection}
                 showAddToFavorites={true}
                 onToggleFavorite={toggleFavorite}
-                showFeatured={isAdmin}
+                showFeatured={canFeature}
                 onToggleFeatured={toggleFeatured}
                 userFavorites={userFavorites}
               />

@@ -6,7 +6,7 @@ import Footer from '../components/Footer';
 import SEO from '../components/SEO';
 const ImageEditorModal = lazy(() => import('../components/ImageEditorModal'));
 const VideoEditorModal = lazy(() => import('../components/VideoEditorModal'));
-import { getEvent, getPhoto, getPhotos, loginToEvent, getPreviewUrl, getOriginalUrl, downloadOriginal, downloadSmall, downloadInstagram, replacePhoto, toggleFavorite as toggleFavoriteAPI, getUserFavoriteIds, setPhotoFeatured, deletePhoto } from '../api';
+import { getEvent, getPhoto, getPhotos, loginToEvent, getPreviewUrl, getOriginalUrl, downloadOriginal, downloadSmall, downloadInstagram, replacePhoto, toggleFavorite as toggleFavoriteAPI, getUserFavoriteIds, setPhotoFeatured, deletePhoto, getCollaborators } from '../api';
 import { createPreview } from '../imageUtils';
 import type { Event, Photo } from '../types';
 import { useAuth } from '../contexts/AuthContext';
@@ -47,6 +47,7 @@ const PhotoDetail: React.FC = () => {
   const [previousPhoto, setPreviousPhoto] = useState<Photo | null>(null);
   const [showEditor, setShowEditor] = useState(false);
   const [showMobileMenu, setShowMobileMenu] = useState(false);
+  const [collaboratorRole, setCollaboratorRole] = useState<'viewer' | 'uploader' | 'editor' | 'admin' | null>(null);
   const [cacheBuster, setCacheBuster] = useState<number>(0);
   const touchStartX = useRef<number | null>(null);
   const touchStartY = useRef<number | null>(null);
@@ -109,10 +110,34 @@ const PhotoDetail: React.FC = () => {
     preloadedImages.has(swipePreviewUrl)
   );
 
+  const canEditMedia = !!user?.isAdmin || collaboratorRole === 'editor' || collaboratorRole === 'admin';
+  const canDeleteMedia = !!user?.isAdmin || collaboratorRole === 'editor' || collaboratorRole === 'admin';
+  const canFeatureMedia = !!user?.isAdmin || collaboratorRole === 'admin';
+
+  useEffect(() => {
+    const loadRole = async () => {
+      if (!slug || !user?.email) {
+        setCollaboratorRole(null);
+        return;
+      }
+
+      try {
+        const collaborators = await getCollaborators(slug);
+        const me = collaborators.find((collaborator) => collaborator.email.toLowerCase() === user.email.toLowerCase());
+        setCollaboratorRole((me?.role as 'viewer' | 'uploader' | 'editor' | 'admin' | undefined) || null);
+      } catch {
+        setCollaboratorRole(null);
+      }
+    };
+
+    void loadRole();
+  }, [slug, user?.email]);
+
   useEffect(() => {
     if (slug && photoId) {
       loadPhoto();
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [slug]);
 
   // Update photo when photoId changes in URL (for browser back/forward)
@@ -128,6 +153,7 @@ const PhotoDetail: React.FC = () => {
         }
       }
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [photoId, allPhotos, displayPhotos]);
 
   // Preload adjacent images for smooth navigation
@@ -137,6 +163,7 @@ const PhotoDetail: React.FC = () => {
     if (!photo || displayPhotos.length === 0) return;
 
     const loadedUrls: string[] = [];
+    const preloadCache = preloadRefs.current;
 
     const preloadImage = (photoToPreload: Photo) => {
       const url = getPreviewUrl(slug!, photoToPreload.id, photoToPreload.file_type, photoToPreload.cache_version);
@@ -147,7 +174,7 @@ const PhotoDetail: React.FC = () => {
       // Create and cache the image
       const img = new Image();
       img.src = url;
-      preloadRefs.current[url] = img;
+      preloadCache[url] = img;
       
       img.onload = () => {
         loadedUrls.push(url);
@@ -159,7 +186,7 @@ const PhotoDetail: React.FC = () => {
             const firstItem = Array.from(newSet)[0];
             newSet.delete(firstItem);
             // Clean up the preload ref
-            delete preloadRefs.current[firstItem];
+            delete preloadCache[firstItem];
           }
           return newSet;
         });
@@ -167,7 +194,7 @@ const PhotoDetail: React.FC = () => {
       
       img.onerror = () => {
         // Silently handle preload errors - the main image load will show error if needed
-        delete preloadRefs.current[url];
+        delete preloadCache[url];
       };
     };
 
@@ -191,13 +218,14 @@ const PhotoDetail: React.FC = () => {
     return () => {
       // Remove event handlers from images that were loaded during this effect
       loadedUrls.forEach(url => {
-        const img = preloadRefs.current[url];
+        const img = preloadCache[url];
         if (img) {
           img.onload = null;
           img.onerror = null;
         }
       });
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentIndex, displayPhotos, allPhotos, photo, slug, preloadedImages, showEditor]);
 
   // Check if current photo is favorited
@@ -295,7 +323,7 @@ const PhotoDetail: React.FC = () => {
     if (imageContainerRef.current && !containerReady) {
       setContainerReady(true);
     }
-  });
+  }, [containerReady]);
 
   // Cleanup all timeouts on unmount
   useEffect(() => {
@@ -454,6 +482,7 @@ const PhotoDetail: React.FC = () => {
         }, 350);
       }
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isTransitioning, fromFavorites, favoritePhotos, photoId, slug, navigate, displayPhotos, allPhotos, currentIndex, preloadedImages, photo]);
 
   const navigateToPrevious = useCallback(() => {
@@ -534,6 +563,7 @@ const PhotoDetail: React.FC = () => {
         }, 350);
       }
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isTransitioning, fromFavorites, favoritePhotos, photoId, slug, navigate, displayPhotos, allPhotos, currentIndex, preloadedImages, photo]);
 
   // Keep refs updated for stable event handlers
@@ -763,7 +793,7 @@ const PhotoDetail: React.FC = () => {
           if ((navigator as any).canShare && (navigator as any).canShare({ files: [file] })) {
             shareData.files = [file];
           }
-        } catch (err) {
+        } catch {
           // Could not include photo file, continue with URL only share
         }
         
@@ -888,7 +918,7 @@ const PhotoDetail: React.FC = () => {
   };
 
   const handleToggleFeatured = async () => {
-    if (!photo || !user?.isAdmin) return;
+    if (!photo || !canFeatureMedia) return;
 
     const nextFeaturedState = !photo.is_featured;
     try {
@@ -910,7 +940,7 @@ const PhotoDetail: React.FC = () => {
   };
 
   const handleDeletePhoto = async () => {
-    if (!photo || !user?.isAdmin || !slug) return;
+    if (!photo || !canDeleteMedia || !slug) return;
 
     const confirmed = await confirm(
       'Delete Photo',
@@ -1132,7 +1162,7 @@ const PhotoDetail: React.FC = () => {
           <div className="hidden md:flex absolute top-4 right-4 z-20 gap-2 items-center">
             
             {/* Edit button - admin only */}
-            {user?.isAdmin && (
+            {canEditMedia && (
               <button
                 onClick={() => setShowEditor(true)}
                 className="text-white p-2 transition hover:text-gray-300 flex items-center justify-center"
@@ -1143,7 +1173,7 @@ const PhotoDetail: React.FC = () => {
               </button>
             )}
 
-            {user?.isAdmin && (
+            {canFeatureMedia && (
               <button
                 onClick={() => {
                   void handleToggleFeatured();
@@ -1156,7 +1186,7 @@ const PhotoDetail: React.FC = () => {
               </button>
             )}
 
-            {user?.isAdmin && (
+            {canDeleteMedia && (
               <button
                 onClick={() => {
                   void handleDeletePhoto();
@@ -1506,7 +1536,7 @@ const PhotoDetail: React.FC = () => {
                       {isSlideshow ? <Pause className="w-5 h-5" /> : <Play className="w-5 h-5" />}
                       {isSlideshow ? 'Pause Slideshow' : 'Start Slideshow'}
                     </button>
-                    {user?.isAdmin && (
+                    {canEditMedia && (
                       <>
                         <div className="my-1 border-t border-gray-700" />
                         <button
@@ -1519,24 +1549,30 @@ const PhotoDetail: React.FC = () => {
                           <Pencil className="w-5 h-5" />
                           Edit Photo
                         </button>
-                        <button
-                          onClick={() => {
-                            void handleToggleFeatured();
-                          }}
-                          className="w-full px-4 py-2.5 text-white text-sm font-medium flex items-center gap-2 hover:bg-gray-700 active:bg-gray-600 transition"
-                        >
-                          <Star className={`w-5 h-5 ${photo?.is_featured ? 'fill-yellow-400 text-yellow-400' : ''}`} />
-                          {photo?.is_featured ? 'Unfeature Photo' : 'Feature Photo'}
-                        </button>
-                        <button
-                          onClick={() => {
-                            void handleDeletePhoto();
-                          }}
-                          className="w-full px-4 py-2.5 text-red-300 text-sm font-medium flex items-center gap-2 hover:bg-red-500/20 active:bg-red-500/30 transition"
-                        >
-                          <Trash2 className="w-5 h-5" />
-                          Delete Photo
-                        </button>
+
+                        {canFeatureMedia && (
+                          <button
+                            onClick={() => {
+                              void handleToggleFeatured();
+                            }}
+                            className="w-full px-4 py-2.5 text-white text-sm font-medium flex items-center gap-2 hover:bg-gray-700 active:bg-gray-600 transition"
+                          >
+                            <Star className={`w-5 h-5 ${photo?.is_featured ? 'fill-yellow-400 text-yellow-400' : ''}`} />
+                            {photo?.is_featured ? 'Unfeature Photo' : 'Feature Photo'}
+                          </button>
+                        )}
+
+                        {canDeleteMedia && (
+                          <button
+                            onClick={() => {
+                              void handleDeletePhoto();
+                            }}
+                            className="w-full px-4 py-2.5 text-red-300 text-sm font-medium flex items-center gap-2 hover:bg-red-500/20 active:bg-red-500/30 transition"
+                          >
+                            <Trash2 className="w-5 h-5" />
+                            Delete Photo
+                          </button>
+                        )}
                       </>
                     )}
                   </div>

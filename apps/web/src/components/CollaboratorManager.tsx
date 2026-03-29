@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { UserPlus, X, Mail, Check, Clock, XCircle, Link as LinkIcon, Copy, Trash2 } from 'lucide-react';
-import { getCollaborators, inviteCollaborator, removeCollaborator, searchUsers, createInviteLink, getInviteLinks, revokeInviteLink } from '../api';
-import type { Collaborator, InviteLink } from '../types';
+import { UserPlus, X, Mail, Check, Link as LinkIcon, Copy, Trash2 } from 'lucide-react';
+import { getCollaborators, inviteCollaborator, removeCollaborator, searchUsers, createInviteLink, getInviteLinks, revokeInviteLink, updateCollaboratorRole } from '../api';
+import type { Collaborator, InviteLink, CollaboratorRole } from '../types';
 
 interface CollaboratorManagerProps {
   eventSlug: string;
@@ -15,9 +15,12 @@ const CollaboratorManager: React.FC<CollaboratorManagerProps> = ({ eventSlug, ev
   const [linksLoading, setLinksLoading] = useState(false);
   const [creatingLink, setCreatingLink] = useState(false);
   const [inviteEmail, setInviteEmail] = useState('');
+  const [inviteRole, setInviteRole] = useState<CollaboratorRole>('uploader');
+  const [inviteLinkRole, setInviteLinkRole] = useState<CollaboratorRole>('uploader');
   const [inviting, setInviting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
+  const [updatingRoleEmail, setUpdatingRoleEmail] = useState<string | null>(null);
   const [copiedToken, setCopiedToken] = useState<string | null>(null);
   const [suggestions, setSuggestions] = useState<Array<{ id: string; email: string; name: string | null }>>([]);
   const [showSuggestions, setShowSuggestions] = useState(false);
@@ -106,7 +109,7 @@ const CollaboratorManager: React.FC<CollaboratorManagerProps> = ({ eventSlug, ev
     try {
       setCreatingLink(true);
       setError(null);
-      const newLink = await createInviteLink(eventSlug);
+      const newLink = await createInviteLink(eventSlug, inviteLinkRole);
       setInviteLinks([newLink, ...inviteLinks]);
       setSuccess('Invite link created!');
       setTimeout(() => setSuccess(null), 3000);
@@ -157,7 +160,7 @@ const CollaboratorManager: React.FC<CollaboratorManagerProps> = ({ eventSlug, ev
       setSuccess(null);
       
       console.log('[CollaboratorManager] Calling inviteCollaborator API...');
-      const result = await inviteCollaborator(eventSlug, inviteEmail);
+      const result = await inviteCollaborator(eventSlug, inviteEmail, inviteRole);
       console.log('[CollaboratorManager] Invite successful:', result);
       
       setSuccess(`Invitation sent to ${inviteEmail}`);
@@ -199,29 +202,31 @@ const CollaboratorManager: React.FC<CollaboratorManagerProps> = ({ eventSlug, ev
     }
   };
 
-  const getStatusIcon = (status: string) => {
-    switch (status) {
-      case 'accepted':
-        return <Check className="w-4 h-4 text-green-600" />;
-      case 'pending':
-        return <Clock className="w-4 h-4 text-yellow-600" />;
-      case 'declined':
-        return <XCircle className="w-4 h-4 text-red-600" />;
-      default:
-        return null;
+  const handleRoleChange = async (email: string, role: CollaboratorRole) => {
+    try {
+      setUpdatingRoleEmail(email);
+      await updateCollaboratorRole(eventSlug, email, role);
+      await loadCollaborators();
+      setSuccess(`Updated ${email} to ${role}`);
+      setTimeout(() => setSuccess(null), 2500);
+    } catch (err) {
+      console.error('Failed to update role:', err);
+      setError('Failed to update role');
+    } finally {
+      setUpdatingRoleEmail(null);
     }
   };
 
-  const getStatusColor = (status: string) => {
-    switch (status) {
-      case 'accepted':
-        return 'bg-green-50 text-green-700 border-green-200';
-      case 'pending':
-        return 'bg-yellow-50 text-yellow-700 border-yellow-200';
-      case 'declined':
-        return 'bg-red-50 text-red-700 border-red-200';
+  const getRoleBadgeColor = (role: CollaboratorRole) => {
+    switch (role) {
+      case 'admin':
+        return 'bg-purple-100 text-purple-700 border-purple-200';
+      case 'editor':
+        return 'bg-blue-100 text-blue-700 border-blue-200';
+      case 'uploader':
+        return 'bg-green-100 text-green-700 border-green-200';
       default:
-        return 'bg-gray-50 text-gray-700 border-gray-200';
+        return 'bg-gray-100 text-gray-700 border-gray-200';
     }
   };
 
@@ -288,6 +293,17 @@ const CollaboratorManager: React.FC<CollaboratorManagerProps> = ({ eventSlug, ev
               </div>
             )}
           </div>
+          <select
+            value={inviteRole}
+            onChange={(e) => setInviteRole(e.target.value as CollaboratorRole)}
+            className="px-3 py-2 border border-gray-300 rounded-lg text-sm bg-white"
+            disabled={inviting}
+          >
+            <option value="viewer">Viewer</option>
+            <option value="uploader">Uploader</option>
+            <option value="editor">Editor</option>
+            <option value="admin">Admin</option>
+          </select>
           <button
             type="button"
             onClick={handleInvite}
@@ -329,6 +345,20 @@ const CollaboratorManager: React.FC<CollaboratorManagerProps> = ({ eventSlug, ev
             {creatingLink ? 'Creating...' : 'Create Link'}
           </button>
         </div>
+        <div className="mb-3">
+          <label className="text-xs text-gray-600 mr-2">Invite link role</label>
+          <select
+            value={inviteLinkRole}
+            onChange={(e) => setInviteLinkRole(e.target.value as CollaboratorRole)}
+            className="px-2.5 py-1.5 border border-gray-300 rounded-md text-sm bg-white"
+            disabled={creatingLink}
+          >
+            <option value="viewer">Viewer</option>
+            <option value="uploader">Uploader</option>
+            <option value="editor">Editor</option>
+            <option value="admin">Admin</option>
+          </select>
+        </div>
 
         {linksLoading ? (
           <div className="text-center py-4">
@@ -356,6 +386,7 @@ const CollaboratorManager: React.FC<CollaboratorManagerProps> = ({ eventSlug, ev
                   </div>
                   <div className="flex items-center gap-3 text-xs text-gray-500">
                     <span>Created {new Date(link.created_at).toLocaleDateString()}</span>
+                    <span className="capitalize">Role: {link.role}</span>
                     {link.use_count > 0 && (
                       <span className="text-green-600">Used {link.use_count}x</span>
                     )}
@@ -409,7 +440,7 @@ const CollaboratorManager: React.FC<CollaboratorManagerProps> = ({ eventSlug, ev
           </h3>
           {collaborators.map((collaborator) => (
             <div
-              key={collaborator.id}
+              key={collaborator.email}
               className="flex items-center justify-between p-3 border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors"
             >
               <div className="flex-1 min-w-0">
@@ -417,9 +448,8 @@ const CollaboratorManager: React.FC<CollaboratorManagerProps> = ({ eventSlug, ev
                   <p className="font-medium text-gray-900 truncate">
                     {collaborator.name || collaborator.email}
                   </p>
-                  <span className={`flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium border ${getStatusColor(collaborator.status)}`}>
-                    {getStatusIcon(collaborator.status)}
-                    {collaborator.status}
+                  <span className={`px-2 py-0.5 rounded-full text-xs font-medium border capitalize ${getRoleBadgeColor(collaborator.role)}`}>
+                    {collaborator.role}
                   </span>
                 </div>
                 {collaborator.name && (
@@ -429,6 +459,20 @@ const CollaboratorManager: React.FC<CollaboratorManagerProps> = ({ eventSlug, ev
                   Invited {new Date(collaborator.invited_at).toLocaleDateString()}
                 </p>
               </div>
+              <select
+                value={collaborator.role}
+                onChange={(e) => {
+                  void handleRoleChange(collaborator.email, e.target.value as CollaboratorRole);
+                }}
+                disabled={updatingRoleEmail === collaborator.email}
+                className="ml-3 px-2 py-1 border border-gray-300 rounded-md text-sm bg-white"
+                title="Change role"
+              >
+                <option value="viewer">Viewer</option>
+                <option value="uploader">Uploader</option>
+                <option value="editor">Editor</option>
+                <option value="admin">Admin</option>
+              </select>
               <button
                 onClick={() => handleRemove(collaborator.email)}
                 className="ml-3 p-2 text-red-600 hover:bg-red-50 rounded-lg transition-colors"
