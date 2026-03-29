@@ -12,8 +12,8 @@ import { useRefresh } from '../contexts/RefreshContext';
 import { EventPasswordForm } from '../components/EventPasswordForm';
 import { GallerySortFilter } from '../components/GallerySortFilter';
 import { ShareEventButton } from '../components/ShareEventButton';
-import { getEvent, getPhotos, loginToEvent, getPreviewUrl, requestZip, downloadZip, setPhotoFeatured, getUserFavoriteIds, toggleFavorite as toggleFavoriteAPI, bulkDeletePhotos, getCollaborators, getInviteLinks, createInviteLink } from '../api';
-import type { Event, Photo, Collaborator, InviteLink } from '../types';
+import { getEvent, getPhotos, loginToEvent, getPreviewUrl, requestZip, downloadZip, setPhotoFeatured, getUserFavoriteIds, toggleFavorite as toggleFavoriteAPI, bulkDeletePhotos, getCollaborators } from '../api';
+import type { Event, Photo, Collaborator } from '../types';
 import { CollaboratorAvatars } from '../components/CollaboratorAvatars';
 import { useAuth } from '../contexts/AuthContext';
 import { usePhotoSelection } from '../hooks/usePhotoSelection';
@@ -40,7 +40,6 @@ const EventGallery: React.FC = () => {
   const [deleting, setDeleting] = useState(false);
   const [collaboratorRole, setCollaboratorRole] = useState<'viewer' | 'uploader' | 'editor' | 'admin' | null>(null);
   const [collaborators, setCollaborators] = useState<Collaborator[]>([]);
-  const [inviteLink, setInviteLink] = useState<InviteLink | null>(null);
   const [activeDate, setActiveDate] = useState<string | null>(null);
   const dateRefs = useRef<Map<string, HTMLDivElement>>(new Map());
   const [isMobile, setIsMobile] = useState(false);
@@ -174,32 +173,6 @@ const EventGallery: React.FC = () => {
     });
     setCollaboratorRole((mine?.role as 'viewer' | 'uploader' | 'editor' | 'admin' | undefined) || null);
   }, [collaborators, user?.email]);
-
-  // Load invite link for collaborators-only events (admin and collaborators)
-  useEffect(() => {
-    const loadInviteLink = async () => {
-      if (event && event.visibility === 'collaborators_only' && slug && canCreateInvite) {
-        try {
-          const links = await getInviteLinks(slug);
-          if (links.length > 0) {
-            // Use the first active link
-            setInviteLink(links[0]);
-          } else if (canCreateInvite) {
-            // Editors/admins can create invite links
-            const newLink = await createInviteLink(slug);
-            setInviteLink(newLink);
-          }
-        } catch (err) {
-          console.error('Failed to load/create invite link:', err);
-          // Silently fail - invite link is optional
-        }
-      } else {
-        setInviteLink(null);
-      }
-    };
-    loadInviteLink();
-  }, [event, slug, canCreateInvite]);
-
 
   // Restore scroll position when returning to gallery
   useEffect(() => {
@@ -877,7 +850,6 @@ const EventGallery: React.FC = () => {
                 event={event}
                 slug={slug!}
                 photos={photos}
-                inviteLink={inviteLink}
                 canInvite={event.visibility === 'collaborators_only' && canCreateInvite}
               />
             )}
