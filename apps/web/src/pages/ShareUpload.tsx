@@ -10,6 +10,7 @@ import AlbumPicker from '../components/AlbumPicker';
 import { addToQueue } from '../uploadQueue';
 import type { UploadQueueItem } from '../types';
 import { backgroundSyncService } from '../services/backgroundSync';
+import { extractMp4CreationTime } from '../utils/videoMetadata';
 
 interface SharedFile {
   name: string;
@@ -257,6 +258,7 @@ export default function ShareUpload() {
         
         // Read file from native cache using Capacitor Filesystem API
         let blob: Blob;
+        let fileBuffer: ArrayBuffer | undefined;
         
         if (Capacitor.isNativePlatform()) {
           console.log('[ShareUpload] Reading file from:', sharedFile.uri);
@@ -273,20 +275,28 @@ export default function ShareUpload() {
           for (let j = 0; j < binaryString.length; j++) {
             bytes[j] = binaryString.charCodeAt(j);
           }
+          fileBuffer = bytes.buffer;
           blob = new Blob([bytes], { type: sharedFile.mimeType });
           console.log('[ShareUpload] Blob created, size:', blob.size);
         } else {
           // On web, use fetch (shouldn't happen in this flow)
           const response = await fetch(sharedFile.uri);
           blob = await response.blob();
+          fileBuffer = await blob.arrayBuffer();
         }
         
         const file = new File([blob], sharedFile.name, { type: sharedFile.mimeType });
-        console.log('[ShareUpload] File created, extracting EXIF...');
+        console.log('[ShareUpload] File created, extracting metadata...');
         
-        // Extract EXIF data only for images
-        const exif = isVideo ? {} : await extractExifData(sharedFile.uri);
-        console.log('[ShareUpload] EXIF extracted:', exif);
+        // Extract metadata: EXIF for images, MP4 creation time for videos
+        let exif: Awaited<ReturnType<typeof extractExifData>> = {};
+        if (isVideo) {
+          const captureTime = fileBuffer ? extractMp4CreationTime(fileBuffer) : undefined;
+          exif = { captureTime };
+        } else {
+          exif = await extractExifData(sharedFile.uri);
+        }
+        console.log('[ShareUpload] Metadata extracted:', exif);
         
         const item: UploadQueueItem = {
           id,

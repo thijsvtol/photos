@@ -16,6 +16,7 @@ import type { Event, UploadQueueItem, EventStats } from '../types';
 import { useToast } from '../components/Toast';
 import { useConfirm } from '../components/ConfirmDialog';
 import { haptics } from '../utils/haptics';
+import { extractMp4CreationTime } from '../utils/videoMetadata';
 
 // Fix Leaflet marker icons
 delete (L.Icon.Default.prototype as any)._getIconUrl;
@@ -222,8 +223,17 @@ const AdminEventUpload: React.FC = () => {
       const photoId = ulid();
       const isVideo = file.type === 'video/mp4';
       
-      // Extract EXIF data only for images
-      const exif = isVideo ? {} : await extractExifData(file);
+      // Extract metadata: EXIF for images, MP4 creation time for videos
+      let exif: Awaited<ReturnType<typeof extractExifData>> = {};
+      if (isVideo) {
+        // Read only the first megabyte – the mvhd box is always near the start
+        const sliceSize = Math.min(1024 * 1024, file.size);
+        const buffer = await file.slice(0, sliceSize).arrayBuffer();
+        const captureTime = extractMp4CreationTime(buffer) ?? new Date(file.lastModified).toISOString();
+        exif = { captureTime };
+      } else {
+        exif = await extractExifData(file);
+      }
       
       const item: UploadQueueItem = {
         id,
