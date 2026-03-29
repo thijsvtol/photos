@@ -159,48 +159,54 @@ app.post('/bulk-delete', async (c) => {
       return c.json({ error: 'Cannot delete more than 500 photos at once' }, 400);
     }
     
-    let deletedCount = 0;
+    // De-duplicate incoming IDs so we don't do repeated work
+    const uniquePhotoIds = Array.from(new Set(photoIds));
+    const placeholders = uniquePhotoIds.map(() => '?').join(', ');
     const errors: { photoId: string; error: string }[] = [];
-    
-    for (const photoId of photoIds) {
-      try {
-        // Get photo and event slug
-        const photo = await c.env.DB
-          .prepare(`
-            SELECT p.id, e.slug
-            FROM photos p
-            JOIN events e ON p.event_id = e.id
-            WHERE p.id = ?
-          `)
-          .bind(photoId)
-          .first<{ id: string; slug: string }>();
-        
-        if (!photo) {
-          errors.push({ photoId, error: 'Photo not found' });
-          continue;
-        }
-        
-        // Delete from R2
-        try {
-          await c.env.PHOTOS_BUCKET.delete(`original/${photo.slug}/${photo.id}.jpg`);
-          await c.env.PHOTOS_BUCKET.delete(`preview/${photo.slug}/${photo.id}.jpg`);
-          await c.env.PHOTOS_BUCKET.delete(`ig/${photo.slug}/${photo.id}.jpg`);
-        } catch (err) {
-          console.error(`Failed to delete photo ${photo.id} from R2:`, err);
-          // Continue to delete from database even if R2 fails
-        }
-        
-        // Delete from database
-        await c.env.DB
-          .prepare('DELETE FROM photos WHERE id = ?')
-          .bind(photoId)
-          .run();
-        
-        deletedCount++;
-      } catch (err) {
-        console.error(`Failed to delete photo ${photoId}:`, err);
-        errors.push({ photoId, error: 'Delete failed' });
+
+    // One query to fetch all existing photos and their event slugs
+    const photoRows = await c.env.DB
+      .prepare(`
+        SELECT p.id, e.slug
+        FROM photos p
+        JOIN events e ON p.event_id = e.id
+        WHERE p.id IN (${placeholders})
+      `)
+      .bind(...uniquePhotoIds)
+      .all<{ id: string; slug: string }>();
+
+    const existingPhotos = photoRows.results || [];
+    const existingPhotoIds = new Set(existingPhotos.map((p) => p.id));
+
+    // Record IDs that don't exist
+    for (const photoId of uniquePhotoIds) {
+      if (!existingPhotoIds.has(photoId)) {
+        errors.push({ photoId, error: 'Photo not found' });
       }
+    }
+
+    // Delete blobs from R2 per existing photo
+    for (const photo of existingPhotos) {
+      try {
+        await c.env.PHOTOS_BUCKET.delete(`original/${photo.slug}/${photo.id}.jpg`);
+        await c.env.PHOTOS_BUCKET.delete(`preview/${photo.slug}/${photo.id}.jpg`);
+        await c.env.PHOTOS_BUCKET.delete(`ig/${photo.slug}/${photo.id}.jpg`);
+      } catch (err) {
+        console.error(`Failed to delete photo ${photo.id} from R2:`, err);
+        // Continue to delete from database even if R2 fails
+      }
+    }
+
+    // One query to delete all found photos from the database
+    let deletedCount = 0;
+    if (existingPhotos.length > 0) {
+      const deletePlaceholders = existingPhotos.map(() => '?').join(', ');
+      await c.env.DB
+        .prepare(`DELETE FROM photos WHERE id IN (${deletePlaceholders})`)
+        .bind(...existingPhotos.map((p) => p.id))
+        .run();
+
+      deletedCount = existingPhotos.length;
     }
     
     return c.json({ 
