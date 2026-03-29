@@ -8,6 +8,37 @@ type Variables = {
 
 const app = new Hono<{ Bindings: Env; Variables: Variables }>();
 
+const RETRY_ATTEMPTS = 3;
+const RETRY_BASE_DELAY_MS = 120;
+
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+async function withRetry<T>(
+  operation: () => Promise<T>,
+  label: string,
+  attempts = RETRY_ATTEMPTS
+): Promise<T> {
+  let lastError: unknown;
+
+  for (let attempt = 1; attempt <= attempts; attempt++) {
+    try {
+      return await operation();
+    } catch (error) {
+      lastError = error;
+
+      if (attempt === attempts) {
+        break;
+      }
+
+      const delayMs = RETRY_BASE_DELAY_MS * 2 ** (attempt - 1);
+      console.warn(`${label} failed (attempt ${attempt}/${attempts}), retrying in ${delayMs}ms`, error);
+      await sleep(delayMs);
+    }
+  }
+
+  throw lastError;
+}
+
 // Apply admin authentication
 app.use('/*', requireAdmin);
 
@@ -120,20 +151,37 @@ app.delete('/:photoId', async (c) => {
     
     // Delete from R2
     try {
-      await c.env.PHOTOS_BUCKET.delete(`original/${photo.slug}/${photo.id}.jpg`);
-      await c.env.PHOTOS_BUCKET.delete(`original/${photo.slug}/${photo.id}.mp4`);
-      await c.env.PHOTOS_BUCKET.delete(`preview/${photo.slug}/${photo.id}.jpg`);
-      await c.env.PHOTOS_BUCKET.delete(`ig/${photo.slug}/${photo.id}.jpg`);
+      await Promise.all([
+        withRetry(
+          () => c.env.PHOTOS_BUCKET.delete(`original/${photo.slug}/${photo.id}.jpg`),
+          `R2 delete original jpg for photo ${photo.id}`
+        ),
+        withRetry(
+          () => c.env.PHOTOS_BUCKET.delete(`original/${photo.slug}/${photo.id}.mp4`),
+          `R2 delete original mp4 for photo ${photo.id}`
+        ),
+        withRetry(
+          () => c.env.PHOTOS_BUCKET.delete(`preview/${photo.slug}/${photo.id}.jpg`),
+          `R2 delete preview for photo ${photo.id}`
+        ),
+        withRetry(
+          () => c.env.PHOTOS_BUCKET.delete(`ig/${photo.slug}/${photo.id}.jpg`),
+          `R2 delete instagram for photo ${photo.id}`
+        ),
+      ]);
     } catch (err) {
       console.error('Failed to delete photo from R2:', err);
       // Continue to delete from database even if R2 fails
     }
     
     // Delete from database
-    await c.env.DB
-      .prepare('DELETE FROM photos WHERE id = ?')
-      .bind(photoId)
-      .run();
+    await withRetry(
+      () => c.env.DB
+        .prepare('DELETE FROM photos WHERE id = ?')
+        .bind(photoId)
+        .run(),
+      `DB delete photo ${photoId}`
+    );
     
     return c.json({ success: true });
   } catch (error) {
@@ -185,26 +233,53 @@ app.post('/bulk-delete', async (c) => {
       }
     }
 
-    // Delete blobs from R2 per existing photo
-    for (const photo of existingPhotos) {
-      try {
-        await c.env.PHOTOS_BUCKET.delete(`original/${photo.slug}/${photo.id}.jpg`);
-        await c.env.PHOTOS_BUCKET.delete(`preview/${photo.slug}/${photo.id}.jpg`);
-        await c.env.PHOTOS_BUCKET.delete(`ig/${photo.slug}/${photo.id}.jpg`);
-      } catch (err) {
-        console.error(`Failed to delete photo ${photo.id} from R2:`, err);
-        // Continue to delete from database even if R2 fails
-      }
+    // Delete blobs from R2 in concurrent batches for better throughput
+    const R2_DELETE_BATCH_SIZE = 25;
+    for (let i = 0; i < existingPhotos.length; i += R2_DELETE_BATCH_SIZE) {
+      const batch = existingPhotos.slice(i, i + R2_DELETE_BATCH_SIZE);
+      const batchResults = await Promise.allSettled(
+        batch.map(async (photo) => {
+          await Promise.all([
+            withRetry(
+              () => c.env.PHOTOS_BUCKET.delete(`original/${photo.slug}/${photo.id}.jpg`),
+              `R2 delete original jpg for photo ${photo.id}`
+            ),
+            withRetry(
+              () => c.env.PHOTOS_BUCKET.delete(`original/${photo.slug}/${photo.id}.mp4`),
+              `R2 delete original mp4 for photo ${photo.id}`
+            ),
+            withRetry(
+              () => c.env.PHOTOS_BUCKET.delete(`preview/${photo.slug}/${photo.id}.jpg`),
+              `R2 delete preview for photo ${photo.id}`
+            ),
+            withRetry(
+              () => c.env.PHOTOS_BUCKET.delete(`ig/${photo.slug}/${photo.id}.jpg`),
+              `R2 delete instagram for photo ${photo.id}`
+            ),
+          ]);
+        })
+      );
+
+      batchResults.forEach((result, index) => {
+        if (result.status === 'rejected') {
+          const photo = batch[index];
+          console.error(`Failed to delete photo ${photo.id} from R2:`, result.reason);
+          // Continue to delete from database even if R2 fails
+        }
+      });
     }
 
     // One query to delete all found photos from the database
     let deletedCount = 0;
     if (existingPhotos.length > 0) {
       const deletePlaceholders = existingPhotos.map(() => '?').join(', ');
-      await c.env.DB
-        .prepare(`DELETE FROM photos WHERE id IN (${deletePlaceholders})`)
-        .bind(...existingPhotos.map((p) => p.id))
-        .run();
+      await withRetry(
+        () => c.env.DB
+          .prepare(`DELETE FROM photos WHERE id IN (${deletePlaceholders})`)
+          .bind(...existingPhotos.map((p) => p.id))
+          .run(),
+        `DB bulk delete ${existingPhotos.length} photos`
+      );
 
       deletedCount = existingPhotos.length;
     }
