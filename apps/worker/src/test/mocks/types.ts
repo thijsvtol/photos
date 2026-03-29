@@ -52,4 +52,5 @@ export interface FavoriteRecord {
 export interface CollaboratorRecord {
   event_id: number;
   user_email: string;
+  role?: 'viewer' | 'uploader' | 'editor' | 'admin';
 }

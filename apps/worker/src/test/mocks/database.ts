@@ -42,7 +42,7 @@ export class MockD1Database {
     this.events = events;
     this.photos = photos;
     this.collaborators = Object.entries(collaborators).flatMap(([eventId, emails]) =>
-      emails.map(email => ({ event_id: Number(eventId), user_email: email }))
+      emails.map(email => ({ event_id: Number(eventId), user_email: email, role: 'editor' }))
     );
   }
 
@@ -134,6 +134,23 @@ export class MockD1Database {
       return this.isCollaborator(eventId, userEmail) ? { user_email: userEmail } : null;
     }
 
+    if (query.includes('SELECT role FROM event_collaborators WHERE event_id = ? AND user_email = ?')) {
+      const eventId = Number(args[0]);
+      const userEmail = String(args[1] || '');
+      const collaborator = this.collaborators.find(
+        c => c.event_id === eventId && c.user_email === userEmail
+      );
+      return collaborator ? { role: collaborator.role || 'editor' } : null;
+    }
+
+    if (query.includes("SELECT COUNT(*) as count FROM event_collaborators WHERE event_id = ? AND role = 'admin'")) {
+      const eventId = Number(args[0]);
+      const count = this.collaborators.filter(
+        c => c.event_id === eventId && c.role === 'admin'
+      ).length;
+      return { count };
+    }
+
     if (query.includes('SELECT 1 FROM event_collaborators')) {
       if (query.includes('JOIN events e')) {
         const slug = String(args[0]);
@@ -202,9 +219,10 @@ export class MockD1Database {
     if (query.includes('INSERT INTO event_collaborators')) {
       const eventId = Number(args[0]);
       const email = String(args[1]);
+      const role = String(args[2] || 'editor') as 'viewer' | 'uploader' | 'editor' | 'admin';
       const existing = this.isCollaborator(eventId, email);
       if (!existing) {
-        this.collaborators.push({ event_id: eventId, user_email: email });
+        this.collaborators.push({ event_id: eventId, user_email: email, role });
         return { success: true, meta: { changes: 1 } };
       }
       return { success: true, meta: { changes: 0 } };
