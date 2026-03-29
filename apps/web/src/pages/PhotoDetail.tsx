@@ -1739,6 +1739,8 @@ const PhotoDetail: React.FC = () => {
         }>
           <ImageEditorModal
             imageUrl={getOriginalUrl(slug, photo.id, photo.file_type, cacheBuster || photo.cache_version)}
+            nativeWidth={photo.width ?? undefined}
+            nativeHeight={photo.height ?? undefined}
             onSave={handleEditorSave}
             onClose={() => setShowEditor(false)}
           />

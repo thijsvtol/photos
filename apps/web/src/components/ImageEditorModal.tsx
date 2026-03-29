@@ -1,4 +1,4 @@
-import React, { useState, useRef, useCallback, useEffect } from 'react';
+import React, { useState, useRef, useCallback, useEffect, useMemo } from 'react';
 import FilerobotImageEditor, { TABS, TOOLS } from 'react-filerobot-image-editor';
 import { X, Sliders, TrendingUp, BarChart3, Loader2 } from 'lucide-react';
 import CurvesEditor from './editor/CurvesEditor';
@@ -8,6 +8,8 @@ type EditorTab = 'adjust' | 'curves' | 'levels';
 
 interface ImageEditorModalProps {
   imageUrl: string;
+  nativeWidth?: number; // Original image pixel width — used to calculate export resolution
+  nativeHeight?: number; // Original image pixel height
   onSave: (editedBlob: Blob) => Promise<void>;
   onClose: () => void;
 }
@@ -39,7 +41,20 @@ function canvasToBlob(canvas: HTMLCanvasElement, quality = 0.92): Promise<Blob> 
   });
 }
 
-const ImageEditorModal: React.FC<ImageEditorModalProps> = ({ imageUrl, onSave, onClose }) => {
+const ImageEditorModal: React.FC<ImageEditorModalProps> = ({ imageUrl, nativeWidth, nativeHeight, onSave, onClose }) => {
+  // Calculate the pixel ratio needed to save at (close to) the original resolution.
+  // Filerobot renders the image in a CSS-sized canvas; savingPixelRatio multiplies that
+  // canvas size when exporting. With savingPixelRatio=1 (the old value) a 4000 px photo
+  // displayed in a 1000 px container would be saved at only 1000 px — a 4× quality loss.
+  // We estimate the effective canvas width as ~65 % of the viewport (Filerobot's panels
+  // and toolbars occupy the rest) and choose the ratio that brings the export back up to
+  // the original image width.
+  const savingPixelRatio = useMemo(() => {
+    const dpr = window.devicePixelRatio || 1;
+    if (!nativeWidth) return dpr;
+    const estimatedCanvasWidth = window.innerWidth * 0.65;
+    return Math.max(dpr, Math.ceil(nativeWidth / estimatedCanvasWidth));
+  }, [nativeWidth]);
   const [activeTab, setActiveTab] = useState<EditorTab>('adjust');
   const [saving, setSaving] = useState(false);
   const [editedCanvas, setEditedCanvas] = useState<HTMLCanvasElement | null>(null);
@@ -229,8 +244,7 @@ const ImageEditorModal: React.FC<ImageEditorModalProps> = ({ imageUrl, onSave, o
             Rotate={{
               componentType: 'slider',
             }}
-            savingPixelRatio={1}
-            previewPixelRatio={1}
+            savingPixelRatio={savingPixelRatio}
             defaultSavedImageType="jpeg"
             defaultSavedImageQuality={0.92}
             observePluginContainerSize
