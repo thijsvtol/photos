@@ -947,10 +947,14 @@ const EventGallery: React.FC = () => {
               dates={dates} 
               activeDate={activeDate} 
               onDateClick={handleDateClick}
-              topOffset={
-                selectedPhotos.size > 0 
-                  ? (isMobile ? (isAndroid ? 147 : 115) : (isAndroid ? 152 : 120))
-                  : (isAndroid ? 96 : 64)
+              topStyle={
+                selectedPhotos.size > 0
+                  ? isAndroid
+                    ? 'calc(6rem + 3rem + env(safe-area-inset-top))'
+                    : 'calc(4rem + 3rem + env(safe-area-inset-top))'
+                  : isAndroid
+                    ? 'calc(6rem + env(safe-area-inset-top))'
+                    : 'calc(4rem + env(safe-area-inset-top))'
               }
             />
           </div>

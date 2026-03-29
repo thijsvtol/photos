@@ -5,10 +5,10 @@ interface DateTimelineProps {
   dates: string[]; // Array of dates in YYYY-MM-DD format
   activeDate: string | null;
   onDateClick: (date: string) => void;
-  topOffset?: number; // Offset from top when sticky (in pixels)
+  topStyle?: string; // CSS value for `top` when sticky (supports calc/env)
 }
 
-const DateTimeline: React.FC<DateTimelineProps> = ({ dates, activeDate, onDateClick, topOffset = 0 }) => {
+const DateTimeline: React.FC<DateTimelineProps> = ({ dates, activeDate, onDateClick, topStyle = '0px' }) => {
   const [isSticky, setIsSticky] = useState(false);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
 
@@ -81,7 +81,7 @@ const DateTimeline: React.FC<DateTimelineProps> = ({ dates, activeDate, onDateCl
       className={`bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 transition-all duration-300 z-40 ${
         isSticky ? 'fixed left-0 right-0 shadow-md' : 'relative'
       }`}
-      style={isSticky ? { top: `${topOffset}px` } : undefined}
+      style={isSticky ? { top: topStyle } : undefined}
     >
       <div className="max-w-7xl mx-auto px-3 sm:px-4 lg:px-8">
         <div className={`flex items-center gap-2 ${isSticky ? 'py-1.5' : 'py-2'}`}>

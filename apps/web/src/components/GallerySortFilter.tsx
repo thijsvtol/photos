@@ -1,3 +1,4 @@
+import { X, CheckSquare, Heart, Star, Download, Trash2, Loader2 } from 'lucide-react';
 import { Capacitor } from '@capacitor/core';
 
 interface GallerySortFilterProps {
@@ -40,73 +41,98 @@ export function GallerySortFilter({
       {selectedCount > 0 && (
         <div
           data-selection-toolbar="true"
-          className={`fixed ${isAndroid ? 'top-nav-offset-android' : 'top-nav-offset'} left-0 right-0 bg-indigo-600 dark:bg-indigo-700 shadow-lg z-40 border-b-2 border-indigo-700 dark:border-indigo-800`}
+          className={`fixed ${isAndroid ? 'top-nav-offset-android' : 'top-nav-offset'} left-0 right-0 bg-indigo-600 dark:bg-indigo-700 shadow-lg z-40 border-b border-indigo-700/60 dark:border-indigo-800`}
         >
           <div className="max-w-7xl mx-auto px-3 sm:px-4 lg:px-8">
-            <div className="flex items-center justify-between py-2 sm:py-2.5 gap-3 flex-wrap">
-              <span className="text-white font-medium text-sm">
-                {selectedCount} {selectedCount === 1 ? 'photo' : 'photos'} selected
+            <div className="flex items-center py-2 gap-2">
+
+              {/* Dismiss button */}
+              {onClearSelection && (
+                <button
+                  onClick={onClearSelection}
+                  className="flex-shrink-0 flex items-center justify-center w-8 h-8 rounded-lg text-white/70 hover:text-white hover:bg-white/15 transition"
+                  aria-label="Clear selection"
+                  title="Clear selection"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              )}
+
+              {/* Count */}
+              <span className="text-white font-semibold text-sm flex-shrink-0">
+                {selectedCount} {selectedCount === 1 ? 'photo' : 'photos'}
               </span>
-              
-              <div className="flex items-center gap-2 flex-wrap justify-end">
+
+              {/* Divider */}
+              <div className="w-px h-5 bg-white/25 flex-shrink-0 mx-0.5" />
+
+              {/* Scrollable action buttons */}
+              <div className="flex items-center gap-1 flex-1 min-w-0 overflow-x-auto scrollbar-hide">
+
+                {/* Select All */}
                 {onSelectAllVisible && (
                   <button
                     onClick={onSelectAllVisible}
-                    className="px-3 sm:px-4 py-1.5 sm:py-2 bg-white/10 text-white rounded-lg hover:bg-white/20 transition-colors text-sm font-medium border border-white/20"
+                    className="flex-shrink-0 flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-white hover:bg-white/15 transition text-sm font-medium whitespace-nowrap"
+                    aria-label="Select all visible photos"
+                    title="Select all visible"
                   >
-                    Select Visible
+                    <CheckSquare className="w-4 h-4" />
+                    <span className="hidden sm:inline">Select All</span>
                   </button>
                 )}
 
-                {onClearSelection && (
-                  <button
-                    onClick={onClearSelection}
-                    className="px-3 sm:px-4 py-1.5 sm:py-2 bg-white/10 text-white rounded-lg hover:bg-white/20 transition-colors text-sm font-medium border border-white/20"
-                  >
-                    Deselect
-                  </button>
-                )}
-
-                <button
-                  onClick={onDownloadSelected}
-                  className="px-3 sm:px-4 py-1.5 sm:py-2 bg-white dark:bg-gray-800 text-indigo-600 dark:text-indigo-400 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors text-sm font-medium flex items-center gap-2 border border-white/20"
-                >
-                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
-                  </svg>
-                  <span className="hidden sm:inline">Download</span>
-                  <span className="sm:hidden">Download</span>
-                </button>
-
+                {/* Favorite */}
                 {onToggleFavoriteSelected && (
                   <button
                     onClick={onToggleFavoriteSelected}
-                    className="px-3 sm:px-4 py-1.5 sm:py-2 bg-white/10 text-white rounded-lg hover:bg-white/20 transition-colors text-sm font-medium border border-white/20"
+                    className="flex-shrink-0 flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-white hover:bg-white/15 transition text-sm font-medium whitespace-nowrap"
+                    aria-label="Toggle favorite for selected photos"
+                    title="Favorite / Unfavorite"
                   >
-                    Favorite
+                    <Heart className="w-4 h-4" />
+                    <span className="hidden sm:inline">Favorite</span>
                   </button>
                 )}
 
+                {/* Feature (admin only) */}
                 {showFeaturedAction && onToggleFeaturedSelected && (
                   <button
                     onClick={onToggleFeaturedSelected}
-                    className="px-3 sm:px-4 py-1.5 sm:py-2 bg-white/10 text-white rounded-lg hover:bg-white/20 transition-colors text-sm font-medium border border-white/20"
+                    className="flex-shrink-0 flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-white hover:bg-white/15 transition text-sm font-medium whitespace-nowrap"
+                    aria-label="Toggle featured for selected photos"
+                    title="Feature / Unfeature"
                   >
-                    Feature
+                    <Star className="w-4 h-4" />
+                    <span className="hidden sm:inline">Feature</span>
                   </button>
                 )}
 
+                {/* Download */}
+                <button
+                  onClick={onDownloadSelected}
+                  className="flex-shrink-0 flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-white hover:bg-white/15 transition text-sm font-medium whitespace-nowrap"
+                  aria-label="Download selected as ZIP"
+                  title="Download as ZIP"
+                >
+                  <Download className="w-4 h-4" />
+                  <span className="hidden sm:inline">Download</span>
+                </button>
+
+                {/* Delete (admin, destructive — last) */}
                 {isAdmin && onDeleteSelected && (
                   <button
                     onClick={onDeleteSelected}
                     disabled={isDeleting}
-                    className="px-3 sm:px-4 py-1.5 sm:py-2 bg-white/10 text-white rounded-lg hover:bg-white/20 transition-colors text-sm font-medium flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed border border-white/20"
+                    className="flex-shrink-0 flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-red-200 hover:bg-red-500/20 transition text-sm font-medium whitespace-nowrap disabled:opacity-50 disabled:cursor-not-allowed"
+                    aria-label="Delete selected photos"
+                    title={isDeleting ? 'Deleting...' : 'Delete selected'}
                   >
-                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                    </svg>
+                    {isDeleting
+                      ? <Loader2 className="w-4 h-4 animate-spin" />
+                      : <Trash2 className="w-4 h-4" />
+                    }
                     <span className="hidden sm:inline">{isDeleting ? 'Deleting...' : 'Delete'}</span>
-                    <span className="sm:hidden">Delete</span>
                   </button>
                 )}
               </div>
