@@ -60,7 +60,13 @@ const PhotoDetail: React.FC = () => {
   const [isSwiping, setIsSwiping] = useState(false);
   const isSwipingRef = useRef(false);
   const containerRef = useRef<HTMLDivElement>(null);
-  const imageContainerRef = useRef<HTMLDivElement>(null);
+  const imageContainerRef = useRef<HTMLDivElement | null>(null);
+  const imageContainerCallbackRef = useCallback((node: HTMLDivElement | null) => {
+    imageContainerRef.current = node;
+    if (node) {
+      setContainerReady(true);
+    }
+  }, []);
   const slideshowTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const preloadRefs = useRef<{ [key: string]: HTMLImageElement }>({});
   const transitionTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -318,13 +324,6 @@ const PhotoDetail: React.FC = () => {
       }
     };
   }, []);
-
-  // Track when container is mounted
-  useEffect(() => {
-    if (imageContainerRef.current && !containerReady) {
-      setContainerReady(true);
-    }
-  }, [containerReady]);
 
   // Cleanup all timeouts on unmount
   useEffect(() => {
@@ -1372,7 +1371,7 @@ const PhotoDetail: React.FC = () => {
           
           {/* Main image/video with swipe support and progressive loading */}
           <div 
-            ref={imageContainerRef} 
+            ref={imageContainerCallbackRef} 
             className={`relative select-none touch-pinch-zoom ${isZoomed ? 'overflow-auto touch-pan-x touch-pan-y' : 'overflow-hidden touch-pan-y'}`}
             style={{ 
               touchAction: isZoomed ? 'pan-x pan-y pinch-zoom' : 'pan-y pinch-zoom',
