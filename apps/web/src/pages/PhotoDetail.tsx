@@ -58,8 +58,15 @@ const PhotoDetail: React.FC = () => {
   const swipeNavigateTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [swipeOffset, setSwipeOffset] = useState(0);
   const [isSwiping, setIsSwiping] = useState(false);
+  const isSwipingRef = useRef(false);
   const containerRef = useRef<HTMLDivElement>(null);
-  const imageContainerRef = useRef<HTMLDivElement>(null);
+  const imageContainerRef = useRef<HTMLDivElement | null>(null);
+  const imageContainerCallbackRef = useCallback((node: HTMLDivElement | null) => {
+    imageContainerRef.current = node;
+    if (node) {
+      setContainerReady(true);
+    }
+  }, []);
   const slideshowTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const preloadRefs = useRef<{ [key: string]: HTMLImageElement }>({});
   const transitionTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -317,13 +324,6 @@ const PhotoDetail: React.FC = () => {
       }
     };
   }, []);
-
-  // Track when container is mounted
-  useEffect(() => {
-    if (imageContainerRef.current && !containerReady) {
-      setContainerReady(true);
-    }
-  }, [containerReady]);
 
   // Cleanup all timeouts on unmount
   useEffect(() => {
@@ -607,6 +607,7 @@ const PhotoDetail: React.FC = () => {
       swipeLastTimeRef.current = performance.now();
       swipeVelocityRef.current = 0;
       setSwipeOffset(0);
+      isSwipingRef.current = false;
       setIsSwiping(false);
     } else {
       // Multiple fingers - clear tracking
@@ -617,6 +618,7 @@ const PhotoDetail: React.FC = () => {
       swipeLastTimeRef.current = null;
       swipeVelocityRef.current = 0;
       setSwipeOffset(0);
+      isSwipingRef.current = false;
       setIsSwiping(false);
     }
   }, []);
@@ -644,6 +646,7 @@ const PhotoDetail: React.FC = () => {
       // Only hijack when gesture is primarily horizontal.
       if (Math.abs(deltaX) > Math.abs(deltaY)) {
         e.preventDefault();
+        isSwipingRef.current = true;
         setIsSwiping(true);
         setSwipeOffset(deltaX * getSwipeResistance(deltaX, containerWidth));
       }
@@ -656,6 +659,7 @@ const PhotoDetail: React.FC = () => {
       swipeLastTimeRef.current = null;
       swipeVelocityRef.current = 0;
       setSwipeOffset(0);
+      isSwipingRef.current = false;
       setIsSwiping(false);
     }
   }, []);
@@ -667,8 +671,9 @@ const PhotoDetail: React.FC = () => {
       const containerWidth = imageContainerRef.current?.clientWidth || window.innerWidth || 320;
       const threshold = Math.min(96, Math.max(48, containerWidth * 0.18));
       const absVelocity = Math.abs(swipeVelocityRef.current);
-      const shouldNavigate = isSwiping && (Math.abs(diff) > threshold || absVelocity > 0.42);
+      const shouldNavigate = isSwipingRef.current && (Math.abs(diff) > threshold || absVelocity > 0.42);
       
+      isSwipingRef.current = false;
       setIsSwiping(false);
 
       if (shouldNavigate) {
@@ -701,7 +706,7 @@ const PhotoDetail: React.FC = () => {
     swipeLastXRef.current = null;
     swipeLastTimeRef.current = null;
     swipeVelocityRef.current = 0;
-  }, [isSwiping]);
+  }, []);
 
   const handleTouchCancelNative = React.useCallback(() => {
     touchStartX.current = null;
@@ -711,6 +716,7 @@ const PhotoDetail: React.FC = () => {
     swipeLastTimeRef.current = null;
     swipeVelocityRef.current = 0;
     setSwipeOffset(0);
+    isSwipingRef.current = false;
     setIsSwiping(false);
   }, []);
 
@@ -1365,10 +1371,10 @@ const PhotoDetail: React.FC = () => {
           
           {/* Main image/video with swipe support and progressive loading */}
           <div 
-            ref={imageContainerRef} 
-            className={`relative select-none touch-pan-x touch-pan-y touch-pinch-zoom ${isZoomed ? 'overflow-auto' : 'overflow-hidden'}`}
+            ref={imageContainerCallbackRef} 
+            className={`relative select-none touch-pinch-zoom ${isZoomed ? 'overflow-auto touch-pan-x touch-pan-y' : 'overflow-hidden touch-pan-y'}`}
             style={{ 
-              touchAction: 'pan-x pan-y pinch-zoom',
+              touchAction: isZoomed ? 'pan-x pan-y pinch-zoom' : 'pan-y pinch-zoom',
               WebkitOverflowScrolling: 'touch'
             }}
           >
