@@ -43,12 +43,13 @@ app.get('/', async (c) => {
       .prepare('SELECT SUM(favorites_count) as total FROM photos')
       .first<{ total: number | null }>();
     
-    // Estimate storage (rough calculation: width * height * 3 bytes per pixel / 3 for JPEG compression)
+    // Estimate storage from unique stored originals only.
+    // Copied photos are DB-only references and should not increase storage usage.
     const storageResult = await c.env.DB
-      .prepare('SELECT SUM(COALESCE(width, 0) * COALESCE(height, 0) * 1.0) as pixels FROM photos')
+      .prepare('SELECT SUM(COALESCE(width, 0) * COALESCE(height, 0) * 1.0) as pixels FROM photos WHERE source_photo_id IS NULL')
       .first<{ pixels: number | null }>();
     
-    const storageBytes = storageResult?.pixels ? (storageResult.pixels * 3 / 3) : 0;
+    const storageBytes = storageResult?.pixels ? (storageResult.pixels / 3) : 0;
     
     // Get recent events (last 10)
     const recentEvents = await c.env.DB

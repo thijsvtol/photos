@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.4.4] - 2026-03-30
+
+### Changed
+- Android app release bumped to build 15 (versionName 1.4.4).
+- Project package versions synchronized to 1.4.4.
+
+### Fixed
+- Admin dashboard storage estimate now counts only unique stored originals and excludes DB-only copied photo references.
+- Production media loading regression resolved by applying migration 016 so source photo columns exist for media lookup queries.
+
 ## [1.4.2] - 2026-03-29
 
 ### Changed
