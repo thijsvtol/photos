@@ -86,7 +86,7 @@ export class MockD1Database {
       return this.photos.filter(photo => photo.event_id === eventId);
     }
 
-    if (query.includes('SELECT id, original_filename, capture_time FROM photos')) {
+    if (query.includes('FROM photos WHERE event_id = ?') && query.includes('id IN')) {
       const eventId = Number(args[0]);
       const photoIds = args.slice(1).map(value => String(value));
       return this.photos.filter(photo => photo.event_id === eventId && photoIds.includes(photo.id));
@@ -116,7 +116,9 @@ export class MockD1Database {
       if (query.includes('id, name')) {
         return {
           id: event.id,
+          slug: event.slug,
           name: event.name,
+          visibility: event.visibility,
           password_hash: query.includes('password_hash') ? event.password_hash : undefined,
         };
       }
@@ -182,7 +184,10 @@ export class MockD1Database {
       return photo ? { file_type: photo.file_type } : null;
     }
 
-    if (query.includes('FROM photos p') && query.includes('WHERE p.id = ?')) {
+    if (
+      (query.includes('FROM photos p') && query.includes('WHERE p.id = ?')) ||
+      (query.includes('FROM photos WHERE id = ?') && query.includes('event_id = ?'))
+    ) {
       const photoId = String(args[0]);
       const eventId = Number(args[1]);
       return this.photos.find(item => item.id === photoId && item.event_id === eventId) || null;

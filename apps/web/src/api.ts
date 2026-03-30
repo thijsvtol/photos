@@ -300,6 +300,59 @@ export const getOriginalUrl = (slug: string, photoId: string, fileType?: string,
   return pathWithVersion;
 };
 
+const DEFAULT_DOWNLOAD_PATH = '/storage/emulated/0/Download';
+
+const getMimeTypeFromFilename = (filename: string): string => {
+  const lower = filename.toLowerCase();
+  if (lower.endsWith('.png')) return 'image/png';
+  if (lower.endsWith('.mp4')) return 'video/mp4';
+  if (lower.endsWith('.zip')) return 'application/zip';
+  return 'image/jpeg';
+};
+
+const toExternalStorageRelativePath = (basePath: string, filename: string): string => {
+  const normalized = basePath.trim().replace(/\\/g, '/').replace(/\/+$/, '');
+  const withoutPrefix = normalized.replace(/^\/storage\/emulated\/0\/?/, '');
+  const relativeBase = withoutPrefix.replace(/^\/+/, '');
+  return relativeBase ? `${relativeBase}/${filename}` : filename;
+};
+
+const saveNativeBase64File = async (base64: string, filename: string, mimeType: string): Promise<string> => {
+  const selectedPath = localStorage.getItem('download_path') || DEFAULT_DOWNLOAD_PATH;
+  console.log('[Download] Selected save path:', selectedPath);
+
+  try {
+    if (selectedPath.startsWith('content://')) {
+      // SAF tree URI selected via folder picker.
+      const result = await SafDirectory.writeFile({
+        treeUri: selectedPath,
+        filename,
+        data: base64,
+        mimeType,
+      });
+      return result.uri;
+    }
+
+    const relativePath = toExternalStorageRelativePath(selectedPath, filename);
+    const result = await Filesystem.writeFile({
+      path: relativePath,
+      data: base64,
+      directory: Directory.ExternalStorage,
+      recursive: true,
+    });
+    return result.uri;
+  } catch (error) {
+    console.warn('[Download] Selected folder write failed, falling back to Documents', error);
+    const fallbackResult = await Filesystem.writeFile({
+      path: filename,
+      data: base64,
+      directory: Directory.Documents,
+      recursive: true,
+    });
+    return fallbackResult.uri;
+  }
+};
+
 // Download functions that trigger browser downloads
 export const downloadPhoto = async (url: string, filename: string): Promise<void> => {
   try {
@@ -334,52 +387,10 @@ export const downloadPhoto = async (url: string, filename: string): Promise<void
         reader.readAsDataURL(blob);
       });
       
-      // Get custom download path from localStorage, or use default
-      const customPath = localStorage.getItem('download_path') || '/storage/emulated/0/Download';
-      console.log('[Download] Custom path:', customPath);
-      
-      try {
-        let result;
-        
-        // Check if it's a content:// URI (from folder picker)
-        if (customPath.startsWith('content://')) {
-          console.log('[Download] Using SafDirectory plugin for content:// URI');
-          // Use SafDirectory plugin to write to SAF tree URI
-          // Detect mime type from filename
-          const mimeType = filename.toLowerCase().endsWith('.png') ? 'image/png' : 'image/jpeg';
-          result = await SafDirectory.writeFile({
-            treeUri: customPath,
-            filename: filename,
-            data: base64,
-            mimeType: mimeType
-          });
-          console.log('[Download] File saved via SAF:', result.uri);
-          alert(`Photo saved: ${filename}`);
-        } else {
-          // Traditional filesystem path
-          const fullPath = `${customPath}/${filename}`;
-          console.log('[Download] Writing file to filesystem path:', fullPath);
-          result = await Filesystem.writeFile({
-            path: fullPath,
-            data: base64,
-            directory: Directory.ExternalStorage,
-            recursive: true
-          });
-          console.log('[Download] File saved:', result.uri);
-          alert(`Photo saved to: ${filename}`);
-        }
-      } catch (error) {
-        // Fallback to Documents if custom path fails
-        console.warn('[Download] Custom path failed, falling back to Documents', error);
-        const result = await Filesystem.writeFile({
-          path: filename,
-          data: base64,
-          directory: Directory.Documents,
-          recursive: true
-        });
-        console.log('[Download] File saved to Documents:', result.uri);
-        alert(`Photo saved to Documents: ${filename}`);
-      }
+      const mimeType = getMimeTypeFromFilename(filename);
+      const savedUri = await saveNativeBase64File(base64, filename, mimeType);
+      console.log('[Download] File saved:', savedUri);
+      alert(`Photo saved: ${filename}`);
     } else {
       // Browser: Use traditional download
       const response = await fetch(url);
@@ -460,25 +471,8 @@ export const downloadInstagram = async (slug: string, photoId: string): Promise<
         reader.readAsDataURL(igBlob);
       });
 
-      const customPath = localStorage.getItem('download_path') || '/storage/emulated/0/Download';
-
-      try {
-        await Filesystem.writeFile({
-          path: `${customPath}/${filename}`,
-          data: base64,
-          directory: Directory.ExternalStorage,
-          recursive: true,
-        });
-        alert(`Instagram photo saved: ${filename}`);
-      } catch {
-        await Filesystem.writeFile({
-          path: filename,
-          data: base64,
-          directory: Directory.Documents,
-          recursive: true,
-        });
-        alert(`Instagram photo saved to Documents: ${filename}`);
-      }
+      await saveNativeBase64File(base64, filename, 'image/jpeg');
+      alert(`Instagram photo saved: ${filename}`);
     } else {
       // Browser: use a temporary object URL
       const downloadUrl = URL.createObjectURL(igBlob);
@@ -529,35 +523,9 @@ export const downloadZip = async (zipBlob: Blob, filename: string): Promise<void
         reader.readAsDataURL(zipBlob);
       });
 
-      // Get custom download path from localStorage, or use default
-      const customPath = localStorage.getItem('download_path') || '/storage/emulated/0/Download';
-      const fullPath = `${customPath}/${filename}`;
-      
-      console.log('[Download ZIP] Writing file to:', fullPath);
-      
-      try {
-        // Try to write to external storage with full path
-        const result = await Filesystem.writeFile({
-          path: fullPath,
-          data: base64,
-          directory: Directory.ExternalStorage,
-          recursive: true
-        });
-        
-        console.log('[Download ZIP] File saved:', result.uri);
-        alert(`ZIP file saved to: ${customPath}/${filename}`);
-      } catch (error) {
-        // Fallback to Documents if external storage fails
-        console.warn('[Download ZIP] External storage failed, falling back to Documents', error);
-        const result = await Filesystem.writeFile({
-          path: filename,
-          data: base64,
-          directory: Directory.Documents,
-          recursive: true
-        });
-        console.log('[Download ZIP] File saved to Documents:', result.uri);
-        alert(`ZIP file saved to Documents: ${filename}`);
-      }
+      const savedUri = await saveNativeBase64File(base64, filename, 'application/zip');
+      console.log('[Download ZIP] File saved:', savedUri);
+      alert(`ZIP file saved: ${filename}`);
     } else {
       // Browser: Use traditional download
       console.log('[Download ZIP] Using browser download');

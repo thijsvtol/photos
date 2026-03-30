@@ -4,6 +4,7 @@ import adminRoutes from '../routes/admin';
 import favoritesRoutes from '../routes/favorites';
 import zipRoutes from '../routes/zip';
 import collaboratorsRoutes from '../routes/collaborators';
+import mediaRoutes from '../routes/media';
 import type { User } from '../types';
 import { createEventCookie } from '../cookies';
 import {
@@ -645,5 +646,39 @@ describe('Access control', () => {
     expect(removeResponse.status).toBe(200);
     const historyEntries = db.runLog.filter(entry => entry.query.includes('INSERT INTO collaboration_history'));
     expect(historyEntries.length).toBeGreaterThanOrEqual(2);
+  });
+
+  it('blocks direct media access to private event photos when requester is not admin', async () => {
+    const db = new MockD1Database(baseEvents, basePhotos, {});
+    const env = createEnv(db);
+
+    const anonymousResponse = await mediaRoutes.request('http://localhost/media/private-event/preview/photo-2.jpg', {}, env);
+    expect(anonymousResponse.status).toBe(401);
+
+    currentUser = { id: 'user-10', email: 'viewer@example.com', name: 'Viewer' };
+    const nonAdminResponse = await mediaRoutes.request('http://localhost/media/private-event/preview/photo-2.jpg', {}, env);
+    expect(nonAdminResponse.status).toBe(403);
+  });
+
+  it('blocks direct media access to collaborators-only photos unless requester is collaborator or admin', async () => {
+    const db = new MockD1Database(baseEvents, basePhotos, { 3: ['collab@example.com'] });
+    const env = createEnv(db);
+
+    currentUser = { id: 'user-11', email: 'outsider@example.com', name: 'Outsider' };
+    const outsiderResponse = await mediaRoutes.request('http://localhost/media/collab-event/preview/photo-3.jpg', {}, env);
+    expect(outsiderResponse.status).toBe(403);
+
+    currentUser = { id: 'user-12', email: 'collab@example.com', name: 'Collaborator' };
+    const collaboratorResponse = await mediaRoutes.request('http://localhost/media/collab-event/preview/photo-3.jpg', {}, env);
+    expect(collaboratorResponse.status).toBe(200);
+  });
+
+  it('allows direct media access to private event photos for admins', async () => {
+    currentUser = { id: 'admin-10', email: 'admin@example.com', name: 'Admin' };
+    const db = new MockD1Database(baseEvents, basePhotos, {});
+    const env = createEnv(db);
+
+    const response = await mediaRoutes.request('http://localhost/media/private-event/original/photo-2.jpg', {}, env);
+    expect(response.status).toBe(200);
   });
 });

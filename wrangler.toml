@@ -71,3 +71,31 @@ database_id = "45a56052-5385-463d-bc79-7ddc20307f53"
 [[env.production.r2_buckets]]
 binding = "PHOTOS_BUCKET"
 bucket_name = "photos-storage"
+
+# Staging configuration
+[env.staging]
+name = "photos-worker-staging"
+routes = [
+  { pattern = "staging-photos.thijsvtol.nl/api/*", zone_name = "thijsvtol.nl" },
+  { pattern = "staging-photos.thijsvtol.nl/media/*", zone_name = "thijsvtol.nl" },
+  { pattern = "staging-photos.thijsvtol.nl/sitemap.xml", zone_name = "thijsvtol.nl" },
+  { pattern = "staging-photos.thijsvtol.nl/robots.txt", zone_name = "thijsvtol.nl" }
+]
+
+[env.staging.vars]
+ENVIRONMENT = "staging"
+APP_NAME = "Thijs van Tol Photos (Staging)"
+BRAND_NAME = "Thijs van Tol"
+COPYRIGHT_HOLDER = "Thijs van Tol"
+APP_DOMAIN = "staging-photos.thijsvtol.nl"
+CONTACT_EMAIL = "info@thijsvtol.nl"
+GA_MEASUREMENT_ID = "G-PLACEHOLDER"
+
+[[env.staging.d1_databases]]
+binding = "DB"
+  database_name = "photos-db-staging-v2"
+  database_id = "4768f8a4-4289-4718-9519-f90e8141d44f"
+
+[[env.staging.r2_buckets]]
+binding = "PHOTOS_BUCKET"
+bucket_name = "photos-storage-staging"

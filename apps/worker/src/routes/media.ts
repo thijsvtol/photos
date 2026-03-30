@@ -1,8 +1,53 @@
-import { Hono } from 'hono';
+import { Context, Hono } from 'hono';
 import type { Env } from '../types';
-import { checkEventAuth } from '../auth';
+import { checkEventAuth, extractUser } from '../auth';
 
 const app = new Hono<{ Bindings: Env }>();
+
+function isAdminEmail(email: string, adminEmails: string): boolean {
+  const admins = (adminEmails || '').split(',').map((entry) => entry.trim().toLowerCase());
+  return admins.includes(email.toLowerCase());
+}
+
+async function requireMediaAccess(
+  c: Context<{ Bindings: Env }>,
+  event: { id: number; slug: string; password_hash: string | null; visibility: 'public' | 'private' | 'collaborators_only' }
+): Promise<Response | null> {
+  // Password gate for protected events.
+  const isAuthenticated = await checkEventAuth(c, event.slug, !!event.password_hash);
+  if (!isAuthenticated) {
+    return c.json({ error: 'Authentication required' }, 401);
+  }
+
+  // Visibility gate: private/collaborators-only media requires authenticated user identity.
+  if (event.visibility === 'public') {
+    return null;
+  }
+
+  const user = await extractUser(c as any);
+  if (!user) {
+    return c.json({ error: 'Authentication required' }, 401);
+  }
+
+  if (isAdminEmail(user.email, c.env.ADMIN_EMAILS || '')) {
+    return null;
+  }
+
+  if (event.visibility === 'private') {
+    return c.json({ error: 'Access denied' }, 403);
+  }
+
+  const collaborator = await c.env.DB
+    .prepare('SELECT role FROM event_collaborators WHERE event_id = ? AND user_email = ?')
+    .bind(event.id, user.email)
+    .first<{ role: string }>();
+
+  if (!collaborator?.role) {
+    return c.json({ error: 'Access denied' }, 403);
+  }
+
+  return null;
+}
 
 /**
  * GET /media/:slug/preview/:photoId.(jpg|mp4)
@@ -16,19 +61,16 @@ app.get('/media/:slug/preview/:photoId', async (c) => {
   try {
     // Check if event is password protected
     const event = await c.env.DB
-      .prepare('SELECT id, password_hash FROM events WHERE slug = ?')
+      .prepare('SELECT id, slug, password_hash, visibility FROM events WHERE slug = ?')
       .bind(slug)
-      .first<{ id: number; password_hash: string | null }>();
+      .first<{ id: number; slug: string; password_hash: string | null; visibility: 'public' | 'private' | 'collaborators_only' }>();
     
     if (!event) {
       return c.json({ error: 'Event not found' }, 404);
     }
     
-    // Check authentication (supports both cookies and Bearer tokens)
-    const isAuthenticated = await checkEventAuth(c, slug, !!event.password_hash);
-    if (!isAuthenticated) {
-      return c.json({ error: 'Authentication required' }, 401);
-    }
+    const accessError = await requireMediaAccess(c, event);
+    if (accessError) return accessError;
     
     // Get file type from database, plus source photo info for copies
     const photo = await c.env.DB
@@ -86,19 +128,16 @@ app.get('/media/:slug/ig/:photoId', async (c) => {
   try {
     // Check if event is password protected
     const event = await c.env.DB
-      .prepare('SELECT id, password_hash FROM events WHERE slug = ?')
+      .prepare('SELECT id, slug, password_hash, visibility FROM events WHERE slug = ?')
       .bind(slug)
-      .first<{ id: number; password_hash: string | null }>();
+      .first<{ id: number; slug: string; password_hash: string | null; visibility: 'public' | 'private' | 'collaborators_only' }>();
     
     if (!event) {
       return c.json({ error: 'Event not found' }, 404);
     }
     
-    // Check authentication (supports both cookies and Bearer tokens)
-    const isAuthenticated = await checkEventAuth(c, slug, !!event.password_hash);
-    if (!isAuthenticated) {
-      return c.json({ error: 'Authentication required' }, 401);
-    }
+    const accessError = await requireMediaAccess(c, event);
+    if (accessError) return accessError;
     
     // Get photo metadata for filename, plus source photo info for copies
     const photo = await c.env.DB
@@ -158,19 +197,16 @@ app.get('/media/:slug/original/:photoId', async (c) => {
   try {
     // Get event to check if password protected
     const event = await c.env.DB
-      .prepare('SELECT id, password_hash FROM events WHERE slug = ?')
+      .prepare('SELECT id, slug, password_hash, visibility FROM events WHERE slug = ?')
       .bind(slug)
-      .first<{ id: number; password_hash: string | null }>();
+      .first<{ id: number; slug: string; password_hash: string | null; visibility: 'public' | 'private' | 'collaborators_only' }>();
     
     if (!event) {
       return c.json({ error: 'Event not found' }, 404);
     }
     
-    // Check authentication (supports both cookies and Bearer tokens)
-    const isAuthenticated = await checkEventAuth(c, slug, !!event.password_hash);
-    if (!isAuthenticated) {
-      return c.json({ error: 'Authentication required' }, 401);
-    }
+    const accessError = await requireMediaAccess(c, event);
+    if (accessError) return accessError;
     
     const photo = await c.env.DB
       .prepare('SELECT capture_time, file_type, source_photo_id, source_event_slug FROM photos WHERE id = ? AND event_id = ?')
