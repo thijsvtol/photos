@@ -216,7 +216,7 @@ describe('Staging Integration - Full Worker Routes + Auth/Session Edges', () => 
       });
       expectOneOf(authed.status, c.allowedAuthed, `${c.method} ${c.path} authed`);
     }
-  });
+  }, 20000);
 
   maybeIt('covers admin route family unauthorized/authenticated boundaries', async () => {
     const adminRoutes: Array<{ method: string; path: string; body?: unknown; allowedAdmin: number[] }> = [
@@ -261,5 +261,5 @@ describe('Staging Integration - Full Worker Routes + Auth/Session Edges', () => 
       });
       expectOneOf(admin.status, c.allowedAdmin, `${c.method} ${c.path} admin`);
     }
-  });
+  }, 30000);
 });
