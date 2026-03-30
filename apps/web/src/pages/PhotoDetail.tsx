@@ -1366,9 +1366,9 @@ const PhotoDetail: React.FC = () => {
           {/* Main image/video with swipe support and progressive loading */}
           <div 
             ref={imageContainerRef} 
-            className={`relative select-none touch-pan-x touch-pan-y touch-pinch-zoom ${isZoomed ? 'overflow-auto' : 'overflow-hidden'}`}
+            className={`relative select-none touch-pinch-zoom ${isZoomed ? 'overflow-auto touch-pan-x touch-pan-y' : 'overflow-hidden touch-pan-y'}`}
             style={{ 
-              touchAction: 'pan-x pan-y pinch-zoom',
+              touchAction: isZoomed ? 'pan-x pan-y pinch-zoom' : 'pan-y pinch-zoom',
               WebkitOverflowScrolling: 'touch'
             }}
           >
