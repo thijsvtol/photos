@@ -58,6 +58,7 @@ const PhotoDetail: React.FC = () => {
   const swipeNavigateTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [swipeOffset, setSwipeOffset] = useState(0);
   const [isSwiping, setIsSwiping] = useState(false);
+  const isSwipingRef = useRef(false);
   const containerRef = useRef<HTMLDivElement>(null);
   const imageContainerRef = useRef<HTMLDivElement>(null);
   const slideshowTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -607,6 +608,7 @@ const PhotoDetail: React.FC = () => {
       swipeLastTimeRef.current = performance.now();
       swipeVelocityRef.current = 0;
       setSwipeOffset(0);
+      isSwipingRef.current = false;
       setIsSwiping(false);
     } else {
       // Multiple fingers - clear tracking
@@ -617,6 +619,7 @@ const PhotoDetail: React.FC = () => {
       swipeLastTimeRef.current = null;
       swipeVelocityRef.current = 0;
       setSwipeOffset(0);
+      isSwipingRef.current = false;
       setIsSwiping(false);
     }
   }, []);
@@ -644,6 +647,7 @@ const PhotoDetail: React.FC = () => {
       // Only hijack when gesture is primarily horizontal.
       if (Math.abs(deltaX) > Math.abs(deltaY)) {
         e.preventDefault();
+        isSwipingRef.current = true;
         setIsSwiping(true);
         setSwipeOffset(deltaX * getSwipeResistance(deltaX, containerWidth));
       }
@@ -656,6 +660,7 @@ const PhotoDetail: React.FC = () => {
       swipeLastTimeRef.current = null;
       swipeVelocityRef.current = 0;
       setSwipeOffset(0);
+      isSwipingRef.current = false;
       setIsSwiping(false);
     }
   }, []);
@@ -667,8 +672,9 @@ const PhotoDetail: React.FC = () => {
       const containerWidth = imageContainerRef.current?.clientWidth || window.innerWidth || 320;
       const threshold = Math.min(96, Math.max(48, containerWidth * 0.18));
       const absVelocity = Math.abs(swipeVelocityRef.current);
-      const shouldNavigate = isSwiping && (Math.abs(diff) > threshold || absVelocity > 0.42);
+      const shouldNavigate = isSwipingRef.current && (Math.abs(diff) > threshold || absVelocity > 0.42);
       
+      isSwipingRef.current = false;
       setIsSwiping(false);
 
       if (shouldNavigate) {
@@ -701,7 +707,7 @@ const PhotoDetail: React.FC = () => {
     swipeLastXRef.current = null;
     swipeLastTimeRef.current = null;
     swipeVelocityRef.current = 0;
-  }, [isSwiping]);
+  }, []);
 
   const handleTouchCancelNative = React.useCallback(() => {
     touchStartX.current = null;
@@ -711,6 +717,7 @@ const PhotoDetail: React.FC = () => {
     swipeLastTimeRef.current = null;
     swipeVelocityRef.current = 0;
     setSwipeOffset(0);
+    isSwipingRef.current = false;
     setIsSwiping(false);
   }, []);
 
