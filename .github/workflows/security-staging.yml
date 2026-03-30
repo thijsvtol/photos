@@ -15,6 +15,15 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v6
 
+      - name: Setup Node
+        uses: actions/setup-node@v5
+        with:
+          node-version: 22
+
+      - name: Install worker dependencies
+        working-directory: apps/worker
+        run: npm ci
+
       - name: Run staging access probe
         env:
           JWT_SECRET: ${{ secrets.JWT_SECRET }}
@@ -27,3 +36,14 @@ jobs:
         run: |
           chmod +x scripts/security-staging-probe.sh
           scripts/security-staging-probe.sh
+
+      - name: Run staging integration tests
+        working-directory: apps/worker
+        env:
+          STAGING_PRIVATE_MEDIA_URL: ${{ secrets.STAGING_PRIVATE_MEDIA_URL }}
+          STAGING_COLLAB_MEDIA_URL: ${{ secrets.STAGING_COLLAB_MEDIA_URL }}
+          STAGING_ADMIN_BEARER_TOKEN: ${{ secrets.STAGING_ADMIN_BEARER_TOKEN }}
+          STAGING_COLLAB_BEARER_TOKEN: ${{ secrets.STAGING_COLLAB_BEARER_TOKEN }}
+          STAGING_PRIVATE_ZIP_URL: ${{ secrets.STAGING_PRIVATE_ZIP_URL }}
+          STAGING_PRIVATE_ZIP_BODY: ${{ secrets.STAGING_PRIVATE_ZIP_BODY }}
+        run: npm run test:integration:staging
