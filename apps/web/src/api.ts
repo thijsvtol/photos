@@ -654,6 +654,15 @@ export const bulkDeletePhotos = async (photoIds: string[]): Promise<{ deletedCou
   return response.data;
 };
 
+export const bulkCopyPhotos = async (photoIds: string[], targetEventSlug: string): Promise<{ copiedCount: number; totalRequested: number }> => {
+  const response = await api.post<{ copiedCount: number; totalRequested: number; errors?: any[] }>(
+    '/admin/photos/bulk-copy',
+    { photoIds, targetEventSlug },
+    { headers: getAdminHeaders() }
+  );
+  return response.data;
+};
+
 // Tag Management API
 export const createTag = async (data: CreateTagRequest): Promise<Tag> => {
   const response = await api.post<{ tag: Tag }>('/admin/tags', data, {

@@ -58,10 +58,10 @@ app.post('/api/events/:slug/zip', async (c) => {
       return c.json({ error: 'Maximum 50 photos can be downloaded at once' }, 400);
     }
     
-    // Get photo metadata
+    // Get photo metadata, including source info for copied photos
     const placeholders = body.photoIds.map(() => '?').join(',');
     const photos = await c.env.DB
-      .prepare(`SELECT id, original_filename, capture_time FROM photos WHERE event_id = ? AND id IN (${placeholders})`)
+      .prepare(`SELECT id, original_filename, capture_time, source_photo_id, source_event_slug FROM photos WHERE event_id = ? AND id IN (${placeholders})`)
       .bind(event.id, ...body.photoIds)
       .all<Photo>();
     
@@ -74,7 +74,10 @@ app.post('/api/events/:slug/zip', async (c) => {
     const missingPhotos: string[] = [];
     
     for (const photo of photos.results) {
-      const key = `original/${slug}/${photo.id}.jpg`;
+      // For copied photos, resolve the key to the source event's storage
+      const r2Slug = photo.source_event_slug ?? slug;
+      const r2PhotoId = photo.source_photo_id ?? photo.id;
+      const key = `original/${r2Slug}/${r2PhotoId}.jpg`;
       const object = await c.env.PHOTOS_BUCKET.get(key);
       
       if (!object) {

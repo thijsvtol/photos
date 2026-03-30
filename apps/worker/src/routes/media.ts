@@ -30,11 +30,11 @@ app.get('/media/:slug/preview/:photoId', async (c) => {
       return c.json({ error: 'Authentication required' }, 401);
     }
     
-    // Get file type from database
+    // Get file type from database, plus source photo info for copies
     const photo = await c.env.DB
-      .prepare('SELECT file_type FROM photos WHERE id = ? AND event_id = ?')
+      .prepare('SELECT file_type, source_photo_id, source_event_slug FROM photos WHERE id = ? AND event_id = ?')
       .bind(photoId, event.id)
-      .first<{ file_type: string }>();
+      .first<{ file_type: string; source_photo_id: string | null; source_event_slug: string | null }>();
     
     if (!photo) {
       return c.json({ error: 'Photo not found' }, 404);
@@ -44,14 +44,18 @@ app.get('/media/:slug/preview/:photoId', async (c) => {
     const isVideo = fileType === 'video/mp4';
     const extension = isVideo ? 'mp4' : 'jpg';
     const contentType = isVideo ? 'video/mp4' : 'image/jpeg';
+
+    // Resolve R2 key: copies point to source event's storage
+    const r2Slug = photo.source_event_slug ?? slug;
+    const r2PhotoId = photo.source_photo_id ?? photoId;
     
     // Try to get the preview version first, fall back to original
-    let key = `preview/${slug}/${photoId}.${extension}`;
+    let key = `preview/${r2Slug}/${r2PhotoId}.${extension}`;
     let object = await c.env.PHOTOS_BUCKET.get(key);
     
     // Fallback to original if preview doesn't exist
     if (!object) {
-      key = `original/${slug}/${photoId}.${extension}`;
+      key = `original/${r2Slug}/${r2PhotoId}.${extension}`;
       object = await c.env.PHOTOS_BUCKET.get(key);
     }
     
@@ -96,23 +100,27 @@ app.get('/media/:slug/ig/:photoId', async (c) => {
       return c.json({ error: 'Authentication required' }, 401);
     }
     
-    // Get photo metadata for filename
+    // Get photo metadata for filename, plus source photo info for copies
     const photo = await c.env.DB
-      .prepare('SELECT capture_time FROM photos WHERE id = ? AND event_id = ?')
+      .prepare('SELECT capture_time, source_photo_id, source_event_slug FROM photos WHERE id = ? AND event_id = ?')
       .bind(photoId, event.id)
-      .first<{ capture_time: string }>();
+      .first<{ capture_time: string; source_photo_id: string | null; source_event_slug: string | null }>();
     
     if (!photo) {
       return c.json({ error: 'Photo not found' }, 404);
     }
+
+    // Resolve R2 key: copies point to source event's storage
+    const r2Slug = photo.source_event_slug ?? slug;
+    const r2PhotoId = photo.source_photo_id ?? photoId;
     
     // Try to get the preview (small) version
-    let key = `preview/${slug}/${photoId}.jpg`;
+    let key = `preview/${r2Slug}/${r2PhotoId}.jpg`;
     let object = await c.env.PHOTOS_BUCKET.get(key);
     
     // If preview version doesn't exist, fall back to original
     if (!object) {
-      key = `original/${slug}/${photoId}.jpg`;
+      key = `original/${r2Slug}/${r2PhotoId}.jpg`;
       object = await c.env.PHOTOS_BUCKET.get(key);
     }
     
@@ -165,9 +173,9 @@ app.get('/media/:slug/original/:photoId', async (c) => {
     }
     
     const photo = await c.env.DB
-      .prepare('SELECT capture_time, file_type FROM photos WHERE id = ? AND event_id = ?')
+      .prepare('SELECT capture_time, file_type, source_photo_id, source_event_slug FROM photos WHERE id = ? AND event_id = ?')
       .bind(photoId, event.id)
-      .first<{ capture_time: string; file_type: string }>();
+      .first<{ capture_time: string; file_type: string; source_photo_id: string | null; source_event_slug: string | null }>();
     
     if (!photo) {
       return c.json({ error: 'Photo not found' }, 404);
@@ -177,9 +185,13 @@ app.get('/media/:slug/original/:photoId', async (c) => {
     const isVideo = fileType === 'video/mp4';
     const extension = isVideo ? 'mp4' : 'jpg';
     const contentType = isVideo ? 'video/mp4' : 'image/jpeg';
+
+    // Resolve R2 key: copies point to source event's storage
+    const r2Slug = photo.source_event_slug ?? slug;
+    const r2PhotoId = photo.source_photo_id ?? photoId;
     
     // Get from R2
-    const key = `original/${slug}/${photoId}.${extension}`;
+    const key = `original/${r2Slug}/${r2PhotoId}.${extension}`;
     const object = await c.env.PHOTOS_BUCKET.get(key);
     
     if (!object) {

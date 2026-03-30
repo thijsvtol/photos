@@ -1,4 +1,4 @@
-import { X, CheckSquare, Heart, Star, Download, Trash2, Loader2 } from 'lucide-react';
+import { X, CheckSquare, Heart, Star, Download, Trash2, Loader2, Copy } from 'lucide-react';
 import { Capacitor } from '@capacitor/core';
 
 interface GallerySortFilterProps {
@@ -11,9 +11,11 @@ interface GallerySortFilterProps {
   onToggleFeaturedSelected?: () => void;
   showFeaturedAction?: boolean;
   onDownloadSelected: () => void;
+  onCopySelected?: () => void;
   onDeleteSelected?: () => void;
   isAdmin?: boolean;
   isDeleting?: boolean;
+  isCopying?: boolean;
 }
 
 /**
@@ -29,9 +31,11 @@ export function GallerySortFilter({
   onToggleFeaturedSelected,
   showFeaturedAction = false,
   onDownloadSelected,
+  onCopySelected,
   onDeleteSelected,
   isAdmin = false,
   isDeleting = false,
+  isCopying = false,
 }: GallerySortFilterProps) {
   const isAndroid = Capacitor.getPlatform() === 'android';
   
@@ -118,6 +122,23 @@ export function GallerySortFilter({
                   <Download className="w-4 h-4" />
                   <span className="hidden sm:inline">Download</span>
                 </button>
+
+                {/* Copy to Album (admin) */}
+                {isAdmin && onCopySelected && (
+                  <button
+                    onClick={onCopySelected}
+                    disabled={isCopying}
+                    className="flex-shrink-0 flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-white hover:bg-white/15 transition text-sm font-medium whitespace-nowrap disabled:opacity-50 disabled:cursor-not-allowed"
+                    aria-label="Copy selected photos to another album"
+                    title={isCopying ? 'Copying...' : 'Copy to Album'}
+                  >
+                    {isCopying
+                      ? <Loader2 className="w-4 h-4 animate-spin" />
+                      : <Copy className="w-4 h-4" />
+                    }
+                    <span className="hidden sm:inline">{isCopying ? 'Copying...' : 'Copy to Album'}</span>
+                  </button>
+                )}
 
                 {/* Delete (admin, destructive — last) */}
                 {isAdmin && onDeleteSelected && (
