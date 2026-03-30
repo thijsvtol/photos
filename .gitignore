@@ -5,6 +5,9 @@ node_modules/
 dist/
 .wrangler/
 .dev.vars
+coverage/
+*.lcov
+*.info
 
 # Environment files
 .env

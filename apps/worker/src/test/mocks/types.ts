@@ -42,6 +42,8 @@ export interface PhotoRecord {
   blur_placeholder: string | null;
   is_featured: number;
   city?: string | null;
+  source_photo_id?: string | null;
+  source_event_slug?: string | null;
 }
 
 export interface FavoriteRecord {

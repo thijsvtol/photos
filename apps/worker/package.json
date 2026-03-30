@@ -8,11 +8,13 @@
     "dev": "wrangler dev",
     "build": "tsc -p tsconfig.json",
     "deploy": "wrangler deploy",
-    "test": "vitest run --passWithNoTests"
+    "test": "vitest run --passWithNoTests",
+    "test:coverage:security": "vitest run src/test/securityRoutesCoverage.test.ts --coverage --coverage.include=src/routes/media.ts --coverage.include=src/routes/zip.ts --coverage.thresholds.lines=100 --coverage.thresholds.functions=100 --coverage.thresholds.statements=100 --coverage.thresholds.branches=100"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^4.20260317.1",
     "@types/node": "^25.5.0",
+    "@vitest/coverage-v8": "^4.1.2",
     "typescript": "^5.9.3",
     "vitest": "^4.1.2",
     "wrangler": "^4.78.0"
