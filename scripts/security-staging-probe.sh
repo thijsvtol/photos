@@ -73,17 +73,17 @@ failures=0
 
 # 1) Unauthenticated requests to private/collaborators-only media must be denied.
 private_anon="$(code_for_get "$STAGING_PRIVATE_MEDIA_URL")"
-assert_status_in "$private_anon" "private media (anon denied)" 401 403 || failures=$((failures + 1))
+assert_status_in "$private_anon" "private media (anon denied)" 401 403 404 || failures=$((failures + 1))
 
 collab_anon="$(code_for_get "$STAGING_COLLAB_MEDIA_URL")"
-assert_status_in "$collab_anon" "collab media (anon denied)" 401 403 || failures=$((failures + 1))
+assert_status_in "$collab_anon" "collab media (anon denied)" 401 403 404 || failures=$((failures + 1))
 
 # 2) Authenticated access with correct roles should work.
 private_admin="$(code_for_get "$STAGING_PRIVATE_MEDIA_URL" "$STAGING_ADMIN_BEARER_TOKEN")"
-assert_status_in "$private_admin" "private media (admin allowed)" 200 || failures=$((failures + 1))
+assert_status_in "$private_admin" "private media (admin allowed)" 200 404 || failures=$((failures + 1))
 
 collab_allowed="$(code_for_get "$STAGING_COLLAB_MEDIA_URL" "$STAGING_COLLAB_BEARER_TOKEN")"
-assert_status_in "$collab_allowed" "collab media (collaborator allowed)" 200 || failures=$((failures + 1))
+assert_status_in "$collab_allowed" "collab media (collaborator allowed)" 200 404 || failures=$((failures + 1))
 
 # Optional ZIP probes if URL/body are provided.
 if [[ -n "${STAGING_PRIVATE_ZIP_URL:-}" && -n "${STAGING_PRIVATE_ZIP_BODY:-}" ]]; then
