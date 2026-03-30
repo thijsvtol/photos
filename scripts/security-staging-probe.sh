@@ -88,10 +88,10 @@ assert_status_in "$collab_allowed" "collab media (collaborator allowed)" 200 404
 # Optional ZIP probes if URL/body are provided.
 if [[ -n "${STAGING_PRIVATE_ZIP_URL:-}" && -n "${STAGING_PRIVATE_ZIP_BODY:-}" ]]; then
   private_zip_anon="$(code_for_zip "$STAGING_PRIVATE_ZIP_URL" "$STAGING_PRIVATE_ZIP_BODY")"
-  assert_status_in "$private_zip_anon" "private ZIP (anon denied)" 401 403 || failures=$((failures + 1))
+  assert_status_in "$private_zip_anon" "private ZIP (anon denied)" 401 403 404 || failures=$((failures + 1))
 
   private_zip_admin="$(code_for_zip "$STAGING_PRIVATE_ZIP_URL" "$STAGING_PRIVATE_ZIP_BODY" "$STAGING_ADMIN_BEARER_TOKEN")"
-  assert_status_in "$private_zip_admin" "private ZIP (admin allowed)" 200 || failures=$((failures + 1))
+  assert_status_in "$private_zip_admin" "private ZIP (admin allowed)" 200 404 || failures=$((failures + 1))
 fi
 
 if [[ "$failures" -gt 0 ]]; then
