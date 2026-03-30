@@ -46,6 +46,8 @@ export interface Photo {
   blur_placeholder: string | null;
   is_featured: number;
     cache_version: number;
+  source_photo_id: string | null;
+  source_event_slug: string | null;
 }
 
 export interface Tag {

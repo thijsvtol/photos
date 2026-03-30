@@ -152,9 +152,9 @@ app.delete('/:slug', async (c) => {
       return c.json({ error: 'Event not found' }, 404);
     }
     
-    // Get all photo IDs for R2 cleanup
+    // Get all photo IDs for R2 cleanup (only non-copied photos have their own R2 files)
     const photos = await c.env.DB
-      .prepare('SELECT id FROM photos WHERE event_id = ?')
+      .prepare('SELECT id FROM photos WHERE event_id = ? AND source_photo_id IS NULL')
       .bind(event.id)
       .all<{ id: string }>();
     
