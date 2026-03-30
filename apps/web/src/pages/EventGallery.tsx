@@ -12,7 +12,8 @@ import { useRefresh } from '../contexts/RefreshContext';
 import { EventPasswordForm } from '../components/EventPasswordForm';
 import { GallerySortFilter } from '../components/GallerySortFilter';
 import { ShareEventButton } from '../components/ShareEventButton';
-import { getEvent, getPhotos, loginToEvent, getPreviewUrl, requestZip, downloadZip, setPhotoFeatured, getUserFavoriteIds, toggleFavorite as toggleFavoriteAPI, bulkDeletePhotos, getCollaborators } from '../api';
+import AlbumPicker from '../components/AlbumPicker';
+import { getEvent, getPhotos, loginToEvent, getPreviewUrl, requestZip, downloadZip, setPhotoFeatured, getUserFavoriteIds, toggleFavorite as toggleFavoriteAPI, bulkDeletePhotos, bulkCopyPhotos, getCollaborators } from '../api';
 import type { Event, Photo, Collaborator } from '../types';
 import { CollaboratorAvatars } from '../components/CollaboratorAvatars';
 import { useAuth } from '../contexts/AuthContext';
@@ -38,6 +39,8 @@ const EventGallery: React.FC = () => {
   const [sortBy, setSortBy] = useState('date_asc');
   const [userFavorites, setUserFavorites] = useState<Set<string>>(new Set());
   const [deleting, setDeleting] = useState(false);
+  const [copying, setCopying] = useState(false);
+  const [showCopyPicker, setShowCopyPicker] = useState(false);
   const [collaboratorRole, setCollaboratorRole] = useState<'viewer' | 'uploader' | 'editor' | 'admin' | null>(null);
   const [collaborators, setCollaborators] = useState<Collaborator[]>([]);
   const [activeDate, setActiveDate] = useState<string | null>(null);
@@ -395,6 +398,35 @@ const EventGallery: React.FC = () => {
       toast.showError('Failed to delete photos. Please try again.');
     } finally {
       setDeleting(false);
+    }
+  };
+
+  const handleBulkCopy = async (targetEventSlug: string) => {
+    const selected = Array.from(selectedPhotos);
+    if (selected.length === 0) {
+      toast.showInfo('No photos selected');
+      return;
+    }
+
+    try {
+      setCopying(true);
+      const result = await bulkCopyPhotos(selected, targetEventSlug);
+
+      clearSelection();
+
+      if (result.copiedCount === result.totalRequested) {
+        await haptics.success();
+        toast.showSuccess(`Successfully copied ${result.copiedCount} photo(s) to the album`);
+      } else {
+        await haptics.warning();
+        toast.showInfo(`Copied ${result.copiedCount} of ${result.totalRequested} photo(s). Some photos may have failed to copy.`);
+      }
+    } catch (error) {
+      console.error('Error copying photos:', error);
+      await haptics.error();
+      toast.showError('Failed to copy photos. Please try again.');
+    } finally {
+      setCopying(false);
     }
   };
 
@@ -802,6 +834,16 @@ const EventGallery: React.FC = () => {
   return (
     <div className="min-h-screen bg-gradient-to-b from-white to-slate-50 dark:from-gray-900 dark:to-gray-950 flex flex-col">
       {ConfirmDialog}
+      <AlbumPicker
+        isOpen={showCopyPicker}
+        onClose={() => setShowCopyPicker(false)}
+        onSelectAlbum={(targetSlug) => {
+          void handleBulkCopy(targetSlug);
+        }}
+        excludeSlug={slug}
+        title="Copy to Album"
+        description="Choose an album to copy the selected photos to"
+      />
       <SEO
         title={`${event?.name || 'Event Gallery'} - ${config.appName}`}
         description={`Browse ${photos.length} photos from ${event?.name}${event?.cities && event.cities.length > 0 ? ` in ${event.cities.join(', ')}` : ''}. Professional event photography featuring ice skating and inline skating.`}
@@ -902,9 +944,11 @@ const EventGallery: React.FC = () => {
           }
           showFeaturedAction={canFeature}
           onDownloadSelected={downloadSelected}
+          onCopySelected={canDelete ? () => setShowCopyPicker(true) : undefined}
           onDeleteSelected={canDelete ? handleBulkDelete : undefined}
           isAdmin={canDelete}
           isDeleting={deleting}
+          isCopying={copying}
         />
 
         {/* Date Timeline - Only show for multi-day events */}

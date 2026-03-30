@@ -1,4 +1,5 @@
 import { Hono, Context } from 'hono';
+import { ulid } from 'ulid';
 import type { Env, User } from '../../types';
 import { extractUser, hasEventCapabilityByEventId, isUserAdmin } from '../../auth';
 
@@ -367,6 +368,188 @@ app.post('/bulk-delete', async (c) => {
   } catch (error) {
     console.error('Error in bulk delete:', error);
     return c.json({ error: 'Failed to process bulk delete' }, 500);
+  }
+});
+
+/**
+ * POST /photos/bulk-copy
+ * Copy multiple photos to a target event
+ */
+app.post('/bulk-copy', async (c) => {
+  try {
+    const user = await extractUser(c);
+    if (!user) {
+      return c.json({ error: 'Authentication required' }, 401);
+    }
+
+    c.set('user', user);
+    const isGlobalAdmin = isUserAdmin(user, c.env.ADMIN_EMAILS || '');
+
+    const { photoIds, targetEventSlug } = await c.req.json<{ photoIds: string[]; targetEventSlug: string }>();
+
+    if (!Array.isArray(photoIds) || photoIds.length === 0) {
+      return c.json({ error: 'photoIds array is required' }, 400);
+    }
+
+    if (!targetEventSlug || typeof targetEventSlug !== 'string') {
+      return c.json({ error: 'targetEventSlug is required' }, 400);
+    }
+
+    if (photoIds.length > 500) {
+      return c.json({ error: 'Cannot copy more than 500 photos at once' }, 400);
+    }
+
+    // Verify target event exists
+    const targetEvent = await c.env.DB
+      .prepare('SELECT id, slug FROM events WHERE slug = ?')
+      .bind(targetEventSlug)
+      .first<{ id: number; slug: string }>();
+
+    if (!targetEvent) {
+      return c.json({ error: 'Target event not found' }, 404);
+    }
+
+    // Check that the user has upload permission in the target event
+    if (!isGlobalAdmin) {
+      // Use a broader check: if user is editor/admin collaborator they can upload
+      const targetCollaborator = await c.env.DB
+        .prepare(`SELECT role FROM collaborators WHERE event_id = ? AND user_email = ?`)
+        .bind(targetEvent.id, user.email)
+        .first<{ role: string }>();
+
+      const allowedRoles = ['uploader', 'editor', 'admin'];
+      if (!targetCollaborator || !allowedRoles.includes(targetCollaborator.role)) {
+        return c.json({ error: 'Upload permission required for the target event' }, 403);
+      }
+    }
+
+    const uniquePhotoIds = Array.from(new Set(photoIds));
+    const placeholders = uniquePhotoIds.map(() => '?').join(', ');
+
+    // Fetch source photos with their event slugs
+    const photoRows = await c.env.DB
+      .prepare(`
+        SELECT p.id, p.event_id, p.original_filename, p.file_type, p.capture_time,
+               p.width, p.height, p.iso, p.aperture, p.shutter_speed, p.focal_length,
+               p.camera_make, p.camera_model, p.lens_model, p.latitude, p.longitude,
+               p.city, p.blur_placeholder, e.slug as event_slug
+        FROM photos p
+        JOIN events e ON p.event_id = e.id
+        WHERE p.id IN (${placeholders})
+      `)
+      .bind(...uniquePhotoIds)
+      .all<{
+        id: string; event_id: number; original_filename: string; file_type: string;
+        capture_time: string; width: number | null; height: number | null;
+        iso: number | null; aperture: string | null; shutter_speed: string | null;
+        focal_length: string | null; camera_make: string | null; camera_model: string | null;
+        lens_model: string | null; latitude: number | null; longitude: number | null;
+        city: string | null; blur_placeholder: string | null; event_slug: string;
+      }>();
+
+    const sourcePhotos = photoRows.results || [];
+
+    if (sourcePhotos.length === 0) {
+      return c.json({ error: 'No valid photos found' }, 404);
+    }
+
+    const errors: { photoId: string; error: string }[] = [];
+    let copiedCount = 0;
+
+    const COPY_BATCH_SIZE = 10;
+    for (let i = 0; i < sourcePhotos.length; i += COPY_BATCH_SIZE) {
+      const batch = sourcePhotos.slice(i, i + COPY_BATCH_SIZE);
+
+      await Promise.all(batch.map(async (photo) => {
+        try {
+          const newPhotoId = ulid();
+          const isVideo = photo.file_type === 'video/mp4';
+          const extension = isVideo ? 'mp4' : 'jpg';
+
+          const sourceOriginalKey = `original/${photo.event_slug}/${photo.id}.${extension}`;
+          const destOriginalKey = `original/${targetEvent.slug}/${newPhotoId}.${extension}`;
+
+          const sourcePreviewKey = `preview/${photo.event_slug}/${photo.id}.jpg`;
+          const destPreviewKey = `preview/${targetEvent.slug}/${newPhotoId}.jpg`;
+
+          // Copy original file
+          const sourceOriginal = await c.env.PHOTOS_BUCKET.get(sourceOriginalKey);
+          if (!sourceOriginal) {
+            errors.push({ photoId: photo.id, error: 'Source original file not found in storage' });
+            return;
+          }
+
+          await withRetry(
+            () => c.env.PHOTOS_BUCKET.put(destOriginalKey, sourceOriginal.body, {
+              httpMetadata: { contentType: photo.file_type },
+            }),
+            `R2 copy original for photo ${photo.id}`
+          );
+
+          // Copy preview file if it exists
+          const sourcePreview = await c.env.PHOTOS_BUCKET.get(sourcePreviewKey);
+          if (sourcePreview) {
+            await withRetry(
+              () => c.env.PHOTOS_BUCKET.put(destPreviewKey, sourcePreview.body, {
+                httpMetadata: { contentType: 'image/jpeg' },
+              }),
+              `R2 copy preview for photo ${photo.id}`
+            );
+          }
+
+          // Insert new photo record in the target event
+          await withRetry(
+            () => c.env.DB
+              .prepare(`INSERT INTO photos (
+                id, event_id, original_filename, file_type, capture_time,
+                width, height, iso, aperture, shutter_speed, focal_length,
+                camera_make, camera_model, lens_model, latitude, longitude,
+                city, blur_placeholder, uploaded_by
+              ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+              .bind(
+                newPhotoId, targetEvent.id, photo.original_filename, photo.file_type,
+                photo.capture_time, photo.width, photo.height, photo.iso, photo.aperture,
+                photo.shutter_speed, photo.focal_length, photo.camera_make, photo.camera_model,
+                photo.lens_model, photo.latitude, photo.longitude, photo.city,
+                photo.blur_placeholder, user.name?.trim() ? user.name.trim().split(' ')[0] : null
+              )
+              .run(),
+            `DB insert copied photo ${newPhotoId}`
+          );
+
+          copiedCount++;
+        } catch (err) {
+          console.error(`Failed to copy photo ${photo.id}:`, err);
+          errors.push({ photoId: photo.id, error: 'Failed to copy photo' });
+        }
+      }));
+    }
+
+    // Update inferred_date on target event based on earliest photo
+    if (copiedCount > 0) {
+      await c.env.DB
+        .prepare(`
+          UPDATE events
+          SET inferred_date = (
+            SELECT DATE(MIN(capture_time))
+            FROM photos
+            WHERE event_id = ?
+          )
+          WHERE id = ?
+        `)
+        .bind(targetEvent.id, targetEvent.id)
+        .run();
+    }
+
+    return c.json({
+      success: true,
+      copiedCount,
+      totalRequested: photoIds.length,
+      errors: errors.length > 0 ? errors : undefined,
+    });
+  } catch (error) {
+    console.error('Error in bulk copy:', error);
+    return c.json({ error: 'Failed to process bulk copy' }, 500);
   }
 });
 

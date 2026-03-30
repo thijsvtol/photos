@@ -9,13 +9,16 @@ interface AlbumPickerProps {
   isOpen: boolean;
   onClose: () => void;
   onSelectAlbum: (eventSlug: string) => void;
+  excludeSlug?: string;
+  title?: string;
+  description?: string;
 }
 
 /**
  * AlbumPicker component displays a modal to select an album for uploading shared photos.
  * Only shows albums where the user has upload permissions (admin or collaborator).
  */
-export default function AlbumPicker({ isOpen, onClose, onSelectAlbum }: AlbumPickerProps) {
+export default function AlbumPicker({ isOpen, onClose, onSelectAlbum, excludeSlug, title = 'Select Album', description = 'Choose an album to upload your photos' }: AlbumPickerProps) {
   const [events, setEvents] = useState<Event[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -28,7 +31,8 @@ export default function AlbumPicker({ isOpen, onClose, onSelectAlbum }: AlbumPic
     if (isOpen) {
       loadEvents();
     }
-  }, [isOpen]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isOpen, excludeSlug]);
 
   const loadEvents = async () => {
     try {
@@ -38,7 +42,7 @@ export default function AlbumPicker({ isOpen, onClose, onSelectAlbum }: AlbumPic
       // getEvents already filters by permissions on the backend
       // It returns only events where user is admin or collaborator
       const fetchedEvents = await getEvents();
-      setEvents(fetchedEvents);
+      setEvents(excludeSlug ? fetchedEvents.filter(e => e.slug !== excludeSlug) : fetchedEvents);
     } catch (err) {
       console.error('Failed to load albums:', err);
       setError('Failed to load albums. Please try again.');
@@ -142,10 +146,10 @@ export default function AlbumPicker({ isOpen, onClose, onSelectAlbum }: AlbumPic
           <div className="flex-1 min-w-0">
             <h2 className="text-base sm:text-lg font-bold text-gray-900 dark:text-white flex items-center gap-2">
               <Upload className="w-4 h-4 sm:w-5 sm:h-5 flex-shrink-0" />
-              <span>Select Album</span>
+              <span>{title}</span>
             </h2>
             <p className="text-xs text-gray-600 dark:text-gray-400 mt-1">
-              Choose an album to upload your photos
+              {description}
             </p>
           </div>
           <button 
