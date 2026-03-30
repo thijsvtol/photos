@@ -10,7 +10,8 @@
     "deploy": "wrangler deploy",
     "test": "vitest run --passWithNoTests",
     "test:coverage:security": "vitest run src/test/securityRoutesCoverage.test.ts --coverage --coverage.include=src/routes/media.ts --coverage.include=src/routes/zip.ts --coverage.thresholds.lines=100 --coverage.thresholds.functions=100 --coverage.thresholds.statements=100 --coverage.thresholds.branches=100",
-    "test:integration:staging": "vitest run src/test/stagingIntegration.test.ts"
+    "test:integration:staging": "vitest run src/test/stagingIntegration.test.ts",
+    "test:integration:staging:full": "vitest run src/test/stagingIntegration.test.ts src/test/stagingRoutesIntegration.test.ts"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^4.20260317.1",
