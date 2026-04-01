@@ -143,14 +143,14 @@ jobs:
           whatsNewDirectory: apps/web/release-notes
       
       - name: Upload APK as artifact
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7
         with:
           name: app-release-v${{ env.VERSION_CODE }}
           path: apps/android/app/build/outputs/apk/release/app-release.apk
           retention-days: 30
       
       - name: Upload AAB as artifact
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7
         with:
           name: app-bundle-v${{ env.VERSION_CODE }}
           path: apps/android/app/build/outputs/bundle/release/app-release.aab
