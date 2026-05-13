@@ -123,7 +123,7 @@ router.get('/api/mobile-auth', async (c) => {
       userId: user.id,
       email: user.email,
       name: user.name,
-      expiresIn: 30 * 24 * 60 * 60 // 30 days in seconds
+      expiresIn: 365 * 24 * 60 * 60 // 365 days in seconds
     });
 
     // Check if user is admin
@@ -134,7 +134,7 @@ router.get('/api/mobile-auth', async (c) => {
     // Build callback URL
     const callbackUrl = new URL('photos://auth/callback');
     callbackUrl.searchParams.set('token', token);
-    callbackUrl.searchParams.set('expires', '2592000'); // 30 days in seconds
+    callbackUrl.searchParams.set('expires', '31536000'); // 365 days in seconds
     callbackUrl.searchParams.set('state', state);
     callbackUrl.searchParams.set('user', JSON.stringify({
       id: user.id,
