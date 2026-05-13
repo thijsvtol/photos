@@ -5,6 +5,38 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.4.6] - 2026-05-13
+
+### Changed
+- Android app release bumped to build 17 (versionName 1.4.6).
+- Project package versions synchronized to 1.4.6.
+
+### Fixed
+- Photos and preview images not loading on Android app for event owners and collaborators — `<img>` tags cannot send Authorization headers, so Bearer token is now passed as a query parameter on native image URLs.
+- Authenticated collaborators no longer blocked by event password gate when accessing media they have permission to view.
+- Server `extractUser` now accepts Bearer token from `?token=` query parameter for mobile image requests.
+
+## [1.4.5] - 2026-05-13
+
+### Added
+- Video streaming with HTTP range requests (206 Partial Content) — videos now stream and seek instantly instead of requiring full download.
+- Video poster thumbnails in gallery grid — videos show blur placeholder frame instead of a black rectangle.
+- Play icon overlay on video thumbnails — clear visual indicator for video content.
+- Double-tap to zoom on photo detail view — standard gallery gesture, 2× zoom at tap point.
+- View Transitions API support — smooth zoom-from-thumbnail animation when opening photos (Chrome/Edge).
+- Staggered grid loading animation — photos fade in with subtle sequential delays.
+- Upload retry with exponential backoff (3 attempts) for video chunk uploads on web.
+
+### Changed
+- Mobile JWT session extended from 30 days to 365 days — Android app stays logged in for a year.
+- Event session cookies now persist for 7 days (was browser-session-only).
+- Video elements use `preload="metadata"` for faster playback start.
+- Gallery cards use `content-visibility: auto` for improved scroll performance on large galleries.
+
+### Fixed
+- Long video uploads failing on web due to no retry logic — now retries failed chunks automatically.
+- Slow video playback caused by lack of range request support — browsers can now stream progressively.
+
 ## [1.4.4] - 2026-03-30
 
 ### Changed

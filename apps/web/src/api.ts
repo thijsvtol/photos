@@ -340,6 +340,13 @@ export const getPreviewUrl = (slug: string, photoId: string, fileType?: string, 
       pathWithVersion = `${pathWithVersion}${separator}est=${encodeURIComponent(eventSessionToken)}`;
     }
 
+    // Append Bearer token for authenticated media access (img tags can't send headers)
+    const bearerToken = localStorage.getItem('mobile_bearer_token');
+    if (bearerToken) {
+      const separator = pathWithVersion.includes('?') ? '&' : '?';
+      pathWithVersion = `${pathWithVersion}${separator}token=${encodeURIComponent(bearerToken)}`;
+    }
+
     const domain = config.domain.startsWith('http') ? config.domain : `https://${config.domain}`;
     return `${domain}${pathWithVersion}`;
   }
@@ -359,6 +366,13 @@ export const getOriginalUrl = (slug: string, photoId: string, fileType?: string,
     if (eventSessionToken) {
       const separator = pathWithVersion.includes('?') ? '&' : '?';
       pathWithVersion = `${pathWithVersion}${separator}est=${encodeURIComponent(eventSessionToken)}`;
+    }
+
+    // Append Bearer token for authenticated media access (img tags can't send headers)
+    const bearerToken = localStorage.getItem('mobile_bearer_token');
+    if (bearerToken) {
+      const separator = pathWithVersion.includes('?') ? '&' : '?';
+      pathWithVersion = `${pathWithVersion}${separator}token=${encodeURIComponent(bearerToken)}`;
     }
 
     const domain = config.domain.startsWith('http') ? config.domain : `https://${config.domain}`;
