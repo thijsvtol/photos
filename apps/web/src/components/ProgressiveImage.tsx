@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 
 interface ProgressiveImageProps {
   src: string;
@@ -18,20 +18,44 @@ const ProgressiveImage: React.FC<ProgressiveImageProps> = ({
   loading = 'lazy'
 }) => {
   const [imageLoaded, setImageLoaded] = useState(false);
-  const [currentSrc, setCurrentSrc] = useState(blurDataUrl || src);
+  const containerRef = useRef<HTMLDivElement>(null);
+  const loadTriggeredRef = useRef(false);
 
   useEffect(() => {
-    // Preload the full image
-    const img = new Image();
-    img.src = src;
-    img.onload = () => {
-      setCurrentSrc(src);
-      setImageLoaded(true);
-    };
+    // Reset when src changes
+    setImageLoaded(false);
+    loadTriggeredRef.current = false;
+  }, [src]);
+
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el || loadTriggeredRef.current) return;
+
+    // Use IntersectionObserver to only load the full image when near viewport
+    const observer = new IntersectionObserver(
+      (entries) => {
+        entries.forEach((entry) => {
+          if (entry.isIntersecting && !loadTriggeredRef.current) {
+            loadTriggeredRef.current = true;
+            observer.disconnect();
+
+            const img = new Image();
+            img.src = src;
+            img.onload = () => {
+              setImageLoaded(true);
+            };
+          }
+        });
+      },
+      { rootMargin: '200px 0px' } // Start loading 200px before entering viewport
+    );
+
+    observer.observe(el);
+    return () => observer.disconnect();
   }, [src]);
 
   return (
-    <div className="relative overflow-hidden w-full h-full">
+    <div ref={containerRef} className="relative overflow-hidden w-full h-full">
       {blurDataUrl && !imageLoaded && (
         <img
           src={blurDataUrl}
@@ -41,14 +65,14 @@ const ProgressiveImage: React.FC<ProgressiveImageProps> = ({
         />
       )}
       <img
-        src={currentSrc}
+        src={imageLoaded ? src : blurDataUrl || ''}
         alt={alt}
         className={`${className} transition-opacity duration-500 ${imageLoaded ? 'opacity-100' : 'opacity-0'}`}
         style={style}
         loading={loading}
         onLoad={() => {
-          if (currentSrc === src) {
-            setImageLoaded(true);
+          if (imageLoaded) {
+            // Already handled by preload
           }
         }}
       />

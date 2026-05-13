@@ -37,6 +37,7 @@ const EventGallery: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [sortBy, setSortBy] = useState('date_asc');
+  const [searchQuery, setSearchQuery] = useState('');
   const [userFavorites, setUserFavorites] = useState<Set<string>>(new Set());
   const [deleting, setDeleting] = useState(false);
   const [copying, setCopying] = useState(false);
@@ -498,7 +499,22 @@ const EventGallery: React.FC = () => {
     };
   }, [photos]);
 
-  const { groups: photosByDate, dates } = groupPhotosByDate(photos);
+  // Filter photos by search query
+  const filteredPhotos = searchQuery.trim()
+    ? photos.filter((photo) => {
+        const query = searchQuery.toLowerCase();
+        return (
+          photo.original_filename.toLowerCase().includes(query) ||
+          (photo.camera_make && photo.camera_make.toLowerCase().includes(query)) ||
+          (photo.camera_model && photo.camera_model.toLowerCase().includes(query)) ||
+          (photo.lens_model && photo.lens_model.toLowerCase().includes(query)) ||
+          (photo.city && photo.city.toLowerCase().includes(query)) ||
+          (photo.capture_time && photo.capture_time.toLowerCase().includes(query))
+        );
+      })
+    : photos;
+
+  const { groups: photosByDate, dates } = groupPhotosByDate(filteredPhotos);
 
   const structuredData = {
     '@context': 'https://schema.org',
@@ -521,13 +537,13 @@ const EventGallery: React.FC = () => {
   const previewImageUrl = previewPhoto ? getPreviewUrl(slug!, previewPhoto.id, previewPhoto.file_type, previewPhoto.cache_version) : undefined;
   const isMultiDateView = dates.length > 1;
   const visibleDates = isMultiDateView ? dates.slice(0, visibleDateCount) : dates;
-  const visibleSingleDatePhotos = isMultiDateView ? photos : photos.slice(0, visibleSinglePhotoCount);
+  const visibleSingleDatePhotos = isMultiDateView ? filteredPhotos : filteredPhotos.slice(0, visibleSinglePhotoCount);
   const visiblePhotosForActions = isMultiDateView
     ? visibleDates.flatMap((date) => photosByDate.get(date) || [])
     : visibleSingleDatePhotos;
   const hasMoreGalleryItems = isMultiDateView
     ? visibleDateCount < dates.length
-    : visibleSinglePhotoCount < photos.length;
+    : visibleSinglePhotoCount < filteredPhotos.length;
 
   const selectAllVisiblePhotos = async () => {
     let selectedNew = 0;
@@ -630,7 +646,7 @@ const EventGallery: React.FC = () => {
     setVisibleDateCount(8);
     setVisibleSinglePhotoCount(140);
     prefetchedPhotoIdsRef.current.clear();
-  }, [slug, sortBy, photos.length]);
+  }, [slug, sortBy, searchQuery, photos.length]);
 
   // Load additional sections/photos when scrolling near the sentinel.
   useEffect(() => {
@@ -927,6 +943,8 @@ const EventGallery: React.FC = () => {
         <GallerySortFilter
           sortBy={sortBy}
           onSortChange={setSortBy}
+          searchQuery={searchQuery}
+          onSearchChange={setSearchQuery}
           selectedCount={selectedPhotos.size}
           onSelectAllVisible={selectAllVisiblePhotos}
           onClearSelection={() => {
@@ -974,7 +992,17 @@ const EventGallery: React.FC = () => {
         {/* Gallery */}
         {photos.length === 0 ? (
           <div className="text-center py-12">
-            <p className="text-gray-600">No photos found.</p>
+            <p className="text-gray-600 dark:text-gray-400">No photos found.</p>
+          </div>
+        ) : filteredPhotos.length === 0 ? (
+          <div className="text-center py-12">
+            <p className="text-gray-600 dark:text-gray-400">No photos match "{searchQuery}"</p>
+            <button
+              onClick={() => setSearchQuery('')}
+              className="mt-2 text-blue-600 dark:text-blue-400 text-sm hover:underline"
+            >
+              Clear search
+            </button>
           </div>
         ) : isMultiDateView ? (
           // Multi-date view with date headers

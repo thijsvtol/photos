@@ -5,6 +5,22 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.4.6] - 2026-05-13
+
+### Added
+- Viewport-priority image loading — photos near the viewport load first instead of sequentially from top, so scrolled-to images appear instantly.
+- Text search in event gallery — filter photos by filename, camera model, lens, city, or date directly from the gallery page.
+
+### Changed
+- Android app release bumped to build 17 (versionName 1.4.6).
+- Project package versions synchronized to 1.4.6.
+- ProgressiveImage component uses IntersectionObserver for on-demand loading instead of eager preloading all images.
+
+### Fixed
+- Photos and preview images not loading on Android app for event owners and collaborators — Bearer token now passed as query parameter for native image requests.
+- Authenticated collaborators no longer blocked by event password gate when accessing media.
+- Server user extraction now accepts Bearer token from query parameter for mobile image requests.
+
 ## [1.4.4] - 2026-03-30
 
 ### Changed
