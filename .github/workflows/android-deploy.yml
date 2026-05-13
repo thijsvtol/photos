@@ -143,14 +143,14 @@ jobs:
           whatsNewDirectory: apps/web/release-notes
       
       - name: Upload APK as artifact
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7
         with:
           name: app-release-v${{ env.VERSION_CODE }}
           path: apps/android/app/build/outputs/apk/release/app-release.apk
           retention-days: 30
       
       - name: Upload AAB as artifact
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7
         with:
           name: app-bundle-v${{ env.VERSION_CODE }}
           path: apps/android/app/build/outputs/bundle/release/app-release.aab
@@ -158,7 +158,7 @@ jobs:
       
       - name: Create GitHub Release
         if: ${{ github.event.inputs.track == 'production' }}
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           tag_name: android-v${{ env.VERSION_NAME }}-${{ env.VERSION_CODE }}
           name: Android v${{ env.VERSION_NAME }} (Build ${{ env.VERSION_CODE }})
