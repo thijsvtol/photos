@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { Heart, Star, Check } from 'lucide-react';
+import { Heart, Star, Check, Play } from 'lucide-react';
 import ProgressiveImage from './ProgressiveImage';
 import { getPreviewUrl, downloadOriginal, downloadSmall } from '../api';
 import type { Photo } from '../types';
@@ -10,6 +10,7 @@ interface PhotoCardProps {
   slug: string;
   albumMode?: boolean;
   forceControlsVisible?: boolean;
+  staggerIndex?: number;
   // Optional props for different contexts
   fromFavorites?: boolean;
   favoritePhotos?: Array<{ id: string; slug: string }>;
@@ -44,6 +45,7 @@ const PhotoCard: React.FC<PhotoCardProps> = ({
   userFavorites = new Set(),
   albumMode = false,
   forceControlsVisible = false,
+  staggerIndex = 0,
 }) => {
   const isVideo = photo.file_type === 'video/mp4';
   const [supportsHover, setSupportsHover] = useState(true);
@@ -101,7 +103,7 @@ const PhotoCard: React.FC<PhotoCardProps> = ({
 
   if (albumMode) {
     return (
-      <div data-photo-card="true" className="mb-2 sm:mb-3 relative group">
+      <div data-photo-card="true" className="mb-2 sm:mb-3 relative group" style={{ contentVisibility: 'auto', containIntrinsicSize: 'auto 300px', animationDelay: `${Math.min(staggerIndex * 30, 300)}ms` }}>
         <Link
           to={`/p/${slug}/${photo.id}`}
           state={fromFavorites && favoritePhotos ? {
@@ -128,23 +130,34 @@ const PhotoCard: React.FC<PhotoCardProps> = ({
           onTouchCancel={clearLongPressTimer}
         >
           {isVideo ? (
-            <video
-              src={getPreviewUrl(slug, photo.id, photo.file_type, photo.cache_version)}
-              className="w-full h-full object-cover object-center transition-transform duration-300 group-hover:scale-[1.02]"
-              muted
-              playsInline
-              onMouseEnter={(e) => e.currentTarget.play()}
-              onMouseLeave={(e) => {
-                e.currentTarget.pause();
-                e.currentTarget.currentTime = 0;
-              }}
-            />
+            <>
+              <video
+                src={getPreviewUrl(slug, photo.id, photo.file_type, photo.cache_version)}
+                className="w-full h-full object-cover object-center transition-transform duration-300 group-hover:scale-[1.02]"
+                style={{ viewTransitionName: `photo-${photo.id}` }}
+                muted
+                playsInline
+                preload="metadata"
+                poster={photo.blur_placeholder || undefined}
+                onMouseEnter={(e) => e.currentTarget.play()}
+                onMouseLeave={(e) => {
+                  e.currentTarget.pause();
+                  e.currentTarget.currentTime = 0;
+                }}
+              />
+              <div className="absolute inset-0 flex items-center justify-center pointer-events-none group-hover:opacity-0 transition-opacity duration-200">
+                <div className="bg-black/50 backdrop-blur-sm rounded-full p-2.5">
+                  <Play className="w-5 h-5 text-white fill-white" />
+                </div>
+              </div>
+            </>
           ) : (
             <ProgressiveImage
               src={getPreviewUrl(slug, photo.id, photo.file_type, photo.cache_version)}
               blurDataUrl={photo.blur_placeholder}
               alt={photo.original_filename}
               className="w-full h-full object-cover object-center transition-transform duration-300 group-hover:scale-[1.02]"
+              style={{ viewTransitionName: `photo-${photo.id}` }}
               loading="lazy"
             />
           )}
@@ -225,17 +238,26 @@ const PhotoCard: React.FC<PhotoCardProps> = ({
         }}
       >
         {isVideo ? (
-          <video
-            src={getPreviewUrl(slug, photo.id, photo.file_type)}
-            className="w-full h-full object-cover object-center"
-            muted
-            playsInline
-            onMouseEnter={(e) => e.currentTarget.play()}
-            onMouseLeave={(e) => {
-              e.currentTarget.pause();
-              e.currentTarget.currentTime = 0;
-            }}
-          />
+          <>
+            <video
+              src={getPreviewUrl(slug, photo.id, photo.file_type)}
+              className="w-full h-full object-cover object-center"
+              muted
+              playsInline
+              preload="metadata"
+              poster={photo.blur_placeholder || undefined}
+              onMouseEnter={(e) => e.currentTarget.play()}
+              onMouseLeave={(e) => {
+                e.currentTarget.pause();
+                e.currentTarget.currentTime = 0;
+              }}
+            />
+            <div className="absolute inset-0 flex items-center justify-center pointer-events-none group-hover:opacity-0 transition-opacity duration-200">
+              <div className="bg-black/50 backdrop-blur-sm rounded-full p-2.5">
+                <Play className="w-5 h-5 text-white fill-white" />
+              </div>
+            </div>
+          </>
         ) : (
           <ProgressiveImage
             src={getPreviewUrl(slug, photo.id, photo.file_type)}
