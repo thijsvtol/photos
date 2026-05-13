@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.4.6] - 2026-05-13
+
+### Changed
+- Android app release bumped to build 17 (versionName 1.4.6).
+- Project package versions synchronized to 1.4.6.
+
+### Fixed
+- Photos and preview images not loading on Android app for event owners and collaborators — `<img>` tags cannot send Authorization headers, so Bearer token is now passed as a query parameter on native image URLs.
+- Authenticated collaborators no longer blocked by event password gate when accessing media they have permission to view.
+- Server `extractUser` now accepts Bearer token from `?token=` query parameter for mobile image requests.
+
 ## [1.4.5] - 2026-05-13
 
 ### Added

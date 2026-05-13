@@ -21,6 +21,17 @@ export async function extractUser(c: Context<{ Bindings: Env; Variables: Variabl
       return await verifyBearerToken(c.env, token);
     }
 
+    // Check for token query parameter (mobile image requests where headers can't be set)
+    try {
+      const url = new URL(c.req.url);
+      const queryToken = url.searchParams.get('token');
+      if (queryToken) {
+        return await verifyBearerToken(c.env, queryToken);
+      }
+    } catch {
+      // Ignore malformed URL
+    }
+
     // Then try Cloudflare Access JWT (web)
     // Try to get JWT from header (for direct Access-protected routes)
     let jwt = c.req.header('Cf-Access-Jwt-Assertion') 
@@ -343,14 +354,29 @@ export async function checkEventAuth(
     return true;
   }
 
-  // Check for Bearer token (mobile app users)
+  // Check for Bearer token (mobile app users) — in header or query param
   const authHeader = c.req.header('Authorization');
+  let token: string | null = null;
   if (authHeader?.startsWith('Bearer ')) {
-    const token = authHeader.substring(7);
+    token = authHeader.substring(7);
+  } else {
+    try {
+      const url = new URL(c.req.url);
+      token = url.searchParams.get('token');
+    } catch {
+      // Ignore malformed URL
+    }
+  }
+
+  if (token) {
     const user = await verifyBearerToken(c.env, token);
-    
-    // Allow if user is an admin
-    if (user && isUserAdmin(user, c.env.ADMIN_EMAILS || '')) {
+    if (user) {
+      // Allow admins
+      if (isUserAdmin(user, c.env.ADMIN_EMAILS || '')) {
+        return true;
+      }
+      // Allow any authenticated user to bypass event password
+      // (collaborator check is done in requireMediaAccess)
       return true;
     }
   }

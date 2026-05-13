@@ -63,10 +63,31 @@ async function requireMediaAccess(
   c: Context<{ Bindings: Env }>,
   event: { id: number; slug: string; password_hash: string | null; visibility: 'public' | 'private' | 'collaborators_only' }
 ): Promise<Response | null> {
-  // Password gate for protected events.
-  const isAuthenticated = await checkEventAuth(c, event.slug, !!event.password_hash);
-  if (!isAuthenticated) {
-    return c.json({ error: 'Authentication required' }, 401);
+  // Try to identify the user first (supports Bearer header + query param token)
+  const user = await extractUser(c as any);
+
+  // Admins always have full access
+  if (user && isAdminEmail(user.email, c.env.ADMIN_EMAILS || '')) {
+    return null;
+  }
+
+  // Collaborators bypass password gate for their events
+  if (user) {
+    const collaborator = await c.env.DB
+      .prepare('SELECT role FROM event_collaborators WHERE event_id = ? AND user_email = ?')
+      .bind(event.id, user.email)
+      .first<{ role: string }>();
+    if (collaborator?.role) {
+      return null;
+    }
+  }
+
+  // Password gate for non-collaborator users
+  if (event.password_hash) {
+    const isAuthenticated = await checkEventAuth(c, event.slug, true);
+    if (!isAuthenticated) {
+      return c.json({ error: 'Authentication required' }, 401);
+    }
   }
 
   // Visibility gate: private/collaborators-only media requires authenticated user identity.
@@ -74,29 +95,12 @@ async function requireMediaAccess(
     return null;
   }
 
-  const user = await extractUser(c as any);
   if (!user) {
     return c.json({ error: 'Authentication required' }, 401);
   }
 
-  if (isAdminEmail(user.email, c.env.ADMIN_EMAILS || '')) {
-    return null;
-  }
-
-  if (event.visibility === 'private') {
-    return c.json({ error: 'Access denied' }, 403);
-  }
-
-  const collaborator = await c.env.DB
-    .prepare('SELECT role FROM event_collaborators WHERE event_id = ? AND user_email = ?')
-    .bind(event.id, user.email)
-    .first<{ role: string }>();
-
-  if (!collaborator?.role) {
-    return c.json({ error: 'Access denied' }, 403);
-  }
-
-  return null;
+  // Private events are only accessible by admins/collaborators (already handled above)
+  return c.json({ error: 'Access denied' }, 403);
 }
 
 /**
