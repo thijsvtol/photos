@@ -1,6 +1,6 @@
 {
   "name": "photo-sharing-app",
-  "version": "1.4.6",
+  "version": "1.4.7",
   "description": "Self-hosted photo sharing application",
   "private": true,
   "type": "module",
