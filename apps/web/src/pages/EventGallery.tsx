@@ -1033,12 +1033,13 @@ const EventGallery: React.FC = () => {
                     className="flex -ml-2 sm:-ml-3 w-auto"
                     columnClassName="pl-2 sm:pl-3 bg-clip-padding"
                   >
-                    {datePhotos.map((photo) => (
+                    {datePhotos.map((photo, index) => (
                       <PhotoCard
                         key={photo.id}
                         photo={photo}
                         slug={slug!}
                         albumMode={true}
+                        staggerIndex={index}
                         forceControlsVisible={selectedPhotos.size > 0}
                         sortBy={sortBy}
                         showSelection={true}
@@ -1070,12 +1071,13 @@ const EventGallery: React.FC = () => {
             className="flex -ml-2 sm:-ml-3 w-auto"
             columnClassName="pl-2 sm:pl-3 bg-clip-padding"
           >
-            {visibleSingleDatePhotos.map((photo) => (
+            {visibleSingleDatePhotos.map((photo, index) => (
               <PhotoCard
                 key={photo.id}
                 photo={photo}
                 slug={slug!}
                 albumMode={true}
+                staggerIndex={index}
                 forceControlsVisible={selectedPhotos.size > 0}
                 sortBy={sortBy}
                 showSelection={true}

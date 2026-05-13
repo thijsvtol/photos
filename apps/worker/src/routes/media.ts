@@ -4,6 +4,56 @@ import { checkEventAuth, extractUser } from '../auth';
 
 const app = new Hono<{ Bindings: Env }>();
 
+/**
+ * Parse an HTTP Range header and return the start/end byte offsets.
+ * Only supports a single byte range (e.g. "bytes=0-1023").
+ */
+function parseRange(header: string, totalSize: number): { offset: number; length: number; end: number } | null {
+  const match = header.match(/^bytes=(\d+)-(\d*)$/);
+  if (!match) return null;
+  const start = parseInt(match[1], 10);
+  const end = match[2] ? parseInt(match[2], 10) : totalSize - 1;
+  if (start > end || start >= totalSize) return null;
+  const clampedEnd = Math.min(end, totalSize - 1);
+  return { offset: start, length: clampedEnd - start + 1, end: clampedEnd };
+}
+
+/**
+ * Serve an R2 object with range-request support (HTTP 206) for video streaming.
+ */
+function serveWithRange(
+  request: Request,
+  object: R2ObjectBody,
+  contentType: string,
+  extraHeaders?: Record<string, string>
+): Response {
+  const totalSize = object.size;
+  const rangeHeader = request.headers.get('Range');
+  const headers: Record<string, string> = {
+    'Content-Type': contentType,
+    'Accept-Ranges': 'bytes',
+    ...extraHeaders,
+  };
+
+  if (rangeHeader) {
+    const range = parseRange(rangeHeader, totalSize);
+    if (range) {
+      headers['Content-Range'] = `bytes ${range.offset}-${range.end}/${totalSize}`;
+      headers['Content-Length'] = String(range.length);
+      // R2 object was fetched with the range option, so body is already the partial content
+      return new Response(object.body, { status: 206, headers });
+    }
+    // Invalid range → 416
+    return new Response(null, {
+      status: 416,
+      headers: { 'Content-Range': `bytes */${totalSize}` },
+    });
+  }
+
+  headers['Content-Length'] = String(totalSize);
+  return new Response(object.body, { status: 200, headers });
+}
+
 function isAdminEmail(email: string, adminEmails: string): boolean {
   const admins = (adminEmails || '').split(',').map((entry) => entry.trim().toLowerCase());
   return admins.includes(email.toLowerCase());
@@ -91,23 +141,57 @@ app.get('/media/:slug/preview/:photoId', async (c) => {
     const r2Slug = photo.source_event_slug ?? slug;
     const r2PhotoId = photo.source_photo_id ?? photoId;
     
+    // Build R2 get options — for videos, support range requests
+    const rangeHeader = c.req.header('Range');
+    const r2Options: R2GetOptions = {};
+
     // Try to get the preview version first, fall back to original
     let key = `preview/${r2Slug}/${r2PhotoId}.${extension}`;
+
+    // For range requests we need the object size first (head), then fetch with range
+    if (isVideo && rangeHeader) {
+      let head = await c.env.PHOTOS_BUCKET.head(key);
+      if (!head) {
+        key = `original/${r2Slug}/${r2PhotoId}.${extension}`;
+        head = await c.env.PHOTOS_BUCKET.head(key);
+      }
+      if (!head) return c.json({ error: 'Media not found' }, 404);
+
+      const range = parseRange(rangeHeader, head.size);
+      if (!range) {
+        return new Response(null, {
+          status: 416,
+          headers: { 'Content-Range': `bytes */${head.size}` },
+        });
+      }
+      r2Options.range = { offset: range.offset, length: range.length };
+
+      const object = await c.env.PHOTOS_BUCKET.get(key, r2Options);
+      if (!object) return c.json({ error: 'Media not found' }, 404);
+
+      return serveWithRange(c.req.raw, object, contentType, {
+        'Cache-Control': 'public, max-age=31536000',
+      });
+    }
+
+    // Non-range or image request
     let object = await c.env.PHOTOS_BUCKET.get(key);
-    
-    // Fallback to original if preview doesn't exist
     if (!object) {
       key = `original/${r2Slug}/${r2PhotoId}.${extension}`;
       object = await c.env.PHOTOS_BUCKET.get(key);
     }
-    
-    if (!object) {
-      return c.json({ error: 'Media not found' }, 404);
+    if (!object) return c.json({ error: 'Media not found' }, 404);
+
+    if (isVideo) {
+      return serveWithRange(c.req.raw, object, contentType, {
+        'Cache-Control': 'public, max-age=31536000',
+      });
     }
-    
+
     return new Response(object.body, {
       headers: {
         'Content-Type': contentType,
+        'Content-Length': String(object.size),
         'Cache-Control': 'public, max-age=31536000',
       },
     });
@@ -226,21 +310,56 @@ app.get('/media/:slug/original/:photoId', async (c) => {
     const r2Slug = photo.source_event_slug ?? slug;
     const r2PhotoId = photo.source_photo_id ?? photoId;
     
-    // Get from R2
-    const key = `original/${r2Slug}/${r2PhotoId}.${extension}`;
-    const object = await c.env.PHOTOS_BUCKET.get(key);
-    
-    if (!object) {
-      return c.json({ error: 'Media not found in storage' }, 404);
-    }
-    
     // Generate filename: eventSlug_captureTime_photoId.ext
     const captureTime = photo.capture_time.replace(/[:.]/g, '-');
     const filename = `${slug}_${captureTime}_${photoId}.${extension}`;
-    
+
+    const key = `original/${r2Slug}/${r2PhotoId}.${extension}`;
+
+    // For videos, support range requests for streaming/seeking
+    if (isVideo) {
+      const rangeHeader = c.req.header('Range');
+      if (rangeHeader) {
+        const head = await c.env.PHOTOS_BUCKET.head(key);
+        if (!head) return c.json({ error: 'Media not found in storage' }, 404);
+
+        const range = parseRange(rangeHeader, head.size);
+        if (!range) {
+          return new Response(null, {
+            status: 416,
+            headers: { 'Content-Range': `bytes */${head.size}` },
+          });
+        }
+
+        const object = await c.env.PHOTOS_BUCKET.get(key, {
+          range: { offset: range.offset, length: range.length },
+        });
+        if (!object) return c.json({ error: 'Media not found in storage' }, 404);
+
+        return serveWithRange(c.req.raw, object, contentType, {
+          'Content-Disposition': `attachment; filename="${filename}"`,
+          'Cache-Control': 'public, max-age=31536000',
+        });
+      }
+
+      // No range header — serve full video with Accept-Ranges advertised
+      const object = await c.env.PHOTOS_BUCKET.get(key);
+      if (!object) return c.json({ error: 'Media not found in storage' }, 404);
+
+      return serveWithRange(c.req.raw, object, contentType, {
+        'Content-Disposition': `attachment; filename="${filename}"`,
+        'Cache-Control': 'public, max-age=31536000',
+      });
+    }
+
+    // Images — full download
+    const object = await c.env.PHOTOS_BUCKET.get(key);
+    if (!object) return c.json({ error: 'Media not found in storage' }, 404);
+
     return new Response(object.body, {
       headers: {
         'Content-Type': contentType,
+        'Content-Length': String(object.size),
         'Content-Disposition': `attachment; filename="${filename}"`,
         'Cache-Control': 'public, max-age=31536000',
       },

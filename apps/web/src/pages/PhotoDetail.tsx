@@ -59,6 +59,7 @@ const PhotoDetail: React.FC = () => {
   const [swipeOffset, setSwipeOffset] = useState(0);
   const [isSwiping, setIsSwiping] = useState(false);
   const isSwipingRef = useRef(false);
+  const lastTapTimeRef = useRef(0);
   const containerRef = useRef<HTMLDivElement>(null);
   const imageContainerRef = useRef<HTMLDivElement | null>(null);
   const imageContainerCallbackRef = useCallback((node: HTMLDivElement | null) => {
@@ -595,6 +596,39 @@ const PhotoDetail: React.FC = () => {
   const handleTouchStartNative = React.useCallback((e: TouchEvent) => {
     // Only track single-finger swipes for navigation
     if (e.touches.length === 1) {
+      // Double-tap to zoom detection
+      const now = Date.now();
+      const timeSinceLastTap = now - lastTapTimeRef.current;
+      if (timeSinceLastTap < 300 && timeSinceLastTap > 0) {
+        e.preventDefault();
+        lastTapTimeRef.current = 0;
+        // Toggle zoom: if already zoomed out, zoom to 2x at tap point
+        const container = imageContainerRef.current;
+        if (container) {
+          const img = container.querySelector('img, video') as HTMLElement | null;
+          if (img) {
+            const currentScale = img.style.transform?.includes('scale') ? 1 : 0;
+            if (currentScale === 0 && !isZoomed) {
+              const touch = e.touches[0];
+              const rect = img.getBoundingClientRect();
+              const originX = ((touch.clientX - rect.left) / rect.width) * 100;
+              const originY = ((touch.clientY - rect.top) / rect.height) * 100;
+              img.style.transformOrigin = `${originX}% ${originY}%`;
+              img.style.transform = 'scale(2)';
+              img.style.transition = 'transform 0.25s cubic-bezier(0.22, 1, 0.36, 1)';
+              setIsZoomed(true);
+            } else {
+              img.style.transform = '';
+              img.style.transition = 'transform 0.25s cubic-bezier(0.22, 1, 0.36, 1)';
+              setTimeout(() => { img.style.transition = ''; }, 250);
+              setIsZoomed(false);
+            }
+          }
+        }
+        return;
+      }
+      lastTapTimeRef.current = now;
+
       if (swipeNavigateTimeoutRef.current) {
         clearTimeout(swipeNavigateTimeoutRef.current);
         swipeNavigateTimeoutRef.current = null;
@@ -1419,6 +1453,9 @@ const PhotoDetail: React.FC = () => {
                   controls
                   autoPlay
                   loop
+                  preload="metadata"
+                  poster={photo?.blur_placeholder || undefined}
+                  style={{ viewTransitionName: `photo-${photo?.id}` }}
                   className={`w-full h-auto ${isFullscreen ? 'max-h-screen' : 'max-h-[70vh] md:max-h-[80vh]'} object-contain`}
                 />
               ) : (
@@ -1448,6 +1485,7 @@ const PhotoDetail: React.FC = () => {
                     src={getPreviewUrl(slug!, photo?.id || photoId!, photo?.file_type, cacheBuster || photo?.cache_version)}
                     alt={photo?.original_filename}
                     className={`w-full h-auto ${isFullscreen ? 'max-h-screen' : 'max-h-[70vh] md:max-h-[80vh]'} object-contain transition-opacity duration-300 ${imageLoaded ? 'opacity-100' : 'opacity-0'} ${photo?.blur_placeholder && !imageLoaded ? 'absolute inset-0' : ''}`}
+                    style={{ viewTransitionName: `photo-${photo?.id}` }}
                     onLoad={() => setImageLoaded(true)}
                     loading="eager"
                     decoding="async"
