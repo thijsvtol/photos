@@ -1,7 +1,7 @@
 import { Context, Next } from 'hono';
 import type { Env, User, CloudflareAccessJWT, DBUser, CollaboratorRole } from './types';
 import { jwtVerify } from 'jose';
-import { getEventSession } from './cookies';
+import { hasEventSessionAccess } from './cookies';
 
 // Extend Hono context to include user
 type Variables = {
@@ -332,14 +332,14 @@ export async function checkEventAuth(
     return true;
   }
 
-  // Check for cookie-based session (web users who entered password)
-  const hasCookieSession = await getEventSession(
+  // Check cookie/header/query event session token.
+  const hasSessionAccess = await hasEventSessionAccess(
     c.req.raw,
     eventSlug,
     c.env.EVENT_COOKIE_SECRET
   );
   
-  if (hasCookieSession) {
+  if (hasSessionAccess) {
     return true;
   }
 

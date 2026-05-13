@@ -7,6 +7,37 @@ import { MobileAuthService } from './services/mobileAuth';
 import { config } from './config';
 import SafDirectory from './services/safDirectory';
 
+const extractApiPathname = (requestUrl?: string): string => {
+  if (!requestUrl) return '';
+
+  try {
+    if (requestUrl.startsWith('http://') || requestUrl.startsWith('https://')) {
+      return new URL(requestUrl).pathname;
+    }
+
+    return new URL(requestUrl, window.location.origin).pathname;
+  } catch {
+    return requestUrl;
+  }
+};
+
+const isEventPasswordFlowRequest = (requestUrl?: string): boolean => {
+  const pathname = extractApiPathname(requestUrl);
+
+  // Axios calls in this app use baseURL '/api', but keep this resilient for absolute URLs as well.
+  const normalizedPath = pathname.replace(/^\/api/, '');
+
+  return /^\/events\/[^/]+\/login$/.test(normalizedPath)
+    || /^\/events\/[^/]+\/photos(?:\/[^/]+)?$/.test(normalizedPath);
+};
+
+const extractEventSlugFromApiPath = (requestUrl?: string): string | null => {
+  const pathname = extractApiPathname(requestUrl);
+  const normalizedPath = pathname.replace(/^\/api/, '');
+  const match = normalizedPath.match(/^\/events\/([^/]+)(?:\/|$)/);
+  return match?.[1] ?? null;
+};
+
 const api = axios.create({
   baseURL: import.meta.env.VITE_API_URL || '/api',
   // Only use credentials in browser, not in native app
@@ -19,6 +50,23 @@ api.interceptors.request.use(async (config) => {
     const token = await MobileAuthService.getToken();
     if (token) {
       config.headers.Authorization = `Bearer ${token}`;
+    }
+
+    const pathname = extractApiPathname(config.url).replace(/^\/api/, '');
+    const eventSlug = extractEventSlugFromApiPath(config.url);
+
+    if (pathname === '/events') {
+      const sessions = await MobileAuthService.getAllEventSessionTokens();
+      if (Object.keys(sessions).length > 0) {
+        config.headers['X-Event-Sessions'] = JSON.stringify(sessions);
+      }
+    }
+
+    if (eventSlug && !/^\/events\/[^/]+\/login$/.test(pathname)) {
+      const eventSessionToken = await MobileAuthService.getEventSessionToken(eventSlug);
+      if (eventSessionToken) {
+        config.headers['X-Event-Session'] = eventSessionToken;
+      }
     }
   }
   return config;
@@ -56,6 +104,10 @@ api.interceptors.response.use(
   (response) => response,
   async (error) => {
     if (error.response?.status === 401) {
+      if (isEventPasswordFlowRequest(error.config?.url)) {
+        return Promise.reject(error);
+      }
+
       // Skip redirect if user is intentionally logging out
       const isLoggingOut = sessionStorage.getItem('logging_out') === 'true';
       if (isLoggingOut) {
@@ -114,7 +166,11 @@ export const getEvent = async (slug: string): Promise<Event> => {
 };
 
 export const loginToEvent = async (slug: string, password: string): Promise<void> => {
-  await api.post(`/events/${slug}/login`, { password });
+  const response = await api.post<{ success: boolean; eventSessionToken?: string }>(`/events/${slug}/login`, { password });
+
+  if (Capacitor.isNativePlatform() && response.data.eventSessionToken) {
+    await MobileAuthService.setEventSessionToken(slug, response.data.eventSessionToken);
+  }
 };
 
 export const adminLogout = async (): Promise<void> => {
@@ -274,10 +330,16 @@ export const getPreviewUrl = (slug: string, photoId: string, fileType?: string, 
   const isVideo = fileType === 'video/mp4';
   const extension = isVideo ? 'mp4' : 'jpg';
   const relativePath = `/media/${slug}/preview/${photoId}.${extension}`;
-  const pathWithVersion = cacheVersion !== undefined ? `${relativePath}?v=${cacheVersion}` : relativePath;
+  let pathWithVersion = cacheVersion !== undefined ? `${relativePath}?v=${cacheVersion}` : relativePath;
   
   // In native app (Capacitor), use full production domain for media files
   if (Capacitor.isNativePlatform()) {
+    const eventSessionToken = localStorage.getItem(`event_session_${slug}`);
+    if (eventSessionToken) {
+      const separator = pathWithVersion.includes('?') ? '&' : '?';
+      pathWithVersion = `${pathWithVersion}${separator}est=${encodeURIComponent(eventSessionToken)}`;
+    }
+
     const domain = config.domain.startsWith('http') ? config.domain : `https://${config.domain}`;
     return `${domain}${pathWithVersion}`;
   }
@@ -289,10 +351,16 @@ export const getOriginalUrl = (slug: string, photoId: string, fileType?: string,
   const isVideo = fileType === 'video/mp4';
   const extension = isVideo ? 'mp4' : 'jpg';
   const relativePath = `/media/${slug}/original/${photoId}.${extension}`;
-  const pathWithVersion = cacheVersion !== undefined ? `${relativePath}?v=${cacheVersion}` : relativePath;
+  let pathWithVersion = cacheVersion !== undefined ? `${relativePath}?v=${cacheVersion}` : relativePath;
   
   // In native app (Capacitor), use full production domain for media files
   if (Capacitor.isNativePlatform()) {
+    const eventSessionToken = localStorage.getItem(`event_session_${slug}`);
+    if (eventSessionToken) {
+      const separator = pathWithVersion.includes('?') ? '&' : '?';
+      pathWithVersion = `${pathWithVersion}${separator}est=${encodeURIComponent(eventSessionToken)}`;
+    }
+
     const domain = config.domain.startsWith('http') ? config.domain : `https://${config.domain}`;
     return `${domain}${pathWithVersion}`;
   }

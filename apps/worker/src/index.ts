@@ -35,7 +35,7 @@ app.use('/*', async (c, next) => {
     },
     credentials: true,
     allowMethods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-    allowHeaders: ['Content-Type', 'Authorization', 'X-Admin-Access', 'Cf-Access-Jwt-Assertion', 'X-Upload-Id', 'X-File-Type'],
+    allowHeaders: ['Content-Type', 'Authorization', 'X-Admin-Access', 'Cf-Access-Jwt-Assertion', 'X-Upload-Id', 'X-File-Type', 'X-Event-Session', 'X-Event-Sessions'],
   })(c, next);
 });
 

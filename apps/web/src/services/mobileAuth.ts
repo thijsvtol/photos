@@ -5,6 +5,7 @@ import { getConfig } from '../config';
 
 const TOKEN_KEY = 'auth_token';
 const USER_KEY = 'auth_user';
+const EVENT_SESSIONS_KEY = 'event_sessions';
 
 export interface AuthToken {
   token: string;
@@ -31,6 +32,10 @@ export interface StoredUser {
  */
 export class MobileAuthService {
   private static tokenCallbackResolve: ((token: AuthToken | null) => void) | null = null;
+
+  private static getEventSessionStorageKey(eventSlug: string): string {
+    return `event_session_${eventSlug}`;
+  }
 
   /**
    * Initialize deep link listener
@@ -203,9 +208,45 @@ export class MobileAuthService {
    * Clear stored token and user
    */
   static async clearToken() {
+    const eventSessions = await this.getAllEventSessionTokens();
+    Object.keys(eventSessions).forEach((slug) => {
+      localStorage.removeItem(this.getEventSessionStorageKey(slug));
+    });
+
     await Preferences.remove({ key: TOKEN_KEY });
     await Preferences.remove({ key: USER_KEY });
+    await Preferences.remove({ key: EVENT_SESSIONS_KEY });
     await Preferences.remove({ key: 'oauth_state' });
+  }
+
+  static async setEventSessionToken(eventSlug: string, token: string) {
+    const sessions = await this.getAllEventSessionTokens();
+    sessions[eventSlug] = token;
+    await Preferences.set({
+      key: EVENT_SESSIONS_KEY,
+      value: JSON.stringify(sessions),
+    });
+
+    localStorage.setItem(this.getEventSessionStorageKey(eventSlug), token);
+  }
+
+  static async getEventSessionToken(eventSlug: string): Promise<string | null> {
+    const sessions = await this.getAllEventSessionTokens();
+    return sessions[eventSlug] || null;
+  }
+
+  static async getAllEventSessionTokens(): Promise<Record<string, string>> {
+    const { value } = await Preferences.get({ key: EVENT_SESSIONS_KEY });
+    if (!value) {
+      return {};
+    }
+
+    try {
+      const parsed = JSON.parse(value) as Record<string, string>;
+      return parsed && typeof parsed === 'object' ? parsed : {};
+    } catch {
+      return {};
+    }
   }
 
   /**

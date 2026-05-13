@@ -1,5 +1,9 @@
 import type { EventSession } from './types';
 
+const EVENT_SESSION_HEADER = 'X-Event-Session';
+const EVENT_SESSIONS_HEADER = 'X-Event-Sessions';
+const EVENT_SESSION_QUERY_PARAM = 'est';
+
 /**
  * Signs a value using HMAC-SHA256
  */
@@ -52,6 +56,19 @@ export async function createEventCookie(
   eventSlug: string,
   secret: string
 ): Promise<string> {
+  const cookieValue = await createEventSessionToken(eventSlug, secret);
+
+  // Session-only cookie (no Max-Age/Expires)
+  return `ev_${eventSlug}=${cookieValue}; HttpOnly; Secure; SameSite=Lax; Path=/`;
+}
+
+/**
+ * Creates a signed event session token value that can be used in headers/query params.
+ */
+export async function createEventSessionToken(
+  eventSlug: string,
+  secret: string
+): Promise<string> {
   const session: EventSession = {
     eventSlug,
     authenticated: true,
@@ -60,10 +77,7 @@ export async function createEventCookie(
   
   const value = JSON.stringify(session);
   const signature = await sign(value, secret);
-  const cookieValue = `${base64Encode(value)}.${signature}`;
-  
-  // Session-only cookie (no Max-Age/Expires)
-  return `ev_${eventSlug}=${cookieValue}; HttpOnly; Secure; SameSite=Lax; Path=/`;
+  return `${base64Encode(value)}.${signature}`;
 }
 
 /**
@@ -121,4 +135,57 @@ export async function getEventSession(
   const session = await verifyEventCookie(cookieValue, secret);
   
   return session !== null && session.eventSlug === eventSlug && session.authenticated;
+}
+
+/**
+ * Checks whether the request has event-session access via cookie, header(s), or query token.
+ */
+export async function hasEventSessionAccess(
+  request: Request,
+  eventSlug: string,
+  secret: string
+): Promise<boolean> {
+  const hasCookieSession = await getEventSession(request, eventSlug, secret);
+  if (hasCookieSession) {
+    return true;
+  }
+
+  const singleToken = request.headers.get(EVENT_SESSION_HEADER);
+  if (singleToken) {
+    const session = await verifyEventCookie(singleToken, secret);
+    if (session && session.eventSlug === eventSlug && session.authenticated) {
+      return true;
+    }
+  }
+
+  const listHeader = request.headers.get(EVENT_SESSIONS_HEADER);
+  if (listHeader) {
+    try {
+      const tokenMap = JSON.parse(listHeader) as Record<string, string>;
+      const token = tokenMap?.[eventSlug];
+      if (token) {
+        const session = await verifyEventCookie(token, secret);
+        if (session && session.eventSlug === eventSlug && session.authenticated) {
+          return true;
+        }
+      }
+    } catch {
+      // Ignore malformed token map header.
+    }
+  }
+
+  try {
+    const requestUrl = new URL(request.url);
+    const queryToken = requestUrl.searchParams.get(EVENT_SESSION_QUERY_PARAM);
+    if (queryToken) {
+      const session = await verifyEventCookie(queryToken, secret);
+      if (session && session.eventSlug === eventSlug && session.authenticated) {
+        return true;
+      }
+    }
+  } catch {
+    // Ignore malformed request URL.
+  }
+
+  return false;
 }

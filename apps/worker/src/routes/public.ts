@@ -1,7 +1,7 @@
 import { Hono } from 'hono';
 import { cors } from 'hono/cors';
 import type { Env, Event, Photo } from '../types';
-import { getEventSession } from '../cookies';
+import { hasEventSessionAccess } from '../cookies';
 import { optionalAuth, getUser, isAdmin } from '../auth';
 
 const app = new Hono<{ Bindings: Env }>();
@@ -16,10 +16,11 @@ app.use('/*', cors({
 
 /**
  * GET /api/events
- * Returns list of events filtered by visibility:
+ * Returns list of events filtered by visibility and any active event password session:
  * - Public events: visible to everyone
  * - Private events: visible only to admins
  * - Collaborators-only events: visible to admins and collaborators
+ * - Password-protected events: only shown after the matching event password is entered
  */
 app.get('/api/events', optionalAuth, async (c) => {
   try {
@@ -53,20 +54,29 @@ app.get('/api/events', optionalAuth, async (c) => {
       .bind(userEmail, userIsAdmin ? 1 : 0, userIsAdmin ? 1 : 0)
       .all<Omit<Event, 'password_salt' | 'password_hash'>>();
     
-    // For public events, add a preview photo ID and cities
+    // For visible events, add a preview photo ID and cities
     const eventsWithPreviews = await Promise.all(
       (events.results || []).map(async (event) => {
-        let preview_photo_id = null;
-        
-        if (!(event as any).requires_password) {
-          // Get the first featured photo for this event as preview, fallback to first photo
-          const photo = await c.env.DB
-            .prepare('SELECT id FROM photos WHERE event_id = ? ORDER BY is_featured DESC, capture_time ASC LIMIT 1')
-            .bind(event.id)
-            .first<{ id: string }>();
-          
-          preview_photo_id = photo?.id || null;
+        if (
+          (event as { requires_password?: boolean }).requires_password
+          && event.visibility === 'public'
+          && !userIsAdmin
+        ) {
+          const hasPasswordSession = await hasEventSessionAccess(c.req.raw, event.slug, c.env.EVENT_COOKIE_SECRET);
+          if (!hasPasswordSession) {
+            return null;
+          }
         }
+
+        let preview_photo_id = null;
+
+        // Get the first featured photo for this event as preview, fallback to first photo
+        const photo = await c.env.DB
+          .prepare('SELECT id FROM photos WHERE event_id = ? ORDER BY is_featured DESC, capture_time ASC LIMIT 1')
+          .bind(event.id)
+          .first<{ id: string }>();
+
+        preview_photo_id = photo?.id || null;
         
         // Get unique cities for this event
         const citiesResult = await c.env.DB
@@ -92,7 +102,9 @@ app.get('/api/events', optionalAuth, async (c) => {
       })
     );
     
-    return c.json({ events: eventsWithPreviews });
+    return c.json({
+      events: eventsWithPreviews.filter((event): event is NonNullable<typeof event> => event !== null),
+    });
   } catch (error) {
     console.error('Error fetching events:', error);
     return c.json({ error: 'Failed to fetch events' }, 500);
@@ -209,7 +221,7 @@ app.get('/api/events/:slug/photos', optionalAuth, async (c) => {
     
     // Check authentication only if password protected
     if (event.password_hash) {
-      const isAuthenticated = await getEventSession(c.req.raw, slug, c.env.EVENT_COOKIE_SECRET);
+      const isAuthenticated = await hasEventSessionAccess(c.req.raw, slug, c.env.EVENT_COOKIE_SECRET);
       if (!isAuthenticated) {
         return c.json({ error: 'Authentication required' }, 401);
       }
@@ -300,7 +312,7 @@ app.get('/api/events/:slug/photos/:photoId', optionalAuth, async (c) => {
     
     // Check authentication only if password protected
     if (event.password_hash) {
-      const isAuthenticated = await getEventSession(c.req.raw, slug, c.env.EVENT_COOKIE_SECRET);
+      const isAuthenticated = await hasEventSessionAccess(c.req.raw, slug, c.env.EVENT_COOKIE_SECRET);
       if (!isAuthenticated) {
         return c.json({ error: 'Authentication required' }, 401);
       }

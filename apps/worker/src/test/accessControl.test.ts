@@ -401,6 +401,92 @@ describe('Access control', () => {
     expect(sessionResponse.status).toBe(200);
   });
 
+  it('hides password-protected albums until the matching event password is entered', async () => {
+    const protectedEvent: EventRecord = {
+      id: 5,
+      slug: 'protected-event',
+      name: 'Protected Event',
+      inferred_date: '2024-01-05',
+      created_at: '2024-01-05',
+      visibility: 'public',
+      password_hash: 'hash',
+    };
+
+    const db = new MockD1Database([...baseEvents, protectedEvent], basePhotos, {});
+    const env = createEnv(db);
+
+    const noSessionResponse = await publicRoutes.request('http://localhost/api/events', {}, env);
+    expect(noSessionResponse.status).toBe(200);
+    const noSessionBody = await noSessionResponse.json() as { events: Array<{ slug: string }> };
+    expect(noSessionBody.events.map(event => event.slug).sort()).toEqual(['public-event']);
+
+    const cookie = await createEventCookie('protected-event', env.EVENT_COOKIE_SECRET);
+    const cookieHeader = cookie.split(';')[0];
+    const sessionResponse = await publicRoutes.request('http://localhost/api/events', {
+      headers: {
+        Cookie: cookieHeader,
+      },
+    }, env);
+    expect(sessionResponse.status).toBe(200);
+    const sessionBody = await sessionResponse.json() as { events: Array<{ slug: string }> };
+    expect(sessionBody.events.map(event => event.slug).sort()).toEqual(['protected-event', 'public-event']);
+  });
+
+  it('shows protected public albums when X-Event-Sessions header includes a valid token', async () => {
+    const protectedEvent: EventRecord = {
+      id: 5,
+      slug: 'protected-event',
+      name: 'Protected Event',
+      inferred_date: '2024-01-05',
+      created_at: '2024-01-05',
+      visibility: 'public',
+      password_hash: 'hash',
+    };
+
+    const db = new MockD1Database([...baseEvents, protectedEvent], basePhotos, {});
+    const env = createEnv(db);
+
+    const cookie = await createEventCookie('protected-event', env.EVENT_COOKIE_SECRET);
+    const eventSessionToken = cookie.split(';')[0].split('=').slice(1).join('=');
+    const response = await publicRoutes.request('http://localhost/api/events', {
+      headers: {
+        'X-Event-Sessions': JSON.stringify({ 'protected-event': eventSessionToken }),
+      },
+    }, env);
+
+    expect(response.status).toBe(200);
+    const body = await response.json() as { events: Array<{ slug: string }> };
+    expect(body.events.map(event => event.slug).sort()).toEqual(['protected-event', 'public-event']);
+  });
+
+  it('shows collaborators-only albums to invited collaborators even when password protected', async () => {
+    const protectedCollabEvent: EventRecord = {
+      id: 6,
+      slug: 'protected-collab',
+      name: 'Protected Collaborator Event',
+      inferred_date: '2024-01-06',
+      created_at: '2024-01-06',
+      visibility: 'collaborators_only',
+      password_hash: 'hash',
+    };
+
+    currentUser = { id: 'user-6', email: 'collab@example.com', name: 'Collaborator' };
+    const db = new MockD1Database([...baseEvents, protectedCollabEvent], basePhotos, {
+      3: ['collab@example.com'],
+      6: ['collab@example.com'],
+    });
+    const env = createEnv(db);
+
+    const response = await publicRoutes.request('http://localhost/api/events', {}, env);
+    expect(response.status).toBe(200);
+    const body = await response.json() as { events: Array<{ slug: string }> };
+    expect(body.events.map(event => event.slug).sort()).toEqual([
+      'collab-event',
+      'protected-collab',
+      'public-event',
+    ]);
+  });
+
   it('requires password even for collaborators-only events', async () => {
     const protectedCollabEvent: EventRecord = {
       id: 6,

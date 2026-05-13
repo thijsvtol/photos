@@ -1,7 +1,7 @@
 import { Hono } from 'hono';
 import type { Env, Event, LoginRequest } from '../types';
 import { verifyPassword } from '../utils';
-import { createEventCookie } from '../cookies';
+import { createEventCookie, createEventSessionToken } from '../cookies';
 import { requireAuth, getUser } from '../auth';
 
 const app = new Hono<{ Bindings: Env }>();
@@ -67,10 +67,11 @@ app.post('/api/events/:slug/login', async (c) => {
       return c.json({ error: 'Invalid password' }, 401);
     }
     
-    // Create session cookie
+    // Create session cookie and portable session token for native clients.
     const cookie = await createEventCookie(slug, c.env.EVENT_COOKIE_SECRET);
+    const eventSessionToken = await createEventSessionToken(slug, c.env.EVENT_COOKIE_SECRET);
     
-    return new Response(JSON.stringify({ success: true }), {
+    return new Response(JSON.stringify({ success: true, eventSessionToken }), {
       status: 200,
       headers: {
         'Content-Type': 'application/json',
