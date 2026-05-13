@@ -27,6 +27,28 @@ L.Icon.Default.mergeOptions({
 });
 
 const CHUNK_SIZE = 5 * 1024 * 1024; // 5MB chunks
+const UPLOAD_MAX_RETRIES = 3;
+const UPLOAD_RETRY_BASE_MS = 1000;
+
+async function uploadPartWithRetry(
+  eventSlug: string,
+  photoId: string,
+  uploadId: string,
+  partNumber: number,
+  chunk: Blob,
+  isPreview: boolean,
+  fileType: string
+): Promise<{ partNumber: number; etag: string }> {
+  for (let attempt = 0; attempt <= UPLOAD_MAX_RETRIES; attempt++) {
+    try {
+      return await uploadPart(eventSlug, photoId, uploadId, partNumber, chunk, isPreview, fileType);
+    } catch (err) {
+      if (attempt === UPLOAD_MAX_RETRIES) throw err;
+      await new Promise(r => setTimeout(r, UPLOAD_RETRY_BASE_MS * Math.pow(2, attempt)));
+    }
+  }
+  throw new Error('Upload failed');
+}
 
 const AdminEventUpload: React.FC = () => {
   const { slug } = useParams<{ slug: string }>();
@@ -301,15 +323,15 @@ const AdminEventUpload: React.FC = () => {
         const end = Math.min(start + CHUNK_SIZE, item.file.size);
         const chunk = item.file.slice(start, end);
         
-        // Upload part directly to worker
-        const { etag } = await uploadPart(
+        // Upload part directly to worker (with retry)
+        const { etag } = await uploadPartWithRetry(
           item.eventSlug,
           item.photoId!,
           uploadId,
           partNumber,
           chunk,
           false,
-          item.fileType
+          item.fileType || 'image/jpeg'
         );
         
         parts.push({ partNumber, etag });
@@ -376,13 +398,14 @@ const AdminEventUpload: React.FC = () => {
       const end = Math.min(start + CHUNK_SIZE, previewBlob.size);
       const chunk = previewBlob.slice(start, end);
       
-      const { etag } = await uploadPart(
+      const { etag } = await uploadPartWithRetry(
         eventSlug,
         photoId,
         uploadId,
         partNumber,
         chunk,
-        true // isPreview flag
+        true, // isPreview flag
+        'image/jpeg'
       );
       
       parts.push({ partNumber, etag });

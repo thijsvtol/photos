@@ -58,8 +58,8 @@ export async function createEventCookie(
 ): Promise<string> {
   const cookieValue = await createEventSessionToken(eventSlug, secret);
 
-  // Session-only cookie (no Max-Age/Expires)
-  return `ev_${eventSlug}=${cookieValue}; HttpOnly; Secure; SameSite=Lax; Path=/`;
+  // Persist for 7 days so the user doesn't have to re-enter the event password
+  return `ev_${eventSlug}=${cookieValue}; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=604800`;
 }
 
 /**
