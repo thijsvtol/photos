@@ -155,6 +155,23 @@ const getAdminHeaders = () => {
 };
 
 // Public API
+export interface MapPhoto {
+  id: string;
+  latitude: number;
+  longitude: number;
+  original_filename: string;
+  blur_placeholder?: string | null;
+  cache_version?: number;
+  file_type: string;
+  event_slug: string;
+  event_name: string;
+}
+
+export const getMapPhotos = async (): Promise<MapPhoto[]> => {
+  const response = await api.get<{ photos: MapPhoto[] }>('/map/photos');
+  return response.data.photos;
+};
+
 export const getEvents = async (): Promise<Event[]> => {
   const response = await api.get<{ events: Event[] }>('/events');
   return response.data.events;

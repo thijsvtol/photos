@@ -5,6 +5,21 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.1] - 2026-05-14
+
+### Added
+- Dedicated `/api/map/photos` backend endpoint — single SQL query returns only GPS-enabled photos from public events with minimal fields, replacing N sequential API calls.
+- Marker clustering on map view via react-leaflet-cluster — nearby markers group into clusters with count badges, dramatically improving rendering performance with many locations.
+- Lazy loading for popup thumbnail images.
+
+### Changed
+- Map page loads in a single API request instead of one request per event (was O(n) sequential HTTP calls).
+- Android app release bumped to build 22 (versionName 1.5.1).
+- Project package versions synchronized to 1.5.1.
+
+### Fixed
+- Map page slow loading with many events/photos — eliminated serial API waterfall and excessive DOM marker rendering.
+
 ## [1.5.0] - 2026-05-14
 
 ### Added

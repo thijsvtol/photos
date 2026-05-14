@@ -341,6 +341,44 @@ app.get('/api/events/:slug/photos/:photoId', optionalAuth, async (c) => {
 });
 
 /**
+ * GET /api/map/photos
+ * Returns all photos with GPS coordinates from public, non-password-protected events.
+ * Minimal fields for fast map rendering.
+ */
+app.get('/api/map/photos', async (c) => {
+  try {
+    const results = await c.env.DB
+      .prepare(`
+        SELECT 
+          p.id,
+          p.latitude,
+          p.longitude,
+          p.original_filename,
+          p.blur_placeholder,
+          p.cache_version,
+          p.file_type,
+          e.slug as event_slug,
+          e.name as event_name
+        FROM photos p
+        JOIN events e ON p.event_id = e.id
+        WHERE p.latitude IS NOT NULL 
+          AND p.longitude IS NOT NULL
+          AND e.visibility = 'public'
+          AND e.password_hash IS NULL
+          AND LOWER(e.name) NOT LIKE '[prive]%'
+          AND LOWER(e.name) NOT LIKE '[hidden]%'
+        ORDER BY p.capture_time DESC
+      `)
+      .all();
+
+    return c.json({ photos: results.results || [] });
+  } catch (error) {
+    console.error('Error fetching map photos:', error);
+    return c.json({ error: 'Failed to fetch map photos' }, 500);
+  }
+});
+
+/**
  * GET /api/tags
  * Returns list of all tags
  */
