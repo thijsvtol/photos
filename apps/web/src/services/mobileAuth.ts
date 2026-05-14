@@ -6,6 +6,7 @@ import { getConfig } from '../config';
 const TOKEN_KEY = 'auth_token';
 const USER_KEY = 'auth_user';
 const EVENT_SESSIONS_KEY = 'event_sessions';
+const LOCAL_TOKEN_KEY = 'mobile_bearer_token';
 
 export interface AuthToken {
   token: string;
@@ -153,6 +154,8 @@ export class MobileAuthService {
       key: TOKEN_KEY,
       value: JSON.stringify(token)
     });
+    // Mirror to localStorage for synchronous access in image URL construction
+    localStorage.setItem(LOCAL_TOKEN_KEY, token.token);
   }
 
   /**
@@ -170,6 +173,11 @@ export class MobileAuthService {
         console.log('[MobileAuth] Token expired');
         await this.clearToken();
         return null;
+      }
+
+      // Ensure localStorage mirror is in sync for image URL construction
+      if (localStorage.getItem(LOCAL_TOKEN_KEY) !== token.token) {
+        localStorage.setItem(LOCAL_TOKEN_KEY, token.token);
       }
 
       return token.token;
@@ -213,6 +221,7 @@ export class MobileAuthService {
       localStorage.removeItem(this.getEventSessionStorageKey(slug));
     });
 
+    localStorage.removeItem(LOCAL_TOKEN_KEY);
     await Preferences.remove({ key: TOKEN_KEY });
     await Preferences.remove({ key: USER_KEY });
     await Preferences.remove({ key: EVENT_SESSIONS_KEY });

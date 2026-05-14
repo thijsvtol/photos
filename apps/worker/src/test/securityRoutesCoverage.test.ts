@@ -339,6 +339,7 @@ describe('Security Route Coverage', () => {
     expect(fallbackType.headers.get('Content-Type')).toBe('image/jpeg');
 
     allowEventAuth = false;
+    currentUser = null;
     const authDenied = await mediaRoutes.request('http://localhost/media/password-event/original/photo-image.jpg', {}, adminEnv);
     expect(authDenied.status).toBe(401);
   });

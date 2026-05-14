@@ -5,6 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.4.8] - 2026-05-14
+
+### Changed
+- Android app release bumped to build 19 (versionName 1.4.8).
+- Project package versions synchronized to 1.4.8.
+
+### Fixed
+- Re-applied mobile image auth fix that was lost during force-push — photos in invite-only events now load correctly on Android app again.
+- Bearer token passed as query parameter on native image URLs so `<img>` tags can authenticate.
+- Server accepts Bearer token from `?token=` query parameter for mobile image requests.
+- Collaborators bypass event password gate when accessing media they have permission to view.
+
 ## [1.4.7] - 2026-05-13
 
 ### Changed
