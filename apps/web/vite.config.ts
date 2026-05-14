@@ -20,15 +20,19 @@ export default defineConfig({
   build: {
     rollupOptions: {
       output: {
-        manualChunks: {
-          // React core
-          'react-vendor': ['react', 'react-dom', 'react-router-dom'],
-          // Map libraries (usually large)
-          'map-vendor': ['leaflet', 'react-leaflet'],
-          // UI libraries
-          'ui-vendor': ['react-masonry-css', 'lucide-react'],
-          // Utilities
-          'utils': ['axios', 'ulid', 'exifreader', 'dexie'],
+        manualChunks(id) {
+          if (id.includes('node_modules/react/') || id.includes('node_modules/react-dom/') || id.includes('node_modules/react-router')) {
+            return 'react-vendor';
+          }
+          if (id.includes('node_modules/leaflet') || id.includes('node_modules/react-leaflet')) {
+            return 'map-vendor';
+          }
+          if (id.includes('node_modules/react-masonry-css') || id.includes('node_modules/lucide-react')) {
+            return 'ui-vendor';
+          }
+          if (id.includes('node_modules/axios') || id.includes('node_modules/ulid') || id.includes('node_modules/exifreader') || id.includes('node_modules/dexie')) {
+            return 'utils';
+          }
         },
       },
     },
