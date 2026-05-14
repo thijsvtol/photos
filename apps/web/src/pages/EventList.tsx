@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { Tag as TagIcon, MapPin, Calendar, ChevronRight, Loader2, Filter, X, ChevronDown, ChevronUp } from 'lucide-react';
+import { Tag as TagIcon, MapPin, Calendar, ChevronRight, Loader2, Filter, X, ChevronDown, ChevronUp, Search } from 'lucide-react';
 import Navbar from '../components/Navbar';
 import Footer from '../components/Footer';
 import SEO from '../components/SEO';
@@ -21,6 +21,7 @@ const EventList: React.FC = () => {
   const [showTagFilters, setShowTagFilters] = useState(false);
   const [showCityFilters, setShowCityFilters] = useState(false);
   const [showAllCities, setShowAllCities] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
 
   useEffect(() => {
     loadTags();
@@ -85,8 +86,18 @@ const EventList: React.FC = () => {
     applyFilters(selectedTag, city);
   };
 
-  const applyFilters = (tagSlug: string | null, city: string | null) => {
+  const applyFilters = (tagSlug: string | null, city: string | null, query: string = searchQuery) => {
     let filteredEvents = allEvents;
+    
+    // Apply text search
+    if (query.trim()) {
+      const q = query.trim().toLowerCase();
+      filteredEvents = filteredEvents.filter(event =>
+        event.name.toLowerCase().includes(q) ||
+        event.cities?.some(c => c.toLowerCase().includes(q)) ||
+        event.tags?.some(tag => tag.name.toLowerCase().includes(q))
+      );
+    }
     
     // Apply tag filter
     if (tagSlug) {
@@ -103,6 +114,11 @@ const EventList: React.FC = () => {
     }
     
     setEvents(filteredEvents);
+  };
+
+  const handleSearchChange = (value: string) => {
+    setSearchQuery(value);
+    applyFilters(selectedTag, selectedCity, value);
   };
 
   const formatDate = (dateStr: string | null) => {
@@ -155,9 +171,10 @@ const EventList: React.FC = () => {
             <h1 className="text-3xl sm:text-4xl font-bold text-gray-900 dark:text-white">Photo Events</h1>
             <p className="text-gray-600 dark:text-gray-400 mt-2 text-sm sm:text-base">Browse all photo events and galleries</p>
           </div>
-          {(selectedTag || selectedCity) && (
+          {(selectedTag || selectedCity || searchQuery) && (
             <button
               onClick={() => {
+                setSearchQuery('');
                 filterByTag(null);
                 filterByCity(null);
               }}
@@ -165,6 +182,26 @@ const EventList: React.FC = () => {
             >
               <X className="w-4 h-4" />
               Clear Filters
+            </button>
+          )}
+        </div>
+
+        {/* Search input */}
+        <div className="relative mb-4 sm:mb-6">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400 dark:text-gray-500" />
+          <input
+            type="text"
+            value={searchQuery}
+            onChange={(e) => handleSearchChange(e.target.value)}
+            placeholder="Search events by name, city, or tag..."
+            className="w-full pl-9 pr-8 py-2.5 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition"
+          />
+          {searchQuery && (
+            <button
+              onClick={() => handleSearchChange('')}
+              className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300"
+            >
+              <X className="w-4 h-4" />
             </button>
           )}
         </div>
@@ -301,14 +338,15 @@ const EventList: React.FC = () => {
               <Calendar className="w-8 h-8 text-gray-400 dark:text-gray-500" />
             </div>
             <h3 className="text-xl font-semibold text-gray-900 dark:text-white mb-2">
-              {selectedTag || selectedCity ? 'No events match your filters' : 'No events found'}
+              {selectedTag || selectedCity || searchQuery ? 'No events match your filters' : 'No events found'}
             </h3>
             <p className="text-gray-600 dark:text-gray-400 mb-6">
-              {selectedTag || selectedCity ? 'Try adjusting your filters' : 'No events have been created yet'}
+              {selectedTag || selectedCity || searchQuery ? 'Try adjusting your filters' : 'No events have been created yet'}
             </p>
-            {(selectedTag || selectedCity) && (
+            {(selectedTag || selectedCity || searchQuery) && (
               <button
                 onClick={() => {
+                  setSearchQuery('');
                   filterByTag(null);
                   filterByCity(null);
                 }}

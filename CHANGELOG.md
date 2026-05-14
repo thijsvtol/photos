@@ -5,6 +5,21 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.0] - 2026-05-14
+
+### Added
+- Custom video player in photo detail view with tap-to-play/pause, double-tap to seek ±10s, scrubbing progress bar, buffered indicator, and time display.
+- Play icon overlay on video cards in gallery — visible on both touch and hover devices.
+- Swipe preview now works for videos in photo detail view (shows blurred poster with play icon).
+- Seek indicator animations (rewind/fast-forward badges) on double-tap video gestures.
+- Fade-in CSS animation for UI overlays.
+
+### Changed
+- Video player in detail view replaced with custom controls instead of browser-native controls: tap to play/pause, double-tap left/right to seek, fullscreen button, custom progress bar with scrubber.
+- ProgressiveVideo component now shows a play icon overlay and properly detects touch vs hover devices.
+- Android app release bumped to build 21 (versionName 1.5.0).
+- Project package versions synchronized to 1.5.0.
+
 ## [1.4.9] - 2026-05-14
 
 ### Changed

@@ -49,6 +49,19 @@ const PhotoDetail: React.FC = () => {
   const [showMobileMenu, setShowMobileMenu] = useState(false);
   const [collaboratorRole, setCollaboratorRole] = useState<'viewer' | 'uploader' | 'editor' | 'admin' | null>(null);
   const [cacheBuster, setCacheBuster] = useState<number>(0);
+  // Custom video player state
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const [videoPaused, setVideoPaused] = useState(false);
+  const [videoProgress, setVideoProgress] = useState(0);
+  const [videoDuration, setVideoDuration] = useState(0);
+  const [videoBuffered, setVideoBuffered] = useState(0);
+  const [showVideoControls, setShowVideoControls] = useState(true);
+  const [seekIndicator, setSeekIndicator] = useState<'left' | 'right' | null>(null);
+  const videoControlsTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const videoTapCountRef = useRef(0);
+  const videoTapTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const videoTapXRef = useRef(0);
+  const videoProgressDraggingRef = useRef(false);
   const touchStartX = useRef<number | null>(null);
   const touchStartY = useRef<number | null>(null);
   const touchEndX = useRef<number | null>(null);
@@ -113,8 +126,7 @@ const PhotoDetail: React.FC = () => {
   const showSwipePreview = Boolean(
     swipePreviewPhoto &&
     swipePreviewUrl &&
-    swipePreviewPhoto.file_type !== 'video/mp4' &&
-    preloadedImages.has(swipePreviewUrl)
+    (swipePreviewPhoto.file_type === 'video/mp4' || preloadedImages.has(swipePreviewUrl))
   );
 
   const canEditMedia = !!user?.isAdmin || collaboratorRole === 'editor' || collaboratorRole === 'admin';
@@ -587,6 +599,96 @@ const PhotoDetail: React.FC = () => {
 
   // Native touch handlers with stable references using useCallback
   // CRITICAL: No dependencies that change - these must be stable function references
+  // --- Custom video player logic ---
+  const resetVideoControlsTimer = useCallback(() => {
+    if (videoControlsTimerRef.current) clearTimeout(videoControlsTimerRef.current);
+    setShowVideoControls(true);
+    videoControlsTimerRef.current = setTimeout(() => {
+      if (!videoRef.current?.paused) setShowVideoControls(false);
+    }, 3000);
+  }, []);
+
+  const handleVideoTap = useCallback((e: React.MouseEvent | React.TouchEvent) => {
+    if (videoProgressDraggingRef.current) return;
+    const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+    const clientX = 'touches' in e ? e.changedTouches[0].clientX : e.clientX;
+    const tapX = clientX - rect.left;
+    const tapZone = tapX / rect.width;
+
+    videoTapCountRef.current += 1;
+    videoTapXRef.current = tapZone;
+
+    if (videoTapTimerRef.current) clearTimeout(videoTapTimerRef.current);
+
+    videoTapTimerRef.current = setTimeout(() => {
+      const count = videoTapCountRef.current;
+      videoTapCountRef.current = 0;
+
+      if (count === 1) {
+        // Single tap: toggle play/pause
+        const v = videoRef.current;
+        if (!v) return;
+        if (v.paused) {
+          v.play();
+          setVideoPaused(false);
+        } else {
+          v.pause();
+          setVideoPaused(true);
+        }
+        resetVideoControlsTimer();
+      } else if (count >= 2) {
+        // Double tap: seek ±10s
+        const v = videoRef.current;
+        if (!v) return;
+        if (videoTapXRef.current < 0.35) {
+          v.currentTime = Math.max(0, v.currentTime - 10);
+          setSeekIndicator('left');
+          haptics.light();
+        } else if (videoTapXRef.current > 0.65) {
+          v.currentTime = Math.min(v.duration, v.currentTime + 10);
+          setSeekIndicator('right');
+          haptics.light();
+        }
+        resetVideoControlsTimer();
+        setTimeout(() => setSeekIndicator(null), 600);
+      }
+    }, 250);
+  }, [resetVideoControlsTimer]);
+
+  const handleVideoTimeUpdate = useCallback(() => {
+    const v = videoRef.current;
+    if (!v || videoProgressDraggingRef.current) return;
+    setVideoProgress(v.currentTime);
+    if (v.buffered.length > 0) {
+      setVideoBuffered(v.buffered.end(v.buffered.length - 1));
+    }
+  }, []);
+
+  const handleVideoSeek = useCallback((e: React.MouseEvent | React.TouchEvent, bar: HTMLDivElement) => {
+    const v = videoRef.current;
+    if (!v || !v.duration) return;
+    const rect = bar.getBoundingClientRect();
+    const clientX = 'touches' in e ? e.touches[0].clientX : e.clientX;
+    const ratio = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width));
+    v.currentTime = ratio * v.duration;
+    setVideoProgress(v.currentTime);
+    resetVideoControlsTimer();
+  }, [resetVideoControlsTimer]);
+
+  const formatTime = (seconds: number): string => {
+    const m = Math.floor(seconds / 60);
+    const s = Math.floor(seconds % 60);
+    return `${m}:${s.toString().padStart(2, '0')}`;
+  };
+
+  // Clean up video timers
+  useEffect(() => {
+    return () => {
+      if (videoControlsTimerRef.current) clearTimeout(videoControlsTimerRef.current);
+      if (videoTapTimerRef.current) clearTimeout(videoTapTimerRef.current);
+    };
+  }, []);
+
   const getSwipeResistance = (deltaX: number, width: number): number => {
     const normalizedDistance = Math.min(Math.abs(deltaX) / Math.max(width, 1), 1);
     return Math.max(0.58, 0.92 - normalizedDistance * 0.28);
@@ -1390,12 +1492,28 @@ const PhotoDetail: React.FC = () => {
                   willChange: 'transform, opacity',
                 }}
               >
-                <img
-                  src={swipePreviewUrl}
-                  alt={swipePreviewPhoto.original_filename}
-                  className={`w-full h-auto ${isFullscreen ? 'max-h-screen' : 'max-h-[70vh] md:max-h-[80vh]'} object-contain`}
-                  draggable={false}
-                />
+                {swipePreviewPhoto.file_type === 'video/mp4' ? (
+                  <div className="relative">
+                    <img
+                      src={swipePreviewPhoto.blur_placeholder || ''}
+                      alt={swipePreviewPhoto.original_filename}
+                      className={`w-full h-auto ${isFullscreen ? 'max-h-screen' : 'max-h-[70vh] md:max-h-[80vh]'} object-contain ${swipePreviewPhoto.blur_placeholder ? 'blur-lg' : ''}`}
+                      draggable={false}
+                    />
+                    <div className="absolute inset-0 flex items-center justify-center">
+                      <div className="bg-black/50 backdrop-blur-sm rounded-full p-4">
+                        <Play className="w-8 h-8 text-white fill-white" />
+                      </div>
+                    </div>
+                  </div>
+                ) : (
+                  <img
+                    src={swipePreviewUrl}
+                    alt={swipePreviewPhoto.original_filename}
+                    className={`w-full h-auto ${isFullscreen ? 'max-h-screen' : 'max-h-[70vh] md:max-h-[80vh]'} object-contain`}
+                    draggable={false}
+                  />
+                )}
               </div>
             )}
             <div
@@ -1414,13 +1532,154 @@ const PhotoDetail: React.FC = () => {
               {showEditor ? (
                 <div className={`w-full ${isFullscreen ? 'h-screen' : 'h-[70vh] md:h-[80vh]'}`} />
               ) : photo?.file_type === 'video/mp4' ? (
-                <video
-                  src={getPreviewUrl(slug!, photo?.id || photoId!, photo?.file_type, photo?.cache_version)}
-                  controls
-                  autoPlay
-                  loop
-                  className={`w-full h-auto ${isFullscreen ? 'max-h-screen' : 'max-h-[70vh] md:max-h-[80vh]'} object-contain`}
-                />
+                <div
+                  className={`relative w-full ${isFullscreen ? 'max-h-screen' : 'max-h-[70vh] md:max-h-[80vh]'} flex items-center justify-center bg-black`}
+                  onClick={handleVideoTap}
+                  onTouchEnd={(e) => {
+                    // Prevent ghost clicks but allow the tap handler
+                    if (!videoProgressDraggingRef.current) {
+                      handleVideoTap(e);
+                    }
+                    e.preventDefault();
+                  }}
+                >
+                  <video
+                    ref={videoRef}
+                    src={getPreviewUrl(slug!, photo?.id || photoId!, photo?.file_type, photo?.cache_version)}
+                    autoPlay
+                    playsInline
+                    loop
+                    preload="metadata"
+                    poster={photo?.blur_placeholder || undefined}
+                    className={`w-full h-auto ${isFullscreen ? 'max-h-screen' : 'max-h-[70vh] md:max-h-[80vh]'} object-contain`}
+                    onTimeUpdate={handleVideoTimeUpdate}
+                    onLoadedMetadata={(e) => {
+                      setVideoDuration(e.currentTarget.duration);
+                      setVideoPaused(false);
+                      resetVideoControlsTimer();
+                    }}
+                    onPlay={() => {
+                      setVideoPaused(false);
+                      resetVideoControlsTimer();
+                    }}
+                    onPause={() => setVideoPaused(true)}
+                  />
+
+                  {/* Double-tap seek indicators */}
+                  {seekIndicator === 'left' && (
+                    <div className="absolute left-4 top-1/2 -translate-y-1/2 bg-black/60 backdrop-blur-sm rounded-full px-4 py-3 text-white text-sm font-medium animate-fade-in pointer-events-none flex items-center gap-1.5">
+                      <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12.066 11.2a1 1 0 000 1.6l5.334 4A1 1 0 0019 16V8a1 1 0 00-1.6-.8l-5.334 4zM4.066 11.2a1 1 0 000 1.6l5.334 4A1 1 0 0011 16V8a1 1 0 00-1.6-.8l-5.334 4z" /></svg>
+                      10s
+                    </div>
+                  )}
+                  {seekIndicator === 'right' && (
+                    <div className="absolute right-4 top-1/2 -translate-y-1/2 bg-black/60 backdrop-blur-sm rounded-full px-4 py-3 text-white text-sm font-medium animate-fade-in pointer-events-none flex items-center gap-1.5">
+                      10s
+                      <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11.933 12.8a1 1 0 000-1.6L6.6 7.2A1 1 0 005 8v8a1 1 0 001.6.8l5.333-4zM19.933 12.8a1 1 0 000-1.6l-5.333-4A1 1 0 0013 8v8a1 1 0 001.6.8l5.333-4z" /></svg>
+                    </div>
+                  )}
+
+                  {/* Center play/pause indicator on tap */}
+                  {videoPaused && (
+                    <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+                      <div className="bg-black/50 backdrop-blur-sm rounded-full p-5">
+                        <Play className="w-10 h-10 text-white fill-white" />
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Custom controls overlay */}
+                  <div
+                    className={`absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/80 via-black/40 to-transparent pt-12 pb-3 px-3 transition-opacity duration-300 ${
+                      showVideoControls || videoPaused ? 'opacity-100' : 'opacity-0 pointer-events-none'
+                    }`}
+                    onClick={(e) => e.stopPropagation()}
+                    onTouchEnd={(e) => e.stopPropagation()}
+                  >
+                    {/* Progress bar */}
+                    <div
+                      className="relative h-8 flex items-center cursor-pointer group/progress touch-none"
+                      onMouseDown={(e) => {
+                        videoProgressDraggingRef.current = true;
+                        handleVideoSeek(e, e.currentTarget as HTMLDivElement);
+                        const bar = e.currentTarget as HTMLDivElement;
+                        const onMove = (ev: MouseEvent) => handleVideoSeek(ev as unknown as React.MouseEvent, bar);
+                        const onUp = () => {
+                          videoProgressDraggingRef.current = false;
+                          window.removeEventListener('mousemove', onMove);
+                          window.removeEventListener('mouseup', onUp);
+                        };
+                        window.addEventListener('mousemove', onMove);
+                        window.addEventListener('mouseup', onUp);
+                      }}
+                      onTouchStart={(e) => {
+                        videoProgressDraggingRef.current = true;
+                        handleVideoSeek(e, e.currentTarget as HTMLDivElement);
+                      }}
+                      onTouchMove={(e) => {
+                        if (videoProgressDraggingRef.current) {
+                          handleVideoSeek(e, e.currentTarget as HTMLDivElement);
+                        }
+                      }}
+                      onTouchEnd={() => {
+                        videoProgressDraggingRef.current = false;
+                      }}
+                    >
+                      <div className="absolute left-0 right-0 h-1 group-hover/progress:h-1.5 bg-white/30 rounded-full transition-all">
+                        {/* Buffered */}
+                        <div
+                          className="absolute top-0 left-0 h-full bg-white/40 rounded-full"
+                          style={{ width: videoDuration ? `${(videoBuffered / videoDuration) * 100}%` : '0%' }}
+                        />
+                        {/* Progress */}
+                        <div
+                          className="absolute top-0 left-0 h-full bg-white rounded-full"
+                          style={{ width: videoDuration ? `${(videoProgress / videoDuration) * 100}%` : '0%' }}
+                        />
+                      </div>
+                      {/* Scrubber handle */}
+                      <div
+                        className="absolute w-3.5 h-3.5 bg-white rounded-full shadow-lg -translate-x-1/2 opacity-0 group-hover/progress:opacity-100 transition-opacity"
+                        style={{ left: videoDuration ? `${(videoProgress / videoDuration) * 100}%` : '0%' }}
+                      />
+                    </div>
+
+                    {/* Time + controls row */}
+                    <div className="flex items-center justify-between text-white text-xs mt-0.5">
+                      <div className="flex items-center gap-3">
+                        <button
+                          className="p-1 hover:bg-white/20 rounded-full transition"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            const v = videoRef.current;
+                            if (!v) return;
+                            if (v.paused) { v.play(); setVideoPaused(false); }
+                            else { v.pause(); setVideoPaused(true); }
+                            resetVideoControlsTimer();
+                          }}
+                        >
+                          {videoPaused ? <Play className="w-5 h-5 fill-white" /> : <Pause className="w-5 h-5" />}
+                        </button>
+                        <span className="tabular-nums">{formatTime(videoProgress)} / {formatTime(videoDuration)}</span>
+                      </div>
+                      <button
+                        className="p-1 hover:bg-white/20 rounded-full transition"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          const v = videoRef.current;
+                          if (!v) return;
+                          if (document.fullscreenElement) {
+                            document.exitFullscreen();
+                          } else {
+                            v.requestFullscreen?.();
+                          }
+                        }}
+                      >
+                        {isFullscreen ? <Minimize className="w-5 h-5" /> : <Maximize className="w-5 h-5" />}
+                      </button>
+                    </div>
+                  </div>
+                </div>
               ) : (
                 <div className="relative">
                   {/* Previous photo for cross-fade effect */}

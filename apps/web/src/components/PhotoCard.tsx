@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { Heart, Star, Check } from 'lucide-react';
 import ProgressiveImage from './ProgressiveImage';
+import ProgressiveVideo from './ProgressiveVideo';
 import { getPreviewUrl, downloadOriginal, downloadSmall } from '../api';
 import type { Photo } from '../types';
 
@@ -128,16 +129,10 @@ const PhotoCard: React.FC<PhotoCardProps> = ({
           onTouchCancel={clearLongPressTimer}
         >
           {isVideo ? (
-            <video
+            <ProgressiveVideo
               src={getPreviewUrl(slug, photo.id, photo.file_type, photo.cache_version)}
+              poster={photo.blur_placeholder}
               className="w-full h-full object-cover object-center transition-transform duration-300 group-hover:scale-[1.02]"
-              muted
-              playsInline
-              onMouseEnter={(e) => e.currentTarget.play()}
-              onMouseLeave={(e) => {
-                e.currentTarget.pause();
-                e.currentTarget.currentTime = 0;
-              }}
             />
           ) : (
             <ProgressiveImage
@@ -225,16 +220,10 @@ const PhotoCard: React.FC<PhotoCardProps> = ({
         }}
       >
         {isVideo ? (
-          <video
+          <ProgressiveVideo
             src={getPreviewUrl(slug, photo.id, photo.file_type)}
+            poster={photo.blur_placeholder}
             className="w-full h-full object-cover object-center"
-            muted
-            playsInline
-            onMouseEnter={(e) => e.currentTarget.play()}
-            onMouseLeave={(e) => {
-              e.currentTarget.pause();
-              e.currentTarget.currentTime = 0;
-            }}
           />
         ) : (
           <ProgressiveImage
