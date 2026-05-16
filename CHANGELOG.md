@@ -5,6 +5,26 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.2] - 2026-05-16
+
+### Added
+- Database migration 017: performance indexes for collaborator lookups, city queries, tag fetching, and preview photo selection.
+- Image load error handling with retry button in ProgressiveImage component — failed images show a fallback icon instead of blank space.
+- Slug format validation on all public API route parameters — rejects malformed slugs early with 400 status.
+- Cache-Control headers on `/api/map/photos` endpoint (5min browser cache, 10min CDN cache).
+
+### Changed
+- GET `/api/events` rewritten from N+1 to batch queries — preview photos, cities, and tags fetched in 3 queries total instead of 3 per event.
+- Android app release bumped to build 23 (versionName 1.5.2).
+- Project package versions synchronized to 1.5.2.
+
+### Fixed
+- Event list API performance: eliminated O(3N) database queries (3 per event) with batch fetching pattern.
+- ProgressiveImage no longer shows blank space when image fails to load.
+
+### Security
+- Route parameter validation prevents malformed slugs from reaching database queries.
+
 ## [1.5.1] - 2026-05-14
 
 ### Added

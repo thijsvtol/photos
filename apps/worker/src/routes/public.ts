@@ -6,6 +6,9 @@ import { optionalAuth, getUser, isAdmin } from '../auth';
 
 const app = new Hono<{ Bindings: Env }>();
 
+// Validate slug format (alphanumeric + hyphens only)
+const isValidSlug = (slug: string): boolean => /^[a-z0-9][a-z0-9\-]*[a-z0-9]$|^[a-z0-9]$/.test(slug);
+
 // CORS configuration for same-origin requests
 app.use('/*', cors({
   origin: '*',
@@ -54,57 +57,95 @@ app.get('/api/events', optionalAuth, async (c) => {
       .bind(userEmail, userIsAdmin ? 1 : 0, userIsAdmin ? 1 : 0)
       .all<Omit<Event, 'password_salt' | 'password_hash'>>();
     
-    // For visible events, add a preview photo ID and cities
-    const eventsWithPreviews = await Promise.all(
-      (events.results || []).map(async (event) => {
-        if (
-          (event as { requires_password?: boolean }).requires_password
-          && event.visibility === 'public'
-          && !userIsAdmin
-        ) {
-          const hasPasswordSession = await hasEventSessionAccess(c.req.raw, event.slug, c.env.EVENT_COOKIE_SECRET);
-          if (!hasPasswordSession) {
-            return null;
-          }
+    // Filter password-protected events that user hasn't authenticated to
+    const visibleEvents: typeof events.results = [];
+    for (const event of (events.results || [])) {
+      if (
+        (event as { requires_password?: boolean }).requires_password
+        && event.visibility === 'public'
+        && !userIsAdmin
+      ) {
+        const hasPasswordSession = await hasEventSessionAccess(c.req.raw, event.slug, c.env.EVENT_COOKIE_SECRET);
+        if (!hasPasswordSession) {
+          continue;
         }
+      }
+      visibleEvents.push(event);
+    }
 
-        let preview_photo_id = null;
+    if (visibleEvents.length === 0) {
+      return c.json({ events: [] });
+    }
 
-        // Get the first featured photo for this event as preview, fallback to first photo
-        const photo = await c.env.DB
-          .prepare('SELECT id FROM photos WHERE event_id = ? ORDER BY is_featured DESC, capture_time ASC LIMIT 1')
-          .bind(event.id)
-          .first<{ id: string }>();
+    // Batch fetch preview photos, cities, and tags in 3 queries instead of 3N
+    const eventIds = visibleEvents.map(e => e.id);
+    const placeholders = eventIds.map(() => '?').join(',');
 
-        preview_photo_id = photo?.id || null;
-        
-        // Get unique cities for this event
-        const citiesResult = await c.env.DB
-          .prepare('SELECT DISTINCT city FROM photos WHERE event_id = ? AND city IS NOT NULL ORDER BY city ASC')
-          .bind(event.id)
-          .all<{ city: string }>();
-        
-        const cities = (citiesResult.results || []).map(r => r.city);
-        
-        // Get tags for this event
-        const tagsResult = await c.env.DB
-          .prepare(`
-            SELECT t.* FROM tags t
-            JOIN event_tags et ON t.id = et.tag_id
-            WHERE et.event_id = ?
-          `)
-          .bind(event.id)
-          .all();
-        
-        const tags = tagsResult.results || [];
-        
-        return { ...event, preview_photo_id, cities, tags };
-      })
-    );
+    // Batch: preview photo IDs (first featured or earliest photo per event)
+    const previewsResult = await c.env.DB
+      .prepare(`
+        SELECT event_id, id as photo_id FROM photos 
+        WHERE id IN (
+          SELECT id FROM photos p2 
+          WHERE p2.event_id IN (${placeholders}) 
+          GROUP BY p2.event_id 
+          HAVING p2.id = (
+            SELECT p3.id FROM photos p3 
+            WHERE p3.event_id = p2.event_id 
+            ORDER BY p3.is_featured DESC, p3.capture_time ASC LIMIT 1
+          )
+        )
+      `)
+      .bind(...eventIds)
+      .all<{ event_id: number; photo_id: string }>();
+
+    // Batch: cities per event
+    const citiesResult = await c.env.DB
+      .prepare(`
+        SELECT event_id, city FROM photos 
+        WHERE event_id IN (${placeholders}) AND city IS NOT NULL 
+        GROUP BY event_id, city ORDER BY city ASC
+      `)
+      .bind(...eventIds)
+      .all<{ event_id: number; city: string }>();
+
+    // Batch: tags per event
+    const tagsResult = await c.env.DB
+      .prepare(`
+        SELECT et.event_id, t.id, t.name, t.slug FROM tags t
+        JOIN event_tags et ON t.id = et.tag_id
+        WHERE et.event_id IN (${placeholders})
+      `)
+      .bind(...eventIds)
+      .all<{ event_id: number; id: number; name: string; slug: string }>();
+
+    // Build lookup maps
+    const previewMap = new Map<number, string>();
+    for (const r of (previewsResult.results || [])) {
+      previewMap.set(r.event_id, r.photo_id);
+    }
+
+    const citiesMap = new Map<number, string[]>();
+    for (const r of (citiesResult.results || [])) {
+      if (!citiesMap.has(r.event_id)) citiesMap.set(r.event_id, []);
+      citiesMap.get(r.event_id)!.push(r.city);
+    }
+
+    const tagsMap = new Map<number, Array<{ id: number; name: string; slug: string }>>();
+    for (const r of (tagsResult.results || [])) {
+      if (!tagsMap.has(r.event_id)) tagsMap.set(r.event_id, []);
+      tagsMap.get(r.event_id)!.push({ id: r.id, name: r.name, slug: r.slug });
+    }
+
+    // Assemble final response
+    const eventsWithPreviews = visibleEvents.map(event => ({
+      ...event,
+      preview_photo_id: previewMap.get(event.id as number) || null,
+      cities: citiesMap.get(event.id as number) || [],
+      tags: tagsMap.get(event.id as number) || [],
+    }));
     
-    return c.json({
-      events: eventsWithPreviews.filter((event): event is NonNullable<typeof event> => event !== null),
-    });
+    return c.json({ events: eventsWithPreviews });
   } catch (error) {
     console.error('Error fetching events:', error);
     return c.json({ error: 'Failed to fetch events' }, 500);
@@ -117,6 +158,7 @@ app.get('/api/events', optionalAuth, async (c) => {
  */
 app.get('/api/events/:slug', optionalAuth, async (c) => {
   const slug = c.req.param('slug')!;
+  if (!isValidSlug(slug)) return c.json({ error: 'Invalid slug format' }, 400);
   
   try {
     const user = getUser(c);
@@ -179,6 +221,7 @@ app.get('/api/events/:slug', optionalAuth, async (c) => {
  */
 app.get('/api/events/:slug/photos', optionalAuth, async (c) => {
   const slug = c.req.param('slug')!;
+  if (!isValidSlug(slug)) return c.json({ error: 'Invalid slug format' }, 400);
   const sort = c.req.query('sort') || 'date_asc';
   
   try {
@@ -270,6 +313,7 @@ app.get('/api/events/:slug/photos', optionalAuth, async (c) => {
  */
 app.get('/api/events/:slug/photos/:photoId', optionalAuth, async (c) => {
   const slug = c.req.param('slug')!;
+  if (!isValidSlug(slug)) return c.json({ error: 'Invalid slug format' }, 400);
   const photoId = c.req.param('photoId');
   
   try {
@@ -371,7 +415,9 @@ app.get('/api/map/photos', async (c) => {
       `)
       .all();
 
-    return c.json({ photos: results.results || [] });
+    return c.json({ photos: results.results || [] }, 200, {
+      'Cache-Control': 'public, max-age=300, s-maxage=600',
+    });
   } catch (error) {
     console.error('Error fetching map photos:', error);
     return c.json({ error: 'Failed to fetch map photos' }, 500);
