@@ -467,6 +467,24 @@ const EventGallery: React.FC = () => {
         top: offsetPosition,
         behavior: 'smooth'
       });
+    } else {
+      // Date section not yet rendered — expand visible dates to include it, then scroll
+      const dateIndex = dates.indexOf(date);
+      if (dateIndex >= 0) {
+        setVisibleDateCount(dateIndex + 1);
+        // Wait for render, then scroll
+        requestAnimationFrame(() => {
+          setTimeout(() => {
+            const el = dateRefs.current.get(date);
+            if (el) {
+              const offset = 100;
+              const elementPosition = el.getBoundingClientRect().top;
+              const offsetPosition = elementPosition + window.pageYOffset - offset;
+              window.scrollTo({ top: offsetPosition, behavior: 'smooth' });
+            }
+          }, 50);
+        });
+      }
     }
   };
 
