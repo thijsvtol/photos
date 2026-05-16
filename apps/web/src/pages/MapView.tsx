@@ -1,7 +1,7 @@
 import React, { useEffect, useState, useMemo } from 'react';
 import { MapContainer, TileLayer, Marker, Popup, useMap } from 'react-leaflet';
 import MarkerClusterGroup from 'react-leaflet-cluster';
-import { Icon, LatLngBounds } from 'leaflet';
+import { Icon, DivIcon, LatLngBounds } from 'leaflet';
 import { Link } from 'react-router-dom';
 import Navbar from '../components/Navbar';
 import Footer from '../components/Footer';
@@ -24,6 +24,31 @@ const defaultIcon = new Icon({
   popupAnchor: [1, -34],
   shadowSize: [41, 41]
 });
+
+// Custom cluster icon with circle badge
+const createClusterIcon = (cluster: { getChildCount: () => number }) => {
+  const count = cluster.getChildCount();
+  const size = count < 10 ? 36 : count < 100 ? 42 : 50;
+  return new DivIcon({
+    html: `<div style="
+      width: ${size}px;
+      height: ${size}px;
+      border-radius: 50%;
+      background: #3b82f6;
+      border: 3px solid #fff;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.3);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: #fff;
+      font-weight: 700;
+      font-size: ${count < 10 ? '14' : '13'}px;
+    ">${count}</div>`,
+    className: '',
+    iconSize: [size, size],
+    iconAnchor: [size / 2, size / 2],
+  });
+};
 
 interface LocationGroup {
   lat: number;
@@ -163,6 +188,7 @@ const MapView: React.FC = () => {
                 maxClusterRadius={60}
                 spiderfyOnMaxZoom
                 showCoverageOnHover={false}
+                iconCreateFunction={createClusterIcon}
               >
                 {locations.map((location, index) => {
                   // Group photos by event
