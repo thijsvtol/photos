@@ -82,19 +82,15 @@ app.get('/api/events', optionalAuth, async (c) => {
     const placeholders = eventIds.map(() => '?').join(',');
 
     // Batch: preview photo IDs (first featured or earliest photo per event)
+    // Use a window function approach compatible with D1/SQLite
     const previewsResult = await c.env.DB
       .prepare(`
-        SELECT event_id, id as photo_id FROM photos 
-        WHERE id IN (
-          SELECT id FROM photos p2 
-          WHERE p2.event_id IN (${placeholders}) 
-          GROUP BY p2.event_id 
-          HAVING p2.id = (
-            SELECT p3.id FROM photos p3 
-            WHERE p3.event_id = p2.event_id 
-            ORDER BY p3.is_featured DESC, p3.capture_time ASC LIMIT 1
-          )
-        )
+        SELECT event_id, id as photo_id FROM (
+          SELECT id, event_id, 
+            ROW_NUMBER() OVER (PARTITION BY event_id ORDER BY is_featured DESC, capture_time ASC) as rn
+          FROM photos
+          WHERE event_id IN (${placeholders})
+        ) WHERE rn = 1
       `)
       .bind(...eventIds)
       .all<{ event_id: number; photo_id: string }>();
