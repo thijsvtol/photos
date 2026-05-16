@@ -141,7 +141,6 @@ jobs:
           status: 'draft' # Set to 'completed' after app is live.
           inAppUpdatePriority: 2
           whatsNewDirectory: apps/web/release-notes
-          changesNotSentForReview: true
       
       - name: Upload APK as artifact
         uses: actions/upload-artifact@v7
