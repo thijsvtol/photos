@@ -5,6 +5,21 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.3] - 2026-05-16
+
+### Added
+- Upload retry button on individual failed uploads and "Retry All" button when multiple uploads fail.
+- Per-chunk retry logic (3 retries with progressive backoff) — individual chunk failures no longer kill the whole upload.
+- `beforeunload` warning when navigating away during active uploads on web.
+- Auto-resume failed uploads when network connection is restored (online event).
+- Auto-resume failed uploads when tab becomes visible again (visibilitychange event).
+- Background sync now works on web platform (previously native-only) for manual sync triggers.
+
+### Changed
+- Background sync max retries increased from 3 to 5 with 2s initial backoff (was 1s).
+- Failed uploads are automatically retried on page load (previously only pending were resumed).
+- Android app release bumped to build 24 (versionName 1.5.3).
+
 ## [1.5.2] - 2026-05-16
 
 ### Added

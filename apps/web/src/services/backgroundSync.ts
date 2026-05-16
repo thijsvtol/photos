@@ -9,8 +9,9 @@ import { folderSyncService } from './folderSync';
 import ProgressNotification from '../plugins/ProgressNotification';
 
 const CHUNK_SIZE = 5 * 1024 * 1024; // 5MB chunks
-const MAX_RETRIES = 3; // Maximum retry attempts
-const RETRY_DELAY_MS = 1000; // Initial retry delay: 1 second
+const MAX_RETRIES = 5; // Maximum retry attempts (increased from 3)
+const RETRY_DELAY_MS = 2000; // Initial retry delay: 2 seconds
+const MAX_CHUNK_RETRIES = 3; // Retry individual chunks up to 3 times
 
 /**
  * Background sync service for uploading photos when app is in background
@@ -26,6 +27,32 @@ class BackgroundSyncService {
    */
   private getBackoffDelay(retryCount: number): number {
     return RETRY_DELAY_MS * Math.pow(2, retryCount);
+  }
+
+  /**
+   * Upload a single chunk with retry logic
+   */
+  private async uploadChunkWithRetry(
+    eventSlug: string,
+    photoId: string,
+    uploadIdVal: string,
+    partNumber: number,
+    chunk: Blob
+  ): Promise<{ etag: string }> {
+    let lastError: unknown;
+    for (let attempt = 0; attempt <= MAX_CHUNK_RETRIES; attempt++) {
+      try {
+        return await uploadPart(eventSlug, photoId, uploadIdVal, partNumber, chunk);
+      } catch (err) {
+        lastError = err;
+        if (attempt < MAX_CHUNK_RETRIES) {
+          const delay = RETRY_DELAY_MS * (attempt + 1);
+          console.warn(`Chunk ${partNumber} failed (attempt ${attempt + 1}/${MAX_CHUNK_RETRIES + 1}), retrying in ${delay}ms...`);
+          await new Promise(resolve => setTimeout(resolve, delay));
+        }
+      }
+    }
+    throw lastError;
   }
 
   /**
@@ -83,21 +110,30 @@ class BackgroundSyncService {
    * Process all pending uploads in the queue
    */
   private async processPendingUploads() {
-    // Check network status
-    const status = await Network.getStatus();
-    if (!status.connected) {
-      console.log('No network connection, skipping sync');
+    const isNative = Capacitor.isNativePlatform();
+
+    // Check network status (native only, web assumes online via navigator.onLine)
+    if (isNative) {
+      const status = await Network.getStatus();
+      if (!status.connected) {
+        console.log('No network connection, skipping sync');
+        return;
+      }
+    } else if (!navigator.onLine) {
+      console.log('Browser offline, skipping sync');
       return;
     }
 
-    // Scan configured folders for new photos before processing uploads
-    try {
-      const newFiles = await folderSyncService.syncAllFolders();
-      if (newFiles > 0) {
-        console.log(`Background folder scan: ${newFiles} new files queued`);
+    // Scan configured folders for new photos before processing uploads (native only)
+    if (isNative) {
+      try {
+        const newFiles = await folderSyncService.syncAllFolders();
+        if (newFiles > 0) {
+          console.log(`Background folder scan: ${newFiles} new files queued`);
+        }
+      } catch (error) {
+        console.warn('Background folder scan failed:', error);
       }
-    } catch (error) {
-      console.warn('Background folder scan failed:', error);
     }
 
     const pendingUploads = await getPendingUploads();
@@ -115,17 +151,19 @@ class BackgroundSyncService {
     // Track which event we're uploading to (use first upload's event)
     const eventSlug = pendingUploads.length > 0 ? pendingUploads[0].eventSlug : null;
 
-    // Show initial progress notification
-    await ProgressNotification.show({
-      id: notificationId,
-      title: 'Uploading Photos',
-      body: `0 of ${pendingUploads.length} completed`,
-      progress: 0,
-      maxProgress: pendingUploads.length,
-      indeterminate: false,
-      ongoing: true,
-      eventSlug: eventSlug || undefined,
-    });
+    // Show initial progress notification (native only)
+    if (isNative) {
+      await ProgressNotification.show({
+        id: notificationId,
+        title: 'Uploading Photos',
+        body: `0 of ${pendingUploads.length} completed`,
+        progress: 0,
+        maxProgress: pendingUploads.length,
+        indeterminate: false,
+        ongoing: true,
+        eventSlug: eventSlug || undefined,
+      });
+    }
 
     for (let idx = 0; idx < pendingUploads.length; idx++) {
       const upload = pendingUploads[idx];
@@ -149,18 +187,20 @@ class BackgroundSyncService {
           continue;
         }
 
-        // Update progress notification
-        await ProgressNotification.show({
-          id: notificationId,
-          title: 'Uploading Photos',
-          body: `${idx} of ${pendingUploads.length} completed`,
-          largeBody: `Currently uploading: ${upload.file.name}`,
-          progress: idx,
-          maxProgress: pendingUploads.length,
-          indeterminate: false,
-          ongoing: true,
-          eventSlug: eventSlug || undefined,
-        });
+        // Update progress notification (native only)
+        if (isNative) {
+          await ProgressNotification.show({
+            id: notificationId,
+            title: 'Uploading Photos',
+            body: `${idx} of ${pendingUploads.length} completed`,
+            largeBody: `Currently uploading: ${upload.file.name}`,
+            progress: idx,
+            maxProgress: pendingUploads.length,
+            indeterminate: false,
+            ongoing: true,
+            eventSlug: eventSlug || undefined,
+          });
+        }
 
         // Update status to uploading
         await updateQueueItem(upload.id, { status: 'uploading' });
@@ -199,7 +239,7 @@ class BackgroundSyncService {
           const end = Math.min(start + CHUNK_SIZE, upload.file.size);
           const chunk = upload.file.slice(start, end);
 
-          const { etag } = await uploadPart(
+          const { etag } = await this.uploadChunkWithRetry(
             upload.eventSlug,
             photoId,
             uploadData.uploadId,
@@ -213,8 +253,8 @@ class BackgroundSyncService {
           const progress = Math.round(((i + 1) / totalChunks) * 100);
           await updateQueueItem(upload.id, { progress });
           
-          // Update notification with chunk progress
-          if (i % 2 === 0 || i === totalChunks - 1) { // Update every 2 chunks or on last chunk
+          // Update notification with chunk progress (native only)
+          if (isNative && (i % 2 === 0 || i === totalChunks - 1)) {
             await ProgressNotification.show({
               id: notificationId,
               title: 'Uploading Photos',
@@ -278,50 +318,52 @@ class BackgroundSyncService {
       }
     }
 
-    // Show completion notification
-    // First cancel the progress notification
-    await ProgressNotification.cancel({ id: notificationId });
-    
-    if (successCount > 0 && failCount === 0) {
-      // All succeeded
-      await LocalNotifications.schedule({
-        notifications: [{
-          title: '✓ Upload Complete',
-          body: `Successfully uploaded ${successCount} photo${successCount > 1 ? 's' : ''}. Tap to view.`,
-          id: notificationId,
-          ongoing: false,
-          actionTypeId: 'VIEW_EVENT',
-          extra: {
-            eventSlug: eventSlug,
-            action: 'view_event'
-          }
-        }],
-      });
-    } else if (successCount > 0 && failCount > 0) {
-      // Partial success
-      await LocalNotifications.schedule({
-        notifications: [{
-          title: 'Upload Completed',
-          body: `${successCount} uploaded, ${failCount} failed. Tap to view.`,
-          id: notificationId,
-          ongoing: false,
-          actionTypeId: 'VIEW_EVENT',
-          extra: {
-            eventSlug: eventSlug,
-            action: 'view_event'
-          }
-        }],
-      });
-    } else if (failCount > 0) {
-      // All failed
-      await LocalNotifications.schedule({
-        notifications: [{
-          title: '✗ Upload Failed',
-          body: `Failed to upload ${failCount} photo${failCount > 1 ? 's' : ''}. Check your connection and try again.`,
-          id: notificationId,
-          ongoing: false,
-        }],
-      });
+    // Show completion notification (native only)
+    if (isNative) {
+      // First cancel the progress notification
+      await ProgressNotification.cancel({ id: notificationId });
+      
+      if (successCount > 0 && failCount === 0) {
+        // All succeeded
+        await LocalNotifications.schedule({
+          notifications: [{
+            title: '✓ Upload Complete',
+            body: `Successfully uploaded ${successCount} photo${successCount > 1 ? 's' : ''}. Tap to view.`,
+            id: notificationId,
+            ongoing: false,
+            actionTypeId: 'VIEW_EVENT',
+            extra: {
+              eventSlug: eventSlug,
+              action: 'view_event'
+            }
+          }],
+        });
+      } else if (successCount > 0 && failCount > 0) {
+        // Partial success
+        await LocalNotifications.schedule({
+          notifications: [{
+            title: 'Upload Completed',
+            body: `${successCount} uploaded, ${failCount} failed. Tap to view.`,
+            id: notificationId,
+            ongoing: false,
+            actionTypeId: 'VIEW_EVENT',
+            extra: {
+              eventSlug: eventSlug,
+              action: 'view_event'
+            }
+          }],
+        });
+      } else if (failCount > 0) {
+        // All failed
+        await LocalNotifications.schedule({
+          notifications: [{
+            title: '✗ Upload Failed',
+            body: `Failed to upload ${failCount} photo${failCount > 1 ? 's' : ''}. Check your connection and try again.`,
+            id: notificationId,
+            ongoing: false,
+          }],
+        });
+      }
     }
   }
 
@@ -337,13 +379,9 @@ class BackgroundSyncService {
   }
 
   /**
-   * Manually trigger a sync (useful for testing or user-initiated sync)
+   * Manually trigger a sync (works on all platforms)
    */
   async syncNow() {
-    if (!Capacitor.isNativePlatform()) {
-      return;
-    }
-
     await this.processPendingUploads();
   }
 }

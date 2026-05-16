@@ -1,14 +1,17 @@
 
-import { Upload, AlertCircle, Loader2, ChevronDown } from 'lucide-react';
+import { Upload, AlertCircle, Loader2, ChevronDown, RotateCcw } from 'lucide-react';
 import type { UploadQueueItem } from '../types';
 
 interface UploadQueueListProps {
   queueItems: UploadQueueItem[];
   itemsToShow: number;
   onLoadMore: () => void;
+  onRetry?: (item: UploadQueueItem) => void;
+  onRetryAll?: () => void;
 }
 
-export default function UploadQueueList({ queueItems, itemsToShow, onLoadMore }: UploadQueueListProps) {
+export default function UploadQueueList({ queueItems, itemsToShow, onLoadMore, onRetry, onRetryAll }: UploadQueueListProps) {
+  const failedItems = queueItems.filter(i => i.status === 'failed');
   const getStatusColor = (status: string) => {
     switch (status) {
       case 'completed': return 'bg-green-500';
@@ -27,6 +30,15 @@ export default function UploadQueueList({ queueItems, itemsToShow, onLoadMore }:
           <span className="ml-2 px-2 py-0.5 bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 text-xs rounded-full">
             {queueItems.length}
           </span>
+        )}
+        {onRetryAll && failedItems.length > 1 && (
+          <button
+            onClick={onRetryAll}
+            className="ml-auto px-3 py-1.5 bg-red-600 text-white text-xs sm:text-sm rounded-lg hover:bg-red-700 transition flex items-center gap-1.5"
+          >
+            <RotateCcw className="w-3.5 h-3.5" />
+            <span>Retry All ({failedItems.length})</span>
+          </button>
         )}
       </h2>
       
@@ -73,7 +85,16 @@ export default function UploadQueueList({ queueItems, itemsToShow, onLoadMore }:
                 {item.status === 'failed' && (
                   <div className="flex items-start gap-2 text-xs sm:text-sm text-red-600 dark:text-red-400 bg-red-50 dark:bg-red-900/20 rounded p-2">
                     <AlertCircle className="w-4 h-4 flex-shrink-0 mt-0.5" />
-                    <span>{item.error}</span>
+                    <span className="flex-1">{item.error}</span>
+                    {onRetry && (
+                      <button
+                        onClick={() => onRetry(item)}
+                        className="flex-shrink-0 px-2 py-1 bg-red-600 text-white text-xs rounded hover:bg-red-700 transition flex items-center gap-1"
+                      >
+                        <RotateCcw className="w-3 h-3" />
+                        <span>Retry</span>
+                      </button>
+                    )}
                   </div>
                 )}
                 

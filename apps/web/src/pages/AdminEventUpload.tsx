@@ -27,6 +27,8 @@ L.Icon.Default.mergeOptions({
 });
 
 const CHUNK_SIZE = 5 * 1024 * 1024; // 5MB chunks
+const MAX_CHUNK_RETRIES = 3; // Retry individual chunk uploads up to 3 times
+const CHUNK_RETRY_DELAY = 2000; // 2 second delay between chunk retries
 
 const AdminEventUpload: React.FC = () => {
   const { slug } = useParams<{ slug: string }>();
@@ -59,10 +61,35 @@ const AdminEventUpload: React.FC = () => {
       ]).finally(() => {
         setIsLoading(false);
       });
-      // Resume any pending uploads
+      // Resume any pending/failed uploads on page load
       resumePendingUploads();
     }
   }, [slug]);
+
+  // Auto-resume uploads when coming back online
+  useEffect(() => {
+    const handleOnline = () => {
+      console.log('Connection restored, resuming pending uploads...');
+      resumePendingUploads();
+    };
+    window.addEventListener('online', handleOnline);
+    return () => window.removeEventListener('online', handleOnline);
+  }, [slug]);
+
+  // Auto-resume when tab becomes visible again (user returns to tab)
+  useEffect(() => {
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') {
+        const hasFailed = queueItems.some(i => i.status === 'failed');
+        if (hasFailed) {
+          console.log('Tab visible again, resuming failed uploads...');
+          resumePendingUploads();
+        }
+      }
+    };
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
+  }, [queueItems, slug]);
 
   useEffect(() => {
     if (successMessage) {
@@ -70,6 +97,18 @@ const AdminEventUpload: React.FC = () => {
       return () => clearTimeout(timer);
     }
   }, [successMessage]);
+
+  // Warn user before leaving page if uploads are in progress
+  useEffect(() => {
+    const hasActiveUploads = queueItems.some(i => i.status === 'uploading' || i.status === 'pending');
+    if (!hasActiveUploads) return;
+    
+    const handler = (e: BeforeUnloadEvent) => {
+      e.preventDefault();
+    };
+    window.addEventListener('beforeunload', handler);
+    return () => window.removeEventListener('beforeunload', handler);
+  }, [queueItems]);
 
   const loadEvent = async () => {
     try {
@@ -103,13 +142,38 @@ const AdminEventUpload: React.FC = () => {
     try {
       const pending = await getPendingUploads(slug);
       for (const item of pending) {
-        if (item.status === 'pending') {
+        if (item.status === 'pending' || item.status === 'failed') {
           processUpload(item);
         }
       }
     } catch (err) {
       console.error('Failed to resume uploads:', err);
     }
+  };
+
+  // Upload a single chunk with retry logic
+  const uploadChunkWithRetry = async (
+    eventSlug: string,
+    photoId: string,
+    uploadId: string,
+    partNumber: number,
+    chunk: Blob,
+    isPreview?: boolean,
+    fileType?: string
+  ): Promise<{ etag: string }> => {
+    let lastError: unknown;
+    for (let attempt = 0; attempt <= MAX_CHUNK_RETRIES; attempt++) {
+      try {
+        return await uploadPart(eventSlug, photoId, uploadId, partNumber, chunk, isPreview, fileType);
+      } catch (err) {
+        lastError = err;
+        if (attempt < MAX_CHUNK_RETRIES) {
+          console.warn(`Chunk ${partNumber} failed (attempt ${attempt + 1}/${MAX_CHUNK_RETRIES + 1}), retrying...`);
+          await new Promise(resolve => setTimeout(resolve, CHUNK_RETRY_DELAY * (attempt + 1)));
+        }
+      }
+    }
+    throw lastError;
   };
 
   const parseExifDate = (exifDate: string): string | undefined => {
@@ -301,8 +365,8 @@ const AdminEventUpload: React.FC = () => {
         const end = Math.min(start + CHUNK_SIZE, item.file.size);
         const chunk = item.file.slice(start, end);
         
-        // Upload part directly to worker
-        const { etag } = await uploadPart(
+        // Upload part with automatic chunk-level retry
+        const { etag } = await uploadChunkWithRetry(
           item.eventSlug,
           item.photoId!,
           uploadId,
@@ -340,8 +404,30 @@ const AdminEventUpload: React.FC = () => {
       }
     } catch (err) {
       console.error('Upload failed:', err);
-      await updateQueueItem(item.id, { status: 'failed', error: String(err) });
-      setQueueItems(prev => prev.map(i => i.id === item.id ? { ...i, status: 'failed', error: String(err) } : i));
+      const currentRetries = (item.retries || 0) + 1;
+      const errorMsg = err instanceof Error ? err.message : String(err);
+      await updateQueueItem(item.id, { 
+        status: 'failed', 
+        error: `Upload failed: ${errorMsg}`,
+        retries: currentRetries,
+        lastRetryTime: Date.now(),
+      });
+      setQueueItems(prev => prev.map(i => i.id === item.id ? { ...i, status: 'failed', error: `Upload failed: ${errorMsg}`, retries: currentRetries } : i));
+    }
+  };
+
+  const retryUpload = (item: UploadQueueItem) => {
+    // Reset the item state and reprocess
+    const resetItem: UploadQueueItem = { ...item, status: 'pending', progress: 0, error: undefined, uploadId: undefined, parts: undefined };
+    setQueueItems(prev => prev.map(i => i.id === item.id ? resetItem : i));
+    updateQueueItem(item.id, { status: 'pending', progress: 0, error: undefined, uploadId: undefined, parts: undefined });
+    processUpload(resetItem);
+  };
+
+  const retryAllFailed = () => {
+    const failedItems = queueItems.filter(i => i.status === 'failed');
+    for (const item of failedItems) {
+      retryUpload(item);
     }
   };
 
@@ -376,13 +462,13 @@ const AdminEventUpload: React.FC = () => {
       const end = Math.min(start + CHUNK_SIZE, previewBlob.size);
       const chunk = previewBlob.slice(start, end);
       
-      const { etag } = await uploadPart(
+      const { etag } = await uploadChunkWithRetry(
         eventSlug,
         photoId,
         uploadId,
         partNumber,
         chunk,
-        true // isPreview flag
+        true
       );
       
       parts.push({ partNumber, etag });
@@ -615,6 +701,8 @@ const AdminEventUpload: React.FC = () => {
           queueItems={queueItems}
           itemsToShow={queueItemsToShow}
           onLoadMore={() => setQueueItemsToShow(prev => prev + 10)}
+          onRetry={retryUpload}
+          onRetryAll={retryAllFailed}
         />
         </>
         )}
