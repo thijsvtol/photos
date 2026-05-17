@@ -27,14 +27,16 @@ fi
 PROBE_TMPDIR="$(mktemp -d)"
 trap 'rm -rf "$PROBE_TMPDIR"' EXIT
 
+PROBE_UA="Mozilla/5.0 (compatible; staging-security-probe/1.0)"
+
 code_for_get() {
   local url="$1"
   local token="${2:-}"
   local body_file="${PROBE_TMPDIR}/body_$(date +%s%N)"
   if [[ -n "$token" ]]; then
-    curl -s -o "$body_file" -w "%{http_code}" -H "Authorization: Bearer ${token}" "$url"
+    curl -s -o "$body_file" -w "%{http_code}" -A "$PROBE_UA" -H "Authorization: Bearer ${token}" "$url"
   else
-    curl -s -o "$body_file" -w "%{http_code}" "$url"
+    curl -s -o "$body_file" -w "%{http_code}" -A "$PROBE_UA" "$url"
   fi
 }
 
@@ -45,6 +47,7 @@ code_for_zip() {
   local body_file="${PROBE_TMPDIR}/body_$(date +%s%N)"
   if [[ -n "$token" ]]; then
     curl -s -o "$body_file" -w "%{http_code}" \
+      -A "$PROBE_UA" \
       -X POST \
       -H "Content-Type: application/json" \
       -H "Authorization: Bearer ${token}" \
@@ -52,6 +55,7 @@ code_for_zip() {
       "$url"
   else
     curl -s -o "$body_file" -w "%{http_code}" \
+      -A "$PROBE_UA" \
       -X POST \
       -H "Content-Type: application/json" \
       --data "$body" \
