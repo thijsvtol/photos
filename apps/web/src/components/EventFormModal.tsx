@@ -16,9 +16,10 @@ interface EventFormModalProps {
   onClose: () => void;
   event?: Event | null; // null = create mode, Event = edit mode
   onSuccess: () => void;
+  onCreated?: (slug: string) => void;
 }
 
-const EventFormModal: React.FC<EventFormModalProps> = ({ isOpen, onClose, event, onSuccess }) => {
+const EventFormModal: React.FC<EventFormModalProps> = ({ isOpen, onClose, event, onSuccess, onCreated }) => {
   const toast = useToast();
   const { confirm, ConfirmDialog } = useConfirm();
   const isEdit = !!event;
@@ -103,6 +104,7 @@ const EventFormModal: React.FC<EventFormModalProps> = ({ isOpen, onClose, event,
         }
         await haptics.success();
         toast.showSuccess('Event created');
+        onCreated?.(newEvent.slug);
       }
 
       onSuccess();

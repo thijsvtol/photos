@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useRef, useCallback } from 'react';
+import React, { useEffect, useState, useRef, useCallback, useMemo } from 'react';
 import { Clock, Download, X } from 'lucide-react';
 import Navbar from '../components/Navbar';
 import Footer from '../components/Footer';
@@ -26,6 +26,22 @@ function groupByDate(photos: Photo[]): { dates: string[]; groups: Map<string, Ph
   }
   const dates = Array.from(groups.keys()).sort((a, b) => b.localeCompare(a)); // newest first
   return { dates, groups };
+}
+
+/** Format a date string for display — memoized at module level to avoid repeated locale formatting */
+const dateFormatCache = new Map<string, string>();
+function formatDate(date: string): string {
+  const cached = dateFormatCache.get(date);
+  if (cached) return cached;
+  const dateObj = new Date(date);
+  const formatted = dateObj.toLocaleDateString('en-US', {
+    weekday: 'long',
+    year: 'numeric',
+    month: 'long',
+    day: 'numeric',
+  });
+  dateFormatCache.set(date, formatted);
+  return formatted;
 }
 
 const Timeline: React.FC = () => {
@@ -108,7 +124,7 @@ const Timeline: React.FC = () => {
     const load = async () => {
       setLoading(true);
       try {
-        const data = await getTimeline(200);
+        const data = await getTimeline(50);
         if (!cancelled) {
           setPhotos(data.photos);
           setNextCursor(data.nextCursor);
@@ -135,7 +151,7 @@ const Timeline: React.FC = () => {
     if (!nextCursor || loadingMore) return;
     setLoadingMore(true);
     try {
-      const data = await getTimeline(200, nextCursor);
+      const data = await getTimeline(50, nextCursor);
       setPhotos((prev) => [...prev, ...data.photos]);
       setNextCursor(data.nextCursor);
     } catch (err) {
@@ -162,29 +178,35 @@ const Timeline: React.FC = () => {
     return () => observer.disconnect();
   }, [nextCursor, loadingMore, loadMore]);
 
-  // Track active date on scroll
+  // Track active date on scroll (throttled to avoid excessive re-renders)
   useEffect(() => {
+    let ticking = false;
     const handleScroll = () => {
-      let closestDate: string | null = null;
-      let closestDistance = Infinity;
+      if (ticking) return;
+      ticking = true;
+      requestAnimationFrame(() => {
+        ticking = false;
+        let closestDate: string | null = null;
+        let closestDistance = Infinity;
 
-      dateRefs.current.forEach((el, date) => {
-        const rect = el.getBoundingClientRect();
-        const distance = Math.abs(rect.top - 140);
-        if (distance < closestDistance) {
-          closestDistance = distance;
-          closestDate = date;
-        }
+        dateRefs.current.forEach((el, date) => {
+          const rect = el.getBoundingClientRect();
+          const distance = Math.abs(rect.top - 140);
+          if (distance < closestDistance) {
+            closestDistance = distance;
+            closestDate = date;
+          }
+        });
+
+        if (closestDate) setActiveDate(closestDate);
       });
-
-      if (closestDate) setActiveDate(closestDate);
     };
 
     window.addEventListener('scroll', handleScroll, { passive: true });
     return () => window.removeEventListener('scroll', handleScroll);
-  }, [photos]);
+  }, []);
 
-  const { dates, groups } = groupByDate(photos);
+  const { dates, groups } = useMemo(() => groupByDate(photos), [photos]);
 
   return (
     <div className="min-h-screen bg-gray-50 dark:bg-gray-900 flex flex-col">
@@ -229,16 +251,7 @@ const Timeline: React.FC = () => {
             )}
             {dates.map((date) => {
               const datePhotos = groups.get(date) || [];
-              const dateObj = new Date(date);
-              const formattedDate = dateObj.toLocaleDateString('en-US', {
-                weekday: 'long',
-                year: 'numeric',
-                month: 'long',
-                day: 'numeric',
-              });
-
-              // Timeline photos may come from different events - group by event_slug for navigation
-              // Each photo already has event_slug from the API
+              const formattedDate = formatDate(date);
 
               // Group photos by event slug within this date
               const byEvent = new Map<string, Photo[]>();

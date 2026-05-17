@@ -89,7 +89,7 @@ const ModalOverlay: React.FC<ModalOverlayProps> = ({ onClose, children, classNam
       role="dialog"
       aria-modal="true"
       aria-label={label}
-      className={`fixed inset-0 z-50 ${className}`}
+      className={`fixed inset-0 z-[60] ${className}`}
     >
       {children}
     </div>

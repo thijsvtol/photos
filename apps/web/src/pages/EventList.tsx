@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { Calendar, Filter, X, ChevronDown, ChevronUp, Search, Plus, MapPin } from 'lucide-react';
 import Navbar from '../components/Navbar';
 import Footer from '../components/Footer';
@@ -13,6 +13,7 @@ import type { Event, Tag } from '../types';
 import { config } from '../config';
 
 const EventList: React.FC = () => {
+  const navigate = useNavigate();
   const { registerRefreshHandler, unregisterRefreshHandler } = useRefresh();
   const { user } = useAuth();
   const isAdmin = user?.isAdmin === true;
@@ -445,6 +446,7 @@ const EventList: React.FC = () => {
         isOpen={showCreateModal}
         onClose={() => setShowCreateModal(false)}
         onSuccess={() => { loadEvents(); loadTags(); }}
+        onCreated={(slug) => navigate(`/events/${slug}`)}
       />
     </div>
   );
