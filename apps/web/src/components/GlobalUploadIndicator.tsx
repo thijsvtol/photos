@@ -1,12 +1,15 @@
 import React, { useState } from 'react';
+import { useLocation } from 'react-router-dom';
 import { CheckCircle, AlertCircle, Loader2, ChevronDown, ChevronUp, RotateCcw } from 'lucide-react';
 import { useUploadContext } from '../contexts/UploadContext';
 
 /**
  * Global upload indicator rendered at app root — visible on ALL pages.
  * Google Photos style: compact floating pill at the bottom, expandable for details.
+ * Hidden on photo detail page to avoid overlapping fullscreen viewer controls.
  */
 const GlobalUploadIndicator: React.FC = () => {
+  const location = useLocation();
   const {
     queueItems,
     hasActiveUploads,
@@ -20,6 +23,9 @@ const GlobalUploadIndicator: React.FC = () => {
   } = useUploadContext();
 
   const [isExpanded, setIsExpanded] = useState(false);
+
+  // Hide on fullscreen photo detail page (/p/:slug/:photoId)
+  if (location.pathname.startsWith('/p/')) return null;
 
   // Nothing to show
   if (totalCount === 0) return null;
