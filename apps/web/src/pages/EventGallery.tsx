@@ -188,39 +188,36 @@ const EventGallery: React.FC = () => {
     setCollaboratorRole((mine?.role as 'viewer' | 'uploader' | 'editor' | 'admin' | undefined) || null);
   }, [collaborators, user?.email]);
 
+  // Disable browser's built-in scroll restoration so our custom logic handles it
+  useEffect(() => {
+    if ('scrollRestoration' in history) {
+      history.scrollRestoration = 'manual';
+    }
+  }, []);
+
   // Restore scroll position when returning to gallery
   useEffect(() => {
     if (slug && !loading && photos.length > 0) {
       const savedScroll = sessionStorage.getItem(`gallery_scroll_${slug}`);
       if (savedScroll) {
-        // Use setTimeout to ensure DOM has rendered
-        setTimeout(() => {
-          window.scrollTo(0, parseInt(savedScroll, 10));
-          // Clear the saved position after restoring
-          sessionStorage.removeItem(`gallery_scroll_${slug}`);
-        }, 100);
+        const target = parseInt(savedScroll, 10);
+        sessionStorage.removeItem(`gallery_scroll_${slug}`);
+        // Poll until the page is tall enough to scroll to the target position,
+        // then scroll. Gives up after ~1s if the page never gets tall enough
+        // (e.g. most photos were deleted).
+        let attempts = 0;
+        const tryScroll = () => {
+          if (document.documentElement.scrollHeight >= target || attempts >= 20) {
+            window.scrollTo(0, target);
+          } else {
+            attempts++;
+            requestAnimationFrame(tryScroll);
+          }
+        };
+        requestAnimationFrame(tryScroll);
       }
     }
   }, [slug, loading, photos]);
-
-  // Handle browser back/forward navigation
-  useEffect(() => {
-    const handlePopState = () => {
-      if (slug) {
-        const savedScroll = sessionStorage.getItem(`gallery_scroll_${slug}`);
-        if (savedScroll) {
-          // Delay slightly to ensure page is rendered
-          setTimeout(() => {
-            window.scrollTo(0, parseInt(savedScroll, 10));
-            sessionStorage.removeItem(`gallery_scroll_${slug}`);
-          }, 100);
-        }
-      }
-    };
-
-    window.addEventListener('popstate', handlePopState);
-    return () => window.removeEventListener('popstate', handlePopState);
-  }, [slug]);
 
   const loadEvent = async () => {
     try {

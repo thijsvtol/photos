@@ -1062,6 +1062,7 @@ const PhotoDetail: React.FC = () => {
       setShowMobileMenu(false);
 
       const remainingPhotos = allPhotos.filter((p) => p.id !== currentPhotoId);
+      setAllPhotos(remainingPhotos);
       const remainingDisplayPhotos = fromFavorites && favoritePhotos.length > 0
         ? remainingPhotos.filter((p) => favoritePhotos.some((fav: { id: string; slug: string }) => fav.id === p.id && fav.slug === slug))
         : remainingPhotos;
