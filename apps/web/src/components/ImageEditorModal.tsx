@@ -173,7 +173,7 @@ const ImageEditorModal: React.FC<ImageEditorModalProps> = ({ imageUrl, nativeWid
   ];
 
   return (
-    <div className="fixed inset-0 z-[200] flex flex-col bg-gray-900">
+    <div className="fixed inset-0 z-[200] flex flex-col bg-gray-900 overscroll-contain">
       {/* Header */}
       <div className="flex items-center justify-between px-4 py-3 bg-gray-800 border-b border-gray-700 shrink-0">
         <div className="flex items-center gap-3">

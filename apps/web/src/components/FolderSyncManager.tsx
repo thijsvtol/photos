@@ -3,7 +3,7 @@ import { Capacitor } from '@capacitor/core';
 import { FilePicker } from '@capawesome/capacitor-file-picker';
 import { Folder, Plus, Trash2, RefreshCw, Smartphone } from 'lucide-react';
 import { folderSyncService, FolderSyncConfig } from '../services/folderSync';
-import { backgroundSyncService } from '../services/backgroundSync';
+import { uploadManager } from '../services/uploadManager';
 
 interface Props {
   eventSlug: string;
@@ -88,8 +88,8 @@ export default function FolderSyncManager({ eventSlug }: Props) {
     try {
       const count = await folderSyncService.syncFolder(folderPath);
       
-      // Trigger background sync to start uploading
-      await backgroundSyncService.syncNow();
+      // Kick the upload manager to pick up and start processing the new queue items
+      await uploadManager.refresh();
       
       return count;
     } catch (error) {

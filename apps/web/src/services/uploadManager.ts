@@ -209,6 +209,12 @@ class UploadManager {
     }
   }
 
+  /** Reload pending items from IndexedDB and start processing them.
+   *  Use after external code (e.g. folder sync) adds items to the queue. */
+  async refresh() {
+    await this.resumeAll();
+  }
+
   // ── Core upload logic (moved from useUpload hook) ──
 
   private async processUpload(item: UploadQueueItem) {
@@ -220,17 +226,51 @@ class UploadManager {
       this.updateItem(item.id, { status: 'uploading' });
       await updateQueueItem(item.id, { status: 'uploading' });
 
-      const isVideo = item.fileType === 'video/mp4';
+      // Ensure photoId exists (folder-sync items may not have one)
+      const photoId = item.photoId || ulid();
+      if (!item.photoId) {
+        this.updateItem(item.id, { photoId });
+        await updateQueueItem(item.id, { photoId });
+      }
+
+      // Infer fileType from the File object if not set (folder-sync items)
+      const fileType = item.fileType || item.file.type || 'image/jpeg';
+      if (!item.fileType) {
+        this.updateItem(item.id, { fileType });
+        await updateQueueItem(item.id, { fileType });
+      }
+
+      const isVideo = fileType === 'video/mp4';
+
+      // Extract EXIF data on-the-fly if not already present (folder-sync items)
+      let exifData: Partial<UploadQueueItem> = {};
+      if (!item.captureTime) {
+        try {
+          if (isVideo) {
+            const sliceSize = Math.min(1024 * 1024, item.file.size);
+            const buffer = await item.file.slice(0, sliceSize).arrayBuffer();
+            const captureTime = extractMp4CreationTime(buffer) ?? new Date(item.file.lastModified).toISOString();
+            exifData = { captureTime };
+          } else {
+            exifData = await this.extractExifData(item.file);
+          }
+          this.updateItem(item.id, exifData);
+          await updateQueueItem(item.id, exifData);
+        } catch { /* proceed without EXIF */ }
+      }
+
+      const merged = { ...item, photoId, fileType, ...exifData };
+
       let previewBlob: Blob | null = null;
       if (!isVideo) previewBlob = await createPreview(item.file);
 
       const { uploadId } = await startUpload(
-        item.eventSlug, item.photoId!, item.file.name,
-        item.captureTime, item.width, item.height, item.iso,
-        item.aperture, item.shutterSpeed, item.focalLength,
-        item.cameraMake, item.cameraModel, item.lensModel,
-        item.latitude, item.longitude, item.blurPlaceholder,
-        false, item.fileType,
+        merged.eventSlug, photoId, item.file.name,
+        merged.captureTime, merged.width, merged.height, merged.iso,
+        merged.aperture, merged.shutterSpeed, merged.focalLength,
+        merged.cameraMake, merged.cameraModel, merged.lensModel,
+        merged.latitude, merged.longitude, merged.blurPlaceholder,
+        false, fileType,
       );
       await updateQueueItem(item.id, { uploadId });
 
@@ -251,7 +291,7 @@ class UploadManager {
           const chunk = item.file.slice(start, end);
           batch.push(
             this.uploadChunkWithRetry(
-              item.eventSlug, item.photoId!, uploadId, partNumber, chunk, false, item.fileType,
+              item.eventSlug, photoId, uploadId, partNumber, chunk, false, fileType,
             ).then(({ etag }) => ({ partNumber, etag }))
           );
         }
@@ -275,7 +315,7 @@ class UploadManager {
       // Sort parts by partNumber for completeUpload (R2 requires ordered parts)
       partsCompleted.sort((a, b) => a.partNumber - b.partNumber);
 
-      await completeUpload(item.eventSlug, item.photoId!, uploadId, partsCompleted);
+      await completeUpload(item.eventSlug, photoId, uploadId, partsCompleted);
 
       if (isVideo) {
         this.updateItem(item.id, { status: 'completed', progress: 100 });
@@ -283,7 +323,7 @@ class UploadManager {
       } else {
         this.updateItem(item.id, { progress: 85 });
         await updateQueueItem(item.id, { progress: 85 });
-        await this.uploadPreview(item.eventSlug, item.photoId!, previewBlob!);
+        await this.uploadPreview(item.eventSlug, photoId, previewBlob!);
         this.updateItem(item.id, { status: 'completed', progress: 100 });
         await updateQueueItem(item.id, { status: 'completed', progress: 100 });
       }

@@ -178,7 +178,7 @@ export function ShareEventButton({ event, slug, photos, canInvite = false }: Sha
       )}
 
       {showCollaboratorModal && (
-        <div className="fixed inset-0 z-[120] flex items-center justify-center p-3 sm:p-6">
+        <div className="fixed inset-0 z-[120] flex items-center justify-center p-3 sm:p-6 overscroll-contain">
           <div className="absolute inset-0 bg-black/60 backdrop-blur-[1px]" onClick={() => setShowCollaboratorModal(false)} />
           <div className="relative z-[121] w-full max-w-4xl max-h-[90vh] overflow-y-auto rounded-xl">
             <div className="sticky top-0 z-10 flex items-center justify-between px-4 py-3 bg-white dark:bg-gray-900 border border-b-0 border-gray-200 dark:border-gray-700 rounded-t-xl">

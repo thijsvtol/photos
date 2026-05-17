@@ -166,6 +166,8 @@ class FolderSyncService {
           await addToQueue({
             id: ulid(),
             file: fileObj,
+            photoId: ulid(),
+            fileType: this.getMimeType(file.name),
             eventSlug: config.eventSlug,
             status: 'pending',
             progress: 0,

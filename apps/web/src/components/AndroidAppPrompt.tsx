@@ -40,10 +40,23 @@ export const AndroidAppPrompt: React.FC = () => {
     setIsVisible(false);
   };
 
+  // Prevent body scroll and pull-to-refresh while prompt is open
+  useEffect(() => {
+    if (!isVisible) return;
+    const origOverflow = document.body.style.overflow;
+    const origOverscroll = document.body.style.overscrollBehavior;
+    document.body.style.overflow = 'hidden';
+    document.body.style.overscrollBehavior = 'contain';
+    return () => {
+      document.body.style.overflow = origOverflow;
+      document.body.style.overscrollBehavior = origOverscroll;
+    };
+  }, [isVisible]);
+
   if (!isVisible) return null;
 
   return (
-    <div className="fixed inset-0 z-[60] flex items-end sm:items-center justify-center p-4 bg-black bg-opacity-50 animate-fadeIn">
+    <div className="fixed inset-0 z-[60] flex items-end sm:items-center justify-center p-4 bg-black bg-opacity-50 animate-fadeIn overscroll-contain">
       <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-2xl max-w-md w-full p-6 relative animate-slideUp">
         {/* Close button */}
         <button

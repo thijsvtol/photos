@@ -74,12 +74,15 @@ const ModalOverlay: React.FC<ModalOverlayProps> = ({ onClose, children, classNam
     return () => window.removeEventListener('keydown', handleTab);
   }, []);
 
-  // Prevent body scroll while modal is open
+  // Prevent body scroll and pull-to-refresh while modal is open
   useEffect(() => {
     const original = document.body.style.overflow;
+    const originalOverscroll = document.body.style.overscrollBehavior;
     document.body.style.overflow = 'hidden';
+    document.body.style.overscrollBehavior = 'contain';
     return () => {
       document.body.style.overflow = original;
+      document.body.style.overscrollBehavior = originalOverscroll;
     };
   }, []);
 
@@ -89,7 +92,7 @@ const ModalOverlay: React.FC<ModalOverlayProps> = ({ onClose, children, classNam
       role="dialog"
       aria-modal="true"
       aria-label={label}
-      className={`fixed inset-0 z-[60] ${className}`}
+      className={`fixed inset-0 z-[60] overscroll-contain ${className}`}
     >
       {children}
     </div>

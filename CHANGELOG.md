@@ -5,6 +5,28 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.6.2] - 2026-05-17
+
+### Changed
+- Android app release bumped to build 27 (versionName 1.6.2).
+- Project package versions synchronized to 1.6.2.
+- Timeline page batch size reduced from 200 to 50 photos per load — dramatically fewer DOM nodes and JustifiedGrid instances.
+- Timeline scroll handler throttled with requestAnimationFrame — was firing getBoundingClientRect on every scroll event.
+- Timeline date grouping memoized to avoid O(n) recomputation on every re-render.
+- Folder sync now uses the main upload manager instead of the background sync service — uploads start immediately with full UI progress feedback.
+
+### Fixed
+- Photo viewer not updating after deleting a photo — navigation list now drops the deleted photo immediately.
+- Gallery scroll position not restored when returning from photo viewer — uses manual scroll restoration with rAF polling until page is tall enough.
+- Modal overlays appearing behind sticky navbar on Android — bumped modal z-index above navbar.
+- Modals allowing pull-to-refresh when scrolling on Android — added `overscroll-behavior: contain` and body scroll lock to all modal overlays.
+- Timeline page freezing or crashing when loading many photos — memoized groupByDate, throttled scroll handler, cached date formatting.
+- Folder sync not starting uploads immediately after enabling — only worked after leaving and reopening the app.
+- Folder sync uploads returning 404 errors — queue items were missing `photoId` and `fileType`, causing server rejection and video misidentification.
+- Upload manager now extracts EXIF/video metadata on-the-fly for folder-sync items that lack it.
+- Event creation now navigates directly to the new event's gallery page.
+- Console logging stripped from production builds via custom Vite plugin (Vite 8/oxc ignores esbuild.drop).
+
 ## [1.6.0] - 2026-05-17
 
 ### Added
