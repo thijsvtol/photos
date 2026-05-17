@@ -24,13 +24,17 @@ if [[ "$missing" -eq 1 ]]; then
   exit 0
 fi
 
+PROBE_TMPDIR="$(mktemp -d)"
+trap 'rm -rf "$PROBE_TMPDIR"' EXIT
+
 code_for_get() {
   local url="$1"
   local token="${2:-}"
+  local body_file="${PROBE_TMPDIR}/body_$(date +%s%N)"
   if [[ -n "$token" ]]; then
-    curl -s -o /dev/null -w "%{http_code}" -H "Authorization: Bearer ${token}" "$url"
+    curl -s -o "$body_file" -w "%{http_code}" -H "Authorization: Bearer ${token}" "$url"
   else
-    curl -s -o /dev/null -w "%{http_code}" "$url"
+    curl -s -o "$body_file" -w "%{http_code}" "$url"
   fi
 }
 
@@ -38,15 +42,16 @@ code_for_zip() {
   local url="$1"
   local body="$2"
   local token="${3:-}"
+  local body_file="${PROBE_TMPDIR}/body_$(date +%s%N)"
   if [[ -n "$token" ]]; then
-    curl -s -o /dev/null -w "%{http_code}" \
+    curl -s -o "$body_file" -w "%{http_code}" \
       -X POST \
       -H "Content-Type: application/json" \
       -H "Authorization: Bearer ${token}" \
       --data "$body" \
       "$url"
   else
-    curl -s -o /dev/null -w "%{http_code}" \
+    curl -s -o "$body_file" -w "%{http_code}" \
       -X POST \
       -H "Content-Type: application/json" \
       --data "$body" \
@@ -66,6 +71,12 @@ assert_status_in() {
     fi
   done
   echo "[security-probe] FAIL ${name}: got ${actual}, expected one of: ${expected[*]}"
+  # Show most recent response body for debugging
+  local latest_body
+  latest_body="$(ls -t "$PROBE_TMPDIR"/body_* 2>/dev/null | head -1)"
+  if [[ -n "$latest_body" && -s "$latest_body" ]]; then
+    echo "[security-probe]   response body: $(head -c 500 "$latest_body")"
+  fi
   return 1
 }
 

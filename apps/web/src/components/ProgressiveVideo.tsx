@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Play } from 'lucide-react';
+import { Capacitor } from '@capacitor/core';
 
 interface ProgressiveVideoProps {
   src: string;
@@ -17,12 +18,15 @@ const ProgressiveVideo: React.FC<ProgressiveVideoProps> = ({
   const [isNearViewport, setIsNearViewport] = useState(false);
   const [isPlaying, setIsPlaying] = useState(false);
   const [supportsHover, setSupportsHover] = useState(true);
+  const [metadataLoaded, setMetadataLoaded] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
+  const isNative = Capacitor.isNativePlatform();
 
   useEffect(() => {
     setIsNearViewport(false);
     setIsPlaying(false);
+    setMetadataLoaded(false);
   }, [src]);
 
   useEffect(() => {
@@ -65,31 +69,56 @@ const ProgressiveVideo: React.FC<ProgressiveVideoProps> = ({
       )}
       {isNearViewport && (
         <>
-          <video
-            ref={videoRef}
-            src={src}
-            className={className}
-            style={style}
-            muted
-            playsInline
-            preload="metadata"
-            poster={poster || undefined}
-            onMouseEnter={(e) => {
-              if (supportsHover) {
-                e.currentTarget.play();
-                setIsPlaying(true);
-              }
-            }}
-            onMouseLeave={(e) => {
-              if (supportsHover) {
-                e.currentTarget.pause();
-                e.currentTarget.currentTime = 0;
-                setIsPlaying(false);
-              }
-            }}
-            onEnded={() => setIsPlaying(false)}
-          />
-          {/* Play icon overlay — always visible on touch devices, hidden on hover devices until hovered */}
+          {isNative ? (
+            /* On native/Android, video preload="metadata" is unreliable.
+               Show a static poster image instead. */
+            poster ? (
+              <img
+                src={poster}
+                alt=""
+                className={className}
+                style={{ ...style, objectFit: 'cover' }}
+              />
+            ) : (
+              <div className={`${className} bg-gray-800`} style={style} />
+            )
+          ) : (
+            <video
+              ref={videoRef}
+              src={src}
+              className={className}
+              style={style}
+              muted
+              playsInline
+              preload="metadata"
+              poster={poster || undefined}
+              onLoadedData={() => setMetadataLoaded(true)}
+              onMouseEnter={(e) => {
+                if (supportsHover) {
+                  e.currentTarget.play();
+                  setIsPlaying(true);
+                }
+              }}
+              onMouseLeave={(e) => {
+                if (supportsHover) {
+                  e.currentTarget.pause();
+                  e.currentTarget.currentTime = 0;
+                  setIsPlaying(false);
+                }
+              }}
+              onEnded={() => setIsPlaying(false)}
+            />
+          )}
+          {/* On web: show poster overlay until video metadata loads (first frame visible) */}
+          {!isNative && !metadataLoaded && !isPlaying && poster && (
+            <img
+              src={poster}
+              alt=""
+              className={`absolute inset-0 w-full h-full object-cover`}
+              style={style}
+            />
+          )}
+          {/* Play icon overlay — always visible on touch/native devices, hidden on hover devices until hovered */}
           {!isPlaying && (
             <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
               <div className="bg-black/50 backdrop-blur-sm rounded-full p-2.5 shadow-lg">

@@ -1,4 +1,5 @@
 import { Capacitor } from '@capacitor/core';
+import { App } from '@capacitor/app';
 import { BackgroundTask } from '@capawesome/capacitor-background-task';
 import { LocalNotifications } from '@capacitor/local-notifications';
 import { Network } from '@capacitor/network';
@@ -6,20 +7,26 @@ import { ulid } from 'ulid';
 import { getPendingUploads, updateQueueItem } from '../uploadQueue';
 import { startUpload, uploadPart, completeUpload } from '../api';
 import { folderSyncService } from './folderSync';
+import { uploadManager } from './uploadManager';
 import ProgressNotification from '../plugins/ProgressNotification';
 
 const CHUNK_SIZE = 5 * 1024 * 1024; // 5MB chunks
+const VIDEO_CHUNK_SIZE = 10 * 1024 * 1024; // 10MB for videos — fewer round-trips
+const PARALLEL_CHUNKS = 4; // Upload up to 4 chunks simultaneously
 const MAX_RETRIES = 5; // Maximum retry attempts (increased from 3)
 const RETRY_DELAY_MS = 2000; // Initial retry delay: 2 seconds
 const MAX_CHUNK_RETRIES = 3; // Retry individual chunks up to 3 times
+const PERIODIC_SYNC_INTERVAL = 4 * 60 * 60 * 1000; // 4 hours between folder scans
+const FOREGROUND_CHECK_INTERVAL = 2 * 60 * 60 * 1000; // Check every 2 hours while app is open
 
 /**
- * Background sync service for uploading photos when app is in background
- * Works on iOS and Android using Capacitor plugins
+ * Background sync service for uploading photos when app is in background.
+ * Also handles periodic foreground folder checks and resume-on-focus syncing.
  */
 class BackgroundSyncService {
   private taskId: string | null = null;
   private isRunning = false;
+  private lastFolderScanTime = 0;
 
   /**
    * Calculate exponential backoff delay in milliseconds
@@ -82,6 +89,61 @@ class BackgroundSyncService {
 
     // Request notification permissions
     await LocalNotifications.requestPermissions();
+
+    // Listen for app state changes — sync folders when app resumes
+    App.addListener('appStateChange', async ({ isActive }) => {
+      if (isActive) {
+        await this.syncFoldersIfDue();
+        // Also kick the upload manager to resume pending items
+        uploadManager.init();
+      }
+    });
+
+    // Periodic foreground folder check (every 2 hours while app is open)
+    setInterval(() => {
+      this.syncFoldersIfDue();
+    }, FOREGROUND_CHECK_INTERVAL);
+
+    // Restore persisted last scan time
+    const stored = localStorage.getItem('lastFolderScanTime');
+    if (stored) this.lastFolderScanTime = parseInt(stored, 10) || 0;
+
+    // Run an initial folder scan if overdue
+    await this.syncFoldersIfDue();
+  }
+
+  /**
+   * Check configured folders for new files if enough time has passed
+   * since the last scan. Queues any new files via the upload manager.
+   */
+  private async syncFoldersIfDue() {
+    const now = Date.now();
+    if (now - this.lastFolderScanTime < PERIODIC_SYNC_INTERVAL) return;
+
+    // Check network before scanning
+    if (Capacitor.isNativePlatform()) {
+      const status = await Network.getStatus();
+      if (!status.connected) return;
+    } else if (!navigator.onLine) {
+      return;
+    }
+
+    const configs = folderSyncService.getFolderSyncs();
+    if (configs.length === 0) return;
+
+    console.log('[BackgroundSync] Periodic folder scan starting');
+    try {
+      const newFiles = await folderSyncService.syncAllFolders();
+      this.lastFolderScanTime = now;
+      localStorage.setItem('lastFolderScanTime', String(now));
+      if (newFiles > 0) {
+        console.log(`[BackgroundSync] Periodic scan: ${newFiles} new files queued`);
+        // Kick upload manager to start processing
+        uploadManager.init();
+      }
+    } catch (err) {
+      console.warn('[BackgroundSync] Periodic folder scan failed:', err);
+    }
   }
 
   /**
@@ -209,7 +271,9 @@ class BackgroundSyncService {
         const photoId = upload.photoId || ulid();
 
         // Perform chunked upload
-        const totalChunks = Math.ceil(upload.file.size / CHUNK_SIZE);
+        const isVideo = upload.file.type === 'video/mp4';
+        const chunkSize = isVideo ? VIDEO_CHUNK_SIZE : CHUNK_SIZE;
+        const totalChunks = Math.ceil(upload.file.size / chunkSize);
         const uploadData = await startUpload(
           upload.eventSlug,
           photoId,
@@ -232,29 +296,34 @@ class BackgroundSyncService {
         );
 
         const parts: Array<{ partNumber: number; etag: string }> = [];
+        let completedChunks = 0;
 
-        // Upload each chunk
-        for (let i = 0; i < totalChunks; i++) {
-          const start = i * CHUNK_SIZE;
-          const end = Math.min(start + CHUNK_SIZE, upload.file.size);
-          const chunk = upload.file.slice(start, end);
+        // Upload chunks in parallel batches for speed
+        for (let batchStart = 0; batchStart < totalChunks; batchStart += PARALLEL_CHUNKS) {
+          const batchEnd = Math.min(batchStart + PARALLEL_CHUNKS, totalChunks);
+          const batch: Promise<{ partNumber: number; etag: string }>[] = [];
 
-          const { etag } = await this.uploadChunkWithRetry(
-            upload.eventSlug,
-            photoId,
-            uploadData.uploadId,
-            i + 1,
-            chunk
-          );
+          for (let i = batchStart; i < batchEnd; i++) {
+            const start = i * chunkSize;
+            const end = Math.min(start + chunkSize, upload.file.size);
+            const chunk = upload.file.slice(start, end);
+            batch.push(
+              this.uploadChunkWithRetry(
+                upload.eventSlug, photoId, uploadData.uploadId, i + 1, chunk
+              ).then(({ etag }) => ({ partNumber: i + 1, etag }))
+            );
+          }
 
-          parts.push({ partNumber: i + 1, etag });
+          const results = await Promise.all(batch);
+          parts.push(...results);
+          completedChunks += results.length;
 
           // Update progress
-          const progress = Math.round(((i + 1) / totalChunks) * 100);
+          const progress = Math.round((completedChunks / totalChunks) * 100);
           await updateQueueItem(upload.id, { progress });
           
           // Update notification with chunk progress (native only)
-          if (isNative && (i % 2 === 0 || i === totalChunks - 1)) {
+          if (isNative) {
             await ProgressNotification.show({
               id: notificationId,
               title: 'Uploading Photos',
@@ -268,6 +337,9 @@ class BackgroundSyncService {
             });
           }
         }
+
+        // Sort parts by partNumber (R2 requires ordered parts)
+        parts.sort((a, b) => a.partNumber - b.partNumber);
 
         // Complete upload
         await completeUpload(

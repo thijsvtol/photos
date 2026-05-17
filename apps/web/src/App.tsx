@@ -5,6 +5,8 @@ import { Capacitor } from '@capacitor/core';
 import { AuthProvider } from './contexts/AuthContext';
 import { ThemeProvider } from './contexts/ThemeContext';
 import { RefreshProvider } from './contexts/RefreshContext';
+import { UploadProvider } from './contexts/UploadContext';
+import GlobalUploadIndicator from './components/GlobalUploadIndicator';
 import { ToastProvider } from './components/Toast';
 import PullToRefresh from './components/PullToRefresh';
 import { AndroidAppPrompt } from './components/AndroidAppPrompt';
@@ -19,13 +21,10 @@ const MyFavorites = lazy(() => import('./pages/MyFavorites'));
 const Logout = lazy(() => import('./pages/Logout'));
 const MapView = lazy(() => import('./pages/MapView'));
 const PhotoUsage = lazy(() => import('./pages/PhotoUsage'));
-const AdminDashboard = lazy(() => import('./pages/AdminDashboard'));
-const AdminEventUpload = lazy(() => import('./pages/AdminEventUpload'));
-const AdminPhotoManager = lazy(() => import('./pages/AdminPhotoManager'));
-const AdminTagManager = lazy(() => import('./pages/AdminTagManager'));
 const InviteAccept = lazy(() => import('./pages/InviteAccept'));
 const PrivacyPolicy = lazy(() => import('./pages/PrivacyPolicy'));
 const ShareUpload = lazy(() => import('./pages/ShareUpload'));
+const Timeline = lazy(() => import('./pages/Timeline'));
 
 // Loading component
 const LoadingFallback = () => (
@@ -209,13 +208,14 @@ function App() {
       <ThemeProvider>
         <AuthProvider>
           <RefreshProvider>
-            <ToastProvider>
-              <BrowserRouter>
-                <ShareIntentHandler />
-                <PageViewTracker />
-                <PullToRefresh>
-                  <Suspense fallback={<LoadingFallback />}>
-                    <Routes>
+            <UploadProvider>
+              <ToastProvider>
+                <BrowserRouter>
+                  <ShareIntentHandler />
+                  <PageViewTracker />
+                  <PullToRefresh>
+                    <Suspense fallback={<LoadingFallback />}>
+                      <Routes>
                       <Route path="/" element={<Landing />} />
                       <Route path="/events" element={<EventList />} />
                       <Route path="/events/:slug" element={<EventGallery />} />
@@ -227,16 +227,15 @@ function App() {
                       <Route path="/usage" element={<PhotoUsage />} />
                       <Route path="/privacy" element={<PrivacyPolicy />} />
                       <Route path="/share-upload" element={<ShareUpload />} />
-                      <Route path="/admin" element={<AdminDashboard />} />
-                      <Route path="/admin/events/:slug/upload" element={<AdminEventUpload />} />
-                      <Route path="/admin/events/:slug/photos" element={<AdminPhotoManager />} />
-                      <Route path="/admin/tags" element={<AdminTagManager />} />
+                      <Route path="/timeline" element={<Timeline />} />
                     </Routes>
-                  </Suspense>
-                </PullToRefresh>
-                <AndroidAppPrompt />
-              </BrowserRouter>
-            </ToastProvider>
+                    </Suspense>
+                  </PullToRefresh>
+                  <AndroidAppPrompt />
+                  <GlobalUploadIndicator />
+                </BrowserRouter>
+              </ToastProvider>
+            </UploadProvider>
           </RefreshProvider>
         </AuthProvider>
       </ThemeProvider>

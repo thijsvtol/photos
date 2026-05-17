@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { Link, useLocation } from 'react-router-dom';
-import { Heart, MapPin, LayoutGrid, Settings, LogOut, User, LogIn, ChevronDown } from 'lucide-react';
+import { Heart, MapPin, LayoutGrid, Settings, LogOut, User, LogIn, ChevronDown, Clock } from 'lucide-react';
 import { Capacitor } from '@capacitor/core';
 import { useAuth } from '../contexts/AuthContext';
 import { config } from '../config';
@@ -83,15 +83,12 @@ const Navbar: React.FC = () => {
               <span className="sr-only sm:hidden">Map</span>
             </Link>
             
-            {/* Show admin link if user is admin */}
-            {user?.isAdmin && (
-              <Link to="/admin" className={linkClass('/admin')}>
-                <Settings className="w-4 h-4 sm:mr-0" aria-hidden="true" />
-                <span className="hidden sm:inline">Admin</span>
-                <span className="sr-only sm:hidden">Admin</span>
-              </Link>
-            )}
-
+            <Link to="/timeline" className={linkClass('/timeline')}>
+              <Clock className="w-4 h-4 sm:mr-0" aria-hidden="true" />
+              <span className="hidden sm:inline">Timeline</span>
+              <span className="sr-only sm:hidden">Timeline</span>
+            </Link>
+            
             {/* User Menu */}
             <div className="relative ml-2" ref={menuRef}>
               {isAuthenticated ? (

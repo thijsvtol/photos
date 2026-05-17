@@ -437,4 +437,99 @@ app.get('/api/tags', async (c) => {
   }
 });
 
+/**
+ * GET /api/timeline
+ * Returns photos across all visible events in chronological order (newest first).
+ * Supports pagination via cursor (capture_time of last photo).
+ * Each photo includes its event slug and name for navigation.
+ */
+app.get('/api/timeline', optionalAuth, async (c) => {
+  try {
+    const user = getUser(c);
+    const userIsAdmin = isAdmin(c);
+    const userEmail = user?.email || '';
+    const limit = Math.min(parseInt(c.req.query('limit') || '200', 10), 500);
+    const cursor = c.req.query('cursor') || null; // capture_time cursor
+
+    // Get IDs of events the user can access
+    const eventsQuery = `
+      SELECT DISTINCT e.id, e.slug, e.name
+      FROM events e
+      LEFT JOIN event_collaborators ec ON e.id = ec.event_id AND ec.user_email = ?
+      WHERE
+        e.visibility = 'public'
+        OR (? = 1)
+        OR (e.visibility = 'collaborators_only' AND ec.user_email IS NOT NULL)
+    `;
+    const events = await c.env.DB
+      .prepare(eventsQuery)
+      .bind(userEmail, userIsAdmin ? 1 : 0)
+      .all<{ id: number; slug: string; name: string }>();
+
+    if (!events.results || events.results.length === 0) {
+      return c.json({ photos: [], nextCursor: null });
+    }
+
+    const eventIds = events.results.map(e => e.id);
+    const placeholders = eventIds.map(() => '?').join(',');
+
+    // Build event lookup
+    const eventMap = new Map<number, { slug: string; name: string }>();
+    for (const e of events.results) {
+      eventMap.set(e.id, { slug: e.slug, name: e.name });
+    }
+
+    let photosQuery: string;
+    let bindings: (string | number)[];
+
+    if (cursor) {
+      photosQuery = `
+        SELECT p.id, p.event_id, p.original_filename, p.file_type, p.capture_time,
+               p.uploaded_at, p.width, p.height, p.city, p.favorites_count,
+               p.blur_placeholder, p.is_featured, p.cache_version,
+               p.latitude, p.longitude
+        FROM photos p
+        WHERE p.event_id IN (${placeholders})
+          AND p.capture_time < ?
+        ORDER BY p.capture_time DESC
+        LIMIT ?
+      `;
+      bindings = [...eventIds, cursor, limit + 1];
+    } else {
+      photosQuery = `
+        SELECT p.id, p.event_id, p.original_filename, p.file_type, p.capture_time,
+               p.uploaded_at, p.width, p.height, p.city, p.favorites_count,
+               p.blur_placeholder, p.is_featured, p.cache_version,
+               p.latitude, p.longitude
+        FROM photos p
+        WHERE p.event_id IN (${placeholders})
+        ORDER BY p.capture_time DESC
+        LIMIT ?
+      `;
+      bindings = [...eventIds, limit + 1];
+    }
+
+    const result = await c.env.DB
+      .prepare(photosQuery)
+      .bind(...bindings)
+      .all<Photo & { event_id: number }>();
+
+    const photos = (result.results || []).slice(0, limit);
+    const hasMore = (result.results || []).length > limit;
+    const nextCursor = hasMore && photos.length > 0 ? photos[photos.length - 1].capture_time : null;
+
+    // Attach event slug/name to each photo
+    const enriched = photos.map(p => ({
+      ...p,
+      event_slug: eventMap.get(p.event_id)?.slug || '',
+      event_name: eventMap.get(p.event_id)?.name || '',
+    }));
+
+    return c.json({ photos: enriched, nextCursor });
+  } catch (error) {
+    console.error('Error fetching timeline:', error);
+    return c.json({ error: 'Failed to fetch timeline' }, 500);
+  }
+});
+
 export default app;

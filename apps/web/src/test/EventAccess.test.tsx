@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import React from 'react';
 import { render, screen, waitFor } from '@testing-library/react';
 import '@testing-library/jest-dom';
 import { MemoryRouter, Routes, Route } from 'react-router-dom';
@@ -70,6 +71,23 @@ vi.mock('../utils/haptics', () => ({
     light: vi.fn(),
     selectionChanged: vi.fn(),
   },
+}));
+
+vi.mock('../contexts/UploadContext', () => ({
+  useUploadContext: () => ({
+    queueItems: [],
+    getItemsForSlug: () => [],
+    addFiles: vi.fn(),
+    retryUpload: vi.fn(),
+    retryAllFailed: vi.fn(),
+    clearCompleted: vi.fn(),
+    hasActiveUploads: false,
+    hasFailedUploads: false,
+    completedCount: 0,
+    totalCount: 0,
+    overallProgress: 0,
+  }),
+  UploadProvider: ({ children }: { children: React.ReactNode }) => children,
 }));
 
 describe('Event access UI', () => {

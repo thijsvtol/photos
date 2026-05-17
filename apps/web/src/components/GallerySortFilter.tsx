@@ -1,5 +1,7 @@
-import { X, CheckSquare, Heart, Star, Download, Trash2, Loader2, Copy, Search } from 'lucide-react';
+import { X, CheckSquare, Heart, Star, Download, Trash2, Loader2, Copy, Search, Grid3X3, Grid2X2, LayoutGrid } from 'lucide-react';
 import { Capacitor } from '@capacitor/core';
+
+type DensityLevel = 'comfortable' | 'default' | 'dense';
 
 interface GallerySortFilterProps {
   sortBy: string;
@@ -18,6 +20,8 @@ interface GallerySortFilterProps {
   isAdmin?: boolean;
   isDeleting?: boolean;
   isCopying?: boolean;
+  density?: DensityLevel;
+  onDensityChange?: (density: DensityLevel) => void;
 }
 
 /**
@@ -40,6 +44,8 @@ export function GallerySortFilter({
   isAdmin = false,
   isDeleting = false,
   isCopying = false,
+  density,
+  onDensityChange,
 }: GallerySortFilterProps) {
   const isAndroid = Capacitor.getPlatform() === 'android';
   
@@ -203,6 +209,35 @@ export function GallerySortFilter({
               </button>
             )}
           </div>
+          {/* Grid density controls */}
+          {density && onDensityChange && (
+            <div className="flex items-center gap-0.5 border border-gray-300 dark:border-gray-600 rounded-lg p-0.5">
+              <button
+                onClick={() => onDensityChange('comfortable')}
+                className={`p-1.5 rounded transition-colors ${density === 'comfortable' ? 'bg-blue-100 dark:bg-blue-900/40 text-blue-600 dark:text-blue-400' : 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300'}`}
+                title="Comfortable (larger photos)"
+                aria-label="Comfortable grid density"
+              >
+                <LayoutGrid className="w-4 h-4" />
+              </button>
+              <button
+                onClick={() => onDensityChange('default')}
+                className={`p-1.5 rounded transition-colors ${density === 'default' ? 'bg-blue-100 dark:bg-blue-900/40 text-blue-600 dark:text-blue-400' : 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300'}`}
+                title="Default"
+                aria-label="Default grid density"
+              >
+                <Grid2X2 className="w-4 h-4" />
+              </button>
+              <button
+                onClick={() => onDensityChange('dense')}
+                className={`p-1.5 rounded transition-colors ${density === 'dense' ? 'bg-blue-100 dark:bg-blue-900/40 text-blue-600 dark:text-blue-400' : 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300'}`}
+                title="Dense (more photos per row)"
+                aria-label="Dense grid density"
+              >
+                <Grid3X3 className="w-4 h-4" />
+              </button>
+            </div>
+          )}
         </div>
       </div>
     </>

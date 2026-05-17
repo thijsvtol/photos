@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { X, Sun, Moon, Folder, Users } from 'lucide-react';
+import { X, Sun, Moon, Monitor, Folder, Users } from 'lucide-react';
 import { Capacitor } from '@capacitor/core';
 import { FilePicker } from '@capawesome/capacitor-file-picker';
 import { useAuth } from '../contexts/AuthContext';
@@ -231,6 +231,17 @@ const UserSettings: React.FC<UserSettingsProps> = ({ isOpen, onClose }) => {
                   >
                     <Moon className="w-5 h-5" />
                     <span className="font-medium">Dark</span>
+                  </button>
+                  <button
+                    onClick={() => setTheme('system')}
+                    className={`flex-1 flex items-center justify-center gap-2 px-4 py-3 rounded-lg border-2 transition-all ${
+                      theme === 'system'
+                        ? 'border-blue-500 bg-blue-50 dark:bg-blue-900/20 text-blue-700 dark:text-blue-400'
+                        : 'border-gray-200 dark:border-gray-700 text-gray-700 dark:text-gray-300 hover:border-gray-300 dark:hover:border-gray-600'
+                    }`}
+                  >
+                    <Monitor className="w-5 h-5" />
+                    <span className="font-medium">System</span>
                   </button>
                 </div>
               </div>

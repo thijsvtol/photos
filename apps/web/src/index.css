@@ -100,6 +100,15 @@ html {
   animation: slide-in-from-left 0.42s cubic-bezier(0.22, 1, 0.36, 1);
 }
 
+@keyframes slide-up {
+  from { transform: translateY(100%); }
+  to { transform: translateY(0); }
+}
+
+.animate-slide-up {
+  animation: slide-up 0.3s ease-out;
+}
+
 @keyframes fade-in {
   from { opacity: 0; transform: scale(0.85); }
   to { opacity: 1; transform: scale(1); }

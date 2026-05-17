@@ -342,6 +342,13 @@ export const getFeaturedPhotos = async (limit: number = 10): Promise<Photo[]> =>
   return response.data.photos;
 };
 
+export const getTimeline = async (limit: number = 200, cursor?: string): Promise<{ photos: Photo[]; nextCursor: string | null }> => {
+  const params = new URLSearchParams({ limit: String(limit) });
+  if (cursor) params.set('cursor', cursor);
+  const response = await api.get<{ photos: Photo[]; nextCursor: string | null }>(`/timeline?${params}`);
+  return response.data;
+};
+
 // Helper functions
 export const getPreviewUrl = (slug: string, photoId: string, fileType?: string, cacheVersion?: number): string => {
   const isVideo = fileType === 'video/mp4';

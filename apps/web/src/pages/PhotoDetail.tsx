@@ -1,8 +1,7 @@
 import React, { useEffect, useState, useRef, useCallback, lazy, Suspense } from 'react';
 import { useParams, Link, useNavigate, useLocation } from 'react-router-dom';
-import { Maximize, Minimize, Share2, X, Heart, Play, Pause, Pencil, MoreVertical, Star, Trash2 } from 'lucide-react';
-import Navbar from '../components/Navbar';
-import Footer from '../components/Footer';
+import { Maximize, Minimize, Share2, X, Heart, Play, Pause, Pencil, MoreVertical, Star, Trash2, ArrowLeft, Download, Info, Volume2, VolumeX } from 'lucide-react';
+
 import SEO from '../components/SEO';
 const ImageEditorModal = lazy(() => import('../components/ImageEditorModal'));
 const VideoEditorModal = lazy(() => import('../components/VideoEditorModal'));
@@ -32,15 +31,12 @@ const PhotoDetail: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [loginError, setLoginError] = useState<string | null>(null);
-  const [showDetails, setShowDetails] = useState(false);
   const [isFullscreen, setIsFullscreen] = useState(false);
-  const [showShareMenu, setShowShareMenu] = useState(false);
   const [imageLoaded, setImageLoaded] = useState(false);
   const [isFavorited, setIsFavorited] = useState(false);
   const [showKeyboardHelp, setShowKeyboardHelp] = useState(false);
   const [isSlideshow, setIsSlideshow] = useState(false);
   const [slideshowSpeed, setSlideshowSpeed] = useState(3000); // milliseconds
-  const [showSlideshowSettings, setShowSlideshowSettings] = useState(false);
   const [preloadedImages, setPreloadedImages] = useState<Set<string>>(new Set());
   const [isTransitioning, setIsTransitioning] = useState(false);
   const [slideDirection, setSlideDirection] = useState<'left' | 'right' | null>(null);
@@ -55,7 +51,6 @@ const PhotoDetail: React.FC = () => {
   const [videoProgress, setVideoProgress] = useState(0);
   const [videoDuration, setVideoDuration] = useState(0);
   const [videoBuffered, setVideoBuffered] = useState(0);
-  const [showVideoControls, setShowVideoControls] = useState(true);
   const [seekIndicator, setSeekIndicator] = useState<'left' | 'right' | null>(null);
   const videoControlsTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const videoTapCountRef = useRef(0);
@@ -88,6 +83,13 @@ const PhotoDetail: React.FC = () => {
   const handlersAttachedRef = useRef<boolean>(false);
   const navigateNextRef = useRef<(() => void) | null>(null);
   const navigatePrevRef = useRef<(() => void) | null>(null);
+
+  // Fullscreen viewer overlay state
+  const [showOverlay, setShowOverlay] = useState(true);
+  const [showInfoSheet, setShowInfoSheet] = useState(false);
+  const [showDownloadMenu, setShowDownloadMenu] = useState(false);
+  const [videoMuted, setVideoMuted] = useState(true);
+  const overlayTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Check if we came from favorites page
   const fromFavorites = location.state?.fromFavorites;
@@ -296,16 +298,18 @@ const PhotoDetail: React.FC = () => {
         toggleSlideshow();
       }
       if (e.key === 'Escape') {
-        if (isSlideshow) {
+        if (showInfoSheet) {
+          setShowInfoSheet(false);
+        } else if (showDownloadMenu) {
+          setShowDownloadMenu(false);
+        } else if (isSlideshow) {
           setIsSlideshow(false);
-        } else if (isFullscreen) {
-          exitFullscreen();
         } else {
           navigate(fromFavorites ? '/favorites' : `/events/${slug}`);
         }
       }
       if (e.key === 'f' || e.key === 'F') toggleFullscreen();
-      if (e.key === 'i' || e.key === 'I') setShowDetails(prev => !prev);
+      if (e.key === 'i' || e.key === 'I') setShowInfoSheet(prev => !prev);
       if (e.key === '?' || e.key === 'h' || e.key === 'H') setShowKeyboardHelp(prev => !prev);
     };
     window.addEventListener('keydown', handleKeyDown);
@@ -348,6 +352,9 @@ const PhotoDetail: React.FC = () => {
       }
       if (slideshowTimerRef.current) {
         clearTimeout(slideshowTimerRef.current);
+      }
+      if (overlayTimerRef.current) {
+        clearTimeout(overlayTimerRef.current);
       }
     };
   }, []);
@@ -409,11 +416,6 @@ const PhotoDetail: React.FC = () => {
 
   const toggleSlideshow = () => {
     setIsSlideshow(!isSlideshow);
-    if (!isSlideshow) {
-      setShowDetails(false); // Hide details when starting slideshow
-    } else {
-      setShowSlideshowSettings(false); // Hide settings when stopping
-    }
   };
 
   const navigateToNext = useCallback(() => {
@@ -602,9 +604,11 @@ const PhotoDetail: React.FC = () => {
   // --- Custom video player logic ---
   const resetVideoControlsTimer = useCallback(() => {
     if (videoControlsTimerRef.current) clearTimeout(videoControlsTimerRef.current);
-    setShowVideoControls(true);
+    setShowOverlay(true);
     videoControlsTimerRef.current = setTimeout(() => {
-      if (!videoRef.current?.paused) setShowVideoControls(false);
+      if (!videoRef.current?.paused) {
+        setShowOverlay(false);
+      }
     }, 3000);
   }, []);
 
@@ -868,13 +872,6 @@ const PhotoDetail: React.FC = () => {
     }
   };
 
-  const exitFullscreen = async () => {
-    if (document.fullscreenElement) {
-      await document.exitFullscreen();
-      setIsFullscreen(false);
-    }
-  };
-
   const sharePhoto = async (platform?: string) => {
     const url = `${window.location.origin}/p/${slug}/${photoId}`;
     const text = `Check out this photo from ${event?.name}`;
@@ -906,7 +903,6 @@ const PhotoDetail: React.FC = () => {
         }
         
         await (navigator as any).share(shareData);
-        setShowShareMenu(false);
         return;
       } catch (err) {
         // User cancelled or share failed, fall back to menu
@@ -942,7 +938,6 @@ const PhotoDetail: React.FC = () => {
         toast.showSuccess('Link copied to clipboard!');
         break;
     }
-    setShowShareMenu(false);
   };
 
   const toggleFavorite = async () => {
@@ -1176,7 +1171,7 @@ const PhotoDetail: React.FC = () => {
     : '';
 
   return (
-    <div className="min-h-screen bg-gray-900 flex flex-col">
+    <div className="fixed inset-0 bg-black z-50 overflow-hidden" ref={containerRef}>
       {ConfirmDialog}
       {photo && (
         <SEO
@@ -1189,23 +1184,189 @@ const PhotoDetail: React.FC = () => {
           structuredData={structuredData}
         />
       )}
-      <Navbar />
-      {/* Header - Mobile optimized */}
-      <div className="sticky top-16 z-50 bg-gray-900/95 backdrop-blur-sm border-b border-gray-800">
-        <div className="max-w-7xl mx-auto px-3 sm:px-4 lg:px-8 py-3">
-          <div className="flex justify-between items-center">
+
+      {/* Full-screen media area */}
+      <div
+        ref={imageContainerCallbackRef}
+        className={`absolute inset-0 flex items-center justify-center select-none ${isZoomed ? 'overflow-auto' : 'overflow-hidden'}`}
+        style={{
+          touchAction: isZoomed ? 'pan-x pan-y pinch-zoom' : 'pan-y pinch-zoom',
+          WebkitOverflowScrolling: 'touch',
+        }}
+      >
+        {/* Swipe preview photo */}
+        {showSwipePreview && swipePreviewPhoto && swipePreviewUrl && (
+          <div
+            className="absolute inset-0 z-0 flex items-center justify-center pointer-events-none"
+            style={{
+              transform: swipeOffset < 0
+                ? `translate3d(calc(100% + ${swipeOffset}px), 0, 0)`
+                : `translate3d(calc(-100% + ${swipeOffset}px), 0, 0)`,
+              transition: isSwiping ? 'none' : 'transform 320ms cubic-bezier(0.22, 1, 0.36, 1), opacity 260ms ease-out',
+              opacity: Math.min(1, Math.max(0.38, Math.abs(swipeOffset) / 180)),
+              willChange: 'transform, opacity',
+            }}
+          >
+            {swipePreviewPhoto.file_type === 'video/mp4' ? (
+              <div className="relative flex items-center justify-center w-full h-full">
+                <img
+                  src={swipePreviewPhoto.blur_placeholder || ''}
+                  alt={swipePreviewPhoto.original_filename}
+                  className={`max-w-full max-h-full object-contain ${swipePreviewPhoto.blur_placeholder ? 'blur-lg' : ''}`}
+                  draggable={false}
+                />
+                <div className="absolute inset-0 flex items-center justify-center">
+                  <div className="bg-black/50 backdrop-blur-sm rounded-full p-4">
+                    <Play className="w-8 h-8 text-white fill-white" />
+                  </div>
+                </div>
+              </div>
+            ) : (
+              <img
+                src={swipePreviewUrl}
+                alt={swipePreviewPhoto.original_filename}
+                className="max-w-full max-h-full object-contain"
+                draggable={false}
+              />
+            )}
+          </div>
+        )}
+
+        {/* Current media with slide animation */}
+        <div
+          key={`${photo?.id}-${slideDirection}`}
+          className={`relative z-10 flex items-center justify-center w-full h-full ${
+            slideDirection === 'left' ? 'animate-slide-in-right' :
+            slideDirection === 'right' ? 'animate-slide-in-left' : ''
+          }`}
+          style={{
+            transform: `translate3d(${swipeOffset}px, 0, 0)`,
+            transition: isSwiping ? 'none' : 'transform 320ms cubic-bezier(0.22, 1, 0.36, 1), opacity 260ms ease-out',
+            opacity: Math.max(0.88, 1 - Math.abs(swipeOffset) / 1200),
+            willChange: 'transform, opacity',
+          }}
+        >
+          {showEditor ? (
+            <div className="w-full h-full" />
+          ) : photo?.file_type === 'video/mp4' ? (
+            <div
+              className="relative w-full h-full flex items-center justify-center"
+              onClick={handleVideoTap}
+              onTouchEnd={(e) => {
+                if (!videoProgressDraggingRef.current) {
+                  handleVideoTap(e);
+                }
+                e.preventDefault();
+              }}
+            >
+              <video
+                ref={videoRef}
+                src={getPreviewUrl(slug!, photo?.id || photoId!, photo?.file_type, photo?.cache_version)}
+                autoPlay
+                muted
+                playsInline
+                loop
+                preload="metadata"
+                poster={photo?.blur_placeholder || undefined}
+                className="max-w-full max-h-full object-contain"
+                onTimeUpdate={handleVideoTimeUpdate}
+                onLoadedMetadata={(e) => {
+                  setVideoDuration(e.currentTarget.duration);
+                  setVideoPaused(false);
+                  resetVideoControlsTimer();
+                }}
+                onPlay={() => {
+                  setVideoPaused(false);
+                  resetVideoControlsTimer();
+                }}
+                onPause={() => {
+                  setVideoPaused(true);
+                  setShowOverlay(true);
+                }}
+              />
+
+              {/* Double-tap seek indicators */}
+              {seekIndicator === 'left' && (
+                <div className="absolute left-4 top-1/2 -translate-y-1/2 bg-black/60 backdrop-blur-sm rounded-full px-4 py-3 text-white text-sm font-medium animate-fade-in pointer-events-none flex items-center gap-1.5">
+                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12.066 11.2a1 1 0 000 1.6l5.334 4A1 1 0 0019 16V8a1 1 0 00-1.6-.8l-5.334 4zM4.066 11.2a1 1 0 000 1.6l5.334 4A1 1 0 0011 16V8a1 1 0 00-1.6-.8l-5.334 4z" /></svg>
+                  10s
+                </div>
+              )}
+              {seekIndicator === 'right' && (
+                <div className="absolute right-4 top-1/2 -translate-y-1/2 bg-black/60 backdrop-blur-sm rounded-full px-4 py-3 text-white text-sm font-medium animate-fade-in pointer-events-none flex items-center gap-1.5">
+                  10s
+                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11.933 12.8a1 1 0 000-1.6L6.6 7.2A1 1 0 005 8v8a1 1 0 001.6.8l5.333-4zM19.933 12.8a1 1 0 000-1.6l-5.333-4A1 1 0 0013 8v8a1 1 0 001.6.8l5.333-4z" /></svg>
+                </div>
+              )}
+
+              {/* Center play/pause indicator */}
+              {videoPaused && (
+                <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+                  <div className="bg-black/50 backdrop-blur-sm rounded-full p-5">
+                    <Play className="w-10 h-10 text-white fill-white" />
+                  </div>
+                </div>
+              )}
+            </div>
+          ) : (
+            <div
+              className="relative w-full h-full flex items-center justify-center"
+              onClick={() => setShowOverlay(prev => !prev)}
+            >
+              {/* Previous photo for cross-fade effect */}
+              {previousPhoto && previousPhoto.file_type !== 'video/mp4' && (
+                <img
+                  src={getPreviewUrl(slug!, previousPhoto.id, previousPhoto.file_type, previousPhoto.cache_version)}
+                  alt="Previous"
+                  className={`max-w-full max-h-full object-contain absolute transition-opacity duration-300 ${
+                    imageLoaded ? 'opacity-0' : 'opacity-100'
+                  }`}
+                />
+              )}
+
+              {/* Blur placeholder */}
+              {photo?.blur_placeholder && !imageLoaded && (
+                <img
+                  src={photo.blur_placeholder}
+                  alt="Loading..."
+                  className="max-w-full max-h-full object-contain blur-xl transition-opacity duration-200"
+                />
+              )}
+
+              {/* Main image */}
+              <img
+                src={getPreviewUrl(slug!, photo?.id || photoId!, photo?.file_type, cacheBuster || photo?.cache_version)}
+                alt={photo?.original_filename}
+                className={`max-w-full max-h-full object-contain transition-opacity duration-300 ${imageLoaded ? 'opacity-100' : 'opacity-0'} ${photo?.blur_placeholder && !imageLoaded ? 'absolute' : ''}`}
+                onLoad={() => setImageLoaded(true)}
+                loading="eager"
+                decoding="async"
+              />
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Top overlay bar */}
+      <div
+        className={`absolute top-0 inset-x-0 z-30 transition-all duration-300 ${
+          showOverlay && !showInfoSheet ? 'opacity-100 translate-y-0' : 'opacity-0 -translate-y-4 pointer-events-none'
+        }`}
+      >
+        <div className="bg-gradient-to-b from-black/80 via-black/40 to-transparent px-4 pb-12 pt-3">
+          <div className="flex items-center justify-between">
+            {/* Back button */}
             <button
               onClick={() => navigate(fromFavorites ? '/favorites' : `/events/${slug}`)}
-              className="text-white hover:text-gray-300 flex items-center text-sm sm:text-base"
+              className="text-white p-2 -ml-2 hover:bg-white/10 rounded-full transition"
+              aria-label="Back"
             >
-              <span className="text-xl mr-1">←</span>
-              <span className="hidden sm:inline">Back to {fromFavorites ? 'Favorites' : 'Gallery'}</span>
-              <span className="sm:hidden">Back</span>
+              <ArrowLeft className="w-6 h-6" />
             </button>
-            
+
             {/* Photo counter */}
             {currentIndex >= 0 && (
-              <div className="text-white text-sm">
+              <div className="text-white/90 text-sm font-medium">
                 {fromFavorites && favoritePhotos.length > 0
                   ? `${(favoritePhotos.findIndex((fav: { id: string; slug: string }) => fav.id === photoId && fav.slug === slug) + 1) || 1} / ${favoritePhotos.length}`
                   : `${currentIndex + 1} / ${displayPhotos.length > 0 ? displayPhotos.length : allPhotos.length}`
@@ -1213,629 +1374,108 @@ const PhotoDetail: React.FC = () => {
                 {fromFavorites && <span className="ml-1 text-red-400">♥</span>}
               </div>
             )}
-            
-            {/* Desktop download buttons */}
-            <div className="hidden md:flex gap-2">
-              <button
-                onClick={handleDownloadOriginal}
-                className="px-3 py-1.5 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition text-sm flex items-center gap-1.5"
-              >
-                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
-                </svg>
-                Original
-              </button>
-              {photo?.file_type !== 'video/mp4' && (
-                <button
-                  onClick={() => downloadSmall(slug!, photo?.id || photoId!)}
-                  className="px-3 py-1.5 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition text-sm flex items-center gap-1.5"
-                >
-                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
-                  </svg>
-                  Small
-                </button>
-              )}
-              {photo?.file_type !== 'video/mp4' && (
-                <button
-                  onClick={handleDownloadInstagram}
-                  className="px-3 py-1.5 bg-gradient-to-r from-pink-500 via-red-500 to-yellow-500 text-white rounded-lg hover:opacity-90 transition text-sm flex items-center gap-1.5"
-                >
-                  <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
-                    <path d="M12 2.163c3.204 0 3.584.012 4.85.07 3.252.148 4.771 1.691 4.919 4.919.058 1.265.069 1.645.069 4.849 0 3.205-.012 3.584-.069 4.849-.149 3.225-1.664 4.771-4.919 4.919-1.266.058-1.644.07-4.85.07-3.204 0-3.584-.012-4.849-.07-3.26-.149-4.771-1.699-4.919-4.92-.058-1.265-.07-1.644-.07-4.849 0-3.204.013-3.583.07-4.849.149-3.227 1.664-4.771 4.919-4.919 1.266-.057 1.645-.069 4.849-.069zm0-2.163c-3.259 0-3.667.014-4.947.072-4.358.2-6.78 2.618-6.98 6.98-.059 1.281-.073 1.689-.073 4.948 0 3.259.014 3.668.072 4.948.2 4.358 2.618 6.78 6.98 6.98 1.281.058 1.689.072 4.948.072 3.259 0 3.668-.014 4.948-.072 4.354-.2 6.782-2.618 6.979-6.98.059-1.28.073-1.689.073-4.948 0-3.259-.014-3.667-.072-4.947-.196-4.354-2.617-6.78-6.979-6.98-1.281-.059-1.69-.073-4.949-.073zm0 5.838c-3.403 0-6.162 2.759-6.162 6.162s2.759 6.163 6.162 6.163 6.162-2.759 6.162-6.163c0-3.403-2.759-6.162-6.162-6.162zm0 10.162c-2.209 0-4-1.79-4-4 0-2.209 1.791-4 4-4s4 1.791 4 4c0 2.21-1.791 4-4 4zm6.406-11.845c-.796 0-1.441.645-1.441 1.44s.645 1.44 1.441 1.44c.795 0 1.439-.645 1.439-1.44s-.644-1.44-1.439-1.44z"/>
-                  </svg>
-                  Instagram
-                </button>
-              )}
-            </div>
-            
-            {/* Mobile menu button */}
-            <button
-              onClick={() => setShowDetails(!showDetails)}
-              className="md:hidden text-white px-3 py-1.5 bg-gray-700 rounded-lg text-sm"
-            >
-              {showDetails ? 'Hide' : 'Info'}
-            </button>
-          </div>
-        </div>
-      </div>
-
-      <div className="max-w-7xl mx-auto px-2 sm:px-4 lg:px-8 py-4">
-        {/* Photo viewer with navigation */}
-        <div 
-          ref={containerRef}
-          className={`relative bg-black rounded-lg ${isFullscreen ? 'fixed inset-0 z-50 rounded-none overflow-hidden' : ''}`}
-        >
-          {/* Action buttons - Desktop only */}
-          <div className="hidden md:flex absolute top-4 right-4 z-20 gap-2 items-center">
-            
-            {/* Edit button - admin only */}
-            {canEditMedia && (
-              <button
-                onClick={() => setShowEditor(true)}
-                className="text-white p-2 transition hover:text-gray-300 flex items-center justify-center"
-                aria-label={`Edit ${photo?.file_type === 'video/mp4' ? 'video' : 'photo'}`}
-                title={`Edit ${photo?.file_type === 'video/mp4' ? 'video' : 'photo'}`}
-              >
-                <Pencil className="w-5 h-5" />
-              </button>
-            )}
-
-            {canFeatureMedia && (
-              <button
-                onClick={() => {
-                  void handleToggleFeatured();
-                }}
-                className="text-white p-2 transition hover:text-gray-300 flex items-center justify-center"
-                aria-label={photo?.is_featured ? 'Unfeature photo' : 'Feature photo'}
-                title={photo?.is_featured ? 'Unfeature photo' : 'Feature photo'}
-              >
-                <Star className={`w-5 h-5 ${photo?.is_featured ? 'fill-yellow-400 text-yellow-400' : ''}`} />
-              </button>
-            )}
-
-            {canDeleteMedia && (
-              <button
-                onClick={() => {
-                  void handleDeletePhoto();
-                }}
-                className="text-white p-2 transition hover:text-red-300 flex items-center justify-center"
-                aria-label="Delete photo"
-                title="Delete photo"
-              >
-                <Trash2 className="w-5 h-5" />
-              </button>
-            )}
-
-            {/* Favorite button */}
-            <button
-              onClick={toggleFavorite}
-              className="text-white p-2 transition hover:text-gray-300 flex items-center justify-center"
-              aria-label="Favorite"
-            >
-              <Heart className={`w-5 h-5 ${isFavorited ? 'fill-red-500 text-red-500' : ''}`} />
-            </button>
-            
-            {/* Share button */}
-            <div className="relative">
-              <button
-                onClick={() => setShowShareMenu(!showShareMenu)}
-                className="text-white p-2 transition hover:text-gray-300 flex items-center justify-center"
-                aria-label="Share"
-              >
-                <Share2 className="w-5 h-5" />
-              </button>
-              
-              {/* Share menu dropdown */}
-              {showShareMenu && (
-                <div className="absolute right-0 mt-2 w-48 bg-gray-800 rounded-lg shadow-xl border border-gray-700 overflow-hidden z-30">
-                  <button
-                    onClick={() => sharePhoto('twitter')}
-                    className="w-full px-4 py-2 text-left text-white hover:bg-gray-700 transition flex items-center gap-2"
-                  >
-                    <span>🐦</span> Twitter
-                  </button>
-                  <button
-                    onClick={() => sharePhoto('facebook')}
-                    className="w-full px-4 py-2 text-left text-white hover:bg-gray-700 transition flex items-center gap-2"
-                  >
-                    <span>📘</span> Facebook
-                  </button>
-                  <button
-                    onClick={() => sharePhoto('instagram')}
-                    className="w-full px-4 py-2 text-left text-white hover:bg-gray-700 transition flex items-center gap-2"
-                  >
-                    <span>📷</span> Instagram
-                  </button>
-                  <button
-                    onClick={() => sharePhoto('snapchat')}
-                    className="w-full px-4 py-2 text-left text-white hover:bg-gray-700 transition flex items-center gap-2"
-                  >
-                    <span>👻</span> Snapchat
-                  </button>
-                  <button
-                    onClick={() => sharePhoto('whatsapp')}
-                    className="w-full px-4 py-2 text-left text-white hover:bg-gray-700 transition flex items-center gap-2"
-                  >
-                    <span>💬</span> WhatsApp
-                  </button>
-                  <button
-                    onClick={() => sharePhoto('copy')}
-                    className="w-full px-4 py-2 text-left text-white hover:bg-gray-700 transition flex items-center gap-2"
-                  >
-                    <span>🔗</span> Copy Link
-                  </button>
-                </div>
-              )}
-            </div>
-            
-            {/* Fullscreen button */}
-            <button
-              onClick={toggleFullscreen}
-              className="text-white p-2 transition hover:text-gray-300 flex items-center justify-center"
-              aria-label="Fullscreen"
-            >
-              {isFullscreen ? <Minimize className="w-5 h-5" /> : <Maximize className="w-5 h-5" />}
-            </button>
-
-            {/* Slideshow button */}
-            <div className="relative">
-              <button
-                onClick={() => {
-                  toggleSlideshow();
-                  if (!isSlideshow) {
-                    setShowSlideshowSettings(true);
-                  }
-                }}
-                className={`text-white p-2 transition hover:text-gray-300 flex items-center justify-center ${
-                  isSlideshow ? 'ring-2 ring-blue-500' : ''
-                }`}
-                aria-label="Slideshow"
-              >
-                {isSlideshow ? <Pause className="w-5 h-5" /> : <Play className="w-5 h-5" />}
-              </button>
-              
-              {/* Slideshow settings dropdown */}
-              {isSlideshow && showSlideshowSettings && (
-                <div className="absolute right-0 mt-2 w-48 bg-gray-800 rounded-lg shadow-xl border border-gray-700 p-3">
-                  <div className="text-white text-sm mb-2">Speed</div>
-                  <div className="space-y-1">
-                    <button
-                      onClick={() => {
-                        setSlideshowSpeed(2000);
-                        setShowSlideshowSettings(false);
-                      }}
-                      className={`w-full px-3 py-1.5 text-left text-sm rounded transition ${
-                        slideshowSpeed === 2000 ? 'bg-blue-600 text-white' : 'text-gray-300 hover:bg-gray-700'
-                      }`}
-                    >
-                      Fast (2s)
-                    </button>
-                    <button
-                      onClick={() => {
-                        setSlideshowSpeed(3000);
-                        setShowSlideshowSettings(false);
-                      }}
-                      className={`w-full px-3 py-1.5 text-left text-sm rounded transition ${
-                        slideshowSpeed === 3000 ? 'bg-blue-600 text-white' : 'text-gray-300 hover:bg-gray-700'
-                      }`}
-                    >
-                      Normal (3s)
-                    </button>
-                    <button
-                      onClick={() => {
-                        setSlideshowSpeed(5000);
-                        setShowSlideshowSettings(false);
-                      }}
-                      className={`w-full px-3 py-1.5 text-left text-sm rounded transition ${
-                        slideshowSpeed === 5000 ? 'bg-blue-600 text-white' : 'text-gray-300 hover:bg-gray-700'
-                      }`}
-                    >
-                      Slow (5s)
-                    </button>
-                    <button
-                      onClick={() => {
-                        setSlideshowSpeed(10000);
-                        setShowSlideshowSettings(false);
-                      }}
-                      className={`w-full px-3 py-1.5 text-left text-sm rounded transition ${
-                        slideshowSpeed === 10000 ? 'bg-blue-600 text-white' : 'text-gray-300 hover:bg-gray-700'
-                      }`}
-                    >
-                      Very Slow (10s)
-                    </button>
-                  </div>
-                </div>
-              )}
-            </div>
-
-            {/* Help button */}
-            <button
-              onClick={() => setShowKeyboardHelp(true)}
-              className="text-white p-2 transition hover:text-gray-300 flex items-center justify-center"
-              aria-label="Keyboard shortcuts"
-              title="Keyboard shortcuts (? or H)"
-            >
-              <span className="text-base font-bold leading-none">?</span>
-            </button>
-            
-            {/* Close button (only in fullscreen) */}
-            {isFullscreen && (
-              <button
-                onClick={exitFullscreen}
-                className="text-white p-2 transition hover:text-gray-300 flex items-center justify-center"
-                aria-label="Close"
-              >
-                <X className="w-5 h-5" />
-              </button>
-            )}
-          </div>
-          
-          {/* Main image/video with swipe support and progressive loading */}
-          <div 
-            ref={imageContainerCallbackRef} 
-            className={`relative select-none touch-pinch-zoom ${isZoomed ? 'overflow-auto touch-pan-x touch-pan-y' : 'overflow-hidden touch-pan-y'}`}
-            style={{ 
-              touchAction: isZoomed ? 'pan-x pan-y pinch-zoom' : 'pan-y pinch-zoom',
-              WebkitOverflowScrolling: 'touch'
-            }}
-          >
-            {showSwipePreview && swipePreviewPhoto && swipePreviewUrl && (
-              <div
-                className="absolute inset-0 z-0 flex items-center justify-center pointer-events-none"
-                style={{
-                  transform: swipeOffset < 0
-                    ? `translate3d(calc(100% + ${swipeOffset}px), 0, 0)`
-                    : `translate3d(calc(-100% + ${swipeOffset}px), 0, 0)`,
-                  transition: isSwiping ? 'none' : 'transform 320ms cubic-bezier(0.22, 1, 0.36, 1), opacity 260ms ease-out',
-                  opacity: Math.min(1, Math.max(0.38, Math.abs(swipeOffset) / 180)),
-                  willChange: 'transform, opacity',
-                }}
-              >
-                {swipePreviewPhoto.file_type === 'video/mp4' ? (
-                  <div className="relative">
-                    <img
-                      src={swipePreviewPhoto.blur_placeholder || ''}
-                      alt={swipePreviewPhoto.original_filename}
-                      className={`w-full h-auto ${isFullscreen ? 'max-h-screen' : 'max-h-[70vh] md:max-h-[80vh]'} object-contain ${swipePreviewPhoto.blur_placeholder ? 'blur-lg' : ''}`}
-                      draggable={false}
-                    />
-                    <div className="absolute inset-0 flex items-center justify-center">
-                      <div className="bg-black/50 backdrop-blur-sm rounded-full p-4">
-                        <Play className="w-8 h-8 text-white fill-white" />
-                      </div>
-                    </div>
-                  </div>
-                ) : (
-                  <img
-                    src={swipePreviewUrl}
-                    alt={swipePreviewPhoto.original_filename}
-                    className={`w-full h-auto ${isFullscreen ? 'max-h-screen' : 'max-h-[70vh] md:max-h-[80vh]'} object-contain`}
-                    draggable={false}
-                  />
-                )}
-              </div>
-            )}
-            <div
-              key={`${photo?.id}-${slideDirection}`}
-              className={`relative z-10 ${
-                slideDirection === 'left' ? 'animate-slide-in-right' :
-                slideDirection === 'right' ? 'animate-slide-in-left' : ''
-              }`}
-              style={{
-                transform: `translate3d(${swipeOffset}px, 0, 0)`,
-                transition: isSwiping ? 'none' : 'transform 320ms cubic-bezier(0.22, 1, 0.36, 1), opacity 260ms ease-out',
-                opacity: Math.max(0.88, 1 - Math.abs(swipeOffset) / 1200),
-                willChange: 'transform, opacity',
-              }}
-            >
-              {showEditor ? (
-                <div className={`w-full ${isFullscreen ? 'h-screen' : 'h-[70vh] md:h-[80vh]'}`} />
-              ) : photo?.file_type === 'video/mp4' ? (
-                <div
-                  className={`relative w-full ${isFullscreen ? 'max-h-screen' : 'max-h-[70vh] md:max-h-[80vh]'} flex items-center justify-center bg-black`}
-                  onClick={handleVideoTap}
-                  onTouchEnd={(e) => {
-                    // Prevent ghost clicks but allow the tap handler
-                    if (!videoProgressDraggingRef.current) {
-                      handleVideoTap(e);
-                    }
-                    e.preventDefault();
-                  }}
-                >
-                  <video
-                    ref={videoRef}
-                    src={getPreviewUrl(slug!, photo?.id || photoId!, photo?.file_type, photo?.cache_version)}
-                    autoPlay
-                    playsInline
-                    loop
-                    preload="metadata"
-                    poster={photo?.blur_placeholder || undefined}
-                    className={`w-full h-auto ${isFullscreen ? 'max-h-screen' : 'max-h-[70vh] md:max-h-[80vh]'} object-contain`}
-                    onTimeUpdate={handleVideoTimeUpdate}
-                    onLoadedMetadata={(e) => {
-                      setVideoDuration(e.currentTarget.duration);
-                      setVideoPaused(false);
-                      resetVideoControlsTimer();
-                    }}
-                    onPlay={() => {
-                      setVideoPaused(false);
-                      resetVideoControlsTimer();
-                    }}
-                    onPause={() => setVideoPaused(true)}
-                  />
-
-                  {/* Double-tap seek indicators */}
-                  {seekIndicator === 'left' && (
-                    <div className="absolute left-4 top-1/2 -translate-y-1/2 bg-black/60 backdrop-blur-sm rounded-full px-4 py-3 text-white text-sm font-medium animate-fade-in pointer-events-none flex items-center gap-1.5">
-                      <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12.066 11.2a1 1 0 000 1.6l5.334 4A1 1 0 0019 16V8a1 1 0 00-1.6-.8l-5.334 4zM4.066 11.2a1 1 0 000 1.6l5.334 4A1 1 0 0011 16V8a1 1 0 00-1.6-.8l-5.334 4z" /></svg>
-                      10s
-                    </div>
-                  )}
-                  {seekIndicator === 'right' && (
-                    <div className="absolute right-4 top-1/2 -translate-y-1/2 bg-black/60 backdrop-blur-sm rounded-full px-4 py-3 text-white text-sm font-medium animate-fade-in pointer-events-none flex items-center gap-1.5">
-                      10s
-                      <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11.933 12.8a1 1 0 000-1.6L6.6 7.2A1 1 0 005 8v8a1 1 0 001.6.8l5.333-4zM19.933 12.8a1 1 0 000-1.6l-5.333-4A1 1 0 0013 8v8a1 1 0 001.6.8l5.333-4z" /></svg>
-                    </div>
-                  )}
-
-                  {/* Center play/pause indicator on tap */}
-                  {videoPaused && (
-                    <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-                      <div className="bg-black/50 backdrop-blur-sm rounded-full p-5">
-                        <Play className="w-10 h-10 text-white fill-white" />
-                      </div>
-                    </div>
-                  )}
-
-                  {/* Custom controls overlay */}
-                  <div
-                    className={`absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/80 via-black/40 to-transparent pt-12 pb-3 px-3 transition-opacity duration-300 ${
-                      showVideoControls || videoPaused ? 'opacity-100' : 'opacity-0 pointer-events-none'
-                    }`}
-                    onClick={(e) => e.stopPropagation()}
-                    onTouchEnd={(e) => e.stopPropagation()}
-                  >
-                    {/* Progress bar */}
-                    <div
-                      className="relative h-8 flex items-center cursor-pointer group/progress touch-none"
-                      onMouseDown={(e) => {
-                        videoProgressDraggingRef.current = true;
-                        handleVideoSeek(e, e.currentTarget as HTMLDivElement);
-                        const bar = e.currentTarget as HTMLDivElement;
-                        const onMove = (ev: MouseEvent) => handleVideoSeek(ev as unknown as React.MouseEvent, bar);
-                        const onUp = () => {
-                          videoProgressDraggingRef.current = false;
-                          window.removeEventListener('mousemove', onMove);
-                          window.removeEventListener('mouseup', onUp);
-                        };
-                        window.addEventListener('mousemove', onMove);
-                        window.addEventListener('mouseup', onUp);
-                      }}
-                      onTouchStart={(e) => {
-                        videoProgressDraggingRef.current = true;
-                        handleVideoSeek(e, e.currentTarget as HTMLDivElement);
-                      }}
-                      onTouchMove={(e) => {
-                        if (videoProgressDraggingRef.current) {
-                          handleVideoSeek(e, e.currentTarget as HTMLDivElement);
-                        }
-                      }}
-                      onTouchEnd={() => {
-                        videoProgressDraggingRef.current = false;
-                      }}
-                    >
-                      <div className="absolute left-0 right-0 h-1 group-hover/progress:h-1.5 bg-white/30 rounded-full transition-all">
-                        {/* Buffered */}
-                        <div
-                          className="absolute top-0 left-0 h-full bg-white/40 rounded-full"
-                          style={{ width: videoDuration ? `${(videoBuffered / videoDuration) * 100}%` : '0%' }}
-                        />
-                        {/* Progress */}
-                        <div
-                          className="absolute top-0 left-0 h-full bg-white rounded-full"
-                          style={{ width: videoDuration ? `${(videoProgress / videoDuration) * 100}%` : '0%' }}
-                        />
-                      </div>
-                      {/* Scrubber handle */}
-                      <div
-                        className="absolute w-3.5 h-3.5 bg-white rounded-full shadow-lg -translate-x-1/2 opacity-0 group-hover/progress:opacity-100 transition-opacity"
-                        style={{ left: videoDuration ? `${(videoProgress / videoDuration) * 100}%` : '0%' }}
-                      />
-                    </div>
-
-                    {/* Time + controls row */}
-                    <div className="flex items-center justify-between text-white text-xs mt-0.5">
-                      <div className="flex items-center gap-3">
-                        <button
-                          className="p-1 hover:bg-white/20 rounded-full transition"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            const v = videoRef.current;
-                            if (!v) return;
-                            if (v.paused) { v.play(); setVideoPaused(false); }
-                            else { v.pause(); setVideoPaused(true); }
-                            resetVideoControlsTimer();
-                          }}
-                        >
-                          {videoPaused ? <Play className="w-5 h-5 fill-white" /> : <Pause className="w-5 h-5" />}
-                        </button>
-                        <span className="tabular-nums">{formatTime(videoProgress)} / {formatTime(videoDuration)}</span>
-                      </div>
-                      <button
-                        className="p-1 hover:bg-white/20 rounded-full transition"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          const v = videoRef.current;
-                          if (!v) return;
-                          if (document.fullscreenElement) {
-                            document.exitFullscreen();
-                          } else {
-                            v.requestFullscreen?.();
-                          }
-                        }}
-                      >
-                        {isFullscreen ? <Minimize className="w-5 h-5" /> : <Maximize className="w-5 h-5" />}
-                      </button>
-                    </div>
-                  </div>
-                </div>
-              ) : (
-                <div className="relative">
-                  {/* Previous photo for cross-fade effect */}
-                  {previousPhoto && previousPhoto.file_type !== 'video/mp4' && (
-                    <img
-                      src={getPreviewUrl(slug!, previousPhoto.id, previousPhoto.file_type, previousPhoto.cache_version)}
-                      alt="Previous"
-                      className={`w-full h-auto ${isFullscreen ? 'max-h-screen' : 'max-h-[70vh] md:max-h-[80vh]'} object-contain absolute inset-0 transition-opacity duration-300 ${
-                        imageLoaded ? 'opacity-0' : 'opacity-100'
-                      }`}
-                    />
-                  )}
-                  
-                  {/* Blur placeholder */}
-                  {photo?.blur_placeholder && !imageLoaded && (
-                    <img
-                      src={photo.blur_placeholder}
-                      alt="Loading..."
-                      className={`w-full h-auto ${isFullscreen ? 'max-h-screen' : 'max-h-[70vh] md:max-h-[80vh]'} object-contain blur-xl transition-opacity duration-200`}
-                    />
-                  )}
-                  
-                  {/* Main image with smooth fade-in */}
-                  <img
-                    src={getPreviewUrl(slug!, photo?.id || photoId!, photo?.file_type, cacheBuster || photo?.cache_version)}
-                    alt={photo?.original_filename}
-                    className={`w-full h-auto ${isFullscreen ? 'max-h-screen' : 'max-h-[70vh] md:max-h-[80vh]'} object-contain transition-opacity duration-300 ${imageLoaded ? 'opacity-100' : 'opacity-0'} ${photo?.blur_placeholder && !imageLoaded ? 'absolute inset-0' : ''}`}
-                    onLoad={() => setImageLoaded(true)}
-                    loading="eager"
-                    decoding="async"
-                  />
-                </div>
-              )}
-            </div>
-          </div>
-        </div>
-
-        {/* Navigation buttons below image - Desktop and Mobile */}
-        {(fromFavorites && favoritePhotos.length > 1) || (!fromFavorites && displayPhotos.length > 1) ? (
-          <div className="flex justify-center items-center gap-4 mt-4">
-            <button
-              onClick={navigateToPrevious}
-              className="bg-gray-800 hover:bg-gray-700 active:bg-gray-600 text-white p-3 rounded-lg transition touch-manipulation shadow-lg"
-              aria-label="Previous photo"
-            >
-              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
-              </svg>
-            </button>
-            <span className="text-gray-400 text-sm">
-              {fromFavorites && favoritePhotos.length > 0
-                ? `${(favoritePhotos.findIndex((fav: { id: string; slug: string }) => fav.id === photoId && fav.slug === slug) + 1) || 1} / ${favoritePhotos.length}`
-                : `${currentIndex + 1} / ${displayPhotos.length}`
-              }
-            </span>
-            <button
-              onClick={navigateToNext}
-              className="bg-gray-800 hover:bg-gray-700 active:bg-gray-600 text-white p-3 rounded-lg transition touch-manipulation shadow-lg"
-              aria-label="Next photo"
-            >
-              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
-              </svg>
-            </button>
-          </div>
-        ) : null}
-
-        {/* Mobile Action Bar */}
-        <div className="md:hidden mt-4 space-y-2.5">
-          {/* Quick actions */}
-          <div className="flex gap-2.5">
-            {/* Favorite button */}
-            <button
-              onClick={toggleFavorite}
-              className="flex min-h-[52px] flex-1 min-w-0 items-center justify-center gap-2.5 rounded-xl border border-white/10 bg-gray-800/95 px-4 text-white shadow-[0_10px_24px_rgba(0,0,0,0.2)] transition hover:bg-gray-700/95 active:scale-[0.98]"
-              aria-label="Favorite"
-            >
-              <Heart className={`h-5 w-5 ${isFavorited ? 'fill-red-500 text-red-500' : 'text-red-200'}`} />
-              <span className="text-sm font-medium">{isFavorited ? 'Favorited' : 'Favorite'}</span>
-            </button>
-            
-            {/* Share button */}
-            <button
-              onClick={() => {
-                // Use native share on mobile if available
-                if ('share' in navigator) {
-                  sharePhoto();
-                } else {
-                  setShowShareMenu(!showShareMenu);
-                }
-              }}
-              className="flex min-h-[52px] flex-1 min-w-0 items-center justify-center gap-2.5 rounded-xl border border-white/10 bg-gray-800/95 px-4 text-white shadow-[0_10px_24px_rgba(0,0,0,0.2)] transition hover:bg-gray-700/95 active:scale-[0.98]"
-              aria-label="Share"
-            >
-              <Share2 className="w-5 h-5" />
-              <span className="text-sm font-medium">Share</span>
-            </button>
 
             {/* More menu */}
-            <div className="relative w-[52px] shrink-0">
+            <div className="relative">
               <button
                 onClick={() => setShowMobileMenu(!showMobileMenu)}
-                className="flex h-[52px] w-full items-center justify-center rounded-xl border border-white/10 bg-gray-800/95 text-white shadow-[0_10px_24px_rgba(0,0,0,0.2)] transition hover:bg-gray-700/95 active:scale-[0.98]"
+                className="text-white p-2 -mr-2 hover:bg-white/10 rounded-full transition"
                 aria-label="More options"
               >
-                <MoreVertical className="w-5 h-5" />
+                <MoreVertical className="w-6 h-6" />
               </button>
+
               {showMobileMenu && (
                 <>
                   <div className="fixed inset-0 z-30" onClick={() => setShowMobileMenu(false)} />
-                  <div className="absolute bottom-full mb-2 right-0 z-40 bg-gray-800 rounded-lg shadow-xl border border-gray-700 py-1 min-w-[180px]">
+                  <div className="absolute top-full right-0 mt-1 z-40 bg-gray-800/95 backdrop-blur-md rounded-xl shadow-2xl border border-white/10 py-1.5 min-w-[220px]">
                     <button
                       onClick={() => {
                         setShowMobileMenu(false);
                         toggleSlideshow();
                       }}
-                      className="w-full px-4 py-2.5 text-white text-sm font-medium flex items-center gap-2 hover:bg-gray-700 active:bg-gray-600 transition"
+                      className="w-full px-4 py-2.5 text-white text-sm font-medium flex items-center gap-3 hover:bg-white/10 transition"
                     >
                       {isSlideshow ? <Pause className="w-5 h-5" /> : <Play className="w-5 h-5" />}
-                      {isSlideshow ? 'Pause Slideshow' : 'Start Slideshow'}
+                      {isSlideshow ? 'Stop Slideshow' : 'Start Slideshow'}
                     </button>
+
+                    {isSlideshow && (
+                      <div className="px-4 py-2 space-y-1">
+                        <div className="text-gray-400 text-xs mb-1">Speed</div>
+                        {[{ label: 'Fast (2s)', ms: 2000 }, { label: 'Normal (3s)', ms: 3000 }, { label: 'Slow (5s)', ms: 5000 }, { label: 'Very Slow (10s)', ms: 10000 }].map(opt => (
+                          <button
+                            key={opt.ms}
+                            onClick={() => setSlideshowSpeed(opt.ms)}
+                            className={`w-full px-3 py-1.5 text-left text-xs rounded transition ${
+                              slideshowSpeed === opt.ms ? 'bg-blue-600 text-white' : 'text-gray-300 hover:bg-white/10'
+                            }`}
+                          >
+                            {opt.label}
+                          </button>
+                        ))}
+                      </div>
+                    )}
+
+                    <button
+                      onClick={() => {
+                        setShowMobileMenu(false);
+                        toggleFullscreen();
+                      }}
+                      className="w-full px-4 py-2.5 text-white text-sm font-medium flex items-center gap-3 hover:bg-white/10 transition"
+                    >
+                      {isFullscreen ? <Minimize className="w-5 h-5" /> : <Maximize className="w-5 h-5" />}
+                      {isFullscreen ? 'Exit Fullscreen' : 'Fullscreen'}
+                    </button>
+
+                    <button
+                      onClick={() => {
+                        setShowMobileMenu(false);
+                        setShowKeyboardHelp(true);
+                      }}
+                      className="w-full px-4 py-2.5 text-white text-sm font-medium flex items-center gap-3 hover:bg-white/10 transition"
+                    >
+                      <span className="w-5 h-5 flex items-center justify-center text-base font-bold">?</span>
+                      Keyboard Shortcuts
+                    </button>
+
                     {canEditMedia && (
                       <>
-                        <div className="my-1 border-t border-gray-700" />
+                        <div className="my-1.5 border-t border-white/10" />
                         <button
                           onClick={() => {
                             setShowMobileMenu(false);
                             setShowEditor(true);
                           }}
-                          className="w-full px-4 py-2.5 text-white text-sm font-medium flex items-center gap-2 hover:bg-gray-700 active:bg-gray-600 transition"
+                          className="w-full px-4 py-2.5 text-white text-sm font-medium flex items-center gap-3 hover:bg-white/10 transition"
                         >
                           <Pencil className="w-5 h-5" />
-                          Edit Photo
+                          Edit {photo?.file_type === 'video/mp4' ? 'Video' : 'Photo'}
                         </button>
 
                         {canFeatureMedia && (
                           <button
                             onClick={() => {
+                              setShowMobileMenu(false);
                               void handleToggleFeatured();
                             }}
-                            className="w-full px-4 py-2.5 text-white text-sm font-medium flex items-center gap-2 hover:bg-gray-700 active:bg-gray-600 transition"
+                            className="w-full px-4 py-2.5 text-white text-sm font-medium flex items-center gap-3 hover:bg-white/10 transition"
                           >
                             <Star className={`w-5 h-5 ${photo?.is_featured ? 'fill-yellow-400 text-yellow-400' : ''}`} />
-                            {photo?.is_featured ? 'Unfeature Photo' : 'Feature Photo'}
+                            {photo?.is_featured ? 'Unfeature' : 'Feature'}
                           </button>
                         )}
 
                         {canDeleteMedia && (
                           <button
                             onClick={() => {
+                              setShowMobileMenu(false);
                               void handleDeletePhoto();
                             }}
-                            className="w-full px-4 py-2.5 text-red-300 text-sm font-medium flex items-center gap-2 hover:bg-red-500/20 active:bg-red-500/30 transition"
+                            className="w-full px-4 py-2.5 text-red-400 text-sm font-medium flex items-center gap-3 hover:bg-red-500/10 transition"
                           >
                             <Trash2 className="w-5 h-5" />
-                            Delete Photo
+                            Delete
                           </button>
                         )}
                       </>
@@ -1845,188 +1485,319 @@ const PhotoDetail: React.FC = () => {
               )}
             </div>
           </div>
-
-          {/* Download buttons */}
-          <div className="flex gap-2.5">
-            <button
-              onClick={handleDownloadOriginal}
-              className="flex min-h-[52px] flex-1 items-center justify-center gap-2.5 rounded-xl border border-blue-400/30 bg-blue-500/90 px-3.5 text-center text-white shadow-[0_10px_24px_rgba(37,99,235,0.2)] transition hover:bg-blue-500 active:scale-[0.98]"
-            >
-              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
-              </svg>
-              <span className="text-sm font-medium">Original</span>
-            </button>
-            <button
-              onClick={handleDownloadSmall}
-              className="flex min-h-[52px] flex-1 items-center justify-center gap-2.5 rounded-xl border border-violet-400/30 bg-violet-500/90 px-3.5 text-center text-white shadow-[0_10px_24px_rgba(139,92,246,0.2)] transition hover:bg-violet-500 active:scale-[0.98]"
-            >
-              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
-              </svg>
-              <span className="text-sm font-medium">Small</span>
-            </button>
-            {photo?.file_type !== 'video/mp4' && (
-              <button
-                onClick={handleDownloadInstagram}
-                className="flex min-h-[52px] flex-1 items-center justify-center gap-2.5 rounded-xl border border-pink-300/30 bg-gradient-to-r from-pink-500 via-red-500 to-amber-400 px-3.5 text-center text-white shadow-[0_10px_24px_rgba(244,63,94,0.22)] transition hover:opacity-95 active:scale-[0.98]"
-              >
-                <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 24 24">
-                  <path d="M12 2.163c3.204 0 3.584.012 4.85.07 3.252.148 4.771 1.691 4.919 4.919.058 1.265.069 1.645.069 4.849 0 3.205-.012 3.584-.069 4.849-.149 3.225-1.664 4.771-4.919 4.919-1.266.058-1.644.07-4.85.07-3.204 0-3.584-.012-4.849-.07-3.26-.149-4.771-1.699-4.919-4.92-.058-1.265-.07-1.644-.07-4.849 0-3.204.013-3.583.07-4.849.149-3.227 1.664-4.771 4.919-4.919 1.266-.057 1.645-.069 4.849-.069zm0-2.163c-3.259 0-3.667.014-4.947.072-4.358.2-6.78 2.618-6.98 6.98-.059 1.281-.073 1.689-.073 4.948 0 3.259.014 3.668.072 4.948.2 4.358 2.618 6.78 6.98 6.98 1.281.058 1.689.072 4.948.072 3.259 0 3.668-.014 4.948-.072 4.354-.2 6.782-2.618 6.979-6.98.059-1.28.073-1.689.073-4.948 0-3.259-.014-3.667-.072-4.947-.196-4.354-2.617-6.78-6.979-6.98-1.281-.059-1.69-.073-4.949-.073zm0 5.838c-3.403 0-6.162 2.759-6.162 6.162s2.759 6.163 6.162 6.163 6.162-2.759 6.162-6.163c0-3.403-2.759-6.162-6.162-6.162zm0 10.162c-2.209 0-4-1.79-4-4 0-2.209 1.791-4 4-4s4 1.791 4 4c0 2.21-1.791 4-4 4zm6.406-11.845c-.796 0-1.441.645-1.441 1.44s.645 1.44 1.441 1.44c.795 0 1.439-.645 1.439-1.44s-.644-1.44-1.439-1.44z"/>
-                </svg>
-                <span className="text-sm font-medium">Instagram</span>
-              </button>
-            )}
-          </div>
-          
-          {/* Navigation hint */}
-          <div className="text-center text-gray-400 text-sm">
-            ← Swipe or use buttons to navigate →
-          </div>
-        </div>
-
-        {/* Mobile Share Menu Bottom Sheet - only shown if native share is not available */}
-        {showShareMenu && !('share' in navigator) && (
-          <div className="md:hidden fixed inset-0 bg-black/50 z-50" onClick={() => setShowShareMenu(false)}>
-            <div className="absolute bottom-0 left-0 right-0 bg-gray-800 rounded-t-2xl p-4" onClick={(e) => e.stopPropagation()}>
-              <div className="w-12 h-1 bg-gray-600 rounded-full mx-auto mb-4"></div>
-              <h3 className="text-white text-lg font-semibold mb-4">Share Photo</h3>
-              <div className="space-y-2">
-                <button
-                  onClick={() => sharePhoto('twitter')}
-                  className="w-full px-4 py-3 text-left text-white bg-gray-700 hover:bg-gray-600 active:bg-gray-500 rounded-lg transition flex items-center gap-3"
-                >
-                  <span className="text-2xl">🐦</span>
-                  <span>Share on Twitter</span>
-                </button>
-                <button
-                  onClick={() => sharePhoto('facebook')}
-                  className="w-full px-4 py-3 text-left text-white bg-gray-700 hover:bg-gray-600 active:bg-gray-500 rounded-lg transition flex items-center gap-3"
-                >
-                  <span className="text-2xl">📘</span>
-                  <span>Share on Facebook</span>
-                </button>
-                <button
-                  onClick={() => sharePhoto('whatsapp')}
-                  className="w-full px-4 py-3 text-left text-white bg-gray-700 hover:bg-gray-600 active:bg-gray-500 rounded-lg transition flex items-center gap-3"
-                >
-                  <span className="text-2xl">💬</span>
-                  <span>Share on WhatsApp</span>
-                </button>
-                <button
-                  onClick={() => sharePhoto('copy')}
-                  className="w-full px-4 py-3 text-left text-white bg-gray-700 hover:bg-gray-600 active:bg-gray-500 rounded-lg transition flex items-center gap-3"
-                >
-                  <span className="text-2xl">🔗</span>
-                  <span>Copy Link</span>
-                </button>
-              </div>
-              <button
-                onClick={() => setShowShareMenu(false)}
-                className="w-full mt-4 px-4 py-3 bg-gray-900 text-white rounded-lg font-medium"
-              >
-                Cancel
-              </button>
-            </div>
-          </div>
-        )}
-
-        {/* Details section - collapsible on mobile */}
-        <div className={`mt-6 grid grid-cols-1 md:grid-cols-2 gap-4 ${showDetails ? 'block' : 'hidden md:grid'}`}>
-          {/* Photo Info */}
-          <div className="bg-gray-800 rounded-lg p-4 md:p-6">
-            <div className="flex justify-between items-center mb-3 md:mb-4">
-              <h3 className="text-base md:text-lg font-semibold text-white">📷 Photo Info</h3>
-              {photo?.favorites_count && photo.favorites_count > 0 ? (
-                <div className="flex items-center gap-1 text-red-500">
-                  <Heart className="w-4 h-4 fill-current" />
-                  <span className="text-sm">{photo.favorites_count}</span>
-                </div>
-              ) : null}
-            </div>
-            <dl className="space-y-2 text-sm md:text-base">
-              <div>
-                <dt className="text-gray-400 text-xs md:text-sm">Captured</dt>
-                <dd className="text-white">
-                  {photo?.capture_time ? new Date(photo.capture_time).toLocaleString() : 'Unknown'}
-                </dd>
-              </div>
-              {photo?.width && photo?.height && (
-                <div>
-                  <dt className="text-gray-400 text-xs md:text-sm">Dimensions</dt>
-                  <dd className="text-white">{photo.width} × {photo.height} pixels</dd>
-                </div>
-              )}
-              <div>
-                <dt className="text-gray-400 text-xs md:text-sm">Filename</dt>
-                <dd className="text-white text-xs md:text-sm break-all">{photo?.original_filename}</dd>
-              </div>
-              {photo?.uploader_name && (
-                <div>
-                  <dt className="text-gray-400 text-xs md:text-sm">Uploaded by</dt>
-                  <dd className="text-white text-xs md:text-sm">{photo.uploader_name}</dd>
-                </div>
-              )}
-            </dl>
-          </div>
-
-          {/* Camera Settings */}
-          {(photo?.iso || photo?.aperture || photo?.shutter_speed || photo?.focal_length) && (
-            <div className="bg-gray-800 rounded-lg p-4 md:p-6">
-              <h3 className="text-base md:text-lg font-semibold text-white mb-3 md:mb-4">⚙️ Camera Settings</h3>
-              <dl className="space-y-2 text-sm md:text-base">
-                {photo.iso && (
-                  <div>
-                    <dt className="text-gray-400 text-xs md:text-sm">ISO</dt>
-                    <dd className="text-white">{photo.iso}</dd>
-                  </div>
-                )}
-                {photo.aperture && (
-                  <div>
-                    <dt className="text-gray-400 text-xs md:text-sm">Aperture</dt>
-                    <dd className="text-white">{photo.aperture}</dd>
-                  </div>
-                )}
-                {photo.shutter_speed && (
-                  <div>
-                    <dt className="text-gray-400 text-xs md:text-sm">Exposure Time</dt>
-                    <dd className="text-white">{photo.shutter_speed}</dd>
-                  </div>
-                )}
-                {photo.focal_length && (
-                  <div>
-                    <dt className="text-gray-400 text-xs md:text-sm">Focal Length</dt>
-                    <dd className="text-white">{photo.focal_length}</dd>
-                  </div>
-                )}
-              </dl>
-            </div>
-          )}
-
-          {/* Camera & Lens */}
-          {(photo?.camera_make || photo?.camera_model || photo?.lens_model) && (
-            <div className="bg-gray-800 rounded-lg p-4 md:p-6 md:col-span-2">
-              <h3 className="text-base md:text-lg font-semibold text-white mb-3 md:mb-4">📸 Equipment</h3>
-              <dl className="space-y-2 text-sm md:text-base">
-                {(photo.camera_make || photo.camera_model) && (
-                  <div>
-                    <dt className="text-gray-400 text-xs md:text-sm">Device Model</dt>
-                    <dd className="text-white">
-                      {[photo.camera_make, photo.camera_model].filter(Boolean).join(' ')}
-                    </dd>
-                  </div>
-                )}
-                {photo.lens_model && (
-                  <div>
-                    <dt className="text-gray-400 text-xs md:text-sm">Lens</dt>
-                    <dd className="text-white break-all">{photo.lens_model}</dd>
-                  </div>
-                )}
-              </dl>
-            </div>
-          )}
         </div>
       </div>
+
+      {/* Bottom overlay bar */}
+      <div
+        className={`absolute bottom-0 inset-x-0 z-30 transition-all duration-300 ${
+          showOverlay && !showInfoSheet ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-4 pointer-events-none'
+        }`}
+      >
+        <div className="bg-gradient-to-t from-black/80 via-black/40 to-transparent px-4 pt-12 pb-4 pb-safe">
+          {/* Video controls */}
+          {photo?.file_type === 'video/mp4' && (
+            <div
+              className="mb-3"
+              onClick={(e) => e.stopPropagation()}
+              onTouchEnd={(e) => e.stopPropagation()}
+            >
+              {/* Progress bar */}
+              <div
+                className="relative h-8 flex items-center cursor-pointer group/progress touch-none"
+                onMouseDown={(e) => {
+                  videoProgressDraggingRef.current = true;
+                  handleVideoSeek(e, e.currentTarget as HTMLDivElement);
+                  const bar = e.currentTarget as HTMLDivElement;
+                  const onMove = (ev: MouseEvent) => handleVideoSeek(ev as unknown as React.MouseEvent, bar);
+                  const onUp = () => {
+                    videoProgressDraggingRef.current = false;
+                    window.removeEventListener('mousemove', onMove);
+                    window.removeEventListener('mouseup', onUp);
+                  };
+                  window.addEventListener('mousemove', onMove);
+                  window.addEventListener('mouseup', onUp);
+                }}
+                onTouchStart={(e) => {
+                  videoProgressDraggingRef.current = true;
+                  handleVideoSeek(e, e.currentTarget as HTMLDivElement);
+                }}
+                onTouchMove={(e) => {
+                  if (videoProgressDraggingRef.current) {
+                    handleVideoSeek(e, e.currentTarget as HTMLDivElement);
+                  }
+                }}
+                onTouchEnd={() => {
+                  videoProgressDraggingRef.current = false;
+                }}
+              >
+                <div className="absolute left-0 right-0 h-1 group-hover/progress:h-1.5 bg-white/30 rounded-full transition-all">
+                  {/* Buffered */}
+                  <div
+                    className="absolute top-0 left-0 h-full bg-white/40 rounded-full"
+                    style={{ width: videoDuration ? `${(videoBuffered / videoDuration) * 100}%` : '0%' }}
+                  />
+                  {/* Progress */}
+                  <div
+                    className="absolute top-0 left-0 h-full bg-white rounded-full"
+                    style={{ width: videoDuration ? `${(videoProgress / videoDuration) * 100}%` : '0%' }}
+                  />
+                </div>
+                {/* Scrubber handle */}
+                <div
+                  className="absolute w-3.5 h-3.5 bg-white rounded-full shadow-lg -translate-x-1/2 opacity-0 group-hover/progress:opacity-100 transition-opacity"
+                  style={{ left: videoDuration ? `${(videoProgress / videoDuration) * 100}%` : '0%' }}
+                />
+              </div>
+
+              {/* Time + controls row */}
+              <div className="flex items-center justify-between text-white text-xs">
+                <div className="flex items-center gap-3">
+                  <button
+                    className="p-1.5 hover:bg-white/20 rounded-full transition"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      const v = videoRef.current;
+                      if (!v) return;
+                      if (v.paused) { v.play(); setVideoPaused(false); }
+                      else { v.pause(); setVideoPaused(true); }
+                      resetVideoControlsTimer();
+                    }}
+                  >
+                    {videoPaused ? <Play className="w-5 h-5 fill-white" /> : <Pause className="w-5 h-5" />}
+                  </button>
+                  <span className="tabular-nums">{formatTime(videoProgress)} / {formatTime(videoDuration)}</span>
+                </div>
+                <button
+                  className="p-1.5 hover:bg-white/20 rounded-full transition"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    if (videoRef.current) {
+                      videoRef.current.muted = !videoRef.current.muted;
+                      setVideoMuted(!videoMuted);
+                    }
+                  }}
+                >
+                  {videoMuted ? <VolumeX className="w-5 h-5" /> : <Volume2 className="w-5 h-5" />}
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* Action buttons */}
+          <div className="flex items-center justify-around">
+            <button
+              onClick={toggleFavorite}
+              className="flex flex-col items-center gap-1 text-white/90 p-2 hover:bg-white/10 rounded-xl transition active:scale-95"
+            >
+              <Heart className={`w-6 h-6 ${isFavorited ? 'fill-red-500 text-red-500' : ''}`} />
+              <span className="text-[10px] font-medium">{isFavorited ? 'Saved' : 'Favorite'}</span>
+            </button>
+
+            <button
+              onClick={() => sharePhoto()}
+              className="flex flex-col items-center gap-1 text-white/90 p-2 hover:bg-white/10 rounded-xl transition active:scale-95"
+            >
+              <Share2 className="w-6 h-6" />
+              <span className="text-[10px] font-medium">Share</span>
+            </button>
+
+            <div className="relative">
+              <button
+                onClick={() => setShowDownloadMenu(!showDownloadMenu)}
+                className="flex flex-col items-center gap-1 text-white/90 p-2 hover:bg-white/10 rounded-xl transition active:scale-95"
+              >
+                <Download className="w-6 h-6" />
+                <span className="text-[10px] font-medium">Download</span>
+              </button>
+
+              {showDownloadMenu && (
+                <>
+                  <div className="fixed inset-0 z-30" onClick={() => setShowDownloadMenu(false)} />
+                  <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 z-40 bg-gray-800/95 backdrop-blur-md rounded-xl shadow-2xl border border-white/10 py-1.5 min-w-[180px]">
+                    <button
+                      onClick={() => { handleDownloadOriginal(); setShowDownloadMenu(false); }}
+                      className="w-full px-4 py-2.5 text-white text-sm font-medium flex items-center gap-3 hover:bg-white/10 transition"
+                    >
+                      <span className="text-blue-400">●</span> Original
+                    </button>
+                    {photo?.file_type !== 'video/mp4' && (
+                      <>
+                        <button
+                          onClick={() => { handleDownloadSmall(); setShowDownloadMenu(false); }}
+                          className="w-full px-4 py-2.5 text-white text-sm font-medium flex items-center gap-3 hover:bg-white/10 transition"
+                        >
+                          <span className="text-purple-400">●</span> Small
+                        </button>
+                        <button
+                          onClick={() => { handleDownloadInstagram(); setShowDownloadMenu(false); }}
+                          className="w-full px-4 py-2.5 text-white text-sm font-medium flex items-center gap-3 hover:bg-white/10 transition"
+                        >
+                          <span className="text-pink-400">●</span> Instagram
+                        </button>
+                      </>
+                    )}
+                  </div>
+                </>
+              )}
+            </div>
+
+            <button
+              onClick={() => { setShowInfoSheet(true); setShowOverlay(false); }}
+              className="flex flex-col items-center gap-1 text-white/90 p-2 hover:bg-white/10 rounded-xl transition active:scale-95"
+            >
+              <Info className="w-6 h-6" />
+              <span className="text-[10px] font-medium">Info</span>
+            </button>
+          </div>
+        </div>
+      </div>
+
+      {/* Info Bottom Sheet */}
+      {showInfoSheet && (
+        <div className="fixed inset-0 z-40" onClick={() => setShowInfoSheet(false)}>
+          <div className="absolute inset-0 bg-black/60 transition-opacity" />
+          <div
+            className="absolute bottom-0 inset-x-0 max-h-[85vh] bg-gray-900 rounded-t-2xl overflow-hidden flex flex-col animate-slide-up"
+            onClick={(e) => e.stopPropagation()}
+          >
+            {/* Sheet header */}
+            <div className="sticky top-0 bg-gray-900 px-4 py-3 border-b border-white/10 shrink-0">
+              <div className="w-10 h-1 bg-gray-600 rounded-full mx-auto mb-3" />
+              <div className="flex items-center justify-between">
+                <h3 className="text-white text-lg font-semibold">Details</h3>
+                <button
+                  onClick={() => setShowInfoSheet(false)}
+                  className="text-gray-400 hover:text-white p-1 transition"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+            </div>
+
+            {/* Sheet content */}
+            <div className="flex-1 overflow-y-auto p-4 space-y-5">
+              {/* Photo Info */}
+              <div>
+                <h4 className="text-white font-medium mb-3 flex items-center gap-2">
+                  📷 Photo Info
+                  {photo?.favorites_count && photo.favorites_count > 0 ? (
+                    <span className="flex items-center gap-1 text-red-500 text-sm ml-auto">
+                      <Heart className="w-4 h-4 fill-current" />
+                      {photo.favorites_count}
+                    </span>
+                  ) : null}
+                </h4>
+                <dl className="space-y-2.5 text-sm">
+                  <div>
+                    <dt className="text-gray-500 text-xs">Captured</dt>
+                    <dd className="text-white">{photo?.capture_time ? new Date(photo.capture_time).toLocaleString() : 'Unknown'}</dd>
+                  </div>
+                  {photo?.width && photo?.height && (
+                    <div>
+                      <dt className="text-gray-500 text-xs">Dimensions</dt>
+                      <dd className="text-white">{photo.width} × {photo.height} pixels</dd>
+                    </div>
+                  )}
+                  <div>
+                    <dt className="text-gray-500 text-xs">Filename</dt>
+                    <dd className="text-white text-xs break-all">{photo?.original_filename}</dd>
+                  </div>
+                  {photo?.uploader_name && (
+                    <div>
+                      <dt className="text-gray-500 text-xs">Uploaded by</dt>
+                      <dd className="text-white text-xs">{photo.uploader_name}</dd>
+                    </div>
+                  )}
+                </dl>
+              </div>
+
+              {/* Camera Settings */}
+              {(photo?.iso || photo?.aperture || photo?.shutter_speed || photo?.focal_length) && (
+                <div>
+                  <h4 className="text-white font-medium mb-3">⚙️ Camera Settings</h4>
+                  <dl className="grid grid-cols-2 gap-2.5 text-sm">
+                    {photo.iso && (
+                      <div>
+                        <dt className="text-gray-500 text-xs">ISO</dt>
+                        <dd className="text-white">{photo.iso}</dd>
+                      </div>
+                    )}
+                    {photo.aperture && (
+                      <div>
+                        <dt className="text-gray-500 text-xs">Aperture</dt>
+                        <dd className="text-white">{photo.aperture}</dd>
+                      </div>
+                    )}
+                    {photo.shutter_speed && (
+                      <div>
+                        <dt className="text-gray-500 text-xs">Exposure Time</dt>
+                        <dd className="text-white">{photo.shutter_speed}</dd>
+                      </div>
+                    )}
+                    {photo.focal_length && (
+                      <div>
+                        <dt className="text-gray-500 text-xs">Focal Length</dt>
+                        <dd className="text-white">{photo.focal_length}</dd>
+                      </div>
+                    )}
+                  </dl>
+                </div>
+              )}
+
+              {/* Equipment */}
+              {(photo?.camera_make || photo?.camera_model || photo?.lens_model) && (
+                <div>
+                  <h4 className="text-white font-medium mb-3">📸 Equipment</h4>
+                  <dl className="space-y-2.5 text-sm">
+                    {(photo.camera_make || photo.camera_model) && (
+                      <div>
+                        <dt className="text-gray-500 text-xs">Device Model</dt>
+                        <dd className="text-white">{[photo.camera_make, photo.camera_model].filter(Boolean).join(' ')}</dd>
+                      </div>
+                    )}
+                    {photo.lens_model && (
+                      <div>
+                        <dt className="text-gray-500 text-xs">Lens</dt>
+                        <dd className="text-white break-all">{photo.lens_model}</dd>
+                      </div>
+                    )}
+                  </dl>
+                </div>
+              )}
+
+              {/* Download section */}
+              <div>
+                <h4 className="text-white font-medium mb-3">💾 Download</h4>
+                <div className="flex gap-2.5">
+                  <button
+                    onClick={handleDownloadOriginal}
+                    className="flex-1 py-2.5 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 transition active:scale-[0.98]"
+                  >
+                    Original
+                  </button>
+                  {photo?.file_type !== 'video/mp4' && (
+                    <>
+                      <button
+                        onClick={handleDownloadSmall}
+                        className="flex-1 py-2.5 bg-purple-600 text-white rounded-lg text-sm font-medium hover:bg-purple-700 transition active:scale-[0.98]"
+                      >
+                        Small
+                      </button>
+                      <button
+                        onClick={handleDownloadInstagram}
+                        className="flex-1 py-2.5 bg-gradient-to-r from-pink-500 via-red-500 to-yellow-500 text-white rounded-lg text-sm font-medium hover:opacity-90 transition active:scale-[0.98]"
+                      >
+                        Instagram
+                      </button>
+                    </>
+                  )}
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Image Editor Modal */}
       {showEditor && photo && slug && photo.file_type !== 'video/mp4' && (
@@ -2072,9 +1843,7 @@ const PhotoDetail: React.FC = () => {
           <div className="bg-gray-800 rounded-lg p-6 max-w-md w-full" onClick={(e) => e.stopPropagation()}>
             <div className="flex justify-between items-center mb-4">
               <h2 className="text-xl font-bold text-white">⌨️ Keyboard Shortcuts</h2>
-              <button onClick={() => setShowKeyboardHelp(false)} className="text-gray-400 hover:text-white">
-                ✕
-              </button>
+              <button onClick={() => setShowKeyboardHelp(false)} className="text-gray-400 hover:text-white">✕</button>
             </div>
             <div className="space-y-3 text-sm">
               <div className="flex justify-between items-center">
@@ -2090,7 +1859,7 @@ const PhotoDetail: React.FC = () => {
                 <span className="bg-gray-700 px-3 py-1 rounded text-white font-mono">F</span>
               </div>
               <div className="flex justify-between items-center">
-                <span className="text-gray-300">Toggle photo info</span>
+                <span className="text-gray-300">Show details</span>
                 <span className="bg-gray-700 px-3 py-1 rounded text-white font-mono">I</span>
               </div>
               <div className="flex justify-between items-center">
@@ -2105,7 +1874,6 @@ const PhotoDetail: React.FC = () => {
           </div>
         </div>
       )}
-      <Footer />
     </div>
   );
 };

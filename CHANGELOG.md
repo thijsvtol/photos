@@ -5,6 +5,37 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.6.0] - 2026-05-17
+
+### Added
+- System theme option — uses OS light/dark preference by default, with live matchMedia listener for real-time updates.
+- Google Photos-style fullscreen photo viewer — tap to toggle overlay, swipe-up info sheet, muted video autoplay with volume toggle.
+- Inline photo/video upload directly from event gallery page — drag-and-drop support with floating progress indicator.
+- Event creation FAB (floating action button) on events list page for admins.
+- Event settings modal accessible from gallery page — edit name, description, visibility, password, tags, collaborators, and admin tools (GPS, geocoding, thumbnail regeneration).
+- Video preview fix for Android — renders static poster image on native platform since WebView doesn't reliably load video metadata.
+
+### Changed
+- Photo detail page completely rewritten as a fullscreen viewer (no Navbar/Footer) with overlay controls, download menu, and bottom info sheet.
+- Theme selector now offers three options: Light, Dark, and System (default).
+- Upload workflow moved from dedicated admin page into the gallery page itself.
+- Event management (create/edit/delete) moved from admin dashboard into the regular event pages.
+- Android app release bumped to build 25 (versionName 1.6.0).
+- Project package versions synchronized to 1.6.0.
+
+### Removed
+- Admin dashboard page (`/admin`) — all functionality inlined into regular UI.
+- Admin upload page (`/admin/events/:slug/upload`) — replaced by inline gallery upload.
+- Admin photo manager page (`/admin/events/:slug/photos`) — gallery already has selection mode with bulk actions.
+- Admin tag manager page (`/admin/tags`) — tags managed inline when editing events.
+- Admin navigation link in navbar.
+- Dashboard analytics/statistics display.
+
+### Fixed
+- Navbar test suite updated to reflect admin link removal.
+- Security staging probe now captures response bodies on failure for better CI diagnostics.
+- Staging database re-seeded to restore missing test event data that caused daily CI cron failures.
+
 ## [1.5.3] - 2026-05-16
 
 ### Added

@@ -1,6 +1,6 @@
 {
   "name": "photos-web",
-  "version": "1.5.3",
+  "version": "1.6.0",
   "description": "React frontend for photo sharing application",
   "type": "module",
   "scripts": {
@@ -51,6 +51,7 @@
     "react-leaflet": "^5.0.0",
     "react-leaflet-cluster": "^4.1.3",
     "react-masonry-css": "^1.0.16",
+    "react-photo-album": "^3.6.0",
     "react-router-dom": "^7.15.0",
     "styled-components": "^6.4.1",
     "ulid": "^3.0.2"

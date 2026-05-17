@@ -1,18 +1,23 @@
 import React, { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { Tag as TagIcon, MapPin, Calendar, ChevronRight, Loader2, Filter, X, ChevronDown, ChevronUp, Search } from 'lucide-react';
+import { Calendar, Loader2, Filter, X, ChevronDown, ChevronUp, Search, Plus, MapPin } from 'lucide-react';
 import Navbar from '../components/Navbar';
 import Footer from '../components/Footer';
 import SEO from '../components/SEO';
+import EventFormModal from '../components/EventFormModal';
 import { useRefresh } from '../contexts/RefreshContext';
+import { useAuth } from '../contexts/AuthContext';
 import { getEvents, getTags, getPreviewUrl } from '../api';
 import type { Event, Tag } from '../types';
 import { config } from '../config';
 
 const EventList: React.FC = () => {
   const { registerRefreshHandler, unregisterRefreshHandler } = useRefresh();
+  const { user } = useAuth();
+  const isAdmin = user?.isAdmin === true;
   const [events, setEvents] = useState<Event[]>([]);
-  const [allEvents, setAllEvents] = useState<Event[]>([]); // Store all events for filtering
+  const [allEvents, setAllEvents] = useState<Event[]>([]);
+  const [showCreateModal, setShowCreateModal] = useState(false);
   const [tags, setTags] = useState<Tag[]>([]);
   const [selectedTag, setSelectedTag] = useState<string | null>(null);
   const [selectedCity, setSelectedCity] = useState<string | null>(null);
@@ -360,83 +365,64 @@ const EventList: React.FC = () => {
         )}
 
         {!loading && !error && events.length > 0 && (
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-6">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-4">
             {events.map((event) => (
               <Link
                 key={event.id}
                 to={`/events/${event.slug}`}
-                className="flex flex-col bg-white dark:bg-gray-800 rounded-xl shadow-md hover:shadow-xl active:scale-[0.98] transition-all overflow-hidden h-full"
+                className="group relative block rounded-xl overflow-hidden shadow-md hover:shadow-xl active:scale-[0.98] transition-all aspect-[3/2]"
               >
-                {/* Preview Image or Placeholder */}
-                <div className="relative w-full h-48 sm:h-56 bg-gradient-to-br from-gray-200 to-gray-300 dark:from-gray-700 dark:to-gray-800">
+                {/* Full-bleed cover image */}
+                <div className="absolute inset-0 bg-gradient-to-br from-gray-300 to-gray-400 dark:from-gray-700 dark:to-gray-800">
                   {event.preview_photo_id ? (
                     <img
                       src={getPreviewUrl(event.slug, event.preview_photo_id)}
                       alt={event.name}
-                      className={`w-full h-full object-cover ${event.requires_password ? 'blur-md' : ''}`}
+                      className={`w-full h-full object-cover transition-transform duration-300 group-hover:scale-[1.03] ${event.requires_password ? 'blur-md' : ''}`}
                       loading="lazy"
                     />
                   ) : (
                     <div className="w-full h-full flex items-center justify-center">
-                      <svg className="w-16 h-16 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <svg className="w-16 h-16 text-gray-400 dark:text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
                       </svg>
                     </div>
                   )}
-                  <div className="absolute top-2 right-2">
-                    <span className={`px-2 py-1 text-xs rounded-full backdrop-blur-sm bg-opacity-90 ${
+                </div>
+
+                {/* Bottom gradient overlay for text */}
+                <div className="absolute inset-x-0 bottom-0 h-2/3 bg-gradient-to-t from-black/70 via-black/30 to-transparent" />
+
+                {/* Visibility badge */}
+                {(event.requires_password || event.visibility !== 'public') && (
+                  <div className="absolute top-2.5 right-2.5">
+                    <span className={`px-2 py-0.5 text-[11px] font-medium rounded-full backdrop-blur-md ${
                       event.requires_password 
-                        ? 'bg-amber-100 text-amber-800' 
+                        ? 'bg-amber-500/80 text-white' 
                         : event.visibility === 'private'
-                        ? 'bg-red-100 text-red-800'
-                        : event.visibility === 'collaborators_only'
-                        ? 'bg-purple-100 text-purple-800'
-                        : 'bg-green-100 text-green-800'
+                        ? 'bg-red-500/80 text-white'
+                        : 'bg-purple-500/80 text-white'
                     }`}>
                       {event.requires_password 
-                        ? 'Password Protected' 
+                        ? 'Password' 
                         : event.visibility === 'private'
                         ? 'Private'
-                        : event.visibility === 'collaborators_only'
-                        ? 'Invite Only'
-                        : 'Public'}
+                        : 'Invite Only'}
                     </span>
                   </div>
-                </div>
-                
-                <div className="p-4 sm:p-6 flex-1 flex flex-col">
-                  <div className="flex items-start justify-between mb-2">
-                    <h2 className="text-xl sm:text-2xl font-semibold text-gray-900 dark:text-white">{event.name}</h2>
-                  </div>
-                  <p className="text-gray-600 dark:text-gray-400 mb-3 text-sm sm:text-base">{formatDate(event.inferred_date)}</p>
-                  
-                  {/* Location */}
-                  {event.cities && event.cities.length > 0 && (
-                    <div className="flex items-center gap-1.5 mb-3 text-gray-600 dark:text-gray-400">
-                      <MapPin className="w-4 h-4" />
-                      <span className="text-sm">{event.cities.join(', ')}</span>
-                    </div>
-                  )}
-                  
-                  {/* Tags */}
-                  {event.tags && event.tags.length > 0 && (
-                    <div className="flex flex-wrap gap-1.5 mb-3">
-                      {event.tags.map((tag) => (
-                        <span
-                          key={tag.id}
-                          className="px-2 py-0.5 text-xs bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 rounded-full flex items-center gap-1"
-                        >
-                          <TagIcon className="w-3 h-3" />
-                          {tag.name}
-                        </span>
-                      ))}
-                    </div>
-                  )}
-                  
-                  <div className="mt-auto text-blue-600 dark:text-blue-400 hover:text-blue-700 dark:hover:text-blue-300 font-semibold text-sm sm:text-base inline-flex items-center gap-1">
-                    View Gallery
-                    <ChevronRight className="w-4 h-4" />
-                  </div>
+                )}
+
+                {/* Overlaid title and date */}
+                <div className="absolute inset-x-0 bottom-0 p-4 sm:p-5">
+                  <h2 className="text-lg sm:text-xl font-bold text-white leading-tight mb-1 drop-shadow-lg">
+                    {event.name}
+                  </h2>
+                  <p className="text-white/80 text-sm drop-shadow-md">
+                    {formatDate(event.inferred_date)}
+                    {event.cities && event.cities.length > 0 && (
+                      <span> &middot; {event.cities.join(', ')}</span>
+                    )}
+                  </p>
                 </div>
               </Link>
             ))}
@@ -444,6 +430,24 @@ const EventList: React.FC = () => {
         )}
       </div>
       <Footer />
+
+      {/* FAB for creating events (admin only) */}
+      {isAdmin && (
+        <button
+          onClick={() => setShowCreateModal(true)}
+          className="fixed bottom-6 right-6 z-30 w-14 h-14 bg-blue-600 text-white rounded-full shadow-lg hover:bg-blue-700 active:scale-95 transition-all flex items-center justify-center"
+          aria-label="Create new album"
+        >
+          <Plus className="w-6 h-6" />
+        </button>
+      )}
+
+      {/* Create Event Modal */}
+      <EventFormModal
+        isOpen={showCreateModal}
+        onClose={() => setShowCreateModal(false)}
+        onSuccess={() => { loadEvents(); loadTags(); }}
+      />
     </div>
   );
 };

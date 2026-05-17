@@ -1,18 +1,22 @@
 import React, { useEffect, useState, useRef } from 'react';
 import { useParams, Link } from 'react-router-dom';
-import { Upload } from 'lucide-react';
-import Masonry from 'react-masonry-css';
+import { Upload, Settings } from 'lucide-react';
 import { Capacitor } from '@capacitor/core';
 import Navbar from '../components/Navbar';
 import Footer from '../components/Footer';
-import PhotoCard from '../components/PhotoCard';
 import DateTimeline from '../components/DateTimeline';
+import JustifiedGrid from '../components/JustifiedGrid';
+import DateScrubber from '../components/DateScrubber';
+import { useGridDensity } from '../hooks/useGridDensity';
 import SEO from '../components/SEO';
+import UploadPanel from '../components/UploadPanel';
+import EventFormModal from '../components/EventFormModal';
 import { useRefresh } from '../contexts/RefreshContext';
 import { EventPasswordForm } from '../components/EventPasswordForm';
 import { GallerySortFilter } from '../components/GallerySortFilter';
 import { ShareEventButton } from '../components/ShareEventButton';
 import AlbumPicker from '../components/AlbumPicker';
+import { useUpload } from '../hooks/useUpload';
 import { getEvent, getPhotos, loginToEvent, getPreviewUrl, requestZip, downloadZip, setPhotoFeatured, getUserFavoriteIds, toggleFavorite as toggleFavoriteAPI, bulkDeletePhotos, bulkCopyPhotos, getCollaborators } from '../api';
 import type { Event, Photo, Collaborator } from '../types';
 import { CollaboratorAvatars } from '../components/CollaboratorAvatars';
@@ -48,6 +52,7 @@ const EventGallery: React.FC = () => {
   const dateRefs = useRef<Map<string, HTMLDivElement>>(new Map());
   const [isMobile, setIsMobile] = useState(false);
   const [supportsHover, setSupportsHover] = useState(true);
+  const { targetRowHeight, containerRef: densityContainerRef, density, changeDensity } = useGridDensity();
   const [visibleDateCount, setVisibleDateCount] = useState(8);
   const [visibleSinglePhotoCount, setVisibleSinglePhotoCount] = useState(140);
   const loadMoreRef = useRef<HTMLDivElement | null>(null);
@@ -58,7 +63,11 @@ const EventGallery: React.FC = () => {
   const canDelete = isAdmin || collaboratorRole === 'editor' || collaboratorRole === 'admin';
   const canCreateInvite = isAdmin || collaboratorRole === 'editor' || collaboratorRole === 'admin';
   const canFeature = isAdmin || collaboratorRole === 'admin';
-  
+  const [showEventSettings, setShowEventSettings] = useState(false);
+
+  // Upload hook for drag-drop
+  const { handleDragOver, handleDragLeave, handleDrop, handleFileInput } = useUpload(slug);
+
   // Use custom hook for photo selection
   const {
     selectedPhotos,
@@ -866,8 +875,32 @@ const EventGallery: React.FC = () => {
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-b from-white to-slate-50 dark:from-gray-900 dark:to-gray-950 flex flex-col">
+    <div
+      className="min-h-screen bg-gradient-to-b from-white to-slate-50 dark:from-gray-900 dark:to-gray-950 flex flex-col"
+      onDragOver={canUpload ? handleDragOver : undefined}
+      onDragLeave={canUpload ? handleDragLeave : undefined}
+      onDrop={canUpload ? handleDrop : undefined}
+    >
       {ConfirmDialog}
+
+      {/* Upload Panel (floating progress indicator) */}
+      {canUpload && slug && (
+        <UploadPanel slug={slug} onUploadsComplete={loadPhotos} />
+      )}
+
+      {/* Event Settings Modal */}
+      {isAdmin && event && (
+        <EventFormModal
+          isOpen={showEventSettings}
+          onClose={() => setShowEventSettings(false)}
+          event={event}
+          onSuccess={() => {
+            loadEvent();
+            loadPhotos();
+          }}
+        />
+      )}
+
       <AlbumPicker
         isOpen={showCopyPicker}
         onClose={() => setShowCopyPicker(false)}
@@ -939,15 +972,24 @@ const EventGallery: React.FC = () => {
           )}
 
           {/* Action Buttons Row */}
-          {canUpload && (
+          {(canUpload || isAdmin) && (
             <div className="flex items-center gap-2 flex-wrap">
-              <Link
-                to={`/admin/events/${slug}/upload`}
-                className="inline-flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-full hover:bg-indigo-700 transition-colors text-sm font-medium shadow-sm"
-              >
-                <Upload className="w-4 h-4" />
-                Upload Photos/Videos
-              </Link>
+              {canUpload && (
+                <label className="inline-flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-full hover:bg-indigo-700 transition-colors text-sm font-medium shadow-sm cursor-pointer">
+                  <Upload className="w-4 h-4" />
+                  Upload
+                  <input type="file" multiple accept="image/jpeg,video/mp4" onChange={handleFileInput} className="hidden" />
+                </label>
+              )}
+              {isAdmin && (
+                <button
+                  onClick={() => setShowEventSettings(true)}
+                  className="inline-flex items-center gap-2 px-3 py-2 bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300 rounded-full hover:bg-gray-300 dark:hover:bg-gray-600 transition-colors text-sm font-medium"
+                >
+                  <Settings className="w-4 h-4" />
+                  <span className="hidden sm:inline">Settings</span>
+                </button>
+              )}
               {collaboratorRole && !isAdmin && (
                 <span className="text-xs text-gray-500 dark:text-gray-400">
                   ({collaboratorRole})
@@ -985,6 +1027,8 @@ const EventGallery: React.FC = () => {
           isAdmin={canDelete}
           isDeleting={deleting}
           isCopying={copying}
+          density={density}
+          onDensityChange={changeDensity}
         />
 
         {/* Date Timeline - Only show for multi-day events */}
@@ -1024,7 +1068,7 @@ const EventGallery: React.FC = () => {
           </div>
         ) : isMultiDateView ? (
           // Multi-date view with date headers
-          <div className="space-y-7">
+          <div className="space-y-7" ref={densityContainerRef}>
             {visibleDates.map((date) => {
               const datePhotos = photosByDate.get(date) || [];
               const dateObj = new Date(date);
@@ -1066,75 +1110,52 @@ const EventGallery: React.FC = () => {
                     </button>
                   </div>
                   
-                  {/* Photos for this date */}
-                  <Masonry
-                    breakpointCols={{
-                      default: 5,
-                      1536: 5,
-                      1280: 4,
-                      1024: 3,
-                      768: 2,
-                      640: 2
-                    }}
-                    className="flex -ml-2 sm:-ml-3 w-auto"
-                    columnClassName="pl-2 sm:pl-3 bg-clip-padding"
-                  >
-                    {datePhotos.map((photo) => (
-                      <PhotoCard
-                        key={photo.id}
-                        photo={photo}
-                        slug={slug!}
-                        albumMode={true}
-                        forceControlsVisible={selectedPhotos.size > 0}
-                        sortBy={sortBy}
-                        showSelection={true}
-                        isSelected={selectedPhotos.has(photo.id)}
-                        onToggleSelection={togglePhotoSelection}
-                        showAddToFavorites={true}
-                        onToggleFavorite={toggleFavorite}
-                        showFeatured={canFeature}
-                        onToggleFeatured={toggleFeatured}
-                        userFavorites={userFavorites}
-                      />
-                    ))}
-                  </Masonry>
+                  {/* Photos for this date - Justified Grid */}
+                  <JustifiedGrid
+                    photos={datePhotos}
+                    slug={slug!}
+                    targetRowHeight={targetRowHeight}
+                    spacing={4}
+                    selectedPhotos={selectedPhotos}
+                    forceControlsVisible={selectedPhotos.size > 0}
+                    userFavorites={userFavorites}
+                    supportsHover={supportsHover}
+                    sortBy={sortBy}
+                    onToggleSelection={togglePhotoSelection}
+                    onToggleFavorite={toggleFavorite}
+                    onToggleFeatured={canFeature ? toggleFeatured : undefined}
+                    showFeatured={canFeature}
+                  />
                 </div>
               );
             })}
+
+            {/* Date Scrubber */}
+            <DateScrubber
+              dateRefs={dateRefs}
+              dates={dates}
+              activeDate={activeDate}
+            />
           </div>
         ) : (
-          // Single-date view (original masonry without date headers)
-          <Masonry
-            breakpointCols={{
-              default: 5,
-              1536: 5,
-              1280: 4,
-              1024: 3,
-              768: 2,
-              640: 2
-            }}
-            className="flex -ml-2 sm:-ml-3 w-auto"
-            columnClassName="pl-2 sm:pl-3 bg-clip-padding"
-          >
-            {visibleSingleDatePhotos.map((photo) => (
-              <PhotoCard
-                key={photo.id}
-                photo={photo}
-                slug={slug!}
-                albumMode={true}
-                forceControlsVisible={selectedPhotos.size > 0}
-                sortBy={sortBy}
-                showSelection={true}
-                isSelected={selectedPhotos.has(photo.id)}
-                onToggleSelection={togglePhotoSelection}
-                showAddToFavorites={true}
-                onToggleFavorite={toggleFavorite}
-                showFeatured={canFeature}
-                onToggleFeatured={toggleFeatured}
-                userFavorites={userFavorites}
-              />
-            ))}
-          </Masonry>
+          // Single-date view (justified grid without date headers)
+          <div ref={densityContainerRef}>
+            <JustifiedGrid
+              photos={visibleSingleDatePhotos}
+              slug={slug!}
+              targetRowHeight={targetRowHeight}
+              spacing={4}
+              selectedPhotos={selectedPhotos}
+              forceControlsVisible={selectedPhotos.size > 0}
+              userFavorites={userFavorites}
+              supportsHover={supportsHover}
+              sortBy={sortBy}
+              onToggleSelection={togglePhotoSelection}
+              onToggleFavorite={toggleFavorite}
+              onToggleFeatured={canFeature ? toggleFeatured : undefined}
+              showFeatured={canFeature}
+            />
+          </div>
         )}
 
         {hasMoreGalleryItems && (
