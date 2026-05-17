@@ -1,14 +1,19 @@
 import React, { useEffect, useState, useRef, useCallback } from 'react';
-import { Clock } from 'lucide-react';
+import { Clock, Download, X } from 'lucide-react';
 import Navbar from '../components/Navbar';
 import Footer from '../components/Footer';
+import { TimelineSkeleton } from '../components/Skeletons';
 import SEO from '../components/SEO';
 import JustifiedGrid from '../components/JustifiedGrid';
 import DateScrubber from '../components/DateScrubber';
 import { useGridDensity } from '../hooks/useGridDensity';
-import { getTimeline } from '../api';
+import { usePhotoSelection } from '../hooks/usePhotoSelection';
+import { getTimeline, getUserFavoriteIds, toggleFavorite as toggleFavoriteAPI, requestZip, downloadZip } from '../api';
 import type { Photo } from '../types';
 import { config } from '../config';
+import { useAuth } from '../contexts/AuthContext';
+import { useToast } from '../components/Toast';
+import { haptics } from '../utils/haptics';
 
 /** Group photos by date (YYYY-MM-DD from capture_time) */
 function groupByDate(photos: Photo[]): { dates: string[]; groups: Map<string, Photo[]> } {
@@ -24,15 +29,69 @@ function groupByDate(photos: Photo[]): { dates: string[]; groups: Map<string, Ph
 }
 
 const Timeline: React.FC = () => {
+  const { isAuthenticated } = useAuth();
+  const toast = useToast();
   const [photos, setPhotos] = useState<Photo[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
   const [nextCursor, setNextCursor] = useState<string | null>(null);
   const [activeDate, setActiveDate] = useState<string | null>(null);
   const [supportsHover, setSupportsHover] = useState(true);
+  const [userFavorites, setUserFavorites] = useState<Set<string>>(new Set());
   const dateRefs = useRef<Map<string, HTMLDivElement>>(new Map());
   const loadMoreRef = useRef<HTMLDivElement | null>(null);
   const { targetRowHeight, containerRef: densityContainerRef } = useGridDensity();
+
+  const {
+    selectedPhotos,
+    togglePhotoSelection: togglePhotoSelectionBase,
+    clearSelection,
+  } = usePhotoSelection(photos);
+
+  const togglePhotoSelection = async (photoId: string) => {
+    await haptics.selectionChanged();
+    togglePhotoSelectionBase(photoId);
+  };
+
+  const toggleFavorite = async (photoId: string, isFavorited: boolean) => {
+    try {
+      await toggleFavoriteAPI(photoId, isFavorited);
+      await haptics.light();
+      setUserFavorites(prev => {
+        const next = new Set(prev);
+        if (isFavorited) next.delete(photoId);
+        else next.add(photoId);
+        return next;
+      });
+    } catch {
+      toast.showError('Failed to update favorite');
+    }
+  };
+
+  const handleDownloadSelected = async () => {
+    const selected = Array.from(selectedPhotos);
+    if (selected.length === 0) return;
+    // Group by event slug
+    const bySlug = new Map<string, string[]>();
+    for (const id of selected) {
+      const photo = photos.find(p => p.id === id);
+      const slug = photo?.event_slug || '';
+      const arr = bySlug.get(slug) || [];
+      arr.push(id);
+      bySlug.set(slug, arr);
+    }
+    try {
+      for (const [slug, ids] of bySlug) {
+        const blob = await requestZip(slug, ids);
+        await downloadZip(blob, `timeline_${slug}_${new Date().toISOString().split('T')[0]}.zip`);
+      }
+      await haptics.success();
+      toast.showSuccess(`Downloaded ${selected.length} photos`);
+      clearSelection();
+    } catch {
+      toast.showError('Download failed');
+    }
+  };
 
   // Detect hover support
   useEffect(() => {
@@ -53,6 +112,13 @@ const Timeline: React.FC = () => {
         if (!cancelled) {
           setPhotos(data.photos);
           setNextCursor(data.nextCursor);
+        }
+        // Load favorites if authenticated
+        if (isAuthenticated) {
+          try {
+            const favIds = await getUserFavoriteIds();
+            if (!cancelled) setUserFavorites(new Set(favIds.map(f => f.photoId)));
+          } catch { /* ignore */ }
         }
       } catch (err) {
         console.error('Failed to load timeline:', err);
@@ -140,16 +206,27 @@ const Timeline: React.FC = () => {
         </div>
 
         {loading ? (
-          <div className="flex flex-col items-center justify-center py-16">
-            <div className="inline-block animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 dark:border-blue-400 mb-4" />
-            <p className="text-gray-600 dark:text-gray-400">Loading timeline...</p>
-          </div>
+          <TimelineSkeleton />
         ) : photos.length === 0 ? (
           <div className="text-center py-16">
             <p className="text-gray-600 dark:text-gray-400">No photos found.</p>
           </div>
         ) : (
           <div className="space-y-7" ref={densityContainerRef}>
+            {/* Selection toolbar */}
+            {selectedPhotos.size > 0 && (
+              <div className="sticky top-20 z-30 bg-blue-600 text-white rounded-xl px-4 py-2.5 flex items-center justify-between shadow-lg">
+                <span className="font-medium text-sm">{selectedPhotos.size} selected</span>
+                <div className="flex items-center gap-2">
+                  <button onClick={handleDownloadSelected} className="px-3 py-1.5 bg-white/20 rounded-lg text-sm hover:bg-white/30 transition flex items-center gap-1.5">
+                    <Download className="w-4 h-4" /> Download
+                  </button>
+                  <button onClick={clearSelection} className="p-1.5 rounded-lg hover:bg-white/20 transition">
+                    <X className="w-4 h-4" />
+                  </button>
+                </div>
+              </div>
+            )}
             {dates.map((date) => {
               const datePhotos = groups.get(date) || [];
               const dateObj = new Date(date);
@@ -204,10 +281,12 @@ const Timeline: React.FC = () => {
                         slug={eventSlug}
                         targetRowHeight={targetRowHeight}
                         spacing={4}
-                        selectedPhotos={new Set()}
-                        forceControlsVisible={false}
-                        userFavorites={new Set()}
+                        selectedPhotos={selectedPhotos}
+                        forceControlsVisible={selectedPhotos.size > 0}
+                        userFavorites={userFavorites}
                         supportsHover={supportsHover}
+                        onToggleSelection={togglePhotoSelection}
+                        onToggleFavorite={isAuthenticated ? toggleFavorite : undefined}
                       />
                     </div>
                   ))}

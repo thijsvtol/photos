@@ -1,6 +1,7 @@
 import { useEffect, useState, useRef } from 'react';
 import { X, Upload, Folder, Lock, Users } from 'lucide-react';
 import { Capacitor } from '@capacitor/core';
+import ModalOverlay from './ModalOverlay';
 import { Event } from '../types';
 import { getEvents, getPreviewUrl } from '../api';
 import { haptics } from '../utils/haptics';
@@ -128,7 +129,8 @@ export default function AlbumPicker({ isOpen, onClose, onSelectAlbum, excludeSlu
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 bg-black/75 backdrop-blur-sm flex items-end sm:items-center justify-center z-50 sm:p-4 animate-in fade-in duration-200">
+    <ModalOverlay onClose={onClose} label={title}>
+    <div className="fixed inset-0 bg-black/75 backdrop-blur-sm flex items-end sm:items-center justify-center sm:p-4 animate-in fade-in duration-200">
       <div 
         ref={modalRef}
         className="bg-white dark:bg-gray-800 rounded-t-xl sm:rounded-xl max-w-2xl w-full max-h-[95vh] sm:max-h-[85vh] flex flex-col shadow-2xl animate-in slide-in-from-bottom-4 duration-300 transition-transform"
@@ -267,5 +269,6 @@ export default function AlbumPicker({ isOpen, onClose, onSelectAlbum, excludeSlu
         </div>
       </div>
     </div>
+    </ModalOverlay>
   );
 }

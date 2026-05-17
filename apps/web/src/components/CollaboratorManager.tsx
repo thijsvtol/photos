@@ -220,28 +220,28 @@ const CollaboratorManager: React.FC<CollaboratorManagerProps> = ({ eventSlug, ev
   const getRoleBadgeColor = (role: CollaboratorRole) => {
     switch (role) {
       case 'admin':
-        return 'bg-purple-100 text-purple-700 border-purple-200';
+        return 'bg-purple-100 text-purple-700 border-purple-200 dark:bg-purple-900/30 dark:text-purple-300 dark:border-purple-700';
       case 'editor':
-        return 'bg-blue-100 text-blue-700 border-blue-200';
+        return 'bg-blue-100 text-blue-700 border-blue-200 dark:bg-blue-900/30 dark:text-blue-300 dark:border-blue-700';
       case 'uploader':
-        return 'bg-green-100 text-green-700 border-green-200';
+        return 'bg-green-100 text-green-700 border-green-200 dark:bg-green-900/30 dark:text-green-300 dark:border-green-700';
       default:
-        return 'bg-gray-100 text-gray-700 border-gray-200';
+        return 'bg-gray-100 text-gray-700 border-gray-200 dark:bg-gray-700 dark:text-gray-300 dark:border-gray-600';
     }
   };
 
   return (
-    <div className="bg-white rounded-lg shadow-md p-6">
+    <div className="bg-white dark:bg-gray-800 rounded-lg shadow-md p-6">
       <div className="mb-6">
-        <h2 className="text-2xl font-bold text-gray-900 mb-2">Manage Collaborators</h2>
-        <p className="text-gray-600 text-sm">
+        <h2 className="text-2xl font-bold text-gray-900 dark:text-white mb-2">Manage Collaborators</h2>
+        <p className="text-gray-600 dark:text-gray-400 text-sm">
           Invite users to upload photos and videos to "{eventName}"
 </p>
       </div>
 
       {/* Invite Form */}
       <div className="mb-6">
-        <label htmlFor="invite-email" className="block text-sm font-medium text-gray-700 mb-2">
+        <label htmlFor="invite-email" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
           Invite by Email
         </label>
         <div className="flex gap-2">
@@ -266,26 +266,26 @@ const CollaboratorManager: React.FC<CollaboratorManagerProps> = ({ eventSlug, ev
                 }
               }}
               placeholder="collaborator@example.com"
-              className="w-full pl-10 pr-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+              className="w-full pl-10 pr-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500 focus:border-transparent"
               disabled={inviting}
               autoComplete="off"
             />
             
             {/* Autocomplete Suggestions */}
             {showSuggestions && suggestions.length > 0 && (
-              <div className="absolute z-20 w-full mt-1 bg-white border border-gray-300 rounded-lg shadow-lg max-h-60 overflow-y-auto">
+              <div className="absolute z-20 w-full mt-1 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-lg shadow-lg max-h-60 overflow-y-auto">
                 {suggestions.map((user) => (
                   <button
                     key={user.id}
                     type="button"
                     onClick={() => selectSuggestion(user.email)}
-                    className="w-full px-4 py-2 text-left hover:bg-gray-100 focus:bg-gray-100 focus:outline-none transition-colors"
+                    className="w-full px-4 py-2 text-left hover:bg-gray-100 dark:hover:bg-gray-600 focus:bg-gray-100 dark:focus:bg-gray-600 focus:outline-none transition-colors"
                   >
                     <div className="flex items-center gap-2">
                       <Mail className="w-4 h-4 text-gray-400" />
                       <div>
-                        <div className="text-sm font-medium text-gray-900">{user.email}</div>
-                        {user.name && <div className="text-xs text-gray-500">{user.name}</div>}
+                        <div className="text-sm font-medium text-gray-900 dark:text-white">{user.email}</div>
+                        {user.name && <div className="text-xs text-gray-500 dark:text-gray-400">{user.name}</div>}
                       </div>
                     </div>
                   </button>
@@ -296,7 +296,7 @@ const CollaboratorManager: React.FC<CollaboratorManagerProps> = ({ eventSlug, ev
           <select
             value={inviteRole}
             onChange={(e) => setInviteRole(e.target.value as CollaboratorRole)}
-            className="px-3 py-2 border border-gray-300 rounded-lg text-sm bg-white"
+            className="px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg text-sm bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
             disabled={inviting}
           >
             <option value="viewer">Viewer</option>
@@ -318,23 +318,23 @@ const CollaboratorManager: React.FC<CollaboratorManagerProps> = ({ eventSlug, ev
 
       {/* Error/Success Messages */}
       {error && (
-        <div className="mb-4 p-3 bg-red-50 border border-red-200 text-red-700 rounded-lg text-sm">
+        <div className="mb-4 p-3 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 text-red-700 dark:text-red-400 rounded-lg text-sm">
           {error}
         </div>
       )}
       
       {success && (
-        <div className="mb-4 p-3 bg-green-50 border border-green-200 text-green-700 rounded-lg text-sm">
+        <div className="mb-4 p-3 bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 text-green-700 dark:text-green-400 rounded-lg text-sm">
           {success}
         </div>
       )}
 
       {/* Invite Links Section */}
-      <div className="mb-6 pb-6 border-b border-gray-200">
+      <div className="mb-6 pb-6 border-b border-gray-200 dark:border-gray-700">
         <div className="flex items-center justify-between mb-4">
           <div>
-            <h3 className="text-lg font-semibold text-gray-900">Invite Links</h3>
-            <p className="text-sm text-gray-600">Create shareable links for collaboration</p>
+            <h3 className="text-lg font-semibold text-gray-900 dark:text-white">Invite Links</h3>
+            <p className="text-sm text-gray-600 dark:text-gray-400">Create shareable links for collaboration</p>
           </div>
           <button
             onClick={handleCreateLink}
@@ -346,11 +346,11 @@ const CollaboratorManager: React.FC<CollaboratorManagerProps> = ({ eventSlug, ev
           </button>
         </div>
         <div className="mb-3">
-          <label className="text-xs text-gray-600 mr-2">Invite link role</label>
+          <label className="text-xs text-gray-600 dark:text-gray-400 mr-2">Invite link role</label>
           <select
             value={inviteLinkRole}
             onChange={(e) => setInviteLinkRole(e.target.value as CollaboratorRole)}
-            className="px-2.5 py-1.5 border border-gray-300 rounded-md text-sm bg-white"
+            className="px-2.5 py-1.5 border border-gray-300 dark:border-gray-600 rounded-md text-sm bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
             disabled={creatingLink}
           >
             <option value="viewer">Viewer</option>
@@ -362,29 +362,29 @@ const CollaboratorManager: React.FC<CollaboratorManagerProps> = ({ eventSlug, ev
 
         {linksLoading ? (
           <div className="text-center py-4">
-            <div className="inline-block animate-spin rounded-full h-6 w-6 border-b-2 border-gray-900"></div>
+            <div className="inline-block animate-spin rounded-full h-6 w-6 border-b-2 border-gray-900 dark:border-white"></div>
           </div>
         ) : inviteLinks.length === 0 ? (
-          <div className="text-center py-6 bg-gray-50 rounded-lg border-2 border-dashed border-gray-300">
+          <div className="text-center py-6 bg-gray-50 dark:bg-gray-700/50 rounded-lg border-2 border-dashed border-gray-300 dark:border-gray-600">
             <LinkIcon className="w-8 h-8 text-gray-400 mx-auto mb-2" />
-            <p className="text-gray-600 text-sm">No active invite links</p>
-            <p className="text-gray-500 text-xs mt-1">Create a link to share with collaborators</p>
+            <p className="text-gray-600 dark:text-gray-400 text-sm">No active invite links</p>
+            <p className="text-gray-500 dark:text-gray-500 text-xs mt-1">Create a link to share with collaborators</p>
           </div>
         ) : (
           <div className="space-y-2">
             {inviteLinks.map((link) => (
               <div
                 key={link.token}
-                className="flex items-center justify-between p-3 border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors"
+                className="flex items-center justify-between p-3 border border-gray-200 dark:border-gray-700 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors"
               >
                 <div className="flex-1 min-w-0 mr-3">
                   <div className="flex items-center gap-2 mb-1">
-                    <LinkIcon className="w-4 h-4 text-blue-600 flex-shrink-0" />
-                    <code className="text-xs text-gray-600 font-mono truncate">
+                    <LinkIcon className="w-4 h-4 text-blue-600 dark:text-blue-400 flex-shrink-0" />
+                    <code className="text-xs text-gray-600 dark:text-gray-400 font-mono truncate">
                       {window.location.origin}/invite/{link.token}
                     </code>
                   </div>
-                  <div className="flex items-center gap-3 text-xs text-gray-500">
+                    <div className="flex items-center gap-3 text-xs text-gray-500 dark:text-gray-400">
                     <span>Created {new Date(link.created_at).toLocaleDateString()}</span>
                     <span className="capitalize">Role: {link.role}</span>
                     {link.use_count > 0 && (
@@ -398,7 +398,7 @@ const CollaboratorManager: React.FC<CollaboratorManagerProps> = ({ eventSlug, ev
                 <div className="flex items-center gap-2">
                   <button
                     onClick={() => handleCopyLink(link.token)}
-                    className="p-2 text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
+                    className="p-2 text-blue-600 dark:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-900/30 rounded-lg transition-colors"
                     title="Copy link"
                   >
                     {copiedToken === link.token ? (
@@ -409,7 +409,7 @@ const CollaboratorManager: React.FC<CollaboratorManagerProps> = ({ eventSlug, ev
                   </button>
                   <button
                     onClick={() => handleRevokeLink(link.token)}
-                    className="p-2 text-red-600 hover:bg-red-50 rounded-lg transition-colors"
+                    className="p-2 text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/30 rounded-lg transition-colors"
                     title="Revoke link"
                   >
                     <Trash2 className="w-4 h-4" />
@@ -424,28 +424,28 @@ const CollaboratorManager: React.FC<CollaboratorManagerProps> = ({ eventSlug, ev
       {/* Collaborators List */}
       {loading ? (
         <div className="text-center py-8">
-          <div className="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-gray-900"></div>
-          <p className="mt-2 text-gray-600 text-sm">Loading collaborators...</p>
+          <div className="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-gray-900 dark:border-white"></div>
+          <p className="mt-2 text-gray-600 dark:text-gray-400 text-sm">Loading collaborators...</p>
         </div>
       ) : collaborators.length === 0 ? (
-        <div className="text-center py-8 bg-gray-50 rounded-lg">
+        <div className="text-center py-8 bg-gray-50 dark:bg-gray-700/50 rounded-lg">
           <UserPlus className="w-12 h-12 text-gray-400 mx-auto mb-2" />
-          <p className="text-gray-600 text-sm">No collaborators yet</p>
-          <p className="text-gray-500 text-xs mt-1">Invite users via email to get started</p>
+          <p className="text-gray-600 dark:text-gray-400 text-sm">No collaborators yet</p>
+          <p className="text-gray-500 dark:text-gray-500 text-xs mt-1">Invite users via email to get started</p>
         </div>
       ) : (
         <div className="space-y-2">
-          <h3 className="text-sm font-semibold text-gray-700 mb-3">
+          <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-3">
             Collaborators ({collaborators.length})
           </h3>
           {collaborators.map((collaborator) => (
             <div
               key={collaborator.email}
-              className="flex items-center justify-between p-3 border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors"
+              className="flex items-center justify-between p-3 border border-gray-200 dark:border-gray-700 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors"
             >
               <div className="flex-1 min-w-0">
                 <div className="flex items-center gap-2">
-                  <p className="font-medium text-gray-900 truncate">
+                  <p className="font-medium text-gray-900 dark:text-white truncate">
                     {collaborator.name || collaborator.email}
                   </p>
                   <span className={`px-2 py-0.5 rounded-full text-xs font-medium border capitalize ${getRoleBadgeColor(collaborator.role)}`}>
@@ -453,9 +453,9 @@ const CollaboratorManager: React.FC<CollaboratorManagerProps> = ({ eventSlug, ev
                   </span>
                 </div>
                 {collaborator.name && (
-                  <p className="text-sm text-gray-500 truncate">{collaborator.email}</p>
+                  <p className="text-sm text-gray-500 dark:text-gray-400 truncate">{collaborator.email}</p>
                 )}
-                <p className="text-xs text-gray-400 mt-1">
+                <p className="text-xs text-gray-400 dark:text-gray-500 mt-1">
                   Invited {new Date(collaborator.invited_at).toLocaleDateString()}
                 </p>
               </div>
@@ -465,7 +465,7 @@ const CollaboratorManager: React.FC<CollaboratorManagerProps> = ({ eventSlug, ev
                   void handleRoleChange(collaborator.email, e.target.value as CollaboratorRole);
                 }}
                 disabled={updatingRoleEmail === collaborator.email}
-                className="ml-3 px-2 py-1 border border-gray-300 rounded-md text-sm bg-white"
+                className="ml-3 px-2 py-1 border border-gray-300 dark:border-gray-600 rounded-md text-sm bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
                 title="Change role"
               >
                 <option value="viewer">Viewer</option>
@@ -475,7 +475,7 @@ const CollaboratorManager: React.FC<CollaboratorManagerProps> = ({ eventSlug, ev
               </select>
               <button
                 onClick={() => handleRemove(collaborator.email)}
-                className="ml-3 p-2 text-red-600 hover:bg-red-50 rounded-lg transition-colors"
+                className="ml-3 p-2 text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/30 rounded-lg transition-colors"
                 title="Remove collaborator"
               >
                 <X className="w-4 h-4" />

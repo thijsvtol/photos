@@ -15,6 +15,10 @@ interface UploadContextValue {
   retryAllFailed: () => void;
   /** Clear completed items from the list */
   clearCompleted: () => void;
+  /** Cancel a single pending/uploading item */
+  cancelUpload: (itemId: string) => void;
+  /** Cancel all pending and in-progress uploads */
+  cancelAll: () => void;
   /** Whether any uploads are currently active (uploading or pending) */
   hasActiveUploads: boolean;
   /** Whether any uploads have failed */
@@ -51,6 +55,8 @@ export const UploadProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   const retryUpload = useCallback((id: string) => uploadManager.retryUpload(id), []);
   const retryAllFailed = useCallback(() => uploadManager.retryAllFailed(), []);
   const clearCompleted = useCallback(() => uploadManager.clearCompleted(), []);
+  const cancelUpload = useCallback((id: string) => uploadManager.cancelUpload(id), []);
+  const cancelAll = useCallback(() => uploadManager.cancelAll(), []);
   const getItemsForSlug = useCallback(
     (slug: string) => queueItems.filter(i => i.eventSlug === slug),
     [queueItems],
@@ -79,6 +85,8 @@ export const UploadProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     retryUpload,
     retryAllFailed,
     clearCompleted,
+    cancelUpload,
+    cancelAll,
     hasActiveUploads,
     hasFailedUploads,
     completedCount,

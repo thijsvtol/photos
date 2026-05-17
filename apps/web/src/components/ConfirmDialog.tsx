@@ -1,5 +1,6 @@
 import React from 'react';
 import { AlertTriangle } from 'lucide-react';
+import ModalOverlay from './ModalOverlay';
 
 interface ConfirmDialogProps {
   isOpen: boolean;
@@ -25,7 +26,8 @@ export const ConfirmDialog: React.FC<ConfirmDialogProps> = ({
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 bg-black/75 backdrop-blur-sm flex items-center justify-center z-[9999] p-4 animate-in fade-in duration-200">
+    <ModalOverlay onClose={onCancel} label={title} className="z-[9999]">
+    <div className="fixed inset-0 bg-black/75 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in duration-200">
       <div className="bg-white dark:bg-gray-800 rounded-xl max-w-md w-full shadow-2xl animate-in zoom-in-95 duration-200">
         {/* Header */}
         <div className="p-6 border-b border-gray-200 dark:border-gray-700">
@@ -65,6 +67,7 @@ export const ConfirmDialog: React.FC<ConfirmDialogProps> = ({
         </div>
       </div>
     </div>
+    </ModalOverlay>
   );
 };
 

@@ -7,9 +7,11 @@ interface DateScrubberProps {
   dates: string[];
   /** Currently active/visible date */
   activeDate: string | null;
+  /** Called when scrubbing to a date whose section is not yet rendered (e.g. lazy-loaded pages) */
+  onScrollToDate?: (date: string) => void;
 }
 
-const DateScrubber: React.FC<DateScrubberProps> = ({ dateRefs, dates, activeDate }) => {
+const DateScrubber: React.FC<DateScrubberProps> = ({ dateRefs, dates, activeDate, onScrollToDate }) => {
   const trackRef = useRef<HTMLDivElement>(null);
   const [isDragging, setIsDragging] = useState(false);
   const [hoverLabel, setHoverLabel] = useState<string | null>(null);
@@ -55,9 +57,11 @@ const DateScrubber: React.FC<DateScrubberProps> = ({ dateRefs, dates, activeDate
       if (el) {
         const y = el.getBoundingClientRect().top + window.scrollY - 120;
         window.scrollTo({ top: y, behavior: 'auto' });
+      } else if (onScrollToDate) {
+        onScrollToDate(dateStr);
       }
     },
-    [dateRefs]
+    [dateRefs, onScrollToDate]
   );
 
   const handleInteraction = useCallback(

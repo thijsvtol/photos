@@ -4,6 +4,7 @@ import { Upload, Settings } from 'lucide-react';
 import { Capacitor } from '@capacitor/core';
 import Navbar from '../components/Navbar';
 import Footer from '../components/Footer';
+import { GallerySkeleton } from '../components/Skeletons';
 import DateTimeline from '../components/DateTimeline';
 import JustifiedGrid from '../components/JustifiedGrid';
 import DateScrubber from '../components/DateScrubber';
@@ -851,10 +852,10 @@ const EventGallery: React.FC = () => {
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-gray-50 dark:bg-gray-900 flex items-center justify-center">
-        <div className="text-center">
-          <div className="inline-block animate-spin rounded-full h-12 w-12 border-b-2 border-gray-900 dark:border-gray-100"></div>
-          <p className="mt-4 text-gray-600 dark:text-gray-400">Loading...</p>
+      <div className="min-h-screen bg-gray-50 dark:bg-gray-900">
+        <Navbar />
+        <div className="max-w-[1600px] mx-auto px-3 sm:px-4 lg:px-8 py-4 sm:py-8">
+          <GallerySkeleton />
         </div>
       </div>
     );
@@ -1135,6 +1136,7 @@ const EventGallery: React.FC = () => {
               dateRefs={dateRefs}
               dates={dates}
               activeDate={activeDate}
+              onScrollToDate={handleDateClick}
             />
           </div>
         ) : (

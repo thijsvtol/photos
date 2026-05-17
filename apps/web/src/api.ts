@@ -72,8 +72,8 @@ api.interceptors.request.use(async (config) => {
   return config;
 });
 
-// Debug logging in dev
-if (import.meta.env.DEV || Capacitor.isNativePlatform()) {
+// Debug logging in dev only (not native production builds)
+if (import.meta.env.DEV) {
   console.log('[API] Base URL:', import.meta.env.VITE_API_URL || '/api');
   console.log('[API] Is Native:', Capacitor.isNativePlatform());
   

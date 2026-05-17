@@ -35,7 +35,7 @@ interface AlbumPhoto {
   photo: Photo;
 }
 
-const JustifiedGrid: React.FC<JustifiedGridProps> = ({
+const JustifiedGridInner: React.FC<JustifiedGridProps> = ({
   photos,
   slug,
   targetRowHeight,
@@ -120,6 +120,8 @@ const JustifiedGrid: React.FC<JustifiedGridProps> = ({
   );
 };
 
+const JustifiedGrid = React.memo(JustifiedGridInner);
+
 /** Overlay wrapper for each photo in the justified grid */
 interface PhotoOverlayProps {
   photo: Photo;
@@ -137,7 +139,7 @@ interface PhotoOverlayProps {
   children: React.ReactNode;
 }
 
-const PhotoOverlay: React.FC<PhotoOverlayProps> = ({
+const PhotoOverlayInner: React.FC<PhotoOverlayProps> = ({
   photo,
   slug,
   style,
@@ -272,5 +274,7 @@ const PhotoOverlay: React.FC<PhotoOverlayProps> = ({
     </div>
   );
 };
+
+const PhotoOverlay = React.memo(PhotoOverlayInner);
 
 export default JustifiedGrid;

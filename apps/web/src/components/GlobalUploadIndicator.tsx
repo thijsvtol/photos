@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { useLocation } from 'react-router-dom';
-import { CheckCircle, AlertCircle, Loader2, ChevronDown, ChevronUp, RotateCcw } from 'lucide-react';
+import { CheckCircle, AlertCircle, Loader2, ChevronDown, ChevronUp, RotateCcw, X } from 'lucide-react';
 import { useUploadContext } from '../contexts/UploadContext';
 
 /**
@@ -20,6 +20,8 @@ const GlobalUploadIndicator: React.FC = () => {
     retryUpload,
     retryAllFailed,
     clearCompleted,
+    cancelUpload,
+    cancelAll,
   } = useUploadContext();
 
   const [isExpanded, setIsExpanded] = useState(false);
@@ -93,6 +95,14 @@ const GlobalUploadIndicator: React.FC = () => {
             Uploads {totalCount > 0 && `(${completedCount}/${totalCount})`}
           </h3>
           <div className="flex items-center gap-2">
+            {hasActiveUploads && (
+              <button
+                onClick={cancelAll}
+                className="px-3 py-1 text-xs bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300 rounded-full hover:bg-gray-300 dark:hover:bg-gray-600 transition"
+              >
+                Cancel All
+              </button>
+            )}
             {hasFailedUploads && (
               <button
                 onClick={retryAllFailed}
@@ -158,6 +168,17 @@ const GlobalUploadIndicator: React.FC = () => {
                       title="Retry"
                     >
                       <RotateCcw className="w-4 h-4 text-gray-500" />
+                    </button>
+                  )}
+
+                  {/* Cancel button for pending/uploading items */}
+                  {(item.status === 'pending' || item.status === 'uploading') && (
+                    <button
+                      onClick={() => cancelUpload(item.id)}
+                      className="flex-shrink-0 p-1.5 rounded-full hover:bg-gray-100 dark:hover:bg-gray-700 transition"
+                      title="Cancel"
+                    >
+                      <X className="w-4 h-4 text-gray-500" />
                     </button>
                   )}
 

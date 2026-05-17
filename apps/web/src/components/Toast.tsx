@@ -57,10 +57,11 @@ export const ToastProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       {/* Toast Container */}
       {typeof document !== 'undefined'
         ? createPortal(
-            <div className="fixed top-0 left-0 right-0 z-[99999] flex flex-col items-center sm:items-end gap-2 px-3 pb-3 pt-safe-top sm:px-4 sm:pt-4 pointer-events-none">
+            <div className="fixed top-0 left-0 right-0 z-[99999] flex flex-col items-center sm:items-end gap-2 px-3 pb-3 pt-safe-top sm:px-4 sm:pt-4 pointer-events-none" aria-live="polite" aria-atomic="true">
               {toasts.map(toast => (
                 <div
                   key={toast.id}
+                  role={toast.type === 'error' ? 'alert' : 'status'}
                   className="pointer-events-auto animate-in slide-in-from-top-2 duration-300 w-full sm:w-auto max-w-sm"
                 >
                   <ToastItem toast={toast} onClose={() => removeToast(toast.id)} />

@@ -8,6 +8,7 @@ import { RefreshProvider } from './contexts/RefreshContext';
 import { UploadProvider } from './contexts/UploadContext';
 import GlobalUploadIndicator from './components/GlobalUploadIndicator';
 import { ToastProvider } from './components/Toast';
+import ErrorBoundary from './components/ErrorBoundary';
 import PullToRefresh from './components/PullToRefresh';
 import { AndroidAppPrompt } from './components/AndroidAppPrompt';
 import { initAnalytics, trackPageView } from './services/analytics';
@@ -204,6 +205,7 @@ function App() {
   }
   
   return (
+    <ErrorBoundary>
     <HelmetProvider>
       <ThemeProvider>
         <AuthProvider>
@@ -240,6 +242,7 @@ function App() {
         </AuthProvider>
       </ThemeProvider>
     </HelmetProvider>
+    </ErrorBoundary>
   );
 }
 

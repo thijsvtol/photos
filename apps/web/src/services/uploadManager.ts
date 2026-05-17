@@ -8,7 +8,7 @@
 import { ulid } from 'ulid';
 import ExifReader from 'exifreader';
 import { startUpload, uploadPart, completeUpload } from '../api';
-import { addToQueue, updateQueueItem, getQueueItems, getPendingUploads } from '../uploadQueue';
+import { addToQueue, updateQueueItem, getQueueItems, getPendingUploads, removeFromQueue } from '../uploadQueue';
 import { createPreview } from '../imageUtils';
 import { extractMp4CreationTime } from '../utils/videoMetadata';
 import type { UploadQueueItem } from '../types';
@@ -24,6 +24,7 @@ export type UploadManagerListener = (items: UploadQueueItem[]) => void;
 class UploadManager {
   private items: Map<string, UploadQueueItem> = new Map();
   private processing = new Set<string>();
+  private cancelled = new Set<string>();
   private listeners = new Set<UploadManagerListener>();
   private initialised = false;
 
@@ -167,6 +168,30 @@ class UploadManager {
     this.notify();
   }
 
+  /** Cancel a single upload. Pending items are removed immediately; in-progress items are flagged and aborted after the current chunk. */
+  cancelUpload(itemId: string) {
+    const item = this.items.get(itemId);
+    if (!item) return;
+    if (item.status === 'pending') {
+      this.items.delete(itemId);
+      removeFromQueue(itemId);
+    } else if (item.status === 'uploading') {
+      this.cancelled.add(itemId);
+      this.items.delete(itemId);
+      removeFromQueue(itemId);
+    }
+    this.notify();
+  }
+
+  /** Cancel all pending and in-progress uploads */
+  cancelAll() {
+    for (const [id, item] of this.items) {
+      if (item.status === 'pending' || item.status === 'uploading') {
+        this.cancelUpload(id);
+      }
+    }
+  }
+
   /** Resume any pending/failed uploads */
   private async resumeAll() {
     try {
@@ -188,6 +213,7 @@ class UploadManager {
 
   private async processUpload(item: UploadQueueItem) {
     if (this.processing.has(item.id)) return;
+    if (this.cancelled.has(item.id)) { this.cancelled.delete(item.id); return; }
     this.processing.add(item.id);
 
     try {
@@ -233,6 +259,13 @@ class UploadManager {
         const results = await Promise.all(batch);
         partsCompleted.push(...results);
         completedChunks += results.length;
+
+        // Check for cancellation between batches
+        if (this.cancelled.has(item.id)) {
+          this.cancelled.delete(item.id);
+          this.processing.delete(item.id);
+          return;
+        }
 
         const progress = Math.round((completedChunks / totalParts) * originalProgressMax);
         this.updateItem(item.id, { progress, parts: [...partsCompleted] });

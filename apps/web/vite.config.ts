@@ -1,8 +1,26 @@
-import { defineConfig } from 'vite';
+import { defineConfig, Plugin } from 'vite';
 import react from '@vitejs/plugin-react';
 
+/** Strip console.* calls from production builds */
+function stripConsole(): Plugin {
+  return {
+    name: 'strip-console',
+    apply: 'build',
+    enforce: 'pre',
+    transform(code, id) {
+      if (id.includes('node_modules') || !code.includes('console.')) return null;
+      // Replace console method references with no-op so console.log("x") becomes (() => {})("x")
+      const stripped = code.replace(
+        /\bconsole\.(log|warn|error|debug|info|trace)\b/g,
+        '(() => {})'
+      );
+      return stripped !== code ? stripped : null;
+    },
+  };
+}
+
 export default defineConfig({
-  plugins: [react()],
+  plugins: [react(), stripConsole()],
   server: {
     port: 5173,
     strictPort: true,

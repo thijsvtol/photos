@@ -1,8 +1,9 @@
 import React, { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { Calendar, Loader2, Filter, X, ChevronDown, ChevronUp, Search, Plus, MapPin } from 'lucide-react';
+import { Calendar, Filter, X, ChevronDown, ChevronUp, Search, Plus, MapPin } from 'lucide-react';
 import Navbar from '../components/Navbar';
 import Footer from '../components/Footer';
+import { EventListSkeleton } from '../components/Skeletons';
 import SEO from '../components/SEO';
 import EventFormModal from '../components/EventFormModal';
 import { useRefresh } from '../contexts/RefreshContext';
@@ -325,10 +326,7 @@ const EventList: React.FC = () => {
         })()}
 
         {loading && (
-          <div className="flex flex-col items-center justify-center py-16">
-            <Loader2 className="w-12 h-12 animate-spin text-blue-600 dark:text-blue-400 mb-4" />
-            <p className="text-gray-600 dark:text-gray-400">Loading events...</p>
-          </div>
+          <EventListSkeleton />
         )}
 
         {error && (

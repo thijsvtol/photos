@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { MapPin, X } from 'lucide-react';
 import { MapContainer, TileLayer, Marker, useMapEvents } from 'react-leaflet';
 import 'leaflet/dist/leaflet.css';
+import ModalOverlay from './ModalOverlay';
 
 interface EventLocationPickerProps {
   isOpen: boolean;
@@ -40,7 +41,8 @@ export default function EventLocationPicker({ isOpen, onClose, onSetLocation }: 
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 bg-black/75 backdrop-blur-sm flex items-center justify-center z-50 p-4 animate-in fade-in duration-200">
+    <ModalOverlay onClose={handleClose} label="Set GPS location for event">
+    <div className="fixed inset-0 bg-black/75 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in duration-200">
       <div className="bg-white dark:bg-gray-800 rounded-xl max-w-4xl w-full max-h-[90vh] h-[600px] flex flex-col shadow-2xl animate-in slide-in-from-bottom-4 duration-300">
         <div className="p-4 sm:p-6 border-b border-gray-200 dark:border-gray-700 flex justify-between items-start gap-4">
           <div className="flex-1">
@@ -103,5 +105,6 @@ export default function EventLocationPicker({ isOpen, onClose, onSetLocation }: 
         </div>
       </div>
     </div>
+    </ModalOverlay>
   );
 }

@@ -41,6 +41,14 @@ vi.mock('../contexts/RefreshContext', () => ({
   }),
 }));
 
+vi.mock('../contexts/ThemeContext', () => ({
+  useTheme: () => ({
+    theme: 'light',
+    setTheme: vi.fn(),
+    isDark: false,
+  }),
+}));
+
 vi.mock('../components/Toast', () => ({
   useToast: () => ({
     showError: vi.fn(),

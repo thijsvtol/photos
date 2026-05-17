@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { X, MapPin, RefreshCw, Globe, Loader2 } from 'lucide-react';
+import ModalOverlay from './ModalOverlay';
 import TagManager from './TagManager';
 import CollaboratorManager from './CollaboratorManager';
 import CollaborationHistory from './CollaborationHistory';
@@ -91,11 +92,15 @@ const EventFormModal: React.FC<EventFormModalProps> = ({ isOpen, onClose, event,
         toast.showSuccess('Event updated');
       } else {
         // Create event
-        await createEvent({
+        const newEvent = await createEvent({
           name,
           password: password || undefined,
           visibility,
         });
+        // Set tags if any were selected
+        if (tagIds.length > 0) {
+          await setEventTags(newEvent.slug, tagIds);
+        }
         await haptics.success();
         toast.showSuccess('Event created');
       }
@@ -179,9 +184,10 @@ const EventFormModal: React.FC<EventFormModalProps> = ({ isOpen, onClose, event,
   return (
     <>
       {ConfirmDialog}
-      <div className="fixed inset-0 bg-black/60 flex items-center justify-center p-4 z-50" onClick={onClose}>
+      <ModalOverlay onClose={onClose} label={isEdit ? 'Edit event' : 'Create new album'}>
+      <div className="fixed inset-0 bg-black/60 flex items-center justify-center p-4 animate-in fade-in duration-200" onClick={onClose}>
         <div
-          className="bg-white dark:bg-gray-800 rounded-2xl shadow-xl max-w-2xl w-full max-h-[90vh] overflow-y-auto"
+          className="bg-white dark:bg-gray-800 rounded-2xl shadow-xl max-w-2xl w-full max-h-[90vh] overflow-y-auto animate-in zoom-in-95 fade-in duration-200"
           onClick={(e) => e.stopPropagation()}
         >
           {/* Header */}
@@ -273,16 +279,14 @@ const EventFormModal: React.FC<EventFormModalProps> = ({ isOpen, onClose, event,
               </div>
             )}
 
-            {/* Tags (edit mode only) */}
-            {isEdit && event && (
-              <div>
-                <TagManager
-                  eventSlug={event.slug}
-                  initialTags={event.tags}
-                  onChange={setTagIds}
-                />
-              </div>
-            )}
+            {/* Tags */}
+            <div>
+              <TagManager
+                eventSlug={isEdit && event ? event.slug : ''}
+                initialTags={isEdit && event ? event.tags : []}
+                onChange={setTagIds}
+              />
+            </div>
 
             {/* Collaborators (edit mode only) */}
             {isEdit && event && (
@@ -406,6 +410,7 @@ const EventFormModal: React.FC<EventFormModalProps> = ({ isOpen, onClose, event,
           </form>
         </div>
       </div>
+      </ModalOverlay>
 
       {/* GPS Location Picker Modal */}
       {showLocationPicker && (
