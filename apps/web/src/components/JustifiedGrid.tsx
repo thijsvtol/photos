@@ -194,6 +194,7 @@ const PhotoOverlayInner: React.FC<PhotoOverlayProps> = ({
   return (
     <div
       data-photo-card="true"
+      data-photo-id={photo.id}
       className="relative group overflow-hidden"
       style={style}
     >
@@ -216,8 +217,9 @@ const PhotoOverlayInner: React.FC<PhotoOverlayProps> = ({
             onToggleSelection(photo.id);
             return;
           }
-          // Store scroll position for back navigation
+          // Store scroll position and photo ID for back navigation
           sessionStorage.setItem(`gallery_scroll_${slug}`, window.scrollY.toString());
+          sessionStorage.setItem(`gallery_photo_${slug}`, photo.id);
         }}
         onTouchStart={startLongPress}
         onTouchEnd={clearLongPressTimer}

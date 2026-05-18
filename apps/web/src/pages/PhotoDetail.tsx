@@ -25,6 +25,7 @@ const PhotoDetail: React.FC = () => {
   const { isAuthenticated, login, user } = useAuth();
   const toast = useToast();
   const { confirm, ConfirmDialog } = useConfirm();
+  const isNative = Capacitor.isNativePlatform();
   const [event, setEvent] = useState<Event | null>(null);
   const [photo, setPhoto] = useState<Photo | null>(null);
   const [allPhotos, setAllPhotos] = useState<Photo[]>([]);
@@ -72,6 +73,25 @@ const PhotoDetail: React.FC = () => {
   const isSwipingRef = useRef(false);
   const containerRef = useRef<HTMLDivElement>(null);
   const imageContainerRef = useRef<HTMLDivElement | null>(null);
+
+  // Pinch-to-zoom state
+  const [zoomScale, setZoomScale] = useState(1);
+  const [zoomTranslate, setZoomTranslate] = useState({ x: 0, y: 0 });
+  const pinchStartDistance = useRef<number | null>(null);
+  const pinchStartScale = useRef(1);
+  const pinchCenter = useRef({ x: 0, y: 0 });
+  const panStart = useRef({ x: 0, y: 0 });
+  const translateStart = useRef({ x: 0, y: 0 });
+  const isPinching = useRef(false);
+  const isPanning = useRef(false);
+  const lastTapTime = useRef(0);
+
+  // Reset zoom when photo changes
+  useEffect(() => {
+    setZoomScale(1);
+    setZoomTranslate({ x: 0, y: 0 });
+  }, [photoId]);
+
   const imageContainerCallbackRef = useCallback((node: HTMLDivElement | null) => {
     imageContainerRef.current = node;
     if (node) {
@@ -702,8 +722,68 @@ const PhotoDetail: React.FC = () => {
   };
 
   const handleTouchStartNative = React.useCallback((e: TouchEvent) => {
-    // Only track single-finger swipes for navigation
+    // Double-tap to zoom
     if (e.touches.length === 1) {
+      const now = Date.now();
+      const timeSinceLastTap = now - lastTapTime.current;
+      lastTapTime.current = now;
+      
+      if (timeSinceLastTap < 300 && timeSinceLastTap > 0) {
+        // Double tap detected
+        e.preventDefault();
+        if (zoomScale > 1) {
+          setZoomScale(1);
+          setZoomTranslate({ x: 0, y: 0 });
+          setIsZoomed(false);
+        } else {
+          setZoomScale(2.5);
+          // Zoom toward tap point
+          const rect = imageContainerRef.current?.getBoundingClientRect();
+          if (rect) {
+            const x = e.touches[0].clientX - rect.left - rect.width / 2;
+            const y = e.touches[0].clientY - rect.top - rect.height / 2;
+            setZoomTranslate({ x: -x * 1.5, y: -y * 1.5 });
+          }
+          setIsZoomed(true);
+        }
+        touchStartX.current = null;
+        return;
+      }
+    }
+
+    // Pinch-to-zoom (two fingers)
+    if (e.touches.length === 2) {
+      e.preventDefault();
+      isPinching.current = true;
+      const dx = e.touches[0].clientX - e.touches[1].clientX;
+      const dy = e.touches[0].clientY - e.touches[1].clientY;
+      pinchStartDistance.current = Math.hypot(dx, dy);
+      pinchStartScale.current = zoomScale;
+      pinchCenter.current = {
+        x: (e.touches[0].clientX + e.touches[1].clientX) / 2,
+        y: (e.touches[0].clientY + e.touches[1].clientY) / 2,
+      };
+      // Clear swipe tracking
+      touchStartX.current = null;
+      touchStartY.current = null;
+      touchEndX.current = null;
+      isSwipingRef.current = false;
+      setIsSwiping(false);
+      setSwipeOffset(0);
+      return;
+    }
+
+    // Single-finger: pan when zoomed, or swipe when not zoomed
+    if (e.touches.length === 1) {
+      if (zoomScale > 1) {
+        // Pan mode
+        isPanning.current = true;
+        panStart.current = { x: e.touches[0].clientX, y: e.touches[0].clientY };
+        translateStart.current = { ...zoomTranslate };
+        return;
+      }
+
+      // Swipe navigation (only when not zoomed)
       if (swipeNavigateTimeoutRef.current) {
         clearTimeout(swipeNavigateTimeoutRef.current);
         swipeNavigateTimeoutRef.current = null;
@@ -718,23 +798,36 @@ const PhotoDetail: React.FC = () => {
       setSwipeOffset(0);
       isSwipingRef.current = false;
       setIsSwiping(false);
-    } else {
-      // Multiple fingers - clear tracking
-      touchStartX.current = null;
-      touchStartY.current = null;
-      touchEndX.current = null;
-      swipeLastXRef.current = null;
-      swipeLastTimeRef.current = null;
-      swipeVelocityRef.current = 0;
-      setSwipeOffset(0);
-      isSwipingRef.current = false;
-      setIsSwiping(false);
     }
-  }, []);
+  }, [zoomScale, zoomTranslate]);
 
   const handleTouchMoveNative = React.useCallback((e: TouchEvent) => {
-    // Only track single-finger movement for swipe detection
-    if (e.touches.length === 1 && touchStartX.current !== null) {
+    // Pinch zoom
+    if (e.touches.length === 2 && isPinching.current && pinchStartDistance.current) {
+      e.preventDefault();
+      const dx = e.touches[0].clientX - e.touches[1].clientX;
+      const dy = e.touches[0].clientY - e.touches[1].clientY;
+      const distance = Math.hypot(dx, dy);
+      const newScale = Math.max(1, Math.min(5, pinchStartScale.current * (distance / pinchStartDistance.current)));
+      setZoomScale(newScale);
+      setIsZoomed(newScale > 1.05);
+      return;
+    }
+
+    // Pan when zoomed
+    if (e.touches.length === 1 && isPanning.current && zoomScale > 1) {
+      e.preventDefault();
+      const dx = e.touches[0].clientX - panStart.current.x;
+      const dy = e.touches[0].clientY - panStart.current.y;
+      setZoomTranslate({
+        x: translateStart.current.x + dx,
+        y: translateStart.current.y + dy,
+      });
+      return;
+    }
+
+    // Swipe navigation (only when not zoomed)
+    if (e.touches.length === 1 && touchStartX.current !== null && zoomScale <= 1) {
       const currentX = e.touches[0].clientX;
       const currentY = e.touches[0].clientY;
       const deltaX = currentX - touchStartX.current;
@@ -759,21 +852,29 @@ const PhotoDetail: React.FC = () => {
         setIsSwiping(true);
         setSwipeOffset(deltaX * getSwipeResistance(deltaX, containerWidth));
       }
-    } else {
-      // Multiple fingers or no start - clear tracking
-      touchStartX.current = null;
-      touchStartY.current = null;
-      touchEndX.current = null;
-      swipeLastXRef.current = null;
-      swipeLastTimeRef.current = null;
-      swipeVelocityRef.current = 0;
-      setSwipeOffset(0);
-      isSwipingRef.current = false;
-      setIsSwiping(false);
     }
-  }, []);
+  }, [zoomScale]);
 
   const handleTouchEndNative = React.useCallback(() => {
+    // End pinch
+    if (isPinching.current) {
+      isPinching.current = false;
+      pinchStartDistance.current = null;
+      // Snap back to 1 if barely zoomed
+      if (zoomScale < 1.1) {
+        setZoomScale(1);
+        setZoomTranslate({ x: 0, y: 0 });
+        setIsZoomed(false);
+      }
+      return;
+    }
+
+    // End pan
+    if (isPanning.current) {
+      isPanning.current = false;
+      return;
+    }
+
     // Check if we should navigate based on swipe
     if (touchStartX.current !== null && touchEndX.current !== null) {
       const diff = touchStartX.current - touchEndX.current;
@@ -815,7 +916,7 @@ const PhotoDetail: React.FC = () => {
     swipeLastXRef.current = null;
     swipeLastTimeRef.current = null;
     swipeVelocityRef.current = 0;
-  }, []);
+  }, [zoomScale]);
 
   const handleTouchCancelNative = React.useCallback(() => {
     touchStartX.current = null;
@@ -1213,9 +1314,9 @@ const PhotoDetail: React.FC = () => {
       {/* Full-screen media area */}
       <div
         ref={imageContainerCallbackRef}
-        className={`absolute inset-0 flex items-center justify-center select-none ${isZoomed ? 'overflow-auto' : 'overflow-hidden'}`}
+        className={`absolute inset-0 flex items-center justify-center select-none overflow-hidden`}
         style={{
-          touchAction: isZoomed ? 'pan-x pan-y pinch-zoom' : 'pan-y pinch-zoom',
+          touchAction: isNative ? 'none' : (isZoomed ? 'pan-x pan-y pinch-zoom' : 'pan-y pinch-zoom'),
           WebkitOverflowScrolling: 'touch',
         }}
       >
@@ -1336,7 +1437,12 @@ const PhotoDetail: React.FC = () => {
           ) : (
             <div
               className="relative w-full h-full flex items-center justify-center"
-              onClick={() => setShowOverlay(prev => !prev)}
+              onClick={() => { if (zoomScale <= 1) setShowOverlay(prev => !prev); }}
+              style={{
+                transform: `scale(${zoomScale}) translate(${zoomTranslate.x / zoomScale}px, ${zoomTranslate.y / zoomScale}px)`,
+                transition: isPinching.current || isPanning.current ? 'none' : 'transform 0.2s ease-out',
+                transformOrigin: 'center center',
+              }}
             >
               {/* Previous photo for cross-fade effect */}
               {previousPhoto && previousPhoto.file_type !== 'video/mp4' && (

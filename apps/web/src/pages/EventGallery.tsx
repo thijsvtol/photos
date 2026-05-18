@@ -196,28 +196,7 @@ const EventGallery: React.FC = () => {
   }, []);
 
   // Restore scroll position when returning to gallery
-  useEffect(() => {
-    if (slug && !loading && photos.length > 0) {
-      const savedScroll = sessionStorage.getItem(`gallery_scroll_${slug}`);
-      if (savedScroll) {
-        const target = parseInt(savedScroll, 10);
-        sessionStorage.removeItem(`gallery_scroll_${slug}`);
-        // Poll until the page is tall enough to scroll to the target position,
-        // then scroll. Gives up after ~1s if the page never gets tall enough
-        // (e.g. most photos were deleted).
-        let attempts = 0;
-        const tryScroll = () => {
-          if (document.documentElement.scrollHeight >= target || attempts >= 20) {
-            window.scrollTo(0, target);
-          } else {
-            attempts++;
-            requestAnimationFrame(tryScroll);
-          }
-        };
-        requestAnimationFrame(tryScroll);
-      }
-    }
-  }, [slug, loading, photos]);
+  // (moved to after visibleDateCount/visibleSinglePhotoCount expansion below)
 
   const loadEvent = async () => {
     try {
@@ -667,9 +646,24 @@ const EventGallery: React.FC = () => {
   };
 
   // Reset lazy-render windows when gallery context changes.
+  // If restoring scroll position, expand window to include the target photo.
   useEffect(() => {
-    setVisibleDateCount(8);
-    setVisibleSinglePhotoCount(140);
+    const savedPhotoId = sessionStorage.getItem(`gallery_photo_${slug}`);
+    if (savedPhotoId && photos.length > 0) {
+      const photoIndex = photos.findIndex(p => p.id === savedPhotoId);
+      if (photoIndex >= 0) {
+        // Ensure the photo is within the visible window
+        setVisibleSinglePhotoCount(Math.min(Math.max(140, photoIndex + 80), photos.length));
+        // For multi-date view, expand date count too
+        setVisibleDateCount(Math.min(Math.max(8, Math.ceil((photoIndex / photos.length) * dates.length) + 4), dates.length || 8));
+      } else {
+        setVisibleDateCount(8);
+        setVisibleSinglePhotoCount(140);
+      }
+    } else {
+      setVisibleDateCount(8);
+      setVisibleSinglePhotoCount(140);
+    }
     prefetchedPhotoIdsRef.current.clear();
   }, [slug, sortBy, searchQuery, photos.length]);
 
@@ -699,6 +693,40 @@ const EventGallery: React.FC = () => {
     observer.observe(loadMoreRef.current);
     return () => observer.disconnect();
   }, [hasMoreGalleryItems, isMultiDateView, dates.length, photos.length]);
+
+  // Restore scroll position when returning to gallery
+  useEffect(() => {
+    if (slug && !loading && photos.length > 0) {
+      const savedScroll = sessionStorage.getItem(`gallery_scroll_${slug}`);
+      const savedPhotoId = sessionStorage.getItem(`gallery_photo_${slug}`);
+      if (savedScroll || savedPhotoId) {
+        const target = savedScroll ? parseInt(savedScroll, 10) : 0;
+        sessionStorage.removeItem(`gallery_scroll_${slug}`);
+        sessionStorage.removeItem(`gallery_photo_${slug}`);
+
+        // Poll until the target photo element exists or page is tall enough
+        let attempts = 0;
+        const tryScroll = () => {
+          // Try to find the specific photo element first
+          if (savedPhotoId) {
+            const el = document.querySelector(`[data-photo-id="${CSS.escape(savedPhotoId)}"]`);
+            if (el) {
+              el.scrollIntoView({ block: 'center' });
+              return;
+            }
+          }
+          // Fallback to scroll position
+          if (document.documentElement.scrollHeight >= target + window.innerHeight * 0.5 || attempts >= 60) {
+            window.scrollTo(0, target);
+          } else {
+            attempts++;
+            requestAnimationFrame(tryScroll);
+          }
+        };
+        requestAnimationFrame(tryScroll);
+      }
+    }
+  }, [slug, loading, photos]);
 
   // Prefetch upcoming preview images based on scroll direction.
   useEffect(() => {

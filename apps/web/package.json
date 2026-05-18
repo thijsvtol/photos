@@ -1,6 +1,6 @@
 {
   "name": "photos-web",
-  "version": "1.6.5",
+  "version": "1.6.6",
   "description": "React frontend for photo sharing application",
   "type": "module",
   "scripts": {
