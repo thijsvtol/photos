@@ -41,7 +41,7 @@ const EventGallery: React.FC = () => {
   const [authenticated, setAuthenticated] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [sortBy, setSortBy] = useState('date_asc');
+  const [sortBy, setSortBy] = useState('date_desc');
   const [searchQuery, setSearchQuery] = useState('');
   const [userFavorites, setUserFavorites] = useState<Set<string>>(new Set());
   const [deleting, setDeleting] = useState(false);

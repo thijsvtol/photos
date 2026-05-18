@@ -94,7 +94,7 @@ const PhotoDetail: React.FC = () => {
   // Check if we came from favorites page
   const fromFavorites = location.state?.fromFavorites;
   const favoritePhotos = (location.state?.favoritePhotos || []) as Array<{ id: string; slug: string }>;
-  const sortBy = location.state?.sortBy || 'date_asc';
+  const sortBy = location.state?.sortBy || 'date_desc';
   
   // Filter photos based on whether we're viewing favorites
   // When in favorites mode, only show photos from this event that are in favorites

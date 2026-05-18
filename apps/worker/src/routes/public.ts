@@ -220,7 +220,7 @@ app.get('/api/events/:slug', optionalAuth, async (c) => {
 app.get('/api/events/:slug/photos', optionalAuth, async (c) => {
   const slug = c.req.param('slug')!;
   if (!isValidSlug(slug)) return c.json({ error: 'Invalid slug format' }, 400);
-  const sort = c.req.query('sort') || 'date_asc';
+  const sort = c.req.query('sort') || 'date_desc';
   
   try {
     const user = getUser(c);
