@@ -896,36 +896,16 @@ const PhotoDetail: React.FC = () => {
       }
     }
 
-    // Use Web Share API on mobile browsers
-    if (!platform && 'share' in navigator) {
+    // Use OS share sheet (works on desktop and mobile browsers)
+    if (!platform && navigator.share) {
       try {
-        // Try to fetch and share the photo file
-        const imageUrl = getPreviewUrl(slug!, photo?.id || photoId!, photo?.file_type, photo?.cache_version);
-        const shareData: any = {
+        await navigator.share({
           title: event?.name || 'Photo',
           text: text,
           url: url,
-        };
-        
-        // Try to include the photo if canShare supports files
-        try {
-          const response = await fetch(imageUrl);
-          const blob = await response.blob();
-          const fileName = photo?.original_filename || 'photo.jpg';
-          const file = new File([blob], fileName, { type: blob.type });
-          
-          // Check if we can share files
-          if ((navigator as any).canShare && (navigator as any).canShare({ files: [file] })) {
-            shareData.files = [file];
-          }
-        } catch {
-          // Could not include photo file, continue with URL only share
-        }
-        
-        await (navigator as any).share(shareData);
+        });
         return;
       } catch (err) {
-        // User cancelled or share failed, fall back to menu
         if ((err as Error).name !== 'AbortError') {
           console.error('Error sharing:', err);
         }
@@ -933,7 +913,14 @@ const PhotoDetail: React.FC = () => {
       }
     }
     
-    // Fall back to platform-specific sharing
+    // Fall back to clipboard copy if share API not available
+    if (!platform) {
+      await navigator.clipboard.writeText(url);
+      toast.showSuccess('Link copied to clipboard!');
+      return;
+    }
+
+    // Platform-specific sharing
     switch (platform) {
       case 'twitter':
         window.open(`https://twitter.com/intent/tweet?url=${encodeURIComponent(url)}&text=${encodeURIComponent(text)}`, '_blank');
@@ -941,21 +928,11 @@ const PhotoDetail: React.FC = () => {
       case 'facebook':
         window.open(`https://www.facebook.com/sharer/sharer.php?u=${encodeURIComponent(url)}`, '_blank');
         break;
-      case 'instagram':
-        // Instagram doesn't support direct URL sharing, so copy link with instruction
-        navigator.clipboard.writeText(url);
-        toast.showSuccess('Link copied! Open Instagram and paste in your story or bio.');
-        break;
-      case 'snapchat':
-        // Snapchat web share (limited support)
-        window.open(`https://www.snapchat.com/scan?attachmentUrl=${encodeURIComponent(url)}`, '_blank');
-        break;
       case 'whatsapp':
         window.open(`https://wa.me/?text=${encodeURIComponent(text + ' ' + url)}`, '_blank');
         break;
-      case 'copy':
       default:
-        navigator.clipboard.writeText(url);
+        await navigator.clipboard.writeText(url);
         toast.showSuccess('Link copied to clipboard!');
         break;
     }
