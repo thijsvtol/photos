@@ -16,6 +16,7 @@ import { haptics } from '../utils/haptics';
 import { trackPhotoView, trackPhotoDownload, trackFavorite } from '../services/analytics';
 import { Capacitor } from '@capacitor/core';
 import { Share } from '@capacitor/share';
+import { Filesystem, Directory } from '@capacitor/filesystem';
 
 const PhotoDetail: React.FC = () => {
   const { slug, photoId } = useParams<{ slug: string; photoId: string }>();
@@ -875,18 +876,43 @@ const PhotoDetail: React.FC = () => {
   };
 
   const sharePhoto = async (platform?: string) => {
-    const url = `${window.location.origin}/p/${slug}/${photoId}`;
+    const domain = Capacitor.isNativePlatform() ? `https://${config.domain}` : window.location.origin;
+    const url = `${domain}/p/${slug}/${photoId}`;
     const text = `Check out this photo from ${event?.name}`;
     
     // Use Capacitor native share on mobile app
     if (!platform && Capacitor.isNativePlatform()) {
       try {
-        await Share.share({
+        const shareOptions: { title?: string; text?: string; url?: string; dialogTitle?: string; files?: string[] } = {
           title: event?.name || 'Photo',
           text: text,
           url: url,
           dialogTitle: 'Share photo',
-        });
+        };
+
+        // Try to download the image and include it as a file
+        try {
+          const imageUrl = getPreviewUrl(slug!, photo?.id || photoId!, photo?.file_type, photo?.cache_version);
+          const response = await fetch(imageUrl);
+          const blob = await response.blob();
+          const reader = new FileReader();
+          const base64 = await new Promise<string>((resolve) => {
+            reader.onloadend = () => resolve((reader.result as string).split(',')[1]);
+            reader.readAsDataURL(blob);
+          });
+          const ext = photo?.file_type === 'video/mp4' ? 'mp4' : 'jpg';
+          const fileName = `share_photo.${ext}`;
+          const saved = await Filesystem.writeFile({
+            path: fileName,
+            data: base64,
+            directory: Directory.Cache,
+          });
+          shareOptions.files = [saved.uri];
+        } catch {
+          // Could not include file, share without it
+        }
+
+        await Share.share(shareOptions);
         return;
       } catch (err) {
         if ((err as Error).message !== 'Share canceled') {
