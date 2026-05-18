@@ -32,10 +32,9 @@ app.get('/api/events', optionalAuth, async (c) => {
     const userEmail = user?.email || '';
 
     // Build query with visibility filtering
-    // LEFT JOIN to check if current user is a collaborator
-    // LEFT JOIN photos to sort by most recent upload
+    // Use GROUP BY to deduplicate (LEFT JOIN can produce duplicates) while preserving ORDER BY
     const query = `
-      SELECT DISTINCT 
+      SELECT 
         e.id, 
         e.slug, 
         e.name, 
@@ -47,11 +46,12 @@ app.get('/api/events', optionalAuth, async (c) => {
       FROM events e
       LEFT JOIN event_collaborators ec ON e.id = ec.event_id AND ec.user_email = ?
       WHERE 
-        e.visibility = 'public'  -- Always show public events
-        OR (? = 1)  -- Show all events if user is admin
-        OR (e.visibility = 'collaborators_only' AND ec.user_email IS NOT NULL)  -- Show collaborators_only if user is collaborator
-        OR (e.visibility = 'private' AND ? = 1)  -- Show private events only to admins
-      ORDER BY latest_upload IS NULL, latest_upload DESC, e.created_at DESC
+        e.visibility = 'public'
+        OR (? = 1)
+        OR (e.visibility = 'collaborators_only' AND ec.user_email IS NOT NULL)
+        OR (e.visibility = 'private' AND ? = 1)
+      GROUP BY e.id
+      ORDER BY latest_upload IS NULL ASC, latest_upload DESC, e.created_at DESC
     `;
     
     const events = await c.env.DB
