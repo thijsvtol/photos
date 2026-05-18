@@ -14,6 +14,8 @@ import { useToast } from '../components/Toast';
 import { useConfirm } from '../components/ConfirmDialog';
 import { haptics } from '../utils/haptics';
 import { trackPhotoView, trackPhotoDownload, trackFavorite } from '../services/analytics';
+import { Capacitor } from '@capacitor/core';
+import { Share } from '@capacitor/share';
 
 const PhotoDetail: React.FC = () => {
   const { slug, photoId } = useParams<{ slug: string; photoId: string }>();
@@ -876,7 +878,25 @@ const PhotoDetail: React.FC = () => {
     const url = `${window.location.origin}/p/${slug}/${photoId}`;
     const text = `Check out this photo from ${event?.name}`;
     
-    // Use native share API on mobile if available and no platform specified
+    // Use Capacitor native share on mobile app
+    if (!platform && Capacitor.isNativePlatform()) {
+      try {
+        await Share.share({
+          title: event?.name || 'Photo',
+          text: text,
+          url: url,
+          dialogTitle: 'Share photo',
+        });
+        return;
+      } catch (err) {
+        if ((err as Error).message !== 'Share canceled') {
+          console.error('Native share error:', err);
+        }
+        return;
+      }
+    }
+
+    // Use Web Share API on mobile browsers
     if (!platform && 'share' in navigator) {
       try {
         // Try to fetch and share the photo file

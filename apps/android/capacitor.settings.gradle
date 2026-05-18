@@ -23,6 +23,9 @@ project(':capacitor-network').projectDir = new File('../web/node_modules/@capaci
 include ':capacitor-preferences'
 project(':capacitor-preferences').projectDir = new File('../web/node_modules/@capacitor/preferences/android')
 
+include ':capacitor-share'
+project(':capacitor-share').projectDir = new File('../web/node_modules/@capacitor/share/android')
+
 include ':capawesome-capacitor-background-task'
 project(':capawesome-capacitor-background-task').projectDir = new File('../web/node_modules/@capawesome/capacitor-background-task/android')
 
