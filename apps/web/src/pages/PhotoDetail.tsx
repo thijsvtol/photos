@@ -934,6 +934,7 @@ const PhotoDetail: React.FC = () => {
         window.open(`https://wa.me/?text=${encodeURIComponent(text + ' ' + url)}`, '_blank');
         break;
       case 'copy':
+      default:
         navigator.clipboard.writeText(url);
         toast.showSuccess('Link copied to clipboard!');
         break;
@@ -1342,6 +1343,7 @@ const PhotoDetail: React.FC = () => {
                 onLoad={() => setImageLoaded(true)}
                 loading="eager"
                 decoding="async"
+                fetchPriority="high"
               />
             </div>
           )}

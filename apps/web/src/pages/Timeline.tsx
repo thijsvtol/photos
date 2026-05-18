@@ -128,8 +128,9 @@ const Timeline: React.FC = () => {
         if (!cancelled) {
           setPhotos(data.photos);
           setNextCursor(data.nextCursor);
+          setLoading(false);
         }
-        // Load favorites if authenticated
+        // Load favorites if authenticated (non-blocking)
         if (isAuthenticated) {
           try {
             const favIds = await getUserFavoriteIds();
@@ -138,7 +139,6 @@ const Timeline: React.FC = () => {
         }
       } catch (err) {
         console.error('Failed to load timeline:', err);
-      } finally {
         if (!cancelled) setLoading(false);
       }
     };

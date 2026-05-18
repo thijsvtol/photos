@@ -57,6 +57,18 @@ const ProgressiveVideo: React.FC<ProgressiveVideoProps> = ({
     return () => observer.disconnect();
   }, [src, isNearViewport]);
 
+  // Abort video preload on unmount to free browser connections
+  useEffect(() => {
+    return () => {
+      const video = videoRef.current;
+      if (video) {
+        video.pause();
+        video.removeAttribute('src');
+        video.load();
+      }
+    };
+  }, []);
+
   return (
     <div ref={containerRef} className="relative overflow-hidden w-full h-full">
       {!isNearViewport && poster && (

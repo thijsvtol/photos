@@ -5,6 +5,20 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.6.4] - 2026-05-18
+
+### Changed
+- Android app release bumped to build 29 (versionName 1.6.4).
+- Project package versions synchronized to 1.6.4.
+- Event list sorted by most recent photo upload (events with newest uploads appear first).
+- Gallery selection mode on touch devices: tapping a photo now toggles selection instead of requiring the small checkbox target.
+- Clicked photos load with priority — other pending gallery image loads are aborted to free browser connections for the detail view.
+
+### Fixed
+- Ghost "X uploads complete" notification appearing on app start without any uploads — completed items from previous sessions no longer reload from IndexedDB.
+- Share button on desktop web doing nothing — added clipboard fallback when Web Share API is unavailable.
+- Multi-select on Android app: tapping photos in selection mode was navigating instead of selecting due to tiny checkbox hit target.
+
 ## [1.6.3] - 2026-05-18
 
 ### Changed
@@ -17,6 +31,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Analytics sending wrong photo IDs — `parseInt()` on ULID strings was producing incorrect values; now passes string IDs directly.
 - GPS coordinates at latitude/longitude 0 (equator/prime meridian) being silently discarded due to falsy `|| undefined` check.
 - Potential OOM crash when folder-syncing large video files — `base64ToBlob` now processes data in 512KB chunks instead of allocating a single massive intermediate array.
+- Timeline infinite scroll not loading more photos for authenticated users — `setLoading(false)` was deferred until after favorites fetch, causing the IntersectionObserver to miss the sentinel element.
+- Folder sync moved from gallery header into event settings modal.
 
 ## [1.6.2] - 2026-05-17
 

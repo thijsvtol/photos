@@ -1,10 +1,12 @@
 import React, { useState, useEffect } from 'react';
 import { X, MapPin, RefreshCw, Globe, Loader2 } from 'lucide-react';
+import { Capacitor } from '@capacitor/core';
 import ModalOverlay from './ModalOverlay';
 import TagManager from './TagManager';
 import CollaboratorManager from './CollaboratorManager';
 import CollaborationHistory from './CollaborationHistory';
 import EventLocationPicker from './EventLocationPicker';
+import FolderSyncManager from './FolderSyncManager';
 import { createEvent, updateEvent, deleteEvent, setEventTags, setEventLocation, regenerateThumbnails, geocodeEventPhotos } from '../api';
 import type { Event, UpdateEventRequest } from '../types';
 import { useToast } from './Toast';
@@ -304,6 +306,13 @@ const EventFormModal: React.FC<EventFormModalProps> = ({ isOpen, onClose, event,
             {isEdit && event && (
               <div>
                 <CollaborationHistory eventSlug={event.slug} />
+              </div>
+            )}
+
+            {/* Folder Sync (native only, edit mode) */}
+            {isEdit && event && Capacitor.isNativePlatform() && (
+              <div className="border-t border-gray-200 dark:border-gray-700 pt-4">
+                <FolderSyncManager eventSlug={event.slug} />
               </div>
             )}
 

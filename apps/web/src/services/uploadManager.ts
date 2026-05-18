@@ -8,7 +8,7 @@
 import { ulid } from 'ulid';
 import ExifReader from 'exifreader';
 import { startUpload, uploadPart, completeUpload } from '../api';
-import { addToQueue, updateQueueItem, getQueueItems, getPendingUploads, removeFromQueue } from '../uploadQueue';
+import { addToQueue, updateQueueItem, getQueueItems, getPendingUploads, removeFromQueue, clearCompletedUploads } from '../uploadQueue';
 import { createPreview } from '../imageUtils';
 import { extractMp4CreationTime } from '../utils/videoMetadata';
 import type { UploadQueueItem } from '../types';
@@ -80,8 +80,13 @@ class UploadManager {
     try {
       const all = await getQueueItems();
       for (const item of all) {
+        // Don't reload completed items from previous sessions —
+        // they cause ghost "X uploads complete" notifications.
+        if (item.status === 'completed') continue;
         this.items.set(item.id, item);
       }
+      // Purge stale completed items from IndexedDB
+      clearCompletedUploads().catch(() => {});
       this.notify();
       // Auto-resume anything pending/uploading (was interrupted)
       this.resumeAll();

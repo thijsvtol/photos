@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { registerLoad, abortLoad } from '../services/imageLoadManager';
 
 interface ProgressiveImageProps {
   src: string;
@@ -33,6 +34,8 @@ const ProgressiveImage: React.FC<ProgressiveImageProps> = ({
     const el = containerRef.current;
     if (!el || loadTriggeredRef.current) return;
 
+    let unregister: (() => void) | null = null;
+
     // Use IntersectionObserver to only load the full image when near viewport
     const observer = new IntersectionObserver(
       (entries) => {
@@ -43,11 +46,16 @@ const ProgressiveImage: React.FC<ProgressiveImageProps> = ({
 
             const img = new Image();
             img.src = src;
+            unregister = registerLoad(src, img);
             img.onload = () => {
               setImageLoaded(true);
+              unregister?.();
+              unregister = null;
             };
             img.onerror = () => {
               setImageError(true);
+              unregister?.();
+              unregister = null;
             };
           }
         });
@@ -56,7 +64,14 @@ const ProgressiveImage: React.FC<ProgressiveImageProps> = ({
     );
 
     observer.observe(el);
-    return () => observer.disconnect();
+    return () => {
+      observer.disconnect();
+      // Abort pending load on unmount to free browser connections
+      if (unregister) {
+        abortLoad(src);
+        unregister();
+      }
+    };
   }, [src]);
 
   const handleRetry = () => {

@@ -33,6 +33,7 @@ app.get('/api/events', optionalAuth, async (c) => {
 
     // Build query with visibility filtering
     // LEFT JOIN to check if current user is a collaborator
+    // LEFT JOIN photos to sort by most recent upload
     const query = `
       SELECT DISTINCT 
         e.id, 
@@ -41,7 +42,8 @@ app.get('/api/events', optionalAuth, async (c) => {
         e.inferred_date, 
         e.created_at, 
         e.visibility,
-        (e.password_hash IS NOT NULL) as requires_password 
+        (e.password_hash IS NOT NULL) as requires_password,
+        (SELECT MAX(p.uploaded_at) FROM photos p WHERE p.event_id = e.id) as latest_upload
       FROM events e
       LEFT JOIN event_collaborators ec ON e.id = ec.event_id AND ec.user_email = ?
       WHERE 
@@ -49,7 +51,7 @@ app.get('/api/events', optionalAuth, async (c) => {
         OR (? = 1)  -- Show all events if user is admin
         OR (e.visibility = 'collaborators_only' AND ec.user_email IS NOT NULL)  -- Show collaborators_only if user is collaborator
         OR (e.visibility = 'private' AND ? = 1)  -- Show private events only to admins
-      ORDER BY e.inferred_date DESC, e.created_at DESC
+      ORDER BY latest_upload DESC NULLS LAST, e.created_at DESC
     `;
     
     const events = await c.env.DB
