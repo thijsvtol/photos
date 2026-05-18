@@ -51,7 +51,7 @@ app.get('/api/events', optionalAuth, async (c) => {
         OR (e.visibility = 'collaborators_only' AND ec.user_email IS NOT NULL)
         OR (e.visibility = 'private' AND ? = 1)
       GROUP BY e.id
-      ORDER BY latest_upload IS NULL ASC, latest_upload DESC, e.created_at DESC
+      ORDER BY e.inferred_date IS NULL ASC, e.inferred_date DESC, e.created_at DESC
     `;
     
     const events = await c.env.DB

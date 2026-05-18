@@ -1,8 +1,15 @@
 import React from 'react';
 
-/** Animated shimmer block */
+/** Animated shimmer block with gradient sweep */
 const Shimmer: React.FC<{ className?: string; style?: React.CSSProperties }> = ({ className = '', style }) => (
-  <div className={`animate-pulse bg-gray-200 dark:bg-gray-700 rounded ${className}`} style={style} />
+  <div
+    className={`animate-shimmer rounded bg-gray-200 dark:bg-gray-700/60 ${className}`}
+    style={{
+      backgroundImage: 'linear-gradient(90deg, transparent 0%, rgba(255,255,255,0.15) 50%, transparent 100%)',
+      backgroundSize: '200% 100%',
+      ...style,
+    }}
+  />
 );
 
 /** Skeleton for an event card in EventList */
@@ -31,21 +38,20 @@ export const EventListSkeleton: React.FC = () => (
 
 /** Skeleton for a justified photo grid row */
 export const GalleryRowSkeleton: React.FC = () => {
-  // Simulate varying widths like a justified grid
   const rows = [
-    [3, 2, 4, 3],
-    [4, 3, 2],
-    [2, 3, 4, 3],
+    [{ flex: 1.5, aspect: '4/3' }, { flex: 1, aspect: '3/4' }, { flex: 1.8, aspect: '16/9' }, { flex: 1.2, aspect: '4/3' }],
+    [{ flex: 1.3, aspect: '3/2' }, { flex: 1.6, aspect: '16/9' }, { flex: 1, aspect: '1/1' }],
+    [{ flex: 1, aspect: '3/4' }, { flex: 1.4, aspect: '4/3' }, { flex: 1.7, aspect: '16/9' }, { flex: 1.1, aspect: '3/2' }],
   ];
   return (
     <div className="space-y-1">
       {rows.map((row, i) => (
-        <div key={i} className="flex gap-1">
-          {row.map((flex, j) => (
+        <div key={i} className="flex gap-1" style={{ height: '150px' }}>
+          {row.map((item, j) => (
             <Shimmer
               key={j}
-              className="rounded-none"
-              style={{ flex, height: '160px' } as React.CSSProperties}
+              className="rounded-sm"
+              style={{ flex: item.flex } as React.CSSProperties}
             />
           ))}
         </div>
