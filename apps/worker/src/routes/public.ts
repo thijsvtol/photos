@@ -51,7 +51,7 @@ app.get('/api/events', optionalAuth, async (c) => {
         OR (? = 1)  -- Show all events if user is admin
         OR (e.visibility = 'collaborators_only' AND ec.user_email IS NOT NULL)  -- Show collaborators_only if user is collaborator
         OR (e.visibility = 'private' AND ? = 1)  -- Show private events only to admins
-      ORDER BY latest_upload DESC NULLS LAST, e.created_at DESC
+      ORDER BY latest_upload IS NULL, latest_upload DESC, e.created_at DESC
     `;
     
     const events = await c.env.DB
