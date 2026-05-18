@@ -5,6 +5,19 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.6.3] - 2026-05-18
+
+### Changed
+- Android app release bumped to build 28 (versionName 1.6.3).
+- Project package versions synchronized to 1.6.3.
+
+### Fixed
+- Interrupted uploads stuck forever in "uploading" state after app kill — now reset to pending and retried on restart.
+- Upload progress bar flickering on app resume — `resumeAll()` no longer overwrites in-memory state for actively-processing items.
+- Analytics sending wrong photo IDs — `parseInt()` on ULID strings was producing incorrect values; now passes string IDs directly.
+- GPS coordinates at latitude/longitude 0 (equator/prime meridian) being silently discarded due to falsy `|| undefined` check.
+- Potential OOM crash when folder-syncing large video files — `base64ToBlob` now processes data in 512KB chunks instead of allocating a single massive intermediate array.
+
 ## [1.6.2] - 2026-05-17
 
 ### Changed
