@@ -1,5 +1,4 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { registerLoad, abortLoad } from '../services/imageLoadManager';
 
 interface ProgressiveImageProps {
   src: string;
@@ -20,74 +19,36 @@ const ProgressiveImage: React.FC<ProgressiveImageProps> = ({
 }) => {
   const [imageLoaded, setImageLoaded] = useState(false);
   const [imageError, setImageError] = useState(false);
-  const containerRef = useRef<HTMLDivElement>(null);
-  const loadTriggeredRef = useRef(false);
+  const imgRef = useRef<HTMLImageElement>(null);
 
   useEffect(() => {
-    // Reset when src changes
     setImageLoaded(false);
     setImageError(false);
-    loadTriggeredRef.current = false;
   }, [src]);
 
+  // Check if image was already cached (loaded before React could attach onLoad)
   useEffect(() => {
-    const el = containerRef.current;
-    if (!el || loadTriggeredRef.current) return;
-
-    let unregister: (() => void) | null = null;
-
-    // Use IntersectionObserver to only load the full image when near viewport
-    const observer = new IntersectionObserver(
-      (entries) => {
-        entries.forEach((entry) => {
-          if (entry.isIntersecting && !loadTriggeredRef.current) {
-            loadTriggeredRef.current = true;
-            observer.disconnect();
-
-            const img = new Image();
-            img.src = src;
-            unregister = registerLoad(src, img);
-            img.onload = () => {
-              setImageLoaded(true);
-              unregister?.();
-              unregister = null;
-            };
-            img.onerror = () => {
-              setImageError(true);
-              unregister?.();
-              unregister = null;
-            };
-          }
-        });
-      },
-      { rootMargin: '200px 0px' } // Start loading 200px before entering viewport
-    );
-
-    observer.observe(el);
-    return () => {
-      observer.disconnect();
-      // Abort pending load on unmount to free browser connections
-      if (unregister) {
-        abortLoad(src);
-        unregister();
-      }
-    };
+    const img = imgRef.current;
+    if (img && img.complete && img.naturalWidth > 0) {
+      setImageLoaded(true);
+    }
   }, [src]);
 
   const handleRetry = () => {
     setImageError(false);
     setImageLoaded(false);
-    loadTriggeredRef.current = false;
   };
 
   return (
-    <div ref={containerRef} className="relative overflow-hidden w-full h-full">
+    <div className="relative overflow-hidden w-full h-full">
+      {/* Blur placeholder shown while loading */}
       {blurDataUrl && !imageLoaded && !imageError && (
         <img
           src={blurDataUrl}
-          alt={alt}
-          className={`${className} blur-xl absolute inset-0`}
+          alt=""
+          className={`${className} absolute inset-0 w-full h-full object-cover scale-110 blur-lg`}
           style={style}
+          aria-hidden="true"
         />
       )}
       {imageError ? (
@@ -104,11 +65,15 @@ const ProgressiveImage: React.FC<ProgressiveImageProps> = ({
         </div>
       ) : (
         <img
-          src={imageLoaded ? src : blurDataUrl || ''}
+          ref={imgRef}
+          src={src}
           alt={alt}
-          className={`${className} transition-opacity duration-500 ${imageLoaded ? 'opacity-100' : 'opacity-0'}`}
+          className={`${className} transition-opacity duration-300 ${imageLoaded ? 'opacity-100' : 'opacity-0'}`}
           style={style}
           loading={loading}
+          decoding="async"
+          onLoad={() => setImageLoaded(true)}
+          onError={() => setImageError(true)}
         />
       )}
     </div>

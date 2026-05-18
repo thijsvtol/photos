@@ -6,7 +6,6 @@ import { Heart, Star, Check } from 'lucide-react';
 import ProgressiveImage from './ProgressiveImage';
 import ProgressiveVideo from './ProgressiveVideo';
 import { getPreviewUrl } from '../api';
-import { prioritize } from '../services/imageLoadManager';
 import type { Photo } from '../types';
 
 interface JustifiedGridProps {
@@ -217,10 +216,7 @@ const PhotoOverlayInner: React.FC<PhotoOverlayProps> = ({
             onToggleSelection(photo.id);
             return;
           }
-          // Abort all other pending image loads so the clicked photo's
-          // preview loads with priority in the detail view.
-          const clickedSrc = getPreviewUrl(slug, photo.id, photo.file_type, photo.cache_version);
-          prioritize(clickedSrc);
+          // Store scroll position for back navigation
           sessionStorage.setItem(`gallery_scroll_${slug}`, window.scrollY.toString());
         }}
         onTouchStart={startLongPress}
