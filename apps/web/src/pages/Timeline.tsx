@@ -146,12 +146,17 @@ const Timeline: React.FC = () => {
     return () => { cancelled = true; };
   }, []);
 
-  // Infinite scroll
+  // Infinite scroll — use refs to avoid recreating observer on every state change
+  const nextCursorRef = useRef(nextCursor);
+  const loadingMoreRef = useRef(loadingMore);
+  nextCursorRef.current = nextCursor;
+  loadingMoreRef.current = loadingMore;
+
   const loadMore = useCallback(async () => {
-    if (!nextCursor || loadingMore) return;
+    if (!nextCursorRef.current || loadingMoreRef.current) return;
     setLoadingMore(true);
     try {
-      const data = await getTimeline(50, nextCursor);
+      const data = await getTimeline(50, nextCursorRef.current);
       setPhotos((prev) => [...prev, ...data.photos]);
       setNextCursor(data.nextCursor);
     } catch (err) {
@@ -159,7 +164,7 @@ const Timeline: React.FC = () => {
     } finally {
       setLoadingMore(false);
     }
-  }, [nextCursor, loadingMore]);
+  }, []);
 
   useEffect(() => {
     const el = loadMoreRef.current;
@@ -167,7 +172,7 @@ const Timeline: React.FC = () => {
 
     const observer = new IntersectionObserver(
       ([entry]) => {
-        if (entry.isIntersecting && nextCursor && !loadingMore) {
+        if (entry.isIntersecting) {
           loadMore();
         }
       },
@@ -176,7 +181,7 @@ const Timeline: React.FC = () => {
 
     observer.observe(el);
     return () => observer.disconnect();
-  }, [nextCursor, loadingMore, loadMore]);
+  }, [nextCursor, loadMore]);
 
   // Track active date on scroll (throttled to avoid excessive re-renders)
   useEffect(() => {
@@ -313,6 +318,13 @@ const Timeline: React.FC = () => {
                 {loadingMore && (
                   <div className="inline-block animate-spin rounded-full h-6 w-6 border-b-2 border-blue-600 dark:border-blue-400" />
                 )}
+              </div>
+            )}
+
+            {/* End of timeline indicator */}
+            {!nextCursor && !loading && photos.length > 0 && (
+              <div className="py-8 text-center text-sm text-gray-400 dark:text-gray-500">
+                You've reached the end of the timeline
               </div>
             )}
 

@@ -83,7 +83,7 @@ export function trackPhotoView(photoId: number, eventSlug: string): void {
  * @param count - Number of photos (for bulk downloads)
  */
 export function trackPhotoDownload(
-  photoId: number | 'bulk',
+  photoId: string | 'bulk',
   eventSlug: string,
   bulk: boolean = false,
   count: number = 1
@@ -91,7 +91,7 @@ export function trackPhotoDownload(
   if (!isAnalyticsEnabled()) return;
 
   window.gtag!('event', 'download', {
-    item_id: photoId.toString(),
+    item_id: String(photoId),
     item_category: eventSlug,
     download_type: bulk ? 'bulk' : 'single',
     count: count,
@@ -103,11 +103,11 @@ export function trackPhotoDownload(
  * @param photoId - The photo ID
  * @param action - Whether adding or removing from favorites
  */
-export function trackFavorite(photoId: number, action: 'add' | 'remove'): void {
+export function trackFavorite(photoId: string, action: 'add' | 'remove'): void {
   if (!isAnalyticsEnabled()) return;
 
   window.gtag!('event', action === 'add' ? 'add_to_wishlist' : 'remove_from_wishlist', {
-    item_id: photoId.toString(),
+    item_id: photoId,
   });
 }
 

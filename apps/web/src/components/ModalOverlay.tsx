@@ -76,13 +76,16 @@ const ModalOverlay: React.FC<ModalOverlayProps> = ({ onClose, children, classNam
 
   // Prevent body scroll and pull-to-refresh while modal is open
   useEffect(() => {
-    const original = document.body.style.overflow;
-    const originalOverscroll = document.body.style.overscrollBehavior;
+    const origBodyOverflow = document.body.style.overflow;
+    const origBodyOverscroll = document.body.style.overscrollBehavior;
+    const origHtmlOverscroll = document.documentElement.style.overscrollBehavior;
     document.body.style.overflow = 'hidden';
-    document.body.style.overscrollBehavior = 'contain';
+    document.body.style.overscrollBehavior = 'none';
+    document.documentElement.style.overscrollBehavior = 'none';
     return () => {
-      document.body.style.overflow = original;
-      document.body.style.overscrollBehavior = originalOverscroll;
+      document.body.style.overflow = origBodyOverflow;
+      document.body.style.overscrollBehavior = origBodyOverscroll;
+      document.documentElement.style.overscrollBehavior = origHtmlOverscroll;
     };
   }, []);
 

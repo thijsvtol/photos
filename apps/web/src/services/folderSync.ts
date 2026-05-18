@@ -245,18 +245,23 @@ class FolderSyncService {
   }
 
   /**
-   * Convert base64 to Blob
+   * Convert base64 to Blob using chunked processing to avoid OOM on large files.
    */
   private base64ToBlob(base64: string, mimeType: string): Blob {
     const byteCharacters = atob(base64);
-    const byteNumbers = new Array(byteCharacters.length);
+    const sliceSize = 512 * 1024; // Process 512KB at a time
+    const byteArrays: BlobPart[] = [];
 
-    for (let i = 0; i < byteCharacters.length; i++) {
-      byteNumbers[i] = byteCharacters.charCodeAt(i);
+    for (let offset = 0; offset < byteCharacters.length; offset += sliceSize) {
+      const end = Math.min(offset + sliceSize, byteCharacters.length);
+      const byteArray = new Uint8Array(end - offset);
+      for (let i = 0; i < byteArray.length; i++) {
+        byteArray[i] = byteCharacters.charCodeAt(offset + i);
+      }
+      byteArrays.push(byteArray as unknown as BlobPart);
     }
 
-    const byteArray = new Uint8Array(byteNumbers);
-    return new Blob([byteArray], { type: mimeType });
+    return new Blob(byteArrays, { type: mimeType });
   }
 }
 

@@ -12,7 +12,6 @@ const Navbar: React.FC = () => {
   const [showUserMenu, setShowUserMenu] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
-  const isAndroid = Capacitor.getPlatform() === 'android';
   
   // Close menu when clicking outside
   useEffect(() => {
@@ -53,7 +52,7 @@ const Navbar: React.FC = () => {
   };
 
   return (
-    <nav className={`bg-white dark:bg-gray-900 border-b border-gray-200 dark:border-gray-700 sticky top-0 z-50 shadow-sm ${isAndroid ? 'pt-8' : ''}`}>
+    <nav className="bg-white dark:bg-gray-900 border-b border-gray-200 dark:border-gray-700 sticky top-0 z-50 shadow-sm">
       <div className="max-w-7xl mx-auto px-3 sm:px-4 lg:px-8">
         <div className="flex items-center justify-between h-16">
           {/* Logo */}

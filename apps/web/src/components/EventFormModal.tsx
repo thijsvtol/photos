@@ -189,7 +189,7 @@ const EventFormModal: React.FC<EventFormModalProps> = ({ isOpen, onClose, event,
       <ModalOverlay onClose={onClose} label={isEdit ? 'Edit event' : 'Create new album'}>
       <div className="fixed inset-0 bg-black/60 flex items-center justify-center p-4 animate-in fade-in duration-200" onClick={onClose}>
         <div
-          className="bg-white dark:bg-gray-800 rounded-2xl shadow-xl max-w-2xl w-full max-h-[90vh] overflow-y-auto animate-in zoom-in-95 fade-in duration-200"
+          className="bg-white dark:bg-gray-800 rounded-2xl shadow-xl max-w-2xl w-full max-h-[90vh] overflow-y-auto overscroll-contain animate-in zoom-in-95 fade-in duration-200"
           onClick={(e) => e.stopPropagation()}
         >
           {/* Header */}

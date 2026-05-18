@@ -1,5 +1,5 @@
-import React from 'react';
-import { Upload } from 'lucide-react';
+import React, { useState } from 'react';
+import { Upload, FolderSync } from 'lucide-react';
 import { Capacitor } from '@capacitor/core';
 import { useUpload } from '../hooks/useUpload';
 import FolderSyncManager from './FolderSyncManager';
@@ -24,6 +24,7 @@ const UploadPanel: React.FC<UploadPanelProps> = ({ slug, onUploadsComplete }) =>
   } = useUpload(slug);
 
   const isNative = Capacitor.isNativePlatform();
+  const [showFolderSync, setShowFolderSync] = useState(false);
 
   // Notify parent when all uploads complete
   const prevActiveRef = React.useRef(hasActiveUploads);
@@ -52,10 +53,21 @@ const UploadPanel: React.FC<UploadPanelProps> = ({ slug, onUploadsComplete }) =>
         </div>
       )}
 
-      {/* Folder sync (Android only) — shown inline on gallery page */}
+      {/* Folder sync (Android only) — toggle button + collapsible panel */}
       {isNative && (
         <div className="mb-4">
-          <FolderSyncManager eventSlug={slug} />
+          <button
+            onClick={() => setShowFolderSync(!showFolderSync)}
+            className="flex items-center gap-2 px-3 py-2 text-sm font-medium text-gray-700 dark:text-gray-300 bg-gray-100 dark:bg-gray-800 rounded-lg hover:bg-gray-200 dark:hover:bg-gray-700 transition-colors"
+          >
+            <FolderSync className="w-4 h-4" />
+            Folder Sync
+          </button>
+          {showFolderSync && (
+            <div className="mt-3">
+              <FolderSyncManager eventSlug={slug} />
+            </div>
+          )}
         </div>
       )}
     </>

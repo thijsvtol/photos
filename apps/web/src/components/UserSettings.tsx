@@ -163,13 +163,16 @@ const UserSettings: React.FC<UserSettingsProps> = ({ isOpen, onClose }) => {
   // Prevent body scroll and pull-to-refresh while modal is open
   useEffect(() => {
     if (!isOpen) return;
-    const origOverflow = document.body.style.overflow;
-    const origOverscroll = document.body.style.overscrollBehavior;
+    const origBodyOverflow = document.body.style.overflow;
+    const origBodyOverscroll = document.body.style.overscrollBehavior;
+    const origHtmlOverscroll = document.documentElement.style.overscrollBehavior;
     document.body.style.overflow = 'hidden';
-    document.body.style.overscrollBehavior = 'contain';
+    document.body.style.overscrollBehavior = 'none';
+    document.documentElement.style.overscrollBehavior = 'none';
     return () => {
-      document.body.style.overflow = origOverflow;
-      document.body.style.overscrollBehavior = origOverscroll;
+      document.body.style.overflow = origBodyOverflow;
+      document.body.style.overscrollBehavior = origBodyOverscroll;
+      document.documentElement.style.overscrollBehavior = origHtmlOverscroll;
     };
   }, [isOpen]);
 
@@ -214,7 +217,7 @@ const UserSettings: React.FC<UserSettingsProps> = ({ isOpen, onClose }) => {
         </div>
 
         {/* Content */}
-        <div className="flex-1 overflow-y-auto p-6">
+        <div className="flex-1 overflow-y-auto overscroll-contain p-6">
           {activeTab === 'profile' && (
             <div className="space-y-6">
               {/* Theme Settings */}

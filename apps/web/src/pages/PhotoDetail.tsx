@@ -961,7 +961,7 @@ const PhotoDetail: React.FC = () => {
       setIsFavorited(!isFavorited);
       
       // Track favorite action
-      trackFavorite(parseInt(photo.id), isFavorited ? 'remove' : 'add');
+      trackFavorite(photo.id, isFavorited ? 'remove' : 'add');
     } catch (err) {
       console.error('Failed to toggle favorite:', err);
       toast.showError('Failed to update favorite. Please try again.');
@@ -1005,19 +1005,19 @@ const PhotoDetail: React.FC = () => {
   const handleDownloadOriginal = () => {
     if (!slug || !photo) return;
     downloadOriginal(slug, photo.id);
-    trackPhotoDownload(parseInt(photo.id), slug, false, 1);
+    trackPhotoDownload(photo.id, slug, false, 1);
   };
 
   const handleDownloadSmall = () => {
     if (!slug || !photo) return;
     downloadSmall(slug, photo.id);
-    trackPhotoDownload(parseInt(photo.id), slug, false, 1);
+    trackPhotoDownload(photo.id, slug, false, 1);
   };
 
   const handleDownloadInstagram = () => {
     if (!slug || !photo) return;
     downloadInstagram(slug, photo.id);
-    trackPhotoDownload(parseInt(photo.id), slug, false, 1);
+    trackPhotoDownload(photo.id, slug, false, 1);
   };
 
   const handleToggleFeatured = async () => {

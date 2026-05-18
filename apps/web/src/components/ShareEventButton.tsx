@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Share2, UserPlus, X } from 'lucide-react';
 import { getPreviewUrl } from '../api';
 import type { Event, Photo } from '../types';
@@ -18,6 +18,22 @@ interface ShareEventButtonProps {
 export function ShareEventButton({ event, slug, photos, canInvite = false }: ShareEventButtonProps) {
   const [showShareMenu, setShowShareMenu] = useState(false);
   const [showCollaboratorModal, setShowCollaboratorModal] = useState(false);
+
+  // Prevent body scroll and pull-to-refresh while collaborator modal is open
+  useEffect(() => {
+    if (!showCollaboratorModal) return;
+    const origBodyOverflow = document.body.style.overflow;
+    const origBodyOverscroll = document.body.style.overscrollBehavior;
+    const origHtmlOverscroll = document.documentElement.style.overscrollBehavior;
+    document.body.style.overflow = 'hidden';
+    document.body.style.overscrollBehavior = 'none';
+    document.documentElement.style.overscrollBehavior = 'none';
+    return () => {
+      document.body.style.overflow = origBodyOverflow;
+      document.body.style.overscrollBehavior = origBodyOverscroll;
+      document.documentElement.style.overscrollBehavior = origHtmlOverscroll;
+    };
+  }, [showCollaboratorModal]);
 
   const copyToClipboard = async (value: string) => {
     if (typeof navigator !== 'undefined' && navigator.clipboard?.writeText) {
@@ -180,7 +196,7 @@ export function ShareEventButton({ event, slug, photos, canInvite = false }: Sha
       {showCollaboratorModal && (
         <div className="fixed inset-0 z-[120] flex items-center justify-center p-3 sm:p-6 overscroll-contain">
           <div className="absolute inset-0 bg-black/60 backdrop-blur-[1px]" onClick={() => setShowCollaboratorModal(false)} />
-          <div className="relative z-[121] w-full max-w-4xl max-h-[90vh] overflow-y-auto rounded-xl">
+          <div className="relative z-[121] w-full max-w-4xl max-h-[90vh] overflow-y-auto overscroll-contain rounded-xl">
             <div className="sticky top-0 z-10 flex items-center justify-between px-4 py-3 bg-white dark:bg-gray-900 border border-b-0 border-gray-200 dark:border-gray-700 rounded-t-xl">
               <h3 className="text-base sm:text-lg font-semibold text-gray-900 dark:text-gray-100">Collaborators & Invite Links</h3>
               <button

@@ -304,7 +304,7 @@ const EventGallery: React.FC = () => {
       await haptics.light();
       
       // Track favorite action
-      trackFavorite(parseInt(photoId), isFavorited ? 'remove' : 'add');
+      trackFavorite(photoId, isFavorited ? 'remove' : 'add');
       
       // Update local state
       const newFavorites = new Set(userFavorites);

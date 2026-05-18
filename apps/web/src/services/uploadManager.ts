@@ -192,12 +192,24 @@ class UploadManager {
     }
   }
 
-  /** Resume any pending/failed uploads */
+  /** Resume any pending/failed/interrupted uploads */
   private async resumeAll() {
     try {
       const pending = await getPendingUploads();
       for (const item of pending) {
-        // Update our in-memory copy
+        // Skip items that are currently being processed to avoid overwriting live progress
+        if (this.processing.has(item.id)) continue;
+
+        // Items stuck as 'uploading' in IndexedDB were interrupted (app was killed).
+        // Reset them to 'pending' so they get retried from scratch.
+        if (item.status === 'uploading') {
+          item.status = 'pending';
+          item.progress = 0;
+          item.uploadId = undefined;
+          item.parts = undefined;
+          await updateQueueItem(item.id, { status: 'pending', progress: 0, uploadId: undefined, parts: undefined });
+        }
+
         this.items.set(item.id, item);
         if (item.status === 'pending' || item.status === 'failed') {
           this.processUpload(item);
@@ -445,8 +457,8 @@ class UploadManager {
         cameraMake: cameraMake || undefined,
         cameraModel: cameraModel || undefined,
         lensModel: lensModel || undefined,
-        latitude: latitude || undefined,
-        longitude: longitude || undefined,
+        latitude: latitude != null && !isNaN(latitude) ? latitude : undefined,
+        longitude: longitude != null && !isNaN(longitude) ? longitude : undefined,
         blurPlaceholder: blurPlaceholder || undefined,
       };
     } catch { return {}; }
