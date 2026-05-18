@@ -1031,20 +1031,18 @@ const EventGallery: React.FC = () => {
 
         {/* Date Timeline - Only show for multi-day events */}
         {isMultiDateView && (
-          <div className="-mx-3 sm:-mx-4 lg:-mx-8 mb-6">
-            <DateTimeline 
-              dates={dates} 
-              activeDate={activeDate} 
-              onDateClick={handleDateClick}
-              topStyle={
-                selectedPhotos.size > 0
+          <div className="-mx-3 sm:-mx-4 lg:-mx-8 mb-6 sticky z-40" style={{ top: selectedPhotos.size > 0
                   ? isAndroid
                     ? 'calc(6rem + 3rem + env(safe-area-inset-top))'
                     : 'calc(4rem + 3rem + env(safe-area-inset-top))'
                   : isAndroid
                     ? 'calc(6rem + env(safe-area-inset-top))'
                     : 'calc(4rem + env(safe-area-inset-top))'
-              }
+          }}>
+            <DateTimeline 
+              dates={dates} 
+              activeDate={activeDate} 
+              onDateClick={handleDateClick}
             />
           </div>
         )}

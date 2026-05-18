@@ -1,25 +1,14 @@
-import React, { useEffect, useState, useRef } from 'react';
+import React, { useEffect, useRef } from 'react';
 import { Calendar, ChevronLeft, ChevronRight } from 'lucide-react';
 
 interface DateTimelineProps {
   dates: string[]; // Array of dates in YYYY-MM-DD format
   activeDate: string | null;
   onDateClick: (date: string) => void;
-  topStyle?: string; // CSS value for `top` when sticky (supports calc/env)
 }
 
-const DateTimeline: React.FC<DateTimelineProps> = ({ dates, activeDate, onDateClick, topStyle = '0px' }) => {
-  const [isSticky, setIsSticky] = useState(false);
+const DateTimeline: React.FC<DateTimelineProps> = ({ dates, activeDate, onDateClick }) => {
   const scrollContainerRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    const handleScroll = () => {
-      setIsSticky(window.scrollY > 200);
-    };
-
-    window.addEventListener('scroll', handleScroll);
-    return () => window.removeEventListener('scroll', handleScroll);
-  }, []);
 
   // Auto-scroll active date into view
   useEffect(() => {
@@ -78,13 +67,10 @@ const DateTimeline: React.FC<DateTimelineProps> = ({ dates, activeDate, onDateCl
 
   return (
     <div 
-      className={`bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 transition-all duration-300 z-40 ${
-        isSticky ? 'fixed left-0 right-0 shadow-md' : 'relative'
-      }`}
-      style={isSticky ? { top: topStyle } : undefined}
+      className="bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 shadow-sm"
     >
       <div className="max-w-7xl mx-auto px-3 sm:px-4 lg:px-8">
-        <div className={`flex items-center gap-2 ${isSticky ? 'py-1.5' : 'py-2'}`}>
+        <div className="flex items-center gap-2 py-2">
           {/* Icon and label - hidden on very small screens */}
           <div className="hidden sm:flex items-center gap-2 text-gray-600 dark:text-gray-400 mr-2 flex-shrink-0">
             <Calendar className="w-5 h-5" />

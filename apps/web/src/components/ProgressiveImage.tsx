@@ -1,4 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { Capacitor } from '@capacitor/core';
+
+const isNative = Capacitor.isNativePlatform();
 
 interface ProgressiveImageProps {
   src: string;
@@ -19,28 +22,54 @@ const ProgressiveImage: React.FC<ProgressiveImageProps> = ({
 }) => {
   const [imageLoaded, setImageLoaded] = useState(false);
   const [imageError, setImageError] = useState(false);
+  const [activeSrc, setActiveSrc] = useState<string | null>(isNative ? null : src);
+  const containerRef = useRef<HTMLDivElement>(null);
   const imgRef = useRef<HTMLImageElement>(null);
 
   useEffect(() => {
     setImageLoaded(false);
     setImageError(false);
+    setActiveSrc(isNative ? null : src);
   }, [src]);
 
-  // Check if image was already cached (loaded before React could attach onLoad)
+  // On native: use IntersectionObserver to set src when near viewport
+  useEffect(() => {
+    if (!isNative) return;
+    const el = containerRef.current;
+    if (!el || activeSrc) return;
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        for (const entry of entries) {
+          if (entry.isIntersecting) {
+            setActiveSrc(src);
+            observer.disconnect();
+          }
+        }
+      },
+      { rootMargin: '300px 0px' }
+    );
+
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [src, activeSrc]);
+
+  // Check if image was already cached
   useEffect(() => {
     const img = imgRef.current;
     if (img && img.complete && img.naturalWidth > 0) {
       setImageLoaded(true);
     }
-  }, [src]);
+  }, [activeSrc]);
 
   const handleRetry = () => {
     setImageError(false);
     setImageLoaded(false);
+    setActiveSrc(src);
   };
 
   return (
-    <div className="relative overflow-hidden w-full h-full">
+    <div ref={containerRef} className="relative overflow-hidden w-full h-full">
       {/* Blur placeholder shown while loading */}
       {blurDataUrl && !imageLoaded && !imageError && (
         <img
@@ -63,19 +92,19 @@ const ProgressiveImage: React.FC<ProgressiveImageProps> = ({
             Retry
           </button>
         </div>
-      ) : (
+      ) : activeSrc ? (
         <img
           ref={imgRef}
-          src={src}
+          src={activeSrc}
           alt={alt}
           className={`${className} transition-opacity duration-300 ${imageLoaded ? 'opacity-100' : 'opacity-0'}`}
           style={style}
-          loading={loading}
+          loading={isNative ? undefined : loading}
           decoding="async"
           onLoad={() => setImageLoaded(true)}
           onError={() => setImageError(true)}
         />
-      )}
+      ) : null}
     </div>
   );
 };
