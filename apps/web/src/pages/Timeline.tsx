@@ -44,6 +44,53 @@ function formatDate(date: string): string {
   return formatted;
 }
 
+/**
+ * Lazily renders children only when the element is near the viewport.
+ * Shows a placeholder with estimated height when off-screen to maintain scroll position.
+ */
+function LazyDateGroup({ photoCount, children }: { photoCount: number; children: React.ReactNode }) {
+  const ref = useRef<HTMLDivElement>(null);
+  const [isVisible, setIsVisible] = useState(false);
+  const [measuredHeight, setMeasuredHeight] = useState<number | null>(null);
+
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+
+    const observer = new IntersectionObserver(
+      ([entry]) => {
+        if (entry.isIntersecting) {
+          setIsVisible(true);
+        } else if (measuredHeight !== null) {
+          // Only hide if we've measured the height (so placeholder can be sized correctly)
+          setIsVisible(false);
+        }
+      },
+      { rootMargin: '600px 0px' } // Start rendering 600px before entering viewport
+    );
+
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [measuredHeight]);
+
+  // Measure actual height once rendered so placeholder can be accurate
+  useEffect(() => {
+    if (isVisible && ref.current) {
+      const h = ref.current.getBoundingClientRect().height;
+      if (h > 0) setMeasuredHeight(h);
+    }
+  }, [isVisible, children]);
+
+  // Estimate height: ~200px per row, ~4 photos per row on average
+  const estimatedHeight = measuredHeight || Math.max(120, Math.ceil(photoCount / 4) * 200);
+
+  return (
+    <div ref={ref} style={!isVisible ? { minHeight: estimatedHeight } : undefined}>
+      {isVisible ? children : null}
+    </div>
+  );
+}
+
 const Timeline: React.FC = () => {
   const { isAuthenticated } = useAuth();
   const toast = useToast();
@@ -243,7 +290,7 @@ const Timeline: React.FC = () => {
                     else dateRefs.current.delete(date);
                   }}
                 >
-                  <div className="mb-3 sm:mb-4 sticky top-20 z-20 backdrop-blur-sm bg-white/80 dark:bg-gray-900/70 rounded-xl px-3 py-2 border border-gray-200/70 dark:border-gray-700/70">
+                  <div className="mb-3 sm:mb-4 sticky top-[6.5rem] z-20 backdrop-blur-sm bg-white/80 dark:bg-gray-900/70 rounded-xl px-3 py-2 border border-gray-200/70 dark:border-gray-700/70">
                     <h2 className="text-lg sm:text-xl font-semibold text-gray-900 dark:text-white">
                       {formattedDate}
                     </h2>
@@ -253,29 +300,31 @@ const Timeline: React.FC = () => {
                     </p>
                   </div>
 
-                  {/* Render a JustifiedGrid per event within this date */}
-                  {Array.from(byEvent.entries()).map(([eventSlug, eventPhotos]) => (
-                    <div key={eventSlug} className="mb-2">
-                      {byEvent.size > 1 && (
-                        <p className="text-xs text-gray-500 dark:text-gray-400 mb-1 px-1">
-                          {eventPhotos[0]?.event_name || eventSlug}
-                        </p>
-                      )}
-                      <JustifiedGrid
-                        photos={eventPhotos}
-                        slug={eventSlug}
-                        targetRowHeight={targetRowHeight}
-                        spacing={4}
-                        selectedPhotos={selectedPhotos}
-                        forceControlsVisible={selectedPhotos.size > 0}
-                        userFavorites={userFavorites}
-                        supportsHover={supportsHover}
-                        linkState={{ fromTimeline: true }}
-                        onToggleSelection={togglePhotoSelection}
-                        onToggleFavorite={isAuthenticated ? toggleFavorite : undefined}
-                      />
-                    </div>
-                  ))}
+                  <LazyDateGroup photoCount={datePhotos.length}>
+                    {/* Render a JustifiedGrid per event within this date */}
+                    {Array.from(byEvent.entries()).map(([eventSlug, eventPhotos]) => (
+                      <div key={eventSlug} className="mb-2">
+                        {byEvent.size > 1 && (
+                          <p className="text-xs text-gray-500 dark:text-gray-400 mb-1 px-1">
+                            {eventPhotos[0]?.event_name || eventSlug}
+                          </p>
+                        )}
+                        <JustifiedGrid
+                          photos={eventPhotos}
+                          slug={eventSlug}
+                          targetRowHeight={targetRowHeight}
+                          spacing={4}
+                          selectedPhotos={selectedPhotos}
+                          forceControlsVisible={selectedPhotos.size > 0}
+                          userFavorites={userFavorites}
+                          supportsHover={supportsHover}
+                          linkState={{ fromTimeline: true }}
+                          onToggleSelection={togglePhotoSelection}
+                          onToggleFavorite={isAuthenticated ? toggleFavorite : undefined}
+                        />
+                      </div>
+                    ))}
+                  </LazyDateGroup>
                 </div>
               );
             })}

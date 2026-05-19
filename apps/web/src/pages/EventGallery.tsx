@@ -1,7 +1,6 @@
 import React, { useEffect, useState, useRef } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { Upload, Settings } from 'lucide-react';
-import { Capacitor } from '@capacitor/core';
 import Navbar from '../components/Navbar';
 import Footer from '../components/Footer';
 import { GallerySkeleton } from '../components/Skeletons';
@@ -59,7 +58,6 @@ const EventGallery: React.FC = () => {
   const loadMoreRef = useRef<HTMLDivElement | null>(null);
   const lastScrollYRef = useRef(0);
   const prefetchedPhotoIdsRef = useRef<Set<string>>(new Set());
-  const isAndroid = Capacitor.getPlatform() === 'android';
   const canUpload = isAdmin || collaboratorRole === 'uploader' || collaboratorRole === 'editor' || collaboratorRole === 'admin';
   const canDelete = isAdmin || collaboratorRole === 'editor' || collaboratorRole === 'admin';
   const canCreateInvite = isAdmin || collaboratorRole === 'editor' || collaboratorRole === 'admin';
@@ -1059,14 +1057,7 @@ const EventGallery: React.FC = () => {
 
         {/* Date Timeline - Only show for multi-day events */}
         {isMultiDateView && (
-          <div className="-mx-3 sm:-mx-4 lg:-mx-8 mb-6 sticky z-40" style={{ top: selectedPhotos.size > 0
-                  ? isAndroid
-                    ? 'calc(6rem + 3rem + env(safe-area-inset-top))'
-                    : 'calc(4rem + 3rem + env(safe-area-inset-top))'
-                  : isAndroid
-                    ? 'calc(6rem + env(safe-area-inset-top))'
-                    : 'calc(4rem + env(safe-area-inset-top))'
-          }}>
+          <div className="fixed top-16 left-0 right-0 z-40">
             <DateTimeline 
               dates={dates} 
               activeDate={activeDate} 
@@ -1092,7 +1083,7 @@ const EventGallery: React.FC = () => {
           </div>
         ) : isMultiDateView ? (
           // Multi-date view with date headers
-          <div className="space-y-7" ref={densityContainerRef}>
+          <div className="space-y-7 pt-12" ref={densityContainerRef}>
             {visibleDates.map((date) => {
               const datePhotos = photosByDate.get(date) || [];
               const dateObj = new Date(date);
@@ -1116,7 +1107,7 @@ const EventGallery: React.FC = () => {
                   }}
                 >
                   {/* Date header */}
-                  <div className="mb-3 sm:mb-4 flex items-center justify-between sticky top-20 z-20 backdrop-blur-sm bg-white/80 dark:bg-gray-900/70 rounded-xl px-3 py-2 border border-gray-200/70 dark:border-gray-700/70">
+                  <div className="mb-3 sm:mb-4 flex items-center justify-between sticky top-[6.5rem] z-20 backdrop-blur-sm bg-white/80 dark:bg-gray-900/70 rounded-xl px-3 py-2 border border-gray-200/70 dark:border-gray-700/70">
                     <div>
                       <h2 className="text-lg sm:text-xl font-semibold text-gray-900 dark:text-white">
                         {formattedDate}

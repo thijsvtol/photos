@@ -12,51 +12,61 @@ interface DateScrubberProps {
 }
 
 const DateScrubber: React.FC<DateScrubberProps> = ({ dateRefs, dates, activeDate, onScrollToDate }) => {
-  const trackRef = useRef<HTMLDivElement>(null);
-  const [isDragging, setIsDragging] = useState(false);
-  const [hoverLabel, setHoverLabel] = useState<string | null>(null);
-  const [hoverY, setHoverY] = useState(0);
+  const scrollContainerRef = useRef<HTMLDivElement>(null);
   const [isVisible, setIsVisible] = useState(false);
-  const hideTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const activePillRef = useRef<HTMLButtonElement>(null);
 
-  // Only show after scrolling past 400px and if there are multiple dates
+  // Only show after scrolling past 200px and if there are multiple dates
   useEffect(() => {
     if (dates.length <= 1) return;
 
     const handleScroll = () => {
-      setIsVisible(window.scrollY > 400);
+      setIsVisible(window.scrollY > 200);
     };
     handleScroll();
     window.addEventListener('scroll', handleScroll, { passive: true });
     return () => window.removeEventListener('scroll', handleScroll);
   }, [dates.length]);
 
+  // Auto-scroll the active pill into view
+  useEffect(() => {
+    if (activePillRef.current && scrollContainerRef.current) {
+      const container = scrollContainerRef.current;
+      const pill = activePillRef.current;
+      const pillLeft = pill.offsetLeft;
+      const pillWidth = pill.offsetWidth;
+      const containerWidth = container.clientWidth;
+      const scrollLeft = container.scrollLeft;
+
+      // Center the active pill in the container
+      const targetScroll = pillLeft - containerWidth / 2 + pillWidth / 2;
+      if (Math.abs(targetScroll - scrollLeft) > pillWidth) {
+        container.scrollTo({ left: targetScroll, behavior: 'smooth' });
+      }
+    }
+  }, [activeDate]);
+
   const formatLabel = useCallback((dateStr: string) => {
     const date = new Date(dateStr);
     const today = new Date();
+    const yesterday = new Date(today);
+    yesterday.setDate(yesterday.getDate() - 1);
+
+    if (dateStr === today.toISOString().slice(0, 10)) return 'Today';
+    if (dateStr === yesterday.toISOString().slice(0, 10)) return 'Yesterday';
+
     if (date.getFullYear() === today.getFullYear()) {
       return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
     }
     return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: '2-digit' });
   }, []);
 
-  const getDateFromY = useCallback(
-    (clientY: number): string | null => {
-      if (!trackRef.current || dates.length === 0) return null;
-      const rect = trackRef.current.getBoundingClientRect();
-      const fraction = Math.max(0, Math.min(1, (clientY - rect.top) / rect.height));
-      const index = Math.round(fraction * (dates.length - 1));
-      return dates[index] || null;
-    },
-    [dates]
-  );
-
   const scrollToDate = useCallback(
     (dateStr: string) => {
       const el = dateRefs.current.get(dateStr);
       if (el) {
         const y = el.getBoundingClientRect().top + window.scrollY - 120;
-        window.scrollTo({ top: y, behavior: 'auto' });
+        window.scrollTo({ top: y, behavior: 'smooth' });
       } else if (onScrollToDate) {
         onScrollToDate(dateStr);
       }
@@ -64,150 +74,32 @@ const DateScrubber: React.FC<DateScrubberProps> = ({ dateRefs, dates, activeDate
     [dateRefs, onScrollToDate]
   );
 
-  const handleInteraction = useCallback(
-    (clientY: number) => {
-      const date = getDateFromY(clientY);
-      if (date) {
-        setHoverLabel(formatLabel(date));
-        if (trackRef.current) {
-          const rect = trackRef.current.getBoundingClientRect();
-          setHoverY(clientY - rect.top);
-        }
-        scrollToDate(date);
-      }
-    },
-    [formatLabel, getDateFromY, scrollToDate]
-  );
-
-  // Mouse events
-  const onMouseDown = useCallback(
-    (e: React.MouseEvent) => {
-      e.preventDefault();
-      setIsDragging(true);
-      handleInteraction(e.clientY);
-    },
-    [handleInteraction]
-  );
-
-  useEffect(() => {
-    if (!isDragging) return;
-
-    const onMouseMove = (e: MouseEvent) => {
-      e.preventDefault();
-      handleInteraction(e.clientY);
-    };
-    const onMouseUp = () => {
-      setIsDragging(false);
-      setHoverLabel(null);
-    };
-
-    window.addEventListener('mousemove', onMouseMove);
-    window.addEventListener('mouseup', onMouseUp);
-    return () => {
-      window.removeEventListener('mousemove', onMouseMove);
-      window.removeEventListener('mouseup', onMouseUp);
-    };
-  }, [isDragging, handleInteraction]);
-
-  // Touch events
-  const onTouchStart = useCallback(
-    (e: React.TouchEvent) => {
-      setIsDragging(true);
-      handleInteraction(e.touches[0].clientY);
-    },
-    [handleInteraction]
-  );
-
-  const onTouchMove = useCallback(
-    (e: React.TouchEvent) => {
-      e.preventDefault();
-      handleInteraction(e.touches[0].clientY);
-    },
-    [handleInteraction]
-  );
-
-  const onTouchEnd = useCallback(() => {
-    setIsDragging(false);
-    setHoverLabel(null);
-  }, []);
-
-  // Show on hover, hide after timeout
-  const onMouseEnter = () => {
-    if (hideTimeoutRef.current) {
-      clearTimeout(hideTimeoutRef.current);
-      hideTimeoutRef.current = null;
-    }
-  };
-
-  const onMouseLeave = () => {
-    if (!isDragging) {
-      hideTimeoutRef.current = setTimeout(() => {
-        setHoverLabel(null);
-      }, 300);
-    }
-  };
-
-  // Indicator position based on active date
-  const activeIndex = activeDate ? dates.indexOf(activeDate) : -1;
-  const activeFraction = dates.length > 1 && activeIndex >= 0 ? activeIndex / (dates.length - 1) : 0;
-
   if (!isVisible || dates.length <= 1) return null;
 
   return (
-    <div
-      className="fixed right-1 sm:right-2 z-30 flex items-center"
-      style={{ top: '50%', transform: 'translateY(-50%)', height: '60vh' }}
-      onMouseEnter={onMouseEnter}
-      onMouseLeave={onMouseLeave}
-    >
-      {/* Date label tooltip */}
-      {(hoverLabel || isDragging) && (
-        <div
-          className="absolute right-8 sm:right-10 bg-gray-900/90 dark:bg-gray-100/90 text-white dark:text-gray-900 text-xs sm:text-sm font-medium px-3 py-1.5 rounded-lg whitespace-nowrap pointer-events-none shadow-lg"
-          style={{ top: Math.max(0, Math.min(hoverY - 14, trackRef.current ? trackRef.current.clientHeight - 28 : 0)) }}
-        >
-          {hoverLabel}
-        </div>
-      )}
-
-      {/* Scrubber track */}
+    <div className="fixed top-16 left-0 right-0 z-40 bg-white/90 dark:bg-gray-900/90 backdrop-blur-md border-b border-gray-200/70 dark:border-gray-700/70 shadow-sm">
       <div
-        ref={trackRef}
-        className={`relative w-5 sm:w-6 h-full cursor-grab active:cursor-grabbing touch-none select-none ${
-          isDragging ? 'opacity-100' : 'opacity-40 hover:opacity-80'
-        } transition-opacity`}
-        onMouseDown={onMouseDown}
-        onTouchStart={onTouchStart}
-        onTouchMove={onTouchMove}
-        onTouchEnd={onTouchEnd}
+        ref={scrollContainerRef}
+        className="flex items-center gap-1.5 px-3 py-1.5 overflow-x-auto scrollbar-hide"
+        style={{ scrollbarWidth: 'none', msOverflowStyle: 'none' }}
       >
-        {/* Track line */}
-        <div className="absolute left-1/2 -translate-x-1/2 w-0.5 h-full bg-gray-400/50 dark:bg-gray-500/50 rounded-full" />
-
-        {/* Date tick marks */}
-        {dates.map((date, i) => {
-          const top = dates.length > 1 ? `${(i / (dates.length - 1)) * 100}%` : '50%';
+        {dates.map((date) => {
           const isActive = date === activeDate;
           return (
-            <div
+            <button
               key={date}
-              className={`absolute left-1/2 -translate-x-1/2 rounded-full transition-all ${
+              ref={isActive ? activePillRef : undefined}
+              onClick={() => scrollToDate(date)}
+              className={`flex-shrink-0 px-2.5 py-1 rounded-full text-xs font-medium transition-all whitespace-nowrap ${
                 isActive
-                  ? 'w-2.5 h-2.5 bg-blue-500'
-                  : 'w-1.5 h-1.5 bg-gray-400 dark:bg-gray-500'
+                  ? 'bg-blue-600 text-white shadow-sm'
+                  : 'bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-700'
               }`}
-              style={{ top, transform: 'translate(-50%, -50%)' }}
-            />
+            >
+              {formatLabel(date)}
+            </button>
           );
         })}
-
-        {/* Active position indicator */}
-        {activeIndex >= 0 && (
-          <div
-            className="absolute left-1/2 -translate-x-1/2 w-4 h-4 border-2 border-blue-500 bg-white dark:bg-gray-900 rounded-full shadow-md transition-all duration-200"
-            style={{ top: `${activeFraction * 100}%`, transform: 'translate(-50%, -50%)' }}
-          />
-        )}
       </div>
     </div>
   );
