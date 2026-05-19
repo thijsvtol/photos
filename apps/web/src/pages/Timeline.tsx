@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useRef, useCallback, useMemo } from 'react';
+import React, { useEffect, useState, useRef, useMemo } from 'react';
 import { Clock, Download, X } from 'lucide-react';
 import Navbar from '../components/Navbar';
 import Footer from '../components/Footer';
@@ -49,13 +49,10 @@ const Timeline: React.FC = () => {
   const toast = useToast();
   const [photos, setPhotos] = useState<Photo[]>([]);
   const [loading, setLoading] = useState(true);
-  const [loadingMore, setLoadingMore] = useState(false);
-  const [nextCursor, setNextCursor] = useState<string | null>(null);
   const [activeDate, setActiveDate] = useState<string | null>(null);
   const [supportsHover, setSupportsHover] = useState(true);
   const [userFavorites, setUserFavorites] = useState<Set<string>>(new Set());
   const dateRefs = useRef<Map<string, HTMLDivElement>>(new Map());
-  const loadMoreRef = useRef<HTMLDivElement | null>(null);
   const { targetRowHeight, containerRef: densityContainerRef } = useGridDensity();
 
   const {
@@ -118,16 +115,23 @@ const Timeline: React.FC = () => {
     return () => mq.removeEventListener('change', handler);
   }, []);
 
-  // Initial load
+  // Initial load — fetch all timeline photos at once so cached images render immediately
   useEffect(() => {
     let cancelled = false;
     const load = async () => {
       setLoading(true);
       try {
-        const data = await getTimeline(50);
+        // Fetch all pages at once
+        let allPhotos: Photo[] = [];
+        let cursor: string | undefined;
+        do {
+          const data = await getTimeline(200, cursor);
+          allPhotos = [...allPhotos, ...data.photos];
+          cursor = data.nextCursor || undefined;
+        } while (cursor && !cancelled);
+
         if (!cancelled) {
-          setPhotos(data.photos);
-          setNextCursor(data.nextCursor);
+          setPhotos(allPhotos);
           setLoading(false);
         }
         // Load favorites if authenticated (non-blocking)
@@ -145,43 +149,6 @@ const Timeline: React.FC = () => {
     load();
     return () => { cancelled = true; };
   }, []);
-
-  // Infinite scroll — use refs to avoid recreating observer on every state change
-  const nextCursorRef = useRef(nextCursor);
-  const loadingMoreRef = useRef(loadingMore);
-  nextCursorRef.current = nextCursor;
-  loadingMoreRef.current = loadingMore;
-
-  const loadMore = useCallback(async () => {
-    if (!nextCursorRef.current || loadingMoreRef.current) return;
-    setLoadingMore(true);
-    try {
-      const data = await getTimeline(50, nextCursorRef.current);
-      setPhotos((prev) => [...prev, ...data.photos]);
-      setNextCursor(data.nextCursor);
-    } catch (err) {
-      console.error('Failed to load more timeline photos:', err);
-    } finally {
-      setLoadingMore(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    const el = loadMoreRef.current;
-    if (!el) return;
-
-    const observer = new IntersectionObserver(
-      ([entry]) => {
-        if (entry.isIntersecting) {
-          loadMore();
-        }
-      },
-      { rootMargin: '400px' }
-    );
-
-    observer.observe(el);
-    return () => observer.disconnect();
-  }, [nextCursor, loadMore]);
 
   // Track active date on scroll (throttled to avoid excessive re-renders)
   useEffect(() => {
@@ -303,6 +270,7 @@ const Timeline: React.FC = () => {
                         forceControlsVisible={selectedPhotos.size > 0}
                         userFavorites={userFavorites}
                         supportsHover={supportsHover}
+                        linkState={{ fromTimeline: true }}
                         onToggleSelection={togglePhotoSelection}
                         onToggleFavorite={isAuthenticated ? toggleFavorite : undefined}
                       />
@@ -312,17 +280,8 @@ const Timeline: React.FC = () => {
               );
             })}
 
-            {/* Load more sentinel */}
-            {nextCursor && (
-              <div ref={loadMoreRef} className="h-12 flex items-center justify-center" aria-hidden="true">
-                {loadingMore && (
-                  <div className="inline-block animate-spin rounded-full h-6 w-6 border-b-2 border-blue-600 dark:border-blue-400" />
-                )}
-              </div>
-            )}
-
             {/* End of timeline indicator */}
-            {!nextCursor && !loading && photos.length > 0 && (
+            {!loading && photos.length > 0 && (
               <div className="py-8 text-center text-sm text-gray-400 dark:text-gray-500">
                 You've reached the end of the timeline
               </div>

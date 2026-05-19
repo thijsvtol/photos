@@ -3,9 +3,9 @@ import { useLocation } from 'react-router-dom';
 import { Capacitor } from '@capacitor/core';
 
 /**
- * Dynamically style the Android status bar based on current route.
- * - Photo viewer: transparent with light icons (white)
- * - Other pages: white background with dark icons
+ * Dynamically style the Android status bar for the photo viewer only.
+ * - Photo viewer: black background with light (white) icons
+ * - All other pages: default (white background, dark icons) — set once on mount
  */
 export function useStatusBar() {
   const location = useLocation();
@@ -17,20 +17,12 @@ export function useStatusBar() {
 
     import('@capacitor/status-bar').then(({ StatusBar, Style }) => {
       if (isPhotoDetail) {
-        StatusBar.setStyle({ style: Style.Dark }); // light icons on dark bg
+        StatusBar.setStyle({ style: Style.Dark });
         StatusBar.setBackgroundColor({ color: '#000000' });
       } else {
-        StatusBar.setStyle({ style: Style.Light }); // dark icons on light bg
+        StatusBar.setStyle({ style: Style.Light });
         StatusBar.setBackgroundColor({ color: '#ffffff' });
-
-        // Check for dark mode
-        if (window.matchMedia('(prefers-color-scheme: dark)').matches) {
-          StatusBar.setStyle({ style: Style.Dark });
-          StatusBar.setBackgroundColor({ color: '#1f2937' }); // gray-800
-        }
       }
-    }).catch(() => {
-      // StatusBar plugin not available
-    });
+    }).catch(() => {});
   }, [location.pathname]);
 }

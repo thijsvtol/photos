@@ -115,8 +115,9 @@ const PhotoDetail: React.FC = () => {
   const [videoMuted, setVideoMuted] = useState(true);
   const overlayTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // Check if we came from favorites page
+  // Check if we came from favorites page or timeline
   const fromFavorites = location.state?.fromFavorites;
+  const fromTimeline = location.state?.fromTimeline;
   const favoritePhotos = (location.state?.favoritePhotos || []) as Array<{ id: string; slug: string }>;
   const sortBy = location.state?.sortBy || 'date_desc';
   
@@ -333,7 +334,7 @@ const PhotoDetail: React.FC = () => {
         } else if (isSlideshow) {
           setIsSlideshow(false);
         } else {
-          navigate(fromFavorites ? '/favorites' : `/events/${slug}`);
+          navigate(fromFavorites ? '/favorites' : fromTimeline ? '/timeline' : `/events/${slug}`);
         }
       }
       if (e.key === 'f' || e.key === 'F') toggleFullscreen();
@@ -447,8 +448,6 @@ const PhotoDetail: React.FC = () => {
   };
 
   const navigateToNext = useCallback(() => {
-    if (isTransitioning) return; // Prevent rapid navigation
-
     // When viewing favorites, always navigate through the favoritePhotos list across all events
     if (fromFavorites && favoritePhotos.length > 0) {
       const currentFavIndex = favoritePhotos.findIndex((fav: { id: string; slug: string }) => fav.id === photoId && fav.slug === slug);
@@ -470,6 +469,12 @@ const PhotoDetail: React.FC = () => {
         const nextIndex = currentIndex + 1;
         const nextPhoto = photosToUse[nextIndex];
         
+        // Cancel any in-progress transition
+        if (transitionTimeoutRef.current) {
+          clearTimeout(transitionTimeoutRef.current);
+          transitionTimeoutRef.current = null;
+        }
+        
         // Keep current photo visible for cross-fade
         setPreviousPhoto(photo);
         
@@ -488,20 +493,22 @@ const PhotoDetail: React.FC = () => {
         navigate(`/p/${slug}/${nextPhoto.id}`, { replace: true });
         
         // End transition and reset slide direction
-        if (transitionTimeoutRef.current) {
-          clearTimeout(transitionTimeoutRef.current);
-        }
         transitionTimeoutRef.current = setTimeout(() => {
           setPreviousPhoto(null); // Clear previous photo after transition
           setIsTransitioning(false);
           setSlideDirection(null);
           transitionTimeoutRef.current = null;
-        }, 350);
+        }, 200);
       } else if (currentIndex === photosToUse.length - 1 && photosToUse.length > 0) {
         // Loop back to first photo
         const firstPhoto = photosToUse[0];
         const imageUrl = getPreviewUrl(slug!, firstPhoto.id, firstPhoto.file_type, firstPhoto.cache_version);
         const isPreloaded = preloadedImages.has(imageUrl);
+        
+        if (transitionTimeoutRef.current) {
+          clearTimeout(transitionTimeoutRef.current);
+          transitionTimeoutRef.current = null;
+        }
         
         // Keep current photo visible for cross-fade
         setPreviousPhoto(photo);
@@ -513,23 +520,18 @@ const PhotoDetail: React.FC = () => {
         setImageLoaded(isPreloaded);
         
         navigate(`/p/${slug}/${firstPhoto.id}`, { replace: true });
-        if (transitionTimeoutRef.current) {
-          clearTimeout(transitionTimeoutRef.current);
-        }
         transitionTimeoutRef.current = setTimeout(() => {
           setPreviousPhoto(null);
           setIsTransitioning(false);
           setSlideDirection(null);
           transitionTimeoutRef.current = null;
-        }, 350);
+        }, 200);
       }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isTransitioning, fromFavorites, favoritePhotos, photoId, slug, navigate, displayPhotos, allPhotos, currentIndex, preloadedImages, photo]);
 
   const navigateToPrevious = useCallback(() => {
-    if (isTransitioning) return; // Prevent rapid navigation
-
     // When viewing favorites, always navigate through the favoritePhotos list across all events
     if (fromFavorites && favoritePhotos.length > 0) {
       const currentFavIndex = favoritePhotos.findIndex((fav: { id: string; slug: string }) => fav.id === photoId && fav.slug === slug);
@@ -551,6 +553,12 @@ const PhotoDetail: React.FC = () => {
         const prevIndex = currentIndex - 1;
         const prevPhoto = photosToUse[prevIndex];
         
+        // Cancel any in-progress transition
+        if (transitionTimeoutRef.current) {
+          clearTimeout(transitionTimeoutRef.current);
+          transitionTimeoutRef.current = null;
+        }
+        
         // Keep current photo visible for cross-fade
         setPreviousPhoto(photo);
         
@@ -569,20 +577,22 @@ const PhotoDetail: React.FC = () => {
         navigate(`/p/${slug}/${prevPhoto.id}`, { replace: true });
         
         // End transition and reset slide direction
-        if (transitionTimeoutRef.current) {
-          clearTimeout(transitionTimeoutRef.current);
-        }
         transitionTimeoutRef.current = setTimeout(() => {
           setPreviousPhoto(null); // Clear previous photo after transition
           setIsTransitioning(false);
           setSlideDirection(null);
           transitionTimeoutRef.current = null;
-        }, 350);
+        }, 200);
       } else if (currentIndex === 0 && photosToUse.length > 1) {
         // Loop back to last photo
         const lastPhoto = photosToUse[photosToUse.length - 1];
         const imageUrl = getPreviewUrl(slug!, lastPhoto.id, lastPhoto.file_type, lastPhoto.cache_version);
         const isPreloaded = preloadedImages.has(imageUrl);
+        
+        if (transitionTimeoutRef.current) {
+          clearTimeout(transitionTimeoutRef.current);
+          transitionTimeoutRef.current = null;
+        }
         
         // Keep current photo visible for cross-fade
         setPreviousPhoto(photo);
@@ -594,15 +604,12 @@ const PhotoDetail: React.FC = () => {
         setImageLoaded(isPreloaded);
         
         navigate(`/p/${slug}/${lastPhoto.id}`, { replace: true });
-        if (transitionTimeoutRef.current) {
-          clearTimeout(transitionTimeoutRef.current);
-        }
         transitionTimeoutRef.current = setTimeout(() => {
           setPreviousPhoto(null);
           setIsTransitioning(false);
           setSlideDirection(null);
           transitionTimeoutRef.current = null;
-        }, 350);
+        }, 200);
       }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -917,7 +924,7 @@ const PhotoDetail: React.FC = () => {
           }
           setSwipeOffset(0);
           swipeNavigateTimeoutRef.current = null;
-        }, 180);
+        }, 80);
       } else {
         // Snap back smoothly if threshold not reached.
         setSwipeOffset(0);
@@ -1216,7 +1223,7 @@ const PhotoDetail: React.FC = () => {
           state: location.state,
         });
       } else {
-        navigate(fromFavorites ? '/favorites' : `/events/${slug}`, { replace: true });
+        navigate(fromFavorites ? '/favorites' : fromTimeline ? '/timeline' : `/events/${slug}`, { replace: true });
       }
     } catch (err) {
       console.error('Failed to delete photo:', err);
@@ -1344,7 +1351,7 @@ const PhotoDetail: React.FC = () => {
               transform: swipeOffset < 0
                 ? `translate3d(calc(100% + ${swipeOffset}px), 0, 0)`
                 : `translate3d(calc(-100% + ${swipeOffset}px), 0, 0)`,
-              transition: isSwiping ? 'none' : 'transform 320ms cubic-bezier(0.22, 1, 0.36, 1), opacity 260ms ease-out',
+              transition: isSwiping ? 'none' : 'transform 200ms cubic-bezier(0.22, 1, 0.36, 1), opacity 180ms ease-out',
               opacity: Math.min(1, Math.max(0.38, Math.abs(swipeOffset) / 180)),
               willChange: 'transform, opacity',
             }}
@@ -1383,7 +1390,7 @@ const PhotoDetail: React.FC = () => {
           }`}
           style={{
             transform: `translate3d(${swipeOffset}px, 0, 0)`,
-            transition: isSwiping ? 'none' : 'transform 320ms cubic-bezier(0.22, 1, 0.36, 1), opacity 260ms ease-out',
+            transition: isSwiping ? 'none' : 'transform 200ms cubic-bezier(0.22, 1, 0.36, 1), opacity 180ms ease-out',
             opacity: Math.max(0.88, 1 - Math.abs(swipeOffset) / 1200),
             willChange: 'transform, opacity',
           }}
@@ -1505,7 +1512,7 @@ const PhotoDetail: React.FC = () => {
           <div className="flex items-center justify-between">
             {/* Back button */}
             <button
-              onClick={() => navigate(fromFavorites ? '/favorites' : `/events/${slug}`)}
+              onClick={() => navigate(fromFavorites ? '/favorites' : fromTimeline ? '/timeline' : `/events/${slug}`)}
               className="text-white p-2 -ml-2 hover:bg-white/10 rounded-full transition"
               aria-label="Back"
             >

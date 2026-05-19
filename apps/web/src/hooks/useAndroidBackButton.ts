@@ -19,14 +19,21 @@ export function useAndroidBackButton() {
     const handler = App.addListener('backButton', ({ canGoBack }) => {
       const path = location.pathname;
 
-      // Photo detail → back to gallery
+      // Photo detail → back to gallery/timeline/favorites
       if (path.startsWith('/p/')) {
-        const parts = path.split('/');
-        const slug = parts[2];
-        if (slug) {
-          navigate(`/events/${slug}`);
+        const state = location.state as Record<string, unknown> | null;
+        if (state?.fromFavorites) {
+          navigate('/favorites');
+        } else if (state?.fromTimeline) {
+          navigate('/timeline');
         } else {
-          navigate(-1);
+          const parts = path.split('/');
+          const slug = parts[2];
+          if (slug) {
+            navigate(`/events/${slug}`);
+          } else {
+            navigate(-1);
+          }
         }
         return;
       }

@@ -18,6 +18,7 @@ interface JustifiedGridProps {
   userFavorites: Set<string>;
   supportsHover: boolean;
   sortBy?: string;
+  linkState?: Record<string, unknown>;
   onToggleSelection?: (photoId: string) => void;
   onToggleFavorite?: (photoId: string, isFavorited: boolean) => void;
   onToggleFeatured?: (photoId: string, currentStatus: boolean) => void;
@@ -45,6 +46,7 @@ const JustifiedGridInner: React.FC<JustifiedGridProps> = ({
   userFavorites,
   supportsHover,
   sortBy,
+  linkState,
   onToggleSelection,
   onToggleFavorite,
   onToggleFeatured,
@@ -86,6 +88,7 @@ const JustifiedGridInner: React.FC<JustifiedGridProps> = ({
               forceControlsVisible={forceControlsVisible}
               supportsHover={supportsHover}
               sortBy={sortBy}
+              linkState={linkState}
               onToggleSelection={onToggleSelection}
               onToggleFavorite={onToggleFavorite}
               onToggleFeatured={onToggleFeatured}
@@ -134,6 +137,7 @@ interface PhotoOverlayProps {
   forceControlsVisible: boolean;
   supportsHover: boolean;
   sortBy?: string;
+  linkState?: Record<string, unknown>;
   onToggleSelection?: (photoId: string) => void;
   onToggleFavorite?: (photoId: string, isFavorited: boolean) => void;
   onToggleFeatured?: (photoId: string, currentStatus: boolean) => void;
@@ -150,6 +154,7 @@ const PhotoOverlayInner: React.FC<PhotoOverlayProps> = ({
   forceControlsVisible,
   supportsHover,
   sortBy,
+  linkState,
   onToggleSelection,
   onToggleFavorite,
   onToggleFeatured,
@@ -166,6 +171,13 @@ const PhotoOverlayInner: React.FC<PhotoOverlayProps> = ({
       setTouchControlsVisible(false);
     }
   }, [forceControlsVisible]);
+
+  // Auto-hide touch controls after 4 seconds if user doesn't interact
+  React.useEffect(() => {
+    if (!touchControlsVisible) return;
+    const timer = setTimeout(() => setTouchControlsVisible(false), 4000);
+    return () => clearTimeout(timer);
+  }, [touchControlsVisible]);
 
   React.useEffect(() => {
     return () => {
@@ -184,12 +196,7 @@ const PhotoOverlayInner: React.FC<PhotoOverlayProps> = ({
     if (supportsHover) return;
     clearLongPressTimer();
     longPressTimerRef.current = setTimeout(() => {
-      // Enter selection mode directly instead of just showing controls
-      if (onToggleSelection) {
-        onToggleSelection(photo.id);
-      } else {
-        setTouchControlsVisible(true);
-      }
+      setTouchControlsVisible(true);
       suppressNextClickRef.current = true;
       longPressTimerRef.current = null;
       // Auto-reset suppress after a short window so it can't get stranded
@@ -216,7 +223,7 @@ const PhotoOverlayInner: React.FC<PhotoOverlayProps> = ({
     >
       <Link
         to={`/p/${slug}/${photo.id}`}
-        state={sortBy ? { sortBy } : undefined}
+        state={{ ...linkState, ...(sortBy ? { sortBy } : undefined) }}
         className="block w-full h-full"
         onClick={(e) => {
           if (!supportsHover && suppressNextClickRef.current) {
