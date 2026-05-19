@@ -7,11 +7,14 @@ import { ThemeProvider } from './contexts/ThemeContext';
 import { RefreshProvider } from './contexts/RefreshContext';
 import { UploadProvider } from './contexts/UploadContext';
 import GlobalUploadIndicator from './components/GlobalUploadIndicator';
+import { OfflineBanner } from './components/OfflineBanner';
 import { ToastProvider } from './components/Toast';
 import ErrorBoundary from './components/ErrorBoundary';
 import PullToRefresh from './components/PullToRefresh';
 import { AndroidAppPrompt } from './components/AndroidAppPrompt';
 import { initAnalytics, trackPageView } from './services/analytics';
+import { useAndroidBackButton } from './hooks/useAndroidBackButton';
+import { useStatusBar } from './hooks/useStatusBar';
 
 // Lazy load route components for better code splitting
 const Landing = lazy(() => import('./pages/Landing'));
@@ -184,6 +187,12 @@ const PageViewTracker = () => {
     trackPageView(location.pathname + location.search, document.title);
   }, [location]);
 
+  // Handle Android hardware back button
+  useAndroidBackButton();
+
+  // Dynamic status bar styling
+  useStatusBar();
+
   return null;
 };
 
@@ -235,6 +244,7 @@ function App() {
                   </PullToRefresh>
                   <AndroidAppPrompt />
                   <GlobalUploadIndicator />
+                  <OfflineBanner />
                 </BrowserRouter>
               </ToastProvider>
             </UploadProvider>

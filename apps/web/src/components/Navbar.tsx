@@ -1,14 +1,16 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { Link, useLocation } from 'react-router-dom';
-import { Heart, MapPin, LayoutGrid, Settings, LogOut, User, LogIn, ChevronDown, Clock } from 'lucide-react';
+import { Heart, MapPin, LayoutGrid, Settings, LogOut, User, LogIn, ChevronDown, Clock, Upload } from 'lucide-react';
 import { Capacitor } from '@capacitor/core';
 import { useAuth } from '../contexts/AuthContext';
 import { config } from '../config';
 import UserSettings from './UserSettings';
+import { useUploadContext } from '../contexts/UploadContext';
 
 const Navbar: React.FC = () => {
   const location = useLocation();
   const { user, isAuthenticated, login, logout } = useAuth();
+  const { hasActiveUploads, totalCount, completedCount } = useUploadContext();
   const [showUserMenu, setShowUserMenu] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
@@ -61,6 +63,14 @@ const Navbar: React.FC = () => {
             <span className="font-bold text-lg hidden sm:inline">{config.brandName}</span>
             <span className="font-bold text-lg sm:hidden">{config.brandName.split(' ').map(w => w[0]).join('')}</span>
           </Link>
+          
+          {/* Upload activity indicator */}
+          {hasActiveUploads && totalCount > 0 && (
+            <div className="flex items-center gap-1.5 ml-2 px-2 py-1 rounded-full bg-blue-50 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400 text-xs font-medium">
+              <Upload className="w-3 h-3 animate-pulse" />
+              <span>{completedCount}/{totalCount}</span>
+            </div>
+          )}
           
           {/* Navigation Links */}
           <div className="flex items-center gap-1 sm:gap-2">

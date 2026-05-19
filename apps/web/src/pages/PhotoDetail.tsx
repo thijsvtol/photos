@@ -85,6 +85,7 @@ const PhotoDetail: React.FC = () => {
   const isPinching = useRef(false);
   const isPanning = useRef(false);
   const lastTapTime = useRef(0);
+  const lastZoomBoundaryHaptic = useRef(0);
 
   // Reset zoom when photo changes
   useEffect(() => {
@@ -225,8 +226,8 @@ const PhotoDetail: React.FC = () => {
         setPreloadedImages(prev => {
           const newSet = new Set(prev);
           newSet.add(url);
-          // Limit Set size to prevent memory buildup (keep last 10 images)
-          if (newSet.size > 10) {
+          // Limit Set size to prevent memory buildup (keep last 20 images)
+          if (newSet.size > 20) {
             const firstItem = Array.from(newSet)[0];
             newSet.delete(firstItem);
             // Clean up the preload ref
@@ -242,20 +243,24 @@ const PhotoDetail: React.FC = () => {
       };
     };
 
-    // Preload next photo
-    if (currentIndex >= 0 && currentIndex < photosToUse.length - 1) {
-      preloadImage(photosToUse[currentIndex + 1]);
-    } else if (currentIndex === photosToUse.length - 1 && photosToUse.length > 0) {
-      // Preload first photo for loop
-      preloadImage(photosToUse[0]);
+    // Preload next 3 photos for smooth swiping
+    for (let i = 1; i <= 3; i++) {
+      const nextIdx = currentIndex + i;
+      if (nextIdx < photosToUse.length) {
+        preloadImage(photosToUse[nextIdx]);
+      } else if (nextIdx >= photosToUse.length && photosToUse.length > 0) {
+        preloadImage(photosToUse[nextIdx - photosToUse.length]);
+      }
     }
 
-    // Preload previous photo
-    if (currentIndex > 0) {
-      preloadImage(photosToUse[currentIndex - 1]);
-    } else if (currentIndex === 0 && photosToUse.length > 1) {
-      // Preload last photo for loop
-      preloadImage(photosToUse[photosToUse.length - 1]);
+    // Preload previous 2 photos
+    for (let i = 1; i <= 2; i++) {
+      const prevIdx = currentIndex - i;
+      if (prevIdx >= 0) {
+        preloadImage(photosToUse[prevIdx]);
+      } else if (prevIdx < 0 && photosToUse.length > 1) {
+        preloadImage(photosToUse[photosToUse.length + prevIdx]);
+      }
     }
 
     // Cleanup function
@@ -808,7 +813,13 @@ const PhotoDetail: React.FC = () => {
       const dx = e.touches[0].clientX - e.touches[1].clientX;
       const dy = e.touches[0].clientY - e.touches[1].clientY;
       const distance = Math.hypot(dx, dy);
-      const newScale = Math.max(1, Math.min(5, pinchStartScale.current * (distance / pinchStartDistance.current)));
+      const rawScale = pinchStartScale.current * (distance / pinchStartDistance.current);
+      const newScale = Math.max(1, Math.min(5, rawScale));
+      // Haptic feedback when hitting zoom boundaries
+      if ((rawScale <= 1 || rawScale >= 5) && Date.now() - lastZoomBoundaryHaptic.current > 300) {
+        lastZoomBoundaryHaptic.current = Date.now();
+        haptics.light();
+      }
       setZoomScale(newScale);
       setIsZoomed(newScale > 1.05);
       return;
@@ -819,9 +830,13 @@ const PhotoDetail: React.FC = () => {
       e.preventDefault();
       const dx = e.touches[0].clientX - panStart.current.x;
       const dy = e.touches[0].clientY - panStart.current.y;
+      // Clamp translation so the image doesn't leave the viewport
+      const container = imageContainerRef.current;
+      const maxX = container ? (container.clientWidth * (zoomScale - 1)) / (2 * zoomScale) : 500;
+      const maxY = container ? (container.clientHeight * (zoomScale - 1)) / (2 * zoomScale) : 500;
       setZoomTranslate({
-        x: translateStart.current.x + dx,
-        y: translateStart.current.y + dy,
+        x: Math.max(-maxX, Math.min(maxX, translateStart.current.x + dx)),
+        y: Math.max(-maxY, Math.min(maxY, translateStart.current.y + dy)),
       });
       return;
     }
@@ -1297,7 +1312,7 @@ const PhotoDetail: React.FC = () => {
     : '';
 
   return (
-    <div className="fixed inset-0 bg-black z-50 overflow-hidden" ref={containerRef}>
+    <div className="fixed inset-0 bg-black z-50 overflow-hidden" ref={containerRef} style={{ overscrollBehavior: 'none' }}>
       {ConfirmDialog}
       {photo && (
         <SEO
@@ -1317,6 +1332,7 @@ const PhotoDetail: React.FC = () => {
         className={`absolute inset-0 flex items-center justify-center select-none overflow-hidden`}
         style={{
           touchAction: isNative ? 'none' : (isZoomed ? 'pan-x pan-y pinch-zoom' : 'pan-y pinch-zoom'),
+          overscrollBehavior: 'none',
           WebkitOverflowScrolling: 'touch',
         }}
       >

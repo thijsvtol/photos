@@ -15,6 +15,21 @@ const config: CapacitorConfig = {
     App: {
       appUrlScheme: 'photos',
     },
+    SplashScreen: {
+      launchAutoHide: true,
+      launchShowDuration: 0,
+      backgroundColor: '#ffffff',
+      androidSplashResourceName: 'splash',
+      androidScaleType: 'CENTER_CROP',
+      showSpinner: false,
+      splashFullScreen: true,
+      splashImmersive: true,
+    },
+    StatusBar: {
+      overlaysWebView: false,
+      style: 'LIGHT',
+      backgroundColor: '#ffffff',
+    },
   },
   android: {
     path: '../android',

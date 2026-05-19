@@ -160,6 +160,13 @@ const PhotoOverlayInner: React.FC<PhotoOverlayProps> = ({
   const suppressNextClickRef = React.useRef(false);
   const [touchControlsVisible, setTouchControlsVisible] = React.useState(false);
 
+  // Reset touchControlsVisible when global selection mode changes
+  React.useEffect(() => {
+    if (forceControlsVisible) {
+      setTouchControlsVisible(false);
+    }
+  }, [forceControlsVisible]);
+
   React.useEffect(() => {
     return () => {
       if (longPressTimerRef.current) clearTimeout(longPressTimerRef.current);
@@ -177,9 +184,18 @@ const PhotoOverlayInner: React.FC<PhotoOverlayProps> = ({
     if (supportsHover) return;
     clearLongPressTimer();
     longPressTimerRef.current = setTimeout(() => {
-      setTouchControlsVisible(true);
+      // Enter selection mode directly instead of just showing controls
+      if (onToggleSelection) {
+        onToggleSelection(photo.id);
+      } else {
+        setTouchControlsVisible(true);
+      }
       suppressNextClickRef.current = true;
       longPressTimerRef.current = null;
+      // Auto-reset suppress after a short window so it can't get stranded
+      setTimeout(() => {
+        suppressNextClickRef.current = false;
+      }, 600);
     }, 380);
   };
 
@@ -217,6 +233,8 @@ const PhotoOverlayInner: React.FC<PhotoOverlayProps> = ({
             onToggleSelection(photo.id);
             return;
           }
+          // Reset individual card controls when navigating away
+          setTouchControlsVisible(false);
           // Store scroll position and photo ID for back navigation
           sessionStorage.setItem(`gallery_scroll_${slug}`, window.scrollY.toString());
           sessionStorage.setItem(`gallery_photo_${slug}`, photo.id);
