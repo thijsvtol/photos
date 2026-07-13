@@ -55,7 +55,6 @@ const JustifiedGridInner: React.FC<JustifiedGridProps> = ({
   const albumPhotos: AlbumPhoto[] = useMemo(
     () =>
       photos
-        .filter((photo) => photo.file_type !== 'video/mp4' || photo.blur_placeholder)
         .map((photo) => ({
           src: getPreviewUrl(slug, photo.id, photo.file_type, photo.cache_version),
           width: photo.width || 1600,

@@ -114,13 +114,13 @@ app.put('/:photoId/replace', async (c) => {
     // Get photo and event slug for R2 key construction
     const photo = await c.env.DB
       .prepare(`
-        SELECT p.id, p.event_id, p.width, p.height, e.slug
+        SELECT p.id, p.event_id, p.width, p.height, p.file_type, e.slug
         FROM photos p
         JOIN events e ON p.event_id = e.id
         WHERE p.id = ?
       `)
       .bind(photoId)
-      .first<{ id: string; event_id: number; width: number | null; height: number | null; slug: string }>();
+      .first<{ id: string; event_id: number; width: number | null; height: number | null; file_type: string | null; slug: string }>();
 
     if (!photo) {
       return c.json({ error: 'Photo not found' }, 404);
@@ -142,19 +142,25 @@ app.put('/:photoId/replace', async (c) => {
       return c.json({ error: 'Both original and preview files are required' }, 400);
     }
 
+    // Use the correct extension/content-type so edited videos land on the same
+    // R2 keys the media routes read from (.mp4), not a stale .jpg key.
+    const isVideo = photo.file_type === 'video/mp4';
+    const extension = isVideo ? 'mp4' : 'jpg';
+    const contentType = isVideo ? 'video/mp4' : 'image/jpeg';
+
     // Overwrite original in R2
-    const originalKey = `original/${photo.slug}/${photo.id}.jpg`;
+    const originalKey = `original/${photo.slug}/${photo.id}.${extension}`;
     await c.env.PHOTOS_BUCKET.put(originalKey, await originalFile.arrayBuffer(), {
-      httpMetadata: { contentType: 'image/jpeg' },
+      httpMetadata: { contentType },
     });
 
     // Overwrite preview in R2
-    const previewKey = `preview/${photo.slug}/${photo.id}.jpg`;
+    const previewKey = `preview/${photo.slug}/${photo.id}.${extension}`;
     await c.env.PHOTOS_BUCKET.put(previewKey, await previewFile.arrayBuffer(), {
-      httpMetadata: { contentType: 'image/jpeg' },
+      httpMetadata: { contentType },
     });
 
-    // Delete stale Instagram export if it exists
+    // Delete stale Instagram export if it exists (images only)
     try {
       await c.env.PHOTOS_BUCKET.delete(`ig/${photo.slug}/${photo.id}.jpg`);
     } catch {
@@ -417,7 +423,7 @@ app.post('/bulk-copy', async (c) => {
     // Check that the user has upload permission in the target event
     if (!isGlobalAdmin) {
       const targetCollaborator = await c.env.DB
-        .prepare(`SELECT role FROM collaborators WHERE event_id = ? AND user_email = ?`)
+        .prepare(`SELECT role FROM event_collaborators WHERE event_id = ? AND user_email = ?`)
         .bind(targetEvent.id, user.email)
         .first<{ role: string }>();
 

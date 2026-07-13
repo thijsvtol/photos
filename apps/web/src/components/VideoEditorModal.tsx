@@ -85,6 +85,9 @@ const VideoEditorModal: React.FC<VideoEditorModalProps> = ({ videoUrl, onSave, o
     try {
       // Fetch original video blob
       const response = await fetch(videoUrl);
+      if (!response.ok) {
+        throw new Error(`Failed to load video (${response.status})`);
+      }
       const videoBlob = await response.blob();
 
       // Apply all transformations

@@ -9,6 +9,21 @@ function isAdminEmail(email: string, adminEmails: string): boolean {
   return admins.includes(email.toLowerCase());
 }
 
+/**
+ * Builds CORS headers so media can be loaded cross-origin into a <canvas>
+ * (required by the in-app image editor on native platforms, where the webview
+ * origin — e.g. https://localhost — differs from the media domain).
+ * Requests are non-credentialed (native uses query-param/Bearer tokens), so a
+ * wildcard origin is safe. Using '*' (rather than reflecting Origin) keeps the
+ * response cache-safe, since the CDN edge cache does not reliably vary on Origin.
+ */
+function mediaCorsHeaders(): Record<string, string> {
+  return {
+    'Access-Control-Allow-Origin': '*',
+    'Cross-Origin-Resource-Policy': 'cross-origin',
+  };
+}
+
 async function requireMediaAccess(
   c: Context<{ Bindings: Env }>,
   event: { id: number; slug: string; password_hash: string | null; visibility: 'public' | 'private' | 'collaborators_only' }
@@ -113,6 +128,7 @@ app.get('/media/:slug/preview/:photoId', async (c) => {
       headers: {
         'Content-Type': contentType,
         'Cache-Control': 'public, max-age=31536000',
+        ...mediaCorsHeaders(),
       },
     });
   } catch (error) {
@@ -180,6 +196,7 @@ app.get('/media/:slug/ig/:photoId', async (c) => {
         'Content-Type': 'image/jpeg',
         'Content-Disposition': `attachment; filename="${filename}"`,
         'Cache-Control': 'public, max-age=31536000',
+        ...mediaCorsHeaders(),
       },
     });
   } catch (error) {
@@ -247,6 +264,7 @@ app.get('/media/:slug/original/:photoId', async (c) => {
         'Content-Type': contentType,
         'Content-Disposition': `attachment; filename="${filename}"`,
         'Cache-Control': 'public, max-age=31536000',
+        ...mediaCorsHeaders(),
       },
     });
   } catch (error) {

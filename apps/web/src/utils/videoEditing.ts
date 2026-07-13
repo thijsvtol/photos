@@ -408,17 +408,20 @@ export async function applyVideoTransformations(
       }
     }
 
-    // Add filters to command
+    // Add speed video filter (setpts) into the same chain so it doesn't
+    // override crop/rotate. FFmpeg only honours a single -vf argument.
+    if (options.speed && options.speed !== 1) {
+      videoFilters.push(`setpts=PTS/${options.speed}`);
+    }
+
+    // Add combined video filters to command
     if (videoFilters.length > 0) {
       cmd.push('-vf', videoFilters.join(','));
     }
 
-    // Add speed filters
-    if (options.speed && options.speed !== 1) {
-      cmd.push('-vf', `setpts=PTS/${options.speed}`);
-      if (options.speed <= 2) {
-        cmd.push('-af', `atempo=${options.speed}`);
-      }
+    // Speed also affects audio tempo (separate -af chain)
+    if (options.speed && options.speed !== 1 && options.speed <= 2) {
+      cmd.push('-af', `atempo=${options.speed}`);
     }
 
     cmd.push('-c:a', 'aac');
