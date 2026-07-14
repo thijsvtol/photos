@@ -65,9 +65,42 @@ const ImageEditorModal: React.FC<ImageEditorModalProps> = ({ imageUrl, nativeWid
   const [previewCanvas, setPreviewCanvas] = useState<HTMLCanvasElement | null>(null);
   const getCurrentImgDataRef = useRef<any>(null);
 
+  // Load the source image as a same-origin blob URL. On native (Capacitor) the
+  // media lives on a different origin (https://photos... vs the https://localhost
+  // webview), so loading it directly taints the editor canvas and breaks export.
+  // The auth token is already embedded in imageUrl's query string (see
+  // getOriginalUrl), so a plain fetch works on both web and native.
+  const [localUrl, setLocalUrl] = useState<string | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let revoked = false;
+    let objectUrl: string | null = null;
+    setLocalUrl(null);
+    setLoadError(null);
+    (async () => {
+      try {
+        const res = await fetch(imageUrl);
+        if (!res.ok) throw new Error(`Failed to load image (${res.status})`);
+        const blob = await res.blob();
+        if (revoked) return;
+        objectUrl = URL.createObjectURL(blob);
+        setLocalUrl(objectUrl);
+      } catch (err) {
+        if (!revoked) {
+          setLoadError(err instanceof Error ? err.message : 'Failed to load image');
+        }
+      }
+    })();
+    return () => {
+      revoked = true;
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+    };
+  }, [imageUrl]);
+
   // Load original image into a canvas for curves/levels tab when no Filerobot edit has been done
   useEffect(() => {
-    if (!editedCanvas) {
+    if (!editedCanvas && localUrl) {
       const img = new Image();
       img.crossOrigin = 'anonymous';
       img.onload = () => {
@@ -79,9 +112,9 @@ const ImageEditorModal: React.FC<ImageEditorModalProps> = ({ imageUrl, nativeWid
         setCurvesLevelsBaseImageData(canvasToImageData(canvas));
         setPreviewCanvas(canvas);
       };
-      img.src = imageUrl;
+      img.src = localUrl;
     }
-  }, [imageUrl, editedCanvas]);
+  }, [localUrl, editedCanvas]);
 
   const handleFilerobotSave = useCallback(
     (savedImageData: any) => {
@@ -224,10 +257,26 @@ const ImageEditorModal: React.FC<ImageEditorModalProps> = ({ imageUrl, nativeWid
 
       {/* Editor Body */}
       <div className="flex-1 overflow-hidden relative min-h-0">
+        {loadError ? (
+          <div className="absolute inset-0 flex items-center justify-center p-6">
+            <div className="text-center">
+              <p className="text-red-400 font-medium">Couldn't load the image for editing.</p>
+              <p className="text-gray-400 text-sm mt-1">{loadError}</p>
+            </div>
+          </div>
+        ) : !localUrl ? (
+          <div className="absolute inset-0 flex items-center justify-center">
+            <div className="text-center">
+              <Loader2 className="w-8 h-8 animate-spin text-white mx-auto" />
+              <p className="mt-3 text-gray-400 text-sm">Loading image...</p>
+            </div>
+          </div>
+        ) : (
+          <>
         {/* Filerobot Adjust Tab */}
         <div className={`absolute inset-0 ${activeTab === 'adjust' ? '' : 'invisible pointer-events-none'}`}>
           <FilerobotImageEditor
-            source={editedCanvas ? editedCanvas.toDataURL('image/jpeg', 0.92) : imageUrl}
+            source={editedCanvas ? editedCanvas.toDataURL('image/jpeg', 0.92) : localUrl!}
             tabsIds={[TABS.FINETUNE, TABS.ADJUST]}
             defaultTabId={TABS.FINETUNE}
             defaultToolId={TOOLS.CROP}
@@ -407,6 +456,8 @@ const ImageEditorModal: React.FC<ImageEditorModalProps> = ({ imageUrl, nativeWid
               )}
             </div>
           </div>
+        )}
+          </>
         )}
       </div>
     </div>

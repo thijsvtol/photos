@@ -259,21 +259,36 @@ class UploadManager {
 
       const isVideo = fileType === 'video/mp4';
 
-      // Extract EXIF data on-the-fly if not already present (folder-sync items)
+      // Extract metadata on-the-fly if not already present (folder-sync items)
       let exifData: Partial<UploadQueueItem> = {};
-      if (!item.captureTime) {
-        try {
-          if (isVideo) {
+      if (isVideo) {
+        // Capture time (if missing)
+        if (!item.captureTime) {
+          try {
             const sliceSize = Math.min(1024 * 1024, item.file.size);
             const buffer = await item.file.slice(0, sliceSize).arrayBuffer();
             const captureTime = extractMp4CreationTime(buffer) ?? new Date(item.file.lastModified).toISOString();
-            exifData = { captureTime };
-          } else {
-            exifData = await this.extractExifData(item.file);
-          }
-          this.updateItem(item.id, exifData);
-          await updateQueueItem(item.id, exifData);
+            exifData = { ...exifData, captureTime };
+          } catch { /* proceed without capture time */ }
+        }
+        // Dimensions + poster so the gallery grid can render the video correctly.
+        // Without width/height the justified grid falls back to a wrong 4:3 ratio,
+        // and without a poster native tiles render blank.
+        if (item.width == null || item.height == null || !item.blurPlaceholder) {
+          try {
+            const videoMeta = await this.extractVideoMetadata(item.file);
+            exifData = { ...exifData, ...videoMeta };
+          } catch { /* proceed without video metadata */ }
+        }
+      } else if (!item.captureTime) {
+        try {
+          exifData = await this.extractExifData(item.file);
         } catch { /* proceed without EXIF */ }
+      }
+
+      if (Object.keys(exifData).length > 0) {
+        this.updateItem(item.id, exifData);
+        await updateQueueItem(item.id, exifData);
       }
 
       const merged = { ...item, photoId, fileType, ...exifData };
@@ -414,6 +429,53 @@ class UploadManager {
       if (isNaN(date.getTime())) return undefined;
       return date.toISOString();
     } catch { return undefined; }
+  }
+
+  private async extractVideoMetadata(file: File): Promise<Partial<UploadQueueItem>> {
+    const url = URL.createObjectURL(file);
+    try {
+      const video = document.createElement('video');
+      video.muted = true;
+      video.preload = 'metadata';
+      video.src = url;
+
+      // Wait for intrinsic dimensions
+      await new Promise<void>((resolve, reject) => {
+        video.onloadedmetadata = () => resolve();
+        video.onerror = () => reject(new Error('Failed to load video metadata'));
+      });
+
+      const width = video.videoWidth || undefined;
+      const height = video.videoHeight || undefined;
+
+      // Capture a first-frame poster as a tiny blur placeholder. The file is a
+      // local blob, so drawing to canvas is not cross-origin tainted here.
+      let blurPlaceholder: string | undefined;
+      try {
+        await new Promise<void>((resolve) => {
+          const safety = setTimeout(resolve, 1500);
+          video.onseeked = () => { clearTimeout(safety); resolve(); };
+          video.currentTime = Math.min(0.1, (video.duration || 1) / 2);
+        });
+        if (video.videoWidth) {
+          const canvas = document.createElement('canvas');
+          canvas.width = 16; canvas.height = 16;
+          const ctx = canvas.getContext('2d');
+          if (ctx) {
+            ctx.drawImage(video, 0, 0, 16, 16);
+            blurPlaceholder = canvas.toDataURL('image/jpeg', 0.3);
+          }
+        }
+      } catch { /* poster is best-effort */ }
+
+      return {
+        width: typeof width === 'number' ? width : undefined,
+        height: typeof height === 'number' ? height : undefined,
+        blurPlaceholder: blurPlaceholder || undefined,
+      };
+    } finally {
+      URL.revokeObjectURL(url);
+    }
   }
 
   private async extractExifData(file: File) {

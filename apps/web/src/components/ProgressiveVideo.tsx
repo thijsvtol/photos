@@ -81,48 +81,45 @@ const ProgressiveVideo: React.FC<ProgressiveVideoProps> = ({
       )}
       {isNearViewport && (
         <>
-          {isNative ? (
-            /* On native/Android, video preload="metadata" is unreliable.
-               Show a static poster image instead. */
-            poster ? (
-              <img
-                src={poster}
-                alt=""
-                className={className}
-                style={{ ...style, objectFit: 'cover' }}
-              />
-            ) : (
-              <div className={`${className} bg-gray-800`} style={style} />
-            )
-          ) : (
-            <video
-              ref={videoRef}
-              src={src}
-              className={className}
-              style={style}
-              muted
-              playsInline
-              preload="metadata"
-              poster={poster || undefined}
-              onLoadedData={() => setMetadataLoaded(true)}
-              onMouseEnter={(e) => {
-                if (supportsHover) {
-                  e.currentTarget.play();
-                  setIsPlaying(true);
+          <video
+            ref={videoRef}
+            src={src}
+            className={className}
+            style={style}
+            muted
+            playsInline
+            preload="metadata"
+            poster={poster || undefined}
+            // Force the first frame to decode/paint. Some Android WebViews don't
+            // render a preview frame from preload="metadata" alone, leaving the
+            // tile blank — seeking a hair past 0 makes the frame appear.
+            onLoadedMetadata={(e) => {
+              if (isNative && e.currentTarget.currentTime === 0) {
+                try {
+                  e.currentTarget.currentTime = 0.1;
+                } catch {
+                  /* ignore seek errors */
                 }
-              }}
-              onMouseLeave={(e) => {
-                if (supportsHover) {
-                  e.currentTarget.pause();
-                  e.currentTarget.currentTime = 0;
-                  setIsPlaying(false);
-                }
-              }}
-              onEnded={() => setIsPlaying(false)}
-            />
-          )}
-          {/* On web: show poster overlay until video metadata loads (first frame visible) */}
-          {!isNative && !metadataLoaded && !isPlaying && poster && (
+              }
+            }}
+            onLoadedData={() => setMetadataLoaded(true)}
+            onMouseEnter={(e) => {
+              if (supportsHover) {
+                e.currentTarget.play();
+                setIsPlaying(true);
+              }
+            }}
+            onMouseLeave={(e) => {
+              if (supportsHover) {
+                e.currentTarget.pause();
+                e.currentTarget.currentTime = 0;
+                setIsPlaying(false);
+              }
+            }}
+            onEnded={() => setIsPlaying(false)}
+          />
+          {/* Show poster overlay until the first video frame is visible */}
+          {!metadataLoaded && !isPlaying && poster && (
             <img
               src={poster}
               alt=""
