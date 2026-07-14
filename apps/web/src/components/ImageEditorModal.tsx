@@ -28,7 +28,7 @@ function imageDataToCanvas(imageData: ImageData): HTMLCanvasElement {
   return canvas;
 }
 
-function canvasToBlob(canvas: HTMLCanvasElement, quality = 0.92): Promise<Blob> {
+function canvasToBlob(canvas: HTMLCanvasElement, quality = 0.95): Promise<Blob> {
   return new Promise((resolve, reject) => {
     canvas.toBlob(
       (blob) => {
@@ -42,21 +42,24 @@ function canvasToBlob(canvas: HTMLCanvasElement, quality = 0.92): Promise<Blob> 
 }
 
 const ImageEditorModal: React.FC<ImageEditorModalProps> = ({ imageUrl, nativeWidth, nativeHeight, onSave, onClose }) => {
-  // Calculate the pixel ratio needed to save at (close to) the original resolution.
-  // Filerobot renders the image in a CSS-sized canvas; savingPixelRatio multiplies that
-  // canvas size when exporting. With savingPixelRatio=1 (the old value) a 4000 px photo
-  // displayed in a 1000 px container would be saved at only 1000 px — a 4× quality loss.
-  // We estimate the effective canvas width as ~65 % of the viewport (Filerobot's panels
-  // and toolbars occupy the rest) and choose the ratio that brings the export back up to
-  // the original image width.
+  // Filerobot exports by cloning the editing stage at the ORIGINAL image's pixel
+  // dimensions and then multiplying by savingPixelRatio (see the library's
+  // getTransformedImgData: getStage().clone({ width: originalImage.width, ... })
+  // with Konva.pixelRatio = savingPixelRatio). A ratio of 1 therefore already
+  // produces a full-resolution export of the original.
+  //
+  // The previous estimate assumed Filerobot exported from the small on-screen
+  // canvas and tried to "scale back up" with a ratio of 4–16. In reality that
+  // multiplies the already-full-resolution export, pushing large photos past the
+  // browser's maximum canvas size. The oversized canvas renders blank/garbled, so
+  // the saved image looks dramatically lower quality. Keep the ratio at 1 to
+  // preserve the original resolution, only scaling below 1 when the source is
+  // larger than the safe canvas limit.
   const savingPixelRatio = useMemo(() => {
-    const dpr = window.devicePixelRatio || 1;
-    if (!nativeWidth && !nativeHeight) return dpr;
-    const estimatedCanvasWidth = window.innerWidth * 0.65;
-    const estimatedCanvasHeight = window.innerHeight * 0.7;
-    const widthRatio = nativeWidth ? Math.ceil(nativeWidth / estimatedCanvasWidth) : 1;
-    const heightRatio = nativeHeight ? Math.ceil(nativeHeight / estimatedCanvasHeight) : 1;
-    return Math.max(dpr, widthRatio, heightRatio);
+    const MAX_CANVAS_SIDE = 16384; // Chromium/desktop max canvas dimension
+    const longest = Math.max(nativeWidth || 0, nativeHeight || 0);
+    if (longest > MAX_CANVAS_SIDE) return MAX_CANVAS_SIDE / longest;
+    return 1;
   }, [nativeWidth, nativeHeight]);
   const [activeTab, setActiveTab] = useState<EditorTab>('adjust');
   const [saving, setSaving] = useState(false);
@@ -138,7 +141,7 @@ const ImageEditorModal: React.FC<ImageEditorModalProps> = ({ imageUrl, nativeWid
 
     if (getCurrentImgDataRef.current) {
       const { imageData } = getCurrentImgDataRef.current(
-        { quality: 0.92 },
+        { quality: 0.95 },
         false,
         true
       );
@@ -174,9 +177,11 @@ const ImageEditorModal: React.FC<ImageEditorModalProps> = ({ imageUrl, nativeWid
       if (editedCanvas) {
         canvasToExport = editedCanvas;
       } else if (getCurrentImgDataRef.current) {
-        // Get the current state from Filerobot without triggering its save UI
+        // Get the current state from Filerobot without triggering its save UI.
+        // The third arg (keepLoadedImageFullQuality) exports from the full-res
+        // original rather than the on-screen preview.
         const { imageData } = getCurrentImgDataRef.current(
-          { quality: 0.92 },
+          { quality: 0.95 },
           false,
           true
         );
@@ -189,7 +194,7 @@ const ImageEditorModal: React.FC<ImageEditorModalProps> = ({ imageUrl, nativeWid
         throw new Error('No edits to save');
       }
 
-      const blob = await canvasToBlob(canvasToExport, 0.92);
+      const blob = await canvasToBlob(canvasToExport, 0.95);
       await onSave(blob);
     } catch (err) {
       console.error('Failed to save:', err);
@@ -276,7 +281,7 @@ const ImageEditorModal: React.FC<ImageEditorModalProps> = ({ imageUrl, nativeWid
         {/* Filerobot Adjust Tab */}
         <div className={`absolute inset-0 ${activeTab === 'adjust' ? '' : 'invisible pointer-events-none'}`}>
           <FilerobotImageEditor
-            source={editedCanvas ? editedCanvas.toDataURL('image/jpeg', 0.92) : localUrl!}
+            source={editedCanvas ? editedCanvas.toDataURL('image/jpeg', 0.95) : localUrl!}
             tabsIds={[TABS.FINETUNE, TABS.ADJUST]}
             defaultTabId={TABS.FINETUNE}
             defaultToolId={TOOLS.CROP}
@@ -298,7 +303,7 @@ const ImageEditorModal: React.FC<ImageEditorModalProps> = ({ imageUrl, nativeWid
             }}
             savingPixelRatio={savingPixelRatio}
             defaultSavedImageType="jpeg"
-            defaultSavedImageQuality={0.92}
+            defaultSavedImageQuality={0.95}
             previewPixelRatio={1}
             observePluginContainerSize
             showBackButton={false}
