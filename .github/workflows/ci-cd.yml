@@ -68,13 +68,13 @@ jobs:
       run: npm ci
     
     - name: Run npm audit
-      run: npm audit --production --audit-level=moderate || npm audit --production --audit-level=moderate; exit 0
-    
+      run: npm audit --omit=dev --audit-level=high
+
     - name: Check for security vulnerabilities in worker
-      run: cd apps/worker && npm audit --production || npm audit --production; exit 0
-    
+      run: cd apps/worker && npm audit --omit=dev --audit-level=high
+
     - name: Check for security vulnerabilities in web
-      run: cd apps/web && npm audit --production || npm audit --production; exit 0
+      run: cd apps/web && npm audit --omit=dev --audit-level=high
 
   code-quality:
     runs-on: ubuntu-latest

@@ -23,6 +23,24 @@ vi.mock('../api', () => ({
   adminLogout: vi.fn(),
 }));
 
+vi.mock('../contexts/UploadContext', () => ({
+  useUploadContext: () => ({
+    queueItems: [],
+    getItemsForSlug: () => [],
+    addFiles: vi.fn(),
+    retryUpload: vi.fn(),
+    retryAllFailed: vi.fn(),
+    clearCompleted: vi.fn(),
+    cancelUpload: vi.fn(),
+    cancelAll: vi.fn(),
+    hasActiveUploads: false,
+    hasFailedUploads: false,
+    completedCount: 0,
+    totalCount: 0,
+    overallProgress: 0,
+  }),
+}));
+
 describe('Navbar Component', () => {
   it('renders all navigation links', () => {
     render(

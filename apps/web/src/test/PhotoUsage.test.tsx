@@ -20,6 +20,24 @@ vi.mock('../components/UserSettings', () => ({
   default: () => null,
 }));
 
+vi.mock('../contexts/UploadContext', () => ({
+  useUploadContext: () => ({
+    queueItems: [],
+    getItemsForSlug: () => [],
+    addFiles: vi.fn(),
+    retryUpload: vi.fn(),
+    retryAllFailed: vi.fn(),
+    clearCompleted: vi.fn(),
+    cancelUpload: vi.fn(),
+    cancelAll: vi.fn(),
+    hasActiveUploads: false,
+    hasFailedUploads: false,
+    completedCount: 0,
+    totalCount: 0,
+    overallProgress: 0,
+  }),
+}));
+
 describe('PhotoUsage Page', () => {
   it('renders main heading', () => {
     render(
