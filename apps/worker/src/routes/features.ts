@@ -48,13 +48,16 @@ app.get('/api/photos/featured', async (c) => {
   try {
     const limit = parseInt(c.req.query('limit') || '10');
     
-    // Try to get featured photos first
+    // Try to get featured photos first.
+    // Only expose events that are BOTH public-visibility and password-free —
+    // private/collaborators_only events must never surface on the public
+    // homepage, and password-protected previews can't load anonymously.
     let photos = await c.env.DB
       .prepare(`
         SELECT p.*, e.slug as event_slug, e.name as event_name
         FROM photos p
         JOIN events e ON p.event_id = e.id
-        WHERE p.is_featured = 1 AND e.password_hash IS NULL
+        WHERE p.is_featured = 1 AND e.visibility = 'public' AND e.password_hash IS NULL
         ORDER BY p.capture_time DESC
         LIMIT ?
       `)
@@ -68,7 +71,7 @@ app.get('/api/photos/featured', async (c) => {
           SELECT p.*, e.slug as event_slug, e.name as event_name
           FROM photos p
           JOIN events e ON p.event_id = e.id
-          WHERE e.password_hash IS NULL
+          WHERE e.visibility = 'public' AND e.password_hash IS NULL
           ORDER BY p.capture_time DESC
           LIMIT ?
         `)
@@ -96,7 +99,7 @@ app.get('/api/photos/most-favorited', async (c) => {
         SELECT p.*, e.slug as event_slug, e.name as event_name
         FROM photos p
         JOIN events e ON p.event_id = e.id
-        WHERE e.password_hash IS NULL
+        WHERE e.visibility = 'public' AND e.password_hash IS NULL
         ORDER BY p.favorites_count DESC, p.capture_time DESC
         LIMIT ?
       `)
@@ -136,7 +139,9 @@ app.get('/api/events/by-tag/:tagSlug', async (c) => {
     const tagSlug = c.req.param('tagSlug');
     console.log('Fetching events for tag:', tagSlug);
     
-    // First get events with the tag
+    // First get events with the tag.
+    // This is an anonymous public endpoint, so only expose public-visibility
+    // events — private/collaborators_only events must not leak via tag pages.
     const events = await c.env.DB
       .prepare(`
         SELECT DISTINCT 
@@ -149,7 +154,7 @@ app.get('/api/events/by-tag/:tagSlug', async (c) => {
         FROM events e
         JOIN event_tags et ON e.id = et.event_id
         JOIN tags t ON et.tag_id = t.id
-        WHERE t.slug = ?
+        WHERE t.slug = ? AND e.visibility = 'public'
         ORDER BY e.inferred_date DESC, e.created_at DESC
       `)
       .bind(tagSlug)
