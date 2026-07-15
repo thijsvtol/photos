@@ -101,23 +101,44 @@ const ImageEditorModal: React.FC<ImageEditorModalProps> = ({ imageUrl, nativeWid
     };
   }, [imageUrl]);
 
-  // Load original image into a canvas for curves/levels tab when no Filerobot edit has been done
+  // Load original image into a canvas for the curves/levels tabs. This decodes
+  // the FULL-resolution image into an ImageData buffer (width*height*4 bytes —
+  // ~96 MB for a 24 MP photo), which can exhaust memory in the Android WebView
+  // and crash the editor. Only do it when the user actually opens curves/levels,
+  // never eagerly on open (the default 'adjust' tab doesn't need it).
   useEffect(() => {
-    if (!editedCanvas && localUrl) {
-      const img = new Image();
-      img.crossOrigin = 'anonymous';
-      img.onload = () => {
+    const needsBase =
+      (activeTab === 'curves' || activeTab === 'levels') &&
+      !curvesLevelsBaseImageData &&
+      !editedCanvas &&
+      !!localUrl;
+    if (!needsBase) return;
+
+    let cancelled = false;
+    const img = new Image();
+    img.crossOrigin = 'anonymous';
+    img.onload = () => {
+      if (cancelled) return;
+      try {
         const canvas = document.createElement('canvas');
         canvas.width = img.width;
         canvas.height = img.height;
-        const ctx = canvas.getContext('2d')!;
+        const ctx = canvas.getContext('2d');
+        if (!ctx) throw new Error('Could not allocate canvas for adjustments');
         ctx.drawImage(img, 0, 0);
         setCurvesLevelsBaseImageData(canvasToImageData(canvas));
         setPreviewCanvas(canvas);
-      };
-      img.src = localUrl;
-    }
-  }, [localUrl, editedCanvas]);
+      } catch (err) {
+        if (!cancelled) {
+          setLoadError(err instanceof Error ? err.message : 'Failed to prepare adjustments');
+        }
+      }
+    };
+    img.src = localUrl!;
+    return () => {
+      cancelled = true;
+    };
+  }, [activeTab, localUrl, editedCanvas, curvesLevelsBaseImageData]);
 
   const handleFilerobotSave = useCallback(
     (savedImageData: any) => {

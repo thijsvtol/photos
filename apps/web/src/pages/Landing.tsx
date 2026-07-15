@@ -5,14 +5,15 @@ import ContactForm from '../components/ContactForm';
 import Footer from '../components/Footer';
 import SEO from '../components/SEO';
 import { useRefresh } from '../contexts/RefreshContext';
-import { getAbsoluteUrl } from '../utils/urlUtils';
-import { getFeaturedPhotos } from '../api';
+import { getFeaturedPhotos, getPreviewUrl } from '../api';
 import { getConfig } from '../config';
 
 interface FeaturedPhoto {
   id: string;
   event_slug: string;
   event_name: string;
+  file_type: string;
+  cache_version?: number;
   blur_placeholder: string | null;
 }
 
@@ -32,6 +33,8 @@ export default function Landing() {
         id: p.id,
         event_slug: p.event_slug || '',
         event_name: p.event_name || '',
+        file_type: p.file_type,
+        cache_version: p.cache_version,
         blur_placeholder: p.blur_placeholder,
       }));
       setFeaturedPhotos(featured);
@@ -123,12 +126,24 @@ export default function Landing() {
                   }`}
                   aria-hidden={index !== currentSlide}
                 >
-                  <img
-                    src={getAbsoluteUrl(`/media/${photo.event_slug}/preview/${photo.id}.jpg`)}
-                    alt={photo.event_name}
-                    className="w-full h-full object-cover"
-                    loading="lazy"
-                  />
+                  {photo.file_type === 'video/mp4' ? (
+                    <video
+                      src={getPreviewUrl(photo.event_slug, photo.id, photo.file_type, photo.cache_version)}
+                      className="w-full h-full object-cover"
+                      muted
+                      loop
+                      playsInline
+                      autoPlay
+                      preload="metadata"
+                    />
+                  ) : (
+                    <img
+                      src={getPreviewUrl(photo.event_slug, photo.id, photo.file_type, photo.cache_version)}
+                      alt={photo.event_name}
+                      className="w-full h-full object-cover"
+                      loading="lazy"
+                    />
+                  )}
                 </div>
               ))}
             </>

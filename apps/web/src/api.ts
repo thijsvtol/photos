@@ -878,16 +878,24 @@ export const searchUsers = async (query: string) => {
 };
 
 export const replacePhoto = async (_slug: string, photoId: string, originalBlob: Blob, previewBlob: Blob): Promise<void> => {
-  const formData = new FormData();
-  formData.append('original', originalBlob, 'original.jpg');
-  formData.append('preview', previewBlob, 'preview.jpg');
-  await api.put(
-    `/admin/photos/${photoId}/replace`,
-    formData,
-    {
-      headers: getAdminHeaders(),
-    }
-  );
+  // Send each image as a raw application/octet-stream body rather than multipart
+  // FormData. The native Android WebView does not reliably serialize FormData
+  // with Blobs, which silently broke photo editing on mobile; raw binary bodies
+  // are exactly what the chunked upload flow uses and are proven to work natively.
+  const fileType = originalBlob.type || 'image/jpeg';
+  const putRaw = (target: 'original' | 'preview', body: Blob) =>
+    api.put(`/admin/photos/${photoId}/replace?target=${target}`, body, {
+      headers: {
+        ...getAdminHeaders(),
+        'Content-Type': 'application/octet-stream',
+        'X-File-Type': fileType,
+      },
+    });
+
+  // Write the preview first, then the original last so the original write (which
+  // also busts the Instagram export) completes after both blobs are stored.
+  await putRaw('preview', previewBlob);
+  await putRaw('original', originalBlob);
 };
 
 export const getCollaborationHistory = async (eventSlug: string) => {

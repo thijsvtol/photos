@@ -3,6 +3,7 @@ import { useParams, Link, useNavigate, useLocation } from 'react-router-dom';
 import { Maximize, Minimize, Share2, X, Heart, Play, Pause, Pencil, MoreVertical, Star, Trash2, ArrowLeft, Download, Info, Volume2, VolumeX } from 'lucide-react';
 
 import SEO from '../components/SEO';
+import EditorErrorBoundary from '../components/EditorErrorBoundary';
 const ImageEditorModal = lazy(() => import('../components/ImageEditorModal'));
 const VideoEditorModal = lazy(() => import('../components/VideoEditorModal'));
 import { getEvent, getPhoto, getPhotos, loginToEvent, getPreviewUrl, getOriginalUrl, downloadOriginal, downloadSmall, downloadInstagram, replacePhoto, toggleFavorite as toggleFavoriteAPI, getUserFavoriteIds, setPhotoFeatured, deletePhoto, getCollaborators } from '../api';
@@ -1145,7 +1146,25 @@ const PhotoDetail: React.FC = () => {
       await loadPhoto();
     } catch (err) {
       console.error('Failed to save edited media:', err);
-      toast.showError('Failed to save. Please try again.');
+      // Surface the real reason so mobile failures are diagnosable instead of
+      // showing a generic message.
+      let detail = '';
+      if (err && typeof err === 'object') {
+        const anyErr = err as { response?: { status?: number; data?: unknown }; message?: string };
+        if (anyErr.response?.status) {
+          const data = anyErr.response.data;
+          const serverMsg =
+            typeof data === 'string'
+              ? data
+              : data && typeof data === 'object' && 'error' in data
+                ? String((data as { error: unknown }).error)
+                : '';
+          detail = ` (${anyErr.response.status}${serverMsg ? `: ${serverMsg}` : ''})`;
+        } else if (anyErr.message) {
+          detail = ` (${anyErr.message})`;
+        }
+      }
+      toast.showError(`Failed to save${detail}. Please try again.`);
     }
   };
 
@@ -1956,40 +1975,44 @@ const PhotoDetail: React.FC = () => {
 
       {/* Image Editor Modal */}
       {showEditor && photo && slug && photo.file_type !== 'video/mp4' && (
-        <Suspense fallback={
-          <div className="fixed inset-0 z-[200] flex items-center justify-center bg-gray-900">
-            <div className="text-center">
-              <div className="inline-block animate-spin rounded-full h-12 w-12 border-b-2 border-white"></div>
-              <p className="mt-4 text-gray-400">Loading editor...</p>
+        <EditorErrorBoundary onClose={() => setShowEditor(false)}>
+          <Suspense fallback={
+            <div className="fixed inset-0 z-[200] flex items-center justify-center bg-gray-900">
+              <div className="text-center">
+                <div className="inline-block animate-spin rounded-full h-12 w-12 border-b-2 border-white"></div>
+                <p className="mt-4 text-gray-400">Loading editor...</p>
+              </div>
             </div>
-          </div>
-        }>
-          <ImageEditorModal
-            imageUrl={getOriginalUrl(slug, photo.id, photo.file_type, cacheBuster || photo.cache_version)}
-            nativeWidth={photo.width ?? undefined}
-            nativeHeight={photo.height ?? undefined}
-            onSave={handleEditorSave}
-            onClose={() => setShowEditor(false)}
-          />
-        </Suspense>
+          }>
+            <ImageEditorModal
+              imageUrl={getOriginalUrl(slug, photo.id, photo.file_type, cacheBuster || photo.cache_version)}
+              nativeWidth={photo.width ?? undefined}
+              nativeHeight={photo.height ?? undefined}
+              onSave={handleEditorSave}
+              onClose={() => setShowEditor(false)}
+            />
+          </Suspense>
+        </EditorErrorBoundary>
       )}
 
       {/* Video Editor Modal */}
       {showEditor && photo && slug && photo.file_type === 'video/mp4' && (
-        <Suspense fallback={
-          <div className="fixed inset-0 z-[200] flex items-center justify-center bg-gray-900">
-            <div className="text-center">
-              <div className="inline-block animate-spin rounded-full h-12 w-12 border-b-2 border-white"></div>
-              <p className="mt-4 text-gray-400">Loading video editor...</p>
+        <EditorErrorBoundary onClose={() => setShowEditor(false)}>
+          <Suspense fallback={
+            <div className="fixed inset-0 z-[200] flex items-center justify-center bg-gray-900">
+              <div className="text-center">
+                <div className="inline-block animate-spin rounded-full h-12 w-12 border-b-2 border-white"></div>
+                <p className="mt-4 text-gray-400">Loading video editor...</p>
+              </div>
             </div>
-          </div>
-        }>
-          <VideoEditorModal
-            videoUrl={getOriginalUrl(slug, photo.id, photo.file_type, cacheBuster || photo.cache_version)}
-            onSave={handleEditorSave}
-            onClose={() => setShowEditor(false)}
-          />
-        </Suspense>
+          }>
+            <VideoEditorModal
+              videoUrl={getOriginalUrl(slug, photo.id, photo.file_type, cacheBuster || photo.cache_version)}
+              onSave={handleEditorSave}
+              onClose={() => setShowEditor(false)}
+            />
+          </Suspense>
+        </EditorErrorBoundary>
       )}
 
       {/* Keyboard Help Modal */}

@@ -134,6 +134,59 @@ app.put('/:photoId/replace', async (c) => {
     );
     if (permissionError) return permissionError;
 
+    // Use the correct extension/content-type so edited videos land on the same
+    // R2 keys the media routes read from (.mp4), not a stale .jpg key.
+    const isVideo = photo.file_type === 'video/mp4';
+    const extension = isVideo ? 'mp4' : 'jpg';
+    const contentType = isVideo ? 'video/mp4' : 'image/jpeg';
+    const originalKey = `original/${photo.slug}/${photo.id}.${extension}`;
+    const previewKey = `preview/${photo.slug}/${photo.id}.${extension}`;
+
+    const bumpCacheVersion = () =>
+      c.env.DB
+        .prepare('UPDATE photos SET cache_version = cache_version + 1 WHERE id = ?')
+        .bind(photoId)
+        .run();
+    const deleteStaleIg = async () => {
+      try {
+        await c.env.PHOTOS_BUCKET.delete(`ig/${photo.slug}/${photo.id}.jpg`);
+      } catch {
+        // Ignore if ig version doesn't exist
+      }
+    };
+
+    const reqContentType = c.req.header('Content-Type') || '';
+
+    // Raw-body path (?target=original|preview): the native Android WebView does
+    // not reliably serialize multipart FormData with Blobs, so the app sends each
+    // image as a raw application/octet-stream body — mirroring the chunked upload
+    // flow that already works on native. Web uses the same path.
+    if (!reqContentType.includes('multipart/form-data')) {
+      const target = c.req.query('target');
+      if (target !== 'original' && target !== 'preview') {
+        return c.json({ error: 'Invalid or missing target (expected original|preview)' }, 400);
+      }
+
+      const body = await c.req.arrayBuffer();
+      if (!body || body.byteLength === 0) {
+        return c.json({ error: 'Empty request body' }, 400);
+      }
+
+      if (target === 'original') {
+        await c.env.PHOTOS_BUCKET.put(originalKey, body, { httpMetadata: { contentType } });
+        await deleteStaleIg();
+      } else {
+        await c.env.PHOTOS_BUCKET.put(previewKey, body, { httpMetadata: { contentType } });
+      }
+
+      // Bump cache version on each write; a couple of extra increments only make
+      // caches refresh, which is the desired behaviour after an edit.
+      await bumpCacheVersion();
+
+      return c.json({ success: true });
+    }
+
+    // Legacy multipart path (kept for backward compatibility with older clients).
     const formData = await c.req.formData();
     const originalFile = formData.get('original') as File | null;
     const previewFile = formData.get('preview') as File | null;
@@ -142,36 +195,18 @@ app.put('/:photoId/replace', async (c) => {
       return c.json({ error: 'Both original and preview files are required' }, 400);
     }
 
-    // Use the correct extension/content-type so edited videos land on the same
-    // R2 keys the media routes read from (.mp4), not a stale .jpg key.
-    const isVideo = photo.file_type === 'video/mp4';
-    const extension = isVideo ? 'mp4' : 'jpg';
-    const contentType = isVideo ? 'video/mp4' : 'image/jpeg';
-
     // Overwrite original in R2
-    const originalKey = `original/${photo.slug}/${photo.id}.${extension}`;
     await c.env.PHOTOS_BUCKET.put(originalKey, await originalFile.arrayBuffer(), {
       httpMetadata: { contentType },
     });
 
     // Overwrite preview in R2
-    const previewKey = `preview/${photo.slug}/${photo.id}.${extension}`;
     await c.env.PHOTOS_BUCKET.put(previewKey, await previewFile.arrayBuffer(), {
       httpMetadata: { contentType },
     });
 
-    // Delete stale Instagram export if it exists (images only)
-    try {
-      await c.env.PHOTOS_BUCKET.delete(`ig/${photo.slug}/${photo.id}.jpg`);
-    } catch {
-      // Ignore if ig version doesn't exist
-    }
-
-    // Increment cache_version so clients can bust stale browser/CDN caches
-    await c.env.DB
-      .prepare('UPDATE photos SET cache_version = cache_version + 1 WHERE id = ?')
-      .bind(photoId)
-      .run();
+    await deleteStaleIg();
+    await bumpCacheVersion();
 
     return c.json({ success: true });
   } catch (error) {
