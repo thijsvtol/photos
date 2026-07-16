@@ -17,16 +17,43 @@ interface FeaturedPhoto {
   blur_placeholder: string | null;
 }
 
+// Cache featured-photo metadata so the home screen can paint an image
+// immediately on load (especially in the mobile app), then refresh in the
+// background. The preview image bytes are cached separately by the service
+// worker, so a cached-then-revalidate metadata list is enough to always show
+// something instantly. Bump the version suffix if FeaturedPhoto's shape changes.
+const FEATURED_CACHE_KEY = 'featured_photos_cache_v1';
+
+function readCachedFeatured(): FeaturedPhoto[] {
+  try {
+    const raw = localStorage.getItem(FEATURED_CACHE_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? (parsed as FeaturedPhoto[]) : [];
+  } catch {
+    return [];
+  }
+}
+
+function writeCachedFeatured(photos: FeaturedPhoto[]): void {
+  try {
+    localStorage.setItem(FEATURED_CACHE_KEY, JSON.stringify(photos));
+  } catch {
+    /* storage full or unavailable — non-fatal, we just won't cache */
+  }
+}
+
 export default function Landing() {
   const { registerRefreshHandler, unregisterRefreshHandler } = useRefresh();
-  const [featuredPhotos, setFeaturedPhotos] = useState<FeaturedPhoto[]>([]);
+  // Seed from cache so the first paint already has photos when available.
+  const [featuredPhotos, setFeaturedPhotos] = useState<FeaturedPhoto[]>(readCachedFeatured);
   const [currentSlide, setCurrentSlide] = useState(0);
-  const [loading, setLoading] = useState(true);
+  // Only show the loading spinner when we have nothing cached to display.
+  const [loading, setLoading] = useState(() => readCachedFeatured().length === 0);
   const [scrollY, setScrollY] = useState(0);
 
   const loadFeaturedPhotos = async () => {
     try {
-      setLoading(true);
       const photos = await getFeaturedPhotos(10);
       // Map Photo type to FeaturedPhoto interface
       const featured = photos.map(p => ({
@@ -38,8 +65,11 @@ export default function Landing() {
         blur_placeholder: p.blur_placeholder,
       }));
       setFeaturedPhotos(featured);
+      writeCachedFeatured(featured);
     } catch (err) {
       console.error('Failed to load featured photos:', err);
+      // Keep whatever cached photos are already on screen; only surface an
+      // empty state if we had nothing to show in the first place.
     } finally {
       setLoading(false);
     }
