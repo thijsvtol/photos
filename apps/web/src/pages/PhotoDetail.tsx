@@ -56,6 +56,7 @@ const PhotoDetail: React.FC = () => {
   const [videoProgress, setVideoProgress] = useState(0);
   const [videoDuration, setVideoDuration] = useState(0);
   const [videoBuffered, setVideoBuffered] = useState(0);
+  const [videoBuffering, setVideoBuffering] = useState(false);
   const [seekIndicator, setSeekIndicator] = useState<'left' | 'right' | null>(null);
   const videoControlsTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const videoTapCountRef = useRef(0);
@@ -92,6 +93,13 @@ const PhotoDetail: React.FC = () => {
   useEffect(() => {
     setZoomScale(1);
     setZoomTranslate({ x: 0, y: 0 });
+    // Reset transient video state when navigating to a different item so
+    // controls/progress/buffering don't carry over from the previous video.
+    setVideoProgress(0);
+    setVideoBuffered(0);
+    setVideoDuration(0);
+    setVideoBuffering(false);
+    setVideoPaused(false);
   }, [photoId]);
 
   const imageContainerCallbackRef = useCallback((node: HTMLDivElement | null) => {
@@ -1431,13 +1439,17 @@ const PhotoDetail: React.FC = () => {
                 ref={videoRef}
                 src={getPreviewUrl(slug!, photo?.id || photoId!, photo?.file_type, photo?.cache_version)}
                 autoPlay
-                muted
+                muted={videoMuted}
                 playsInline
                 loop
                 preload="metadata"
                 poster={photo?.blur_placeholder || undefined}
                 className="max-w-full max-h-full object-contain"
                 onTimeUpdate={handleVideoTimeUpdate}
+                onWaiting={() => setVideoBuffering(true)}
+                onStalled={() => setVideoBuffering(true)}
+                onCanPlay={() => setVideoBuffering(false)}
+                onPlaying={() => setVideoBuffering(false)}
                 onLoadedMetadata={(e) => {
                   setVideoDuration(e.currentTarget.duration);
                   setVideoPaused(false);
@@ -1473,6 +1485,12 @@ const PhotoDetail: React.FC = () => {
                   <div className="bg-black/50 backdrop-blur-sm rounded-full p-5">
                     <Play className="w-10 h-10 text-white fill-white" />
                   </div>
+                </div>
+              )}
+              {/* Buffering spinner — shown while the video is waiting for data */}
+              {videoBuffering && !videoPaused && (
+                <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+                  <div className="w-12 h-12 border-4 border-white/30 border-t-white rounded-full animate-spin" />
                 </div>
               )}
             </div>
@@ -1746,10 +1764,7 @@ const PhotoDetail: React.FC = () => {
                   className="p-1.5 hover:bg-white/20 rounded-full transition"
                   onClick={(e) => {
                     e.stopPropagation();
-                    if (videoRef.current) {
-                      videoRef.current.muted = !videoRef.current.muted;
-                      setVideoMuted(!videoMuted);
-                    }
+                    setVideoMuted((m) => !m);
                   }}
                 >
                   {videoMuted ? <VolumeX className="w-5 h-5" /> : <Volume2 className="w-5 h-5" />}

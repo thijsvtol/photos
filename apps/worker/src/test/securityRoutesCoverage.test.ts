@@ -179,13 +179,30 @@ const photos: PhotoRecord[] = [
 ];
 
 function createBucket(missingKeys: Set<string> = new Set()) {
+  const size = 4;
   return {
-    get: async (key: string) => {
+    get: async (key: string, options?: { range?: { offset?: number; length?: number; suffix?: number } }) => {
       if (missingKeys.has(key)) return null;
-      return {
+      const base = {
         body: 'ok',
+        size,
         arrayBuffer: async () => new Uint8Array([1, 2, 3, 4]).buffer,
+        writeHttpMetadata: () => {},
       };
+      const range = options?.range;
+      if (range) {
+        let offset: number;
+        let length: number;
+        if (typeof range.suffix === 'number') {
+          offset = size - range.suffix;
+          length = range.suffix;
+        } else {
+          offset = range.offset ?? 0;
+          length = range.length ?? size - offset;
+        }
+        return { ...base, range: { offset, length } };
+      }
+      return base;
     },
   };
 }
@@ -245,6 +262,19 @@ describe('Security Route Coverage', () => {
     const videoRes = await mediaRoutes.request('http://localhost/media/private-event/preview/photo-video.mp4', {}, videoEnv);
     expect(videoRes.status).toBe(200);
     expect(videoRes.headers.get('Content-Type')).toBe('video/mp4');
+    expect(videoRes.headers.get('Accept-Ranges')).toBe('bytes');
+
+    // Range request on a video returns 206 Partial Content for seeking/buffering.
+    const rangeEnv = createEnv(db);
+    const rangeRes = await mediaRoutes.request(
+      'http://localhost/media/private-event/preview/photo-video.mp4',
+      { headers: { Range: 'bytes=1-2' } },
+      rangeEnv
+    );
+    expect(rangeRes.status).toBe(206);
+    expect(rangeRes.headers.get('Content-Range')).toBe('bytes 1-2/4');
+    expect(rangeRes.headers.get('Content-Length')).toBe('2');
+    expect(rangeRes.headers.get('Accept-Ranges')).toBe('bytes');
 
     const sourceEnv = createEnv(db);
     const sourceRes = await mediaRoutes.request('http://localhost/media/public-event/preview/photo-copy.jpg', {}, sourceEnv);
