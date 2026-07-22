@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.7.10] - 2026-07-22
+
+### Changed
+- Android app release bumped to build 42 (versionName 1.7.10).
+- Project package versions synchronized to 1.7.10.
+- Web foreground upload path now caps concurrent uploads (`MAX_CONCURRENT_UPLOADS`) to avoid flooding the browser's connection pool and exhausting memory when selecting many/large files.
+
+### Fixed
+- Native background upload progress not reflected live in the on-screen upload list (`GlobalUploadIndicator`) — status/progress updates are now mirrored into the in-memory upload manager as they happen instead of only jumping to the final state once the whole batch finishes.
+
 ## [1.6.4] - 2026-05-18
 
 ### Changed
