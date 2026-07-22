@@ -298,6 +298,22 @@ export const completeUpload = async (
   );
 };
 
+/** Cancel an in-progress or not-yet-started upload: aborts the multipart
+ *  upload(s) on R2 and deletes the (incomplete) photo row so it never lingers
+ *  as a half-uploaded photo. Safe to call even if the upload never reached R2
+ *  (e.g. a still-pending item that has no uploadId yet). */
+export const cancelUpload = async (
+  slug: string,
+  photoId: string,
+  options: { uploadId?: string; previewUploadId?: string; fileType?: string } = {}
+): Promise<void> => {
+  await api.post(
+    `/admin/events/${slug}/uploads/${photoId}/cancel`,
+    options,
+    { headers: getAdminHeaders() }
+  );
+};
+
 export const regenerateThumbnails = async (slug: string): Promise<{ count: number }> => {
   const response = await api.post(
     `/admin/events/${slug}/regenerate-thumbnails`,

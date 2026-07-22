@@ -87,15 +87,29 @@ class BackgroundSyncService {
       return;
     }
 
-    // Request notification permissions
-    await LocalNotifications.requestPermissions();
+    // Request notification permissions. On Android 13+ this requires the
+    // POST_NOTIFICATIONS manifest permission (see AndroidManifest.xml) or the
+    // OS silently denies it with no prompt, and any subsequent
+    // upload/progress notification fails to display.
+    try {
+      const result = await LocalNotifications.requestPermissions();
+      if (result.display !== 'granted') {
+        console.warn('[BackgroundSync] Notification permission not granted — upload progress/completion notifications will not be shown.');
+      }
+    } catch (err) {
+      console.warn('[BackgroundSync] Failed to request notification permissions:', err);
+    }
 
     // Listen for app state changes — sync folders when app resumes
     App.addListener('appStateChange', async ({ isActive }) => {
       if (isActive) {
         await this.syncFoldersIfDue();
-        // Also kick the upload manager to resume pending items
-        uploadManager.init();
+        // Also kick the upload manager to resume pending items. Use
+        // refresh() instead of init() to resume pending items — this used
+        // to call init(), but init() is a one-shot initializer that no-ops
+        // on every call after the first, so it could never actually resume
+        // uploads that stalled while the app was backgrounded.
+        uploadManager.refresh();
       }
     });
 
@@ -138,8 +152,8 @@ class BackgroundSyncService {
       localStorage.setItem('lastFolderScanTime', String(now));
       if (newFiles > 0) {
         console.log(`[BackgroundSync] Periodic scan: ${newFiles} new files queued`);
-        // Kick upload manager to start processing
-        uploadManager.init();
+        // Kick upload manager to start processing (see note above re: refresh() vs init())
+        uploadManager.refresh();
       }
     } catch (err) {
       console.warn('[BackgroundSync] Periodic folder scan failed:', err);

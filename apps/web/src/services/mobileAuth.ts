@@ -48,6 +48,17 @@ export class MobileAuthService {
       
       if (event.url.startsWith('photos://auth/callback')) {
         this.handleAuthCallback(event.url);
+        return;
+      }
+
+      // Collaboration invite link opened directly in the app
+      // (photos://invite/TOKEN) — hand off to the router via the same
+      // custom-event pattern used for notification taps (see App.tsx).
+      if (event.url.startsWith('photos://invite/')) {
+        const token = event.url.replace('photos://invite/', '').split(/[/?#]/)[0];
+        if (token) {
+          window.dispatchEvent(new CustomEvent('navigateToInvite', { detail: { token } }));
+        }
       }
     });
   }
