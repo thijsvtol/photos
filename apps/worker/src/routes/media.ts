@@ -1,6 +1,6 @@
 import { Context, Hono } from 'hono';
 import type { Env } from '../types';
-import { checkEventAuth, extractUser } from '../auth';
+import { checkEventAuth, extractUser, getCollaboratorRoleByEventId } from '../auth';
 
 const app = new Hono<{ Bindings: Env }>();
 
@@ -61,13 +61,12 @@ async function requireMediaAccess(
     return null;
   }
 
-  // Collaborators bypass password gate for their events
+  // Collaborators bypass password gate for their events. Case-insensitive —
+  // email casing can differ between how a collaborator was invited and how
+  // they log in, and a mismatch must not cause a spurious 403 on media access.
   if (user) {
-    const collaborator = await c.env.DB
-      .prepare('SELECT role FROM event_collaborators WHERE event_id = ? AND user_email = ?')
-      .bind(event.id, user.email)
-      .first<{ role: string }>();
-    if (collaborator?.role) {
+    const role = await getCollaboratorRoleByEventId(c.env.DB, event.id, user.email);
+    if (role) {
       return null;
     }
   }

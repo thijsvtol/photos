@@ -455,15 +455,13 @@ app.post('/bulk-copy', async (c) => {
       return c.json({ error: 'Target event not found' }, 404);
     }
 
-    // Check that the user has upload permission in the target event
+    // Check that the user has upload permission in the target event.
+    // Case-insensitive — email casing can differ between how a collaborator
+    // was invited and how they log in, and a mismatch must not cause a
+    // spurious 403 here (see getCollaboratorRole() for rationale).
     if (!isGlobalAdmin) {
-      const targetCollaborator = await c.env.DB
-        .prepare(`SELECT role FROM event_collaborators WHERE event_id = ? AND user_email = ?`)
-        .bind(targetEvent.id, user.email)
-        .first<{ role: string }>();
-
-      const allowedRoles = ['uploader', 'editor', 'admin'];
-      if (!targetCollaborator || !allowedRoles.includes(targetCollaborator.role)) {
+      const hasUploadPermission = await hasEventCapabilityByEventId(c.env.DB, targetEvent.id, user.email, 'upload');
+      if (!hasUploadPermission) {
         return c.json({ error: 'Upload permission required for the target event' }, 403);
       }
     }

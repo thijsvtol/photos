@@ -2,7 +2,7 @@ import { Hono } from 'hono';
 import { cors } from 'hono/cors';
 import type { Env, Event, Photo } from '../types';
 import { hasEventSessionAccess } from '../cookies';
-import { optionalAuth, getUser, isAdmin } from '../auth';
+import { optionalAuth, getUser, isAdmin, getCollaboratorRoleByEventId } from '../auth';
 
 const app = new Hono<{ Bindings: Env }>();
 
@@ -181,13 +181,12 @@ app.get('/api/events/:slug', optionalAuth, async (c) => {
     }
     
     if (event.visibility === 'collaborators_only' && !userIsAdmin) {
-      // Check if user is a collaborator
-      const collaborator = await c.env.DB
-        .prepare('SELECT user_email FROM event_collaborators WHERE event_id = ? AND user_email = ?')
-        .bind(event.id, userEmail)
-        .first();
+      // Check if user is a collaborator (case-insensitive — email casing can
+      // differ between how a collaborator was invited and how they log in,
+      // and a mismatch must not cause a spurious 403 when viewing their event).
+      const collaboratorRole = await getCollaboratorRoleByEventId(c.env.DB, event.id, userEmail);
       
-      if (!collaborator) {
+      if (!collaboratorRole) {
         // Return 401 if not logged in, 403 if logged in but not authorized
         const statusCode = user ? 403 : 401;
         const message = user ? 'Access forbidden' : 'Authentication required';
@@ -246,13 +245,12 @@ app.get('/api/events/:slug/photos', optionalAuth, async (c) => {
     }
     
     if (event.visibility === 'collaborators_only' && !userIsAdmin) {
-      // Check if user is a collaborator
-      const collaborator = await c.env.DB
-        .prepare('SELECT user_email FROM event_collaborators WHERE event_id = ? AND user_email = ?')
-        .bind(event.id, userEmail)
-        .first();
+      // Check if user is a collaborator (case-insensitive — email casing can
+      // differ between how a collaborator was invited and how they log in,
+      // and a mismatch must not cause a spurious 403 when viewing their event).
+      const collaboratorRole = await getCollaboratorRoleByEventId(c.env.DB, event.id, userEmail);
       
-      if (!collaborator) {
+      if (!collaboratorRole) {
         // Return 401 if not logged in, 403 if logged in but not authorized
         const statusCode = user ? 403 : 401;
         const message = user ? 'Access forbidden' : 'Authentication required';
@@ -338,13 +336,12 @@ app.get('/api/events/:slug/photos/:photoId', optionalAuth, async (c) => {
     }
     
     if (event.visibility === 'collaborators_only' && !userIsAdmin) {
-      // Check if user is a collaborator
-      const collaborator = await c.env.DB
-        .prepare('SELECT user_email FROM event_collaborators WHERE event_id = ? AND user_email = ?')
-        .bind(event.id, userEmail)
-        .first();
+      // Check if user is a collaborator (case-insensitive — email casing can
+      // differ between how a collaborator was invited and how they log in,
+      // and a mismatch must not cause a spurious 403 when viewing their event).
+      const collaboratorRole = await getCollaboratorRoleByEventId(c.env.DB, event.id, userEmail);
       
-      if (!collaborator) {
+      if (!collaboratorRole) {
         // Return 401 if not logged in, 403 if logged in but not authorized
         const statusCode = user ? 403 : 401;
         const message = user ? 'Access forbidden' : 'Authentication required';

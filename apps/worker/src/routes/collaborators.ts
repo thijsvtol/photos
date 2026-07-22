@@ -1,6 +1,6 @@
 import { Hono } from 'hono';
 import type { Env, InviteCollaboratorRequest, CollaboratorWithUser, User, CollaboratorRole } from '../types';
-import { requireAdmin, extractUser, requireEventCapability, isAdmin, getCollaboratorRole } from '../auth';
+import { requireAdmin, extractUser, requireEventCapability, isAdmin, getCollaboratorRole, getCollaboratorRoleByEventId } from '../auth';
 import { requireFeature } from '../features';
 import { getConfig } from '../config';
 
@@ -27,12 +27,8 @@ const normalizeRole = (value: unknown): CollaboratorRole | null => {
   return null;
 };
 
-async function getEventCollaboratorRole(db: D1Database, eventId: number, userEmail: string): Promise<CollaboratorRole | null> {
-  const result = await db.prepare(
-    `SELECT role FROM event_collaborators WHERE event_id = ? AND user_email = ?`
-  ).bind(eventId, userEmail).first<{ role: CollaboratorRole }>();
-  return result?.role ?? null;
-}
+// Case-insensitive lookup — see getCollaboratorRole() in auth.ts for rationale.
+const getEventCollaboratorRole = getCollaboratorRoleByEventId;
 
 // Require collaborators feature to be enabled for all routes
 app.use('/*', requireFeature('enableCollaborators'));
@@ -230,9 +226,10 @@ app.delete('/api/events/:slug/collaborators/:userEmail', requireEventCapability(
       return c.json({ error: 'Collaborator not found' }, 404);
     }
 
-    // Delete collaborator relationship
+    // Delete collaborator relationship (case-insensitive, matching the
+    // lookup above — see getCollaboratorRole() for rationale).
     const result = await c.env.DB.prepare(
-      'DELETE FROM event_collaborators WHERE event_id = ? AND user_email = ?'
+      'DELETE FROM event_collaborators WHERE event_id = ? AND LOWER(user_email) = LOWER(?)'
     ).bind(event.id, userEmail).run();
     
     if (result.meta.changes === 0) {
@@ -293,7 +290,7 @@ app.put('/api/events/:slug/collaborators/:userEmail/role', requireEventCapabilit
     const result = await c.env.DB.prepare(`
       UPDATE event_collaborators
       SET role = ?
-      WHERE event_id = ? AND user_email = ?
+      WHERE event_id = ? AND LOWER(user_email) = LOWER(?)
     `).bind(nextRole, event.id, userEmail).run();
 
     if (result.meta.changes === 0) {

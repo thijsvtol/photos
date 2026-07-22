@@ -1,7 +1,7 @@
 import { Context, Hono } from 'hono';
 import { zipSync } from 'fflate';
 import type { Env, ZipRequest, Photo } from '../types';
-import { checkEventAuth, extractUser } from '../auth';
+import { checkEventAuth, extractUser, getCollaboratorRoleByEventId } from '../auth';
 
 const app = new Hono<{ Bindings: Env }>();
 
@@ -36,12 +36,12 @@ async function requireZipAccess(
     return c.json({ error: 'Access denied' }, 403);
   }
 
-  const collaborator = await c.env.DB
-    .prepare('SELECT role FROM event_collaborators WHERE event_id = ? AND user_email = ?')
-    .bind(event.id, user.email)
-    .first<{ role: string }>();
+  // Case-insensitive — email casing can differ between how a collaborator
+  // was invited and how they log in, and a mismatch must not cause a
+  // spurious 403 when downloading their event's ZIP.
+  const role = await getCollaboratorRoleByEventId(c.env.DB, event.id, user.email);
 
-  if (!collaborator?.role) {
+  if (!role) {
     return c.json({ error: 'Access denied' }, 403);
   }
 

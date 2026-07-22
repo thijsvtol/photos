@@ -62,6 +62,7 @@ vi.mock('../auth', () => {
     },
     hasEventCapabilityByEventId: async () => currentIsAdmin,
     getCollaboratorRole: async () => (currentIsAdmin ? 'admin' : 'viewer'),
+    getCollaboratorRoleByEventId: async () => (currentIsAdmin ? 'admin' : 'viewer'),
     extractUser: async () => currentUser,
     checkEventAuth: async (c: any, eventSlug: string, hasPassword: boolean) => {
       return !hasPassword;
