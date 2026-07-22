@@ -9,6 +9,7 @@ import { startUpload, uploadPart, completeUpload } from '../api';
 import { folderSyncService } from './folderSync';
 import { uploadManager } from './uploadManager';
 import ProgressNotification from '../plugins/ProgressNotification';
+import type { UploadQueueItem } from '../types';
 
 const CHUNK_SIZE = 5 * 1024 * 1024; // 5MB chunks
 const VIDEO_CHUNK_SIZE = 10 * 1024 * 1024; // 10MB for videos — fewer round-trips
@@ -183,6 +184,17 @@ class BackgroundSyncService {
   }
 
   /**
+   * Persist a queue item update to IndexedDB AND mirror it into the
+   * in-memory upload manager so GlobalUploadIndicator (web/app UI) reflects
+   * the same live progress as the native notification, instead of only
+   * jumping to the final state once the whole batch finishes.
+   */
+  private async updateQueueItemAndSync(id: string, updates: Partial<UploadQueueItem>) {
+    await updateQueueItem(id, updates);
+    uploadManager.syncItemProgress(id, updates);
+  }
+
+  /**
    * Process all pending uploads in the queue
    */
   private async processPendingUploads() {
@@ -279,7 +291,7 @@ class BackgroundSyncService {
         }
 
         // Update status to uploading
-        await updateQueueItem(upload.id, { status: 'uploading' });
+        await this.updateQueueItemAndSync(upload.id, { status: 'uploading' });
 
         // Generate photoId if not already set
         const photoId = upload.photoId || ulid();
@@ -334,7 +346,7 @@ class BackgroundSyncService {
 
           // Update progress
           const progress = Math.round((completedChunks / totalChunks) * 100);
-          await updateQueueItem(upload.id, { progress });
+          await this.updateQueueItemAndSync(upload.id, { progress });
           
           // Update notification with chunk progress (native only)
           if (isNative) {
@@ -364,7 +376,7 @@ class BackgroundSyncService {
         );
 
         // Mark as completed
-        await updateQueueItem(upload.id, { 
+        await this.updateQueueItemAndSync(upload.id, {
           status: 'completed',
           progress: 100,
           photoId: photoId
@@ -383,7 +395,7 @@ class BackgroundSyncService {
             `Scheduling retry ${currentRetries + 1}/${MAX_RETRIES} for ${upload.file.name} in ${backoffDelay}ms`
           );
           
-          await updateQueueItem(upload.id, {
+          await this.updateQueueItemAndSync(upload.id, {
             status: 'failed',
             retries: currentRetries + 1,
             lastRetryTime: Date.now(),
@@ -394,7 +406,7 @@ class BackgroundSyncService {
           console.error(
             `Max retries (${MAX_RETRIES}) exceeded for ${upload.file.name}, marking as permanently failed`
           );
-          await updateQueueItem(upload.id, {
+          await this.updateQueueItemAndSync(upload.id, {
             status: 'failed',
             retries: MAX_RETRIES,
             error: `Upload failed after ${MAX_RETRIES} retries: ${error instanceof Error ? error.message : 'Unknown error'}`,

@@ -19,6 +19,13 @@ const VIDEO_CHUNK_SIZE = 10 * 1024 * 1024; // 10MB for videos — fewer round-tr
 const PARALLEL_CHUNKS = 4; // Upload up to 4 chunks simultaneously
 const MAX_CHUNK_RETRIES = 3;
 const CHUNK_RETRY_DELAY = 2000;
+// Cap how many files are uploaded at once on the web (foreground) path.
+// Without this, selecting many/large files (photos + videos) fires off an
+// unbounded number of concurrent uploads, each already doing up to
+// PARALLEL_CHUNKS simultaneous chunk requests — this floods the browser's
+// connection pool and often exhausts memory (each file is fully read for
+// EXIF/preview/video-metadata extraction), causing large batches to fail.
+const MAX_CONCURRENT_UPLOADS = 3;
 
 export type UploadManagerListener = (items: UploadQueueItem[]) => void;
 
@@ -28,6 +35,8 @@ class UploadManager {
   private cancelled = new Set<string>();
   private listeners = new Set<UploadManagerListener>();
   private initialised = false;
+  /** Files waiting for a processing slot (see MAX_CONCURRENT_UPLOADS). */
+  private uploadQueue: UploadQueueItem[] = [];
 
   /** Subscribe to state changes. Returns unsubscribe function. */
   subscribe(listener: UploadManagerListener): () => void {
@@ -281,6 +290,23 @@ class UploadManager {
    *  Use after external code (e.g. folder sync) adds items to the queue. */
   async refresh() {
     await this.resumeAll();
+  }
+
+  /** Merge a live status/progress update into the in-memory state and notify
+   *  listeners (e.g. GlobalUploadIndicator). Used by backgroundSync (native)
+   *  so the on-screen upload list reflects the same progress as the native
+   *  notification in real time, instead of only jumping to the final state
+   *  once the whole batch finishes. If the item isn't tracked yet (e.g. a
+   *  folder-sync item processed before a refresh()/resumeAll() call), it is
+   *  added to the map so it becomes visible immediately. */
+  syncItemProgress(id: string, updates: Partial<UploadQueueItem>) {
+    const existing = this.items.get(id);
+    if (existing) {
+      this.updateItem(id, updates);
+    } else {
+      this.items.set(id, { ...updates, id } as UploadQueueItem);
+      this.notify();
+    }
   }
 
   // ── Core upload logic (moved from useUpload hook) ──
