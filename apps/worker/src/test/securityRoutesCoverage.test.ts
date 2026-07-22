@@ -11,6 +11,13 @@ vi.mock('../auth', () => {
   return {
     checkEventAuth: async () => allowEventAuth,
     extractUser: async () => currentUser,
+    getCollaboratorRoleByEventId: async (db: any, eventId: number, userEmail: string) => {
+      const result = await db
+        .prepare('SELECT role FROM event_collaborators WHERE event_id = ? AND user_email = ?')
+        .bind(eventId, userEmail)
+        .first();
+      return result?.role ?? null;
+    },
   };
 });
 
