@@ -124,6 +124,15 @@ const PhotoDetail: React.FC = () => {
   const [videoMuted, setVideoMuted] = useState(true);
   const overlayTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  // Keep the actual <video> element's muted property in sync with state.
+  // React only applies the `muted` attribute on initial mount, so subsequent
+  // toggles of videoMuted must be pushed to the DOM node imperatively.
+  useEffect(() => {
+    if (videoRef.current) {
+      videoRef.current.muted = videoMuted;
+    }
+  }, [videoMuted, photoId]);
+
   // Check if we came from favorites page or timeline
   const fromFavorites = location.state?.fromFavorites;
   const fromTimeline = location.state?.fromTimeline;
