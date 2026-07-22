@@ -154,7 +154,9 @@ class UploadManager {
     if (Capacitor.isNativePlatform()) {
       // Delegate to the background-sync pipeline (progress notifications,
       // survives app-close, resumes on relaunch) — same as folder sync.
-      // Dynamic import avoids a circular dependency with backgroundSync.
+      // Dynamic import avoids a circular dependency: backgroundSync.ts imports
+      // this module (uploadManager) at the top level, so importing it back
+      // statically here would create an import cycle.
       try {
         const { backgroundSyncService } = await import('./backgroundSync');
         await backgroundSyncService.syncNow();
