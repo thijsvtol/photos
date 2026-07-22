@@ -62,8 +62,8 @@ app.post('/start', requireUploadPermission, async (c) => {
         .prepare(`INSERT INTO photos (
           id, event_id, original_filename, file_type, capture_time, uploaded_by, width, height,
           iso, aperture, shutter_speed, focal_length, camera_make, camera_model, lens_model,
-          latitude, longitude, blur_placeholder
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+          latitude, longitude, blur_placeholder, upload_complete
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)`)
         .bind(
           body.photoId, event.id, body.filename, fileType, captureTime, 
           uploaderName, // Store uploader's first name
@@ -177,6 +177,17 @@ app.post('/:photoId/complete', requireUploadPermission, async (c) => {
     // Complete the multipart upload
     const upload = c.env.PHOTOS_BUCKET.resumeMultipartUpload(key, body.uploadId);
     await upload.complete(body.parts);
+
+    // Mark the photo as fully uploaded once the ORIGINAL media lands in R2, so
+    // it becomes visible in galleries/detail. Preview uploads (isPreview) are a
+    // progressive enhancement that happens afterwards; the media endpoint falls
+    // back to the original if the preview isn't ready yet.
+    if (!isPreview) {
+      await c.env.DB
+        .prepare('UPDATE photos SET upload_complete = 1 WHERE id = ?')
+        .bind(photoId)
+        .run();
+    }
     
     // Log collaborator uploads to history (not admins, originals only).
     // Email notifications are sent by the hourly scheduled job (see

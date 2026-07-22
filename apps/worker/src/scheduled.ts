@@ -121,6 +121,7 @@ export async function runUploadNotifications(env: Env): Promise<void> {
     JOIN events e ON p.event_id = e.id
     WHERE p.notified_at IS NULL
       AND p.uploaded_by IS NOT NULL
+      AND p.upload_complete = 1
   `).all<NewPhotoRow>();
 
   const rows = results || [];
