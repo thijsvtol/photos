@@ -27,13 +27,6 @@ const normalizeRole = (value: unknown): CollaboratorRole | null => {
   return null;
 };
 
-async function getEventAdminCount(db: D1Database, eventId: number): Promise<number> {
-  const result = await db.prepare(
-    `SELECT COUNT(*) as count FROM event_collaborators WHERE event_id = ? AND role = 'admin'`
-  ).bind(eventId).first<{ count: number }>();
-  return Number(result?.count || 0);
-}
-
 async function getEventCollaboratorRole(db: D1Database, eventId: number, userEmail: string): Promise<CollaboratorRole | null> {
   const result = await db.prepare(
     `SELECT role FROM event_collaborators WHERE event_id = ? AND user_email = ?`
@@ -231,13 +224,6 @@ app.delete('/api/events/:slug/collaborators/:userEmail', requireEventCapability(
       return c.json({ error: 'Collaborator not found' }, 404);
     }
 
-    if (existingRole === 'admin') {
-      const adminCount = await getEventAdminCount(c.env.DB, event.id);
-      if (adminCount <= 1) {
-        return c.json({ error: 'Cannot remove the last event admin' }, 400);
-      }
-    }
-    
     // Delete collaborator relationship
     const result = await c.env.DB.prepare(
       'DELETE FROM event_collaborators WHERE event_id = ? AND user_email = ?'
@@ -296,13 +282,6 @@ app.put('/api/events/:slug/collaborators/:userEmail/role', requireEventCapabilit
     const existingRole = await getEventCollaboratorRole(c.env.DB, event.id, userEmail);
     if (!existingRole) {
       return c.json({ error: 'Collaborator not found' }, 404);
-    }
-
-    if (existingRole === 'admin' && nextRole !== 'admin') {
-      const adminCount = await getEventAdminCount(c.env.DB, event.id);
-      if (adminCount <= 1) {
-        return c.json({ error: 'Cannot demote the last event admin' }, 400);
-      }
     }
 
     const result = await c.env.DB.prepare(`

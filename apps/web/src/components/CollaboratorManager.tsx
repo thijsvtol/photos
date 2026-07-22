@@ -1,7 +1,13 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { Capacitor } from '@capacitor/core';
 import { UserPlus, X, Mail, Check, Link as LinkIcon, Copy, Trash2 } from 'lucide-react';
 import { getCollaborators, inviteCollaborator, removeCollaborator, searchUsers, createInviteLink, getInviteLinks, revokeInviteLink, updateCollaboratorRole } from '../api';
 import type { Collaborator, InviteLink, CollaboratorRole } from '../types';
+import { config } from '../config';
+
+// On native (Capacitor) the origin is localhost, so use the configured domain instead.
+const getInviteBaseUrl = (): string =>
+  Capacitor.isNativePlatform() ? `https://${config.domain}` : window.location.origin;
 
 interface CollaboratorManagerProps {
   eventSlug: string;
@@ -122,7 +128,7 @@ const CollaboratorManager: React.FC<CollaboratorManagerProps> = ({ eventSlug, ev
   };
 
   const handleCopyLink = (token: string) => {
-    const inviteUrl = `${window.location.origin}/invite/${token}`;
+    const inviteUrl = `${getInviteBaseUrl()}/invite/${token}`;
     navigator.clipboard.writeText(inviteUrl);
     setCopiedToken(token);
     setTimeout(() => setCopiedToken(null), 2000);
@@ -381,7 +387,7 @@ const CollaboratorManager: React.FC<CollaboratorManagerProps> = ({ eventSlug, ev
                   <div className="flex items-center gap-2 mb-1">
                     <LinkIcon className="w-4 h-4 text-blue-600 dark:text-blue-400 flex-shrink-0" />
                     <code className="text-xs text-gray-600 dark:text-gray-400 font-mono truncate">
-                      {window.location.origin}/invite/{link.token}
+                      {getInviteBaseUrl()}/invite/{link.token}
                     </code>
                   </div>
                     <div className="flex items-center gap-3 text-xs text-gray-500 dark:text-gray-400">
