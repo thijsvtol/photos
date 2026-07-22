@@ -273,11 +273,15 @@ export async function getCollaboratorRole(
   userEmail: string
 ): Promise<CollaboratorRole | null> {
   try {
+    // Compare case-insensitively: emails can be stored with different casing
+    // depending on how the collaborator was added (manual invite vs. accepted
+    // link vs. OAuth login), and mismatched casing must not cause collaborators
+    // to lose their permissions (e.g. spurious 403s when uploading).
     const result = await db.prepare(`
       SELECT ec.role
       FROM event_collaborators ec
       JOIN events e ON ec.event_id = e.id
-      WHERE e.slug = ? AND ec.user_email = ?
+      WHERE e.slug = ? AND LOWER(ec.user_email) = LOWER(?)
     `).bind(eventSlug, userEmail).first<{ role: CollaboratorRole }>();
 
     return result?.role ?? null;
@@ -293,10 +297,11 @@ export async function getCollaboratorRoleByEventId(
   userEmail: string
 ): Promise<CollaboratorRole | null> {
   try {
+    // Case-insensitive match — see getCollaboratorRole() for rationale.
     const result = await db.prepare(`
       SELECT role
       FROM event_collaborators
-      WHERE event_id = ? AND user_email = ?
+      WHERE event_id = ? AND LOWER(user_email) = LOWER(?)
     `).bind(eventId, userEmail).first<{ role: CollaboratorRole }>();
 
     return result?.role ?? null;

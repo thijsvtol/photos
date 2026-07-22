@@ -104,10 +104,10 @@ app.post('/start', requireUploadPermission, async (c) => {
  * PUT /events/:slug/uploads/:photoId/parts/:partNumber
  * Uploads a part directly to R2 (supports preview uploads via query param)
  */
-app.put('/:photoId/parts/:partNumber', async (c) => {
+app.put('/:photoId/parts/:partNumber', requireUploadPermission, async (c) => {
   const slug = c.req.param('slug')!;
   const photoId = c.req.param('photoId');
-  const partNumber = parseInt(c.req.param('partNumber'));
+  const partNumber = parseInt(c.req.param('partNumber')!);
   const isPreview = c.req.query('preview') === 'true';
   
   try {
@@ -141,6 +141,67 @@ app.put('/:photoId/parts/:partNumber', async (c) => {
   } catch (error) {
     console.error('Error uploading part:', error);
     return c.json({ error: 'Failed to upload part' }, 500);
+  }
+});
+
+/**
+ * POST /events/:slug/uploads/:photoId/cancel
+ * Cancels an in-progress (or not-yet-started) upload: aborts the multipart
+ * upload on R2 (best-effort, for both original and preview keys) and removes
+ * the photo row that was created at /start — but ONLY if the photo never
+ * finished uploading (upload_complete = 0), so a completed photo can never be
+ * deleted through this endpoint.
+ * Accessible by admins and event collaborators. Always available so users can
+ * always clear a half-uploaded photo from the queue.
+ */
+app.post('/:photoId/cancel', requireUploadPermission, async (c) => {
+  const slug = c.req.param('slug')!;
+  const photoId = c.req.param('photoId');
+
+  try {
+    const body = await c.req.json<{ uploadId?: string; previewUploadId?: string; fileType?: string }>().catch(() => ({} as { uploadId?: string; previewUploadId?: string; fileType?: string }));
+
+    // Only ever delete a photo row that hasn't completed uploading.
+    const photo = await c.env.DB
+      .prepare('SELECT file_type, upload_complete FROM photos WHERE id = ?')
+      .bind(photoId)
+      .first<{ file_type: string; upload_complete: number }>();
+
+    if (photo && photo.upload_complete === 1) {
+      return c.json({ error: 'Cannot cancel a completed upload' }, 400);
+    }
+
+    const fileType = body.fileType || photo?.file_type || 'image/jpeg';
+    const isVideo = fileType === 'video/mp4';
+    const extension = isVideo ? 'mp4' : 'jpg';
+
+    // Best-effort abort of any in-progress multipart uploads on R2. Aborting
+    // an already-completed/nonexistent multipart upload throws — swallow
+    // those errors so a stale/missing uploadId never blocks cleanup.
+    const abortAttempts: Array<Promise<unknown>> = [];
+    if (body.uploadId) {
+      const originalKey = `original/${slug}/${photoId}.${extension}`;
+      abortAttempts.push(
+        c.env.PHOTOS_BUCKET.resumeMultipartUpload(originalKey, body.uploadId).abort()
+      );
+    }
+    if (body.previewUploadId) {
+      const previewKey = `preview/${slug}/${photoId}.${extension}`;
+      abortAttempts.push(
+        c.env.PHOTOS_BUCKET.resumeMultipartUpload(previewKey, body.previewUploadId).abort()
+      );
+    }
+    await Promise.allSettled(abortAttempts);
+
+    // Remove the incomplete photo row (if any) so it doesn't linger forever.
+    if (photo) {
+      await c.env.DB.prepare('DELETE FROM photos WHERE id = ? AND upload_complete = 0').bind(photoId).run();
+    }
+
+    return c.json({ success: true });
+  } catch (error) {
+    console.error('Error cancelling upload:', error);
+    return c.json({ error: 'Failed to cancel upload' }, 500);
   }
 });
 

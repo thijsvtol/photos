@@ -129,13 +129,19 @@ app.post('/api/events/:slug/collaborators', requireEventCapability('invite_creat
     
     if (!user) {
       console.log('[Invite Collaborator] User not found, creating new user');
+      // Normalize to lowercase so this matches the casing extracted from the
+      // user's own auth session when they eventually log in (avoids a
+      // mismatch that would silently deny them permissions, e.g. a 403 on
+      // upload, if they typed a different-case email at login than the
+      // admin used here).
+      const normalizedEmail = body.email.toLowerCase();
       // Create a placeholder user (they'll be fully created when they first log in)
       const createResult = await c.env.DB.prepare(
         'INSERT INTO users (email, name) VALUES (?, ?)'
-      ).bind(body.email, null).run();
+      ).bind(normalizedEmail, null).run();
       console.log('[Invite Collaborator] User creation result:', createResult.success);
       
-      user = { email: body.email, name: null };
+      user = { email: normalizedEmail, name: null };
     } else {
       console.log('[Invite Collaborator] User exists:', user.email);
     }
@@ -792,10 +798,11 @@ app.post('/api/invite/:token/accept', async (c) => {
       return c.json({ error: 'Invalid or revoked invite link' }, 404);
     }
     
-    // Check if user is already a collaborator
+    // Check if user is already a collaborator (case-insensitive — see
+    // getCollaboratorRole() for why casing can differ).
     const existing = await c.env.DB.prepare(`
       SELECT 1 FROM event_collaborators 
-      WHERE event_id = ? AND user_email = ?
+      WHERE event_id = ? AND LOWER(user_email) = LOWER(?)
     `).bind(inviteLink.event_id, user.email).first();
     
     if (existing) {

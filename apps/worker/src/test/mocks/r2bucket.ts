@@ -18,6 +18,7 @@ export function createBucket(missingKeys: Set<string> = new Set()) {
       return {
         uploadPart: async (_partNumber: number, _body: ArrayBuffer) => ({ etag: 'etag' }),
         complete: async (_parts: Array<{ partNumber: number; etag: string }>) => {},
+        abort: async () => {},
       };
     },
     delete: async () => {},
