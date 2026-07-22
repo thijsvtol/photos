@@ -4,6 +4,7 @@
 ALTER TABLE photos ADD COLUMN notified_at TEXT;
 
 -- Efficiently find un-notified collaborator uploads. Partial index keeps it
--- small since notified photos are never queried again.
-CREATE INDEX IF NOT EXISTS idx_photos_notified_at
+-- small since notified photos are never queried again. The name reflects that
+-- it only covers rows still pending notification (notified_at IS NULL).
+CREATE INDEX IF NOT EXISTS idx_photos_pending_notification
   ON photos(notified_at) WHERE notified_at IS NULL;
