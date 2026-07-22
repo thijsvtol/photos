@@ -55,7 +55,7 @@ export function GallerySortFilter({
       {selectedCount > 0 && (
         <div
           data-selection-toolbar="true"
-          className={`fixed ${isAndroid ? 'top-nav-offset-android' : 'top-nav-offset'} left-0 right-0 bg-indigo-600 dark:bg-indigo-700 shadow-lg z-40 border-b border-indigo-700/60 dark:border-indigo-800`}
+          className={`fixed ${isAndroid ? 'top-nav-offset-android' : 'top-nav-offset'} left-0 right-0 bg-indigo-600 dark:bg-indigo-700 shadow-lg z-50 border-b border-indigo-700/60 dark:border-indigo-800`}
         >
           <div className="max-w-7xl mx-auto px-3 sm:px-4 lg:px-8">
             <div className="flex items-center py-2 gap-2">

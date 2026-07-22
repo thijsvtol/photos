@@ -1,7 +1,7 @@
 import { Hono } from 'hono';
 import type { Env, StartUploadRequest, CompleteUploadRequest, User } from '../../types';
 import { requireUploadPermission, isAdmin } from '../../auth';
-import { sendUploadNotification, logCollaborationAction } from '../collaborators';
+import { logCollaborationAction } from '../collaborators';
 import { checkFeature } from '../../features';
 
 type Variables = {
@@ -62,8 +62,8 @@ app.post('/start', requireUploadPermission, async (c) => {
         .prepare(`INSERT INTO photos (
           id, event_id, original_filename, file_type, capture_time, uploaded_by, width, height,
           iso, aperture, shutter_speed, focal_length, camera_make, camera_model, lens_model,
-          latitude, longitude, blur_placeholder
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+          latitude, longitude, blur_placeholder, upload_complete
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)`)
         .bind(
           body.photoId, event.id, body.filename, fileType, captureTime, 
           uploaderName, // Store uploader's first name
@@ -177,9 +177,22 @@ app.post('/:photoId/complete', requireUploadPermission, async (c) => {
     // Complete the multipart upload
     const upload = c.env.PHOTOS_BUCKET.resumeMultipartUpload(key, body.uploadId);
     await upload.complete(body.parts);
+
+    // Mark the photo as fully uploaded once the ORIGINAL media lands in R2, so
+    // it becomes visible in galleries/detail. Preview uploads (isPreview) are a
+    // progressive enhancement that happens afterwards; the media endpoint falls
+    // back to the original if the preview isn't ready yet.
+    if (!isPreview) {
+      await c.env.DB
+        .prepare('UPDATE photos SET upload_complete = 1 WHERE id = ?')
+        .bind(photoId)
+        .run();
+    }
     
-    // Send notification if uploader is a collaborator (not admin)
-    // Only send for original uploads, not previews, and only if feature is enabled
+    // Log collaborator uploads to history (not admins, originals only).
+    // Email notifications are sent by the hourly scheduled job (see
+    // apps/worker/src/scheduled.ts), which batches new photos per event and
+    // notifies collaborators + admins, avoiding a spammy email per photo.
     if (!isPreview && !isAdmin(c) && checkFeature(c.env, 'enableCollaborators')) {
       const user = c.get('user');
       if (user) {
@@ -196,28 +209,6 @@ app.post('/:photoId/complete', requireUploadPermission, async (c) => {
         }>();
         
         if (eventInfo) {
-          // Get admin emails from environment
-          const adminEmails = c.env.ADMIN_EMAILS || '';
-          const adminList = adminEmails.split(',').map(email => email.trim()).filter(Boolean);
-          
-          // Send notification to all admins (only if Mailgun is configured)
-          if (checkFeature(c.env, 'canSendEmails')) {
-            for (const adminEmail of adminList) {
-              console.log('[Upload Notification] Sending to admin:', adminEmail);
-              await sendUploadNotification(c.env, {
-                adminEmail: adminEmail,
-                adminName: null,
-                uploaderName: user.name || null,
-                uploaderEmail: user.email,
-                eventName: eventInfo.name,
-                eventSlug: slug,
-                photoCount: 1 // Single photo per completion
-              });
-            }
-          } else {
-            console.log('[Upload Notification] Skipped - email feature not enabled');
-          }
-          
           // Log upload action to history
           await logCollaborationAction(c.env.DB, {
             eventId: eventInfo.id,

@@ -12,6 +12,7 @@ import favoritesRoutes from './routes/favorites';
 import collaboratorsRoutes from './routes/collaborators';
 import mobileAuthRoutes from './routes/mobileAuth';
 import { seo } from './routes/seo';
+import { runUploadNotifications } from './scheduled';
 
 const app = new Hono<{ Bindings: Env }>();
 
@@ -67,4 +68,10 @@ app.onError((err, c) => {
   return c.json({ error: 'Internal server error' }, 500);
 });
 
-export default app;
+export default {
+  fetch: (request: Request, env: Env, ctx: ExecutionContext) => app.fetch(request, env, ctx),
+  // Hourly cron: batch new-photo notifications to collaborators (see wrangler.toml [triggers]).
+  scheduled: (_event: ScheduledController, env: Env, ctx: ExecutionContext) => {
+    ctx.waitUntil(runUploadNotifications(env));
+  },
+};

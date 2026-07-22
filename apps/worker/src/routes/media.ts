@@ -24,6 +24,31 @@ function mediaCorsHeaders(): Record<string, string> {
   };
 }
 
+/**
+ * Parse an HTTP `Range` header (single range only) into an R2 range option.
+ * Returns undefined for absent/unsupported/multi-range headers so the caller
+ * falls back to serving the full object.
+ */
+function parseRangeHeader(rangeHeader: string | undefined): R2Range | undefined {
+  if (!rangeHeader) return undefined;
+  const match = /^bytes=(\d*)-(\d*)$/.exec(rangeHeader.trim());
+  if (!match) return undefined;
+  const [, startStr, endStr] = match;
+  if (startStr === '' && endStr === '') return undefined;
+  if (startStr === '') {
+    // Suffix range: last N bytes.
+    const suffix = Number(endStr);
+    if (!Number.isFinite(suffix) || suffix <= 0) return undefined;
+    return { suffix };
+  }
+  const offset = Number(startStr);
+  if (!Number.isFinite(offset) || offset < 0) return undefined;
+  if (endStr === '') return { offset };
+  const end = Number(endStr);
+  if (!Number.isFinite(end) || end < offset) return undefined;
+  return { offset, length: end - offset + 1 };
+}
+
 async function requireMediaAccess(
   c: Context<{ Bindings: Env }>,
   event: { id: number; slug: string; password_hash: string | null; visibility: 'public' | 'private' | 'collaborators_only' }
@@ -109,27 +134,58 @@ app.get('/media/:slug/preview/:photoId', async (c) => {
     // Resolve R2 key: copies point to source event's storage
     const r2Slug = photo.source_event_slug ?? slug;
     const r2PhotoId = photo.source_photo_id ?? photoId;
-    
+
+    // Honor HTTP Range requests for video so the player can seek and buffer
+    // incrementally instead of downloading the whole file up front.
+    const rangeOption = isVideo ? parseRangeHeader(c.req.header('Range')) : undefined;
+    const getOptions = rangeOption ? { range: rangeOption } : undefined;
+
     // Try to get the preview version first, fall back to original
     let key = `preview/${r2Slug}/${r2PhotoId}.${extension}`;
-    let object = await c.env.PHOTOS_BUCKET.get(key);
-    
+    let object = await c.env.PHOTOS_BUCKET.get(key, getOptions);
+
     // Fallback to original if preview doesn't exist
     if (!object) {
       key = `original/${r2Slug}/${r2PhotoId}.${extension}`;
-      object = await c.env.PHOTOS_BUCKET.get(key);
+      object = await c.env.PHOTOS_BUCKET.get(key, getOptions);
     }
-    
+
     if (!object) {
       return c.json({ error: 'Media not found' }, 404);
     }
-    
+
+    const baseHeaders: Record<string, string> = {
+      'Content-Type': contentType,
+      'Cache-Control': 'public, max-age=31536000',
+      'Accept-Ranges': 'bytes',
+      ...mediaCorsHeaders(),
+    };
+
+    // Partial content response when a valid range was requested and resolved.
+    const objRange = (object as R2ObjectBody).range as
+      | { offset?: number; length?: number }
+      | undefined;
+    const objSize = (object as R2ObjectBody).size;
+    if (rangeOption && objRange && typeof objSize === 'number') {
+      const start = objRange.offset ?? 0;
+      const length = objRange.length ?? objSize - start;
+      const end = start + length - 1;
+      return new Response(object.body, {
+        status: 206,
+        headers: {
+          ...baseHeaders,
+          'Content-Range': `bytes ${start}-${end}/${objSize}`,
+          'Content-Length': String(length),
+        },
+      });
+    }
+
+    if (typeof objSize === 'number') {
+      baseHeaders['Content-Length'] = String(objSize);
+    }
+
     return new Response(object.body, {
-      headers: {
-        'Content-Type': contentType,
-        'Cache-Control': 'public, max-age=31536000',
-        ...mediaCorsHeaders(),
-      },
+      headers: baseHeaders,
     });
   } catch (error) {
     console.error('[MEDIA] Error serving preview:', error);

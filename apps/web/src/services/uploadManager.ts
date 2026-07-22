@@ -6,6 +6,7 @@
  * React components subscribe to state changes via the listener pattern.
  */
 import { ulid } from 'ulid';
+import { Capacitor } from '@capacitor/core';
 import ExifReader from 'exifreader';
 import { startUpload, uploadPart, completeUpload } from '../api';
 import { addToQueue, updateQueueItem, getQueueItems, getPendingUploads, removeFromQueue, clearCompletedUploads } from '../uploadQueue';
@@ -101,12 +102,20 @@ class UploadManager {
     });
   }
 
-  /** Add files and start uploading */
+  /** Add files and start uploading.
+   *
+   *  On native, manual uploads reuse the same background-sync + notification
+   *  pipeline that folder sync uses: items are enqueued and then handed to
+   *  backgroundSyncService, which shows the persistent progress notification,
+   *  survives app-close (BackgroundTask.beforeExit), and resumes on relaunch.
+   *  On web there is no such pipeline, so we process in the foreground and let
+   *  the GlobalUploadIndicator render live progress. */
   async addFiles(slug: string, files: FileList | File[]) {
     const supportedFiles = Array.from(files).filter(
       f => f.type === 'image/jpeg' || f.type === 'video/mp4'
     );
 
+    const enqueued: UploadQueueItem[] = [];
     for (const file of supportedFiles) {
       const id = ulid();
       const photoId = ulid();
@@ -135,8 +144,35 @@ class UploadManager {
 
       await addToQueue(item);
       this.items.set(id, item);
-      this.notify();
-      this.processUpload(item);
+      enqueued.push(item);
+    }
+
+    this.notify();
+
+    if (enqueued.length === 0) return;
+
+    if (Capacitor.isNativePlatform()) {
+      // Delegate to the background-sync pipeline (progress notifications,
+      // survives app-close, resumes on relaunch) — same as folder sync.
+      // Dynamic import avoids a circular dependency: backgroundSync.ts imports
+      // this module (uploadManager) at the top level, so importing it back
+      // statically here would create an import cycle.
+      try {
+        const { backgroundSyncService } = await import('./backgroundSync');
+        await backgroundSyncService.syncNow();
+        // Reconcile in-memory state (GlobalUploadIndicator) with the final
+        // statuses the background pipeline wrote to IndexedDB.
+        const latest = await getQueueItems();
+        for (const it of latest) {
+          if (this.items.has(it.id)) this.items.set(it.id, it);
+        }
+        this.notify();
+      } catch (err) {
+        console.error('[UploadManager] background sync delegation failed, falling back to foreground:', err);
+        for (const item of enqueued) this.processUpload(item);
+      }
+    } else {
+      for (const item of enqueued) this.processUpload(item);
     }
   }
 

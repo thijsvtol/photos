@@ -8,6 +8,11 @@ compatibility_flags = ["nodejs_compat"]
 enabled = true
 invocation_logs = true
 
+# Scheduled cron triggers
+# Hourly job that batches new-photo notifications to event collaborators.
+[triggers]
+crons = ["0 * * * *"]
+
 # D1 Database binding
 [[d1_databases]]
 binding = "DB"
@@ -63,6 +68,9 @@ APP_DOMAIN = "photos.thijsvtol.nl"
 CONTACT_EMAIL = "info@thijsvtol.nl"
 GA_MEASUREMENT_ID = "G-PLACEHOLDER"
 
+[env.production.triggers]
+crons = ["0 * * * *"]
+
 [[env.production.d1_databases]]
 binding = "DB"
 database_name = "photos-db"
@@ -90,6 +98,9 @@ COPYRIGHT_HOLDER = "Thijs van Tol"
 APP_DOMAIN = "staging-photos.thijsvtol.nl"
 CONTACT_EMAIL = "info@thijsvtol.nl"
 GA_MEASUREMENT_ID = "G-PLACEHOLDER"
+
+[env.staging.triggers]
+crons = ["0 * * * *"]
 
 [[env.staging.d1_databases]]
 binding = "DB"
