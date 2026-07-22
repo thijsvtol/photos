@@ -80,7 +80,7 @@ describe('POST /events/:slug/uploads/:photoId/cancel', () => {
     vi.clearAllMocks();
   });
 
-  it('aborts the R2 multipart upload and deletes the incomplete photo row', async () => {
+  it('aborts the R2 multipart upload and deletes the photo row when upload_complete is 0', async () => {
     const { env, app, deletedIds, abortedKeys } = createFakeEnv([
       { id: 'photo-1', file_type: 'image/jpeg', upload_complete: 0 },
     ]);

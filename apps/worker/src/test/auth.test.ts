@@ -7,7 +7,7 @@ import { getCollaboratorRole, getCollaboratorRoleByEventId, hasEventCapability }
  * real case-sensitivity regressions instead of relying on string-matching
  * mocks. Only supports the exact query shapes those two functions issue.
  */
-function createFakeDb(rows: Array<{ event_id: number; slug: string; user_email: string; role: string }>) {
+function createFakeDb(collaboratorRows: Array<{ event_id: number; slug: string; user_email: string; role: string }>) {
   return {
     prepare(query: string) {
       let boundArgs: unknown[] = [];
@@ -19,7 +19,7 @@ function createFakeDb(rows: Array<{ event_id: number; slug: string; user_email: 
         async first<T>() {
           if (query.includes('JOIN events e')) {
             const [slug, userEmail] = boundArgs as [string, string];
-            const match = rows.find(
+            const match = collaboratorRows.find(
               r => r.slug === slug && r.user_email.toLowerCase() === String(userEmail).toLowerCase()
             );
             return (match ? { role: match.role } : null) as T | null;
@@ -27,7 +27,7 @@ function createFakeDb(rows: Array<{ event_id: number; slug: string; user_email: 
 
           // getCollaboratorRoleByEventId: WHERE event_id = ? AND ...user_email = ?
           const [eventId, userEmail] = boundArgs as [number, string];
-          const match = rows.find(
+          const match = collaboratorRows.find(
             r => r.event_id === eventId && r.user_email.toLowerCase() === String(userEmail).toLowerCase()
           );
           return (match ? { role: match.role } : null) as T | null;

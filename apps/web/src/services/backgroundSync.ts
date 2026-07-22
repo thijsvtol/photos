@@ -89,8 +89,8 @@ class BackgroundSyncService {
 
     // Request notification permissions. On Android 13+ this requires the
     // POST_NOTIFICATIONS manifest permission (see AndroidManifest.xml) or the
-    // OS silently denies it with no prompt, and every upload/progress
-    // notification below silently fails to display.
+    // OS silently denies it with no prompt, and any subsequent
+    // upload/progress notification fails to display.
     try {
       const result = await LocalNotifications.requestPermissions();
       if (result.display !== 'granted') {
@@ -105,9 +105,10 @@ class BackgroundSyncService {
       if (isActive) {
         await this.syncFoldersIfDue();
         // Also kick the upload manager to resume pending items. Use
-        // refresh() (not init()) — init() is a one-shot initializer that
-        // no-ops on every call after the first, so it can never actually
-        // resume uploads that stalled while the app was backgrounded.
+        // refresh() instead of init() to resume pending items — this used
+        // to call init(), but init() is a one-shot initializer that no-ops
+        // on every call after the first, so it could never actually resume
+        // uploads that stalled while the app was backgrounded.
         uploadManager.refresh();
       }
     });

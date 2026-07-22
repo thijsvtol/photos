@@ -144,6 +144,8 @@ app.put('/:photoId/parts/:partNumber', requireUploadPermission, async (c) => {
   }
 });
 
+type CancelUploadBody = { uploadId?: string; previewUploadId?: string; fileType?: string };
+
 /**
  * POST /events/:slug/uploads/:photoId/cancel
  * Cancels an in-progress (or not-yet-started) upload: aborts the multipart
@@ -159,7 +161,12 @@ app.post('/:photoId/cancel', requireUploadPermission, async (c) => {
   const photoId = c.req.param('photoId');
 
   try {
-    const body = await c.req.json<{ uploadId?: string; previewUploadId?: string; fileType?: string }>().catch(() => ({} as { uploadId?: string; previewUploadId?: string; fileType?: string }));
+    const body = await c.req.json<CancelUploadBody>().catch((err) => {
+      // A missing/empty body is expected (e.g. cancelling an item that never
+      // reached /start), so this is logged at debug level, not as an error.
+      console.debug('Cancel upload: no/invalid JSON body, proceeding with defaults', err);
+      return {} as CancelUploadBody;
+    });
 
     // Only ever delete a photo row that hasn't completed uploading.
     const photo = await c.env.DB

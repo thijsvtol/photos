@@ -233,7 +233,7 @@ class UploadManager {
     // we conservatively always attempt cleanup — the endpoint is a no-op if
     // there's nothing to clean up).
     if (item.photoId) {
-      cancelUploadApi(item.eventSlug, item.photoId, item.uploadId, undefined, item.fileType).catch(err => {
+      cancelUploadApi(item.eventSlug, item.photoId, { uploadId: item.uploadId, fileType: item.fileType }).catch(err => {
         console.warn('[UploadManager] Failed to clean up cancelled upload on server:', err);
       });
     }

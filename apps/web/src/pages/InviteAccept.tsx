@@ -21,7 +21,15 @@ const InviteAccept: React.FC = () => {
     if (!token || Capacitor.isNativePlatform()) return;
     const isMobile = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
     if (!isMobile) return;
-    window.location.href = `photos://invite/${token}`;
+    try {
+      window.location.href = `photos://invite/${token}`;
+    } catch (err) {
+      // Defensive: some older WebViews/browsers can throw synchronously when
+      // navigating to an unregistered custom scheme instead of silently
+      // ignoring it. Swallow it either way and let the normal web flow
+      // below proceed as the fallback.
+      console.debug('[InviteAccept] App deep-link attempt failed, continuing on web:', err);
+    }
   }, [token]);
 
   useEffect(() => {

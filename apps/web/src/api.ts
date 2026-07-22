@@ -305,13 +305,11 @@ export const completeUpload = async (
 export const cancelUpload = async (
   slug: string,
   photoId: string,
-  uploadId?: string,
-  previewUploadId?: string,
-  fileType?: string
+  options: { uploadId?: string; previewUploadId?: string; fileType?: string } = {}
 ): Promise<void> => {
   await api.post(
     `/admin/events/${slug}/uploads/${photoId}/cancel`,
-    { uploadId, previewUploadId, fileType },
+    options,
     { headers: getAdminHeaders() }
   );
 };
