@@ -98,12 +98,24 @@ const ShareIntentHandler = () => {
       }
     };
 
+    // Listen for a collaboration invite link opened directly in the app
+    // (photos://invite/TOKEN — see MobileAuthService.initialize())
+    const handleNavigateToInvite = (event: CustomEvent) => {
+      const token = event.detail?.token;
+      if (token) {
+        console.log('[ShareIntentHandler] Navigating to invite from deep link:', token);
+        navigate(`/invite/${token}`);
+      }
+    };
+
     window.addEventListener('shareReceived', handleShareReceived as EventListener);
     window.addEventListener('navigateToEvent', handleNavigateToEvent as EventListener);
+    window.addEventListener('navigateToInvite', handleNavigateToInvite as EventListener);
     
     return () => {
       window.removeEventListener('shareReceived', handleShareReceived as EventListener);
       window.removeEventListener('navigateToEvent', handleNavigateToEvent as EventListener);
+      window.removeEventListener('navigateToInvite', handleNavigateToInvite as EventListener);
     };
   }, [navigate, location]);
   

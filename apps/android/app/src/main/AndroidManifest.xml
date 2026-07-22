@@ -31,6 +31,16 @@
                 <data android:scheme="photos" android:host="auth" />
             </intent-filter>
 
+            <!-- Deep link for collaboration invite links (photos://invite/TOKEN).
+                 The web app tries this scheme first when an invite link is
+                 opened so the native app can handle it directly. -->
+            <intent-filter android:autoVerify="true">
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="photos" android:host="invite" />
+            </intent-filter>
+
             <!-- Share intent for images -->
             <intent-filter>
                 <action android:name="android.intent.action.SEND" />
@@ -72,4 +82,9 @@
     <!-- Permissions -->
 
     <uses-permission android:name="android.permission.INTERNET" />
+    <!-- Required on Android 13+ (API 33) to show any notification, including
+         upload progress/completion notifications from ProgressNotificationPlugin
+         and @capacitor/local-notifications. Without this, requestPermissions()
+         is silently denied and notifications never appear. -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 </manifest>

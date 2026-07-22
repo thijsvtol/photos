@@ -8,7 +8,7 @@
 import { ulid } from 'ulid';
 import { Capacitor } from '@capacitor/core';
 import ExifReader from 'exifreader';
-import { startUpload, uploadPart, completeUpload } from '../api';
+import { startUpload, uploadPart, completeUpload, cancelUpload as cancelUploadApi } from '../api';
 import { addToQueue, updateQueueItem, getQueueItems, getPendingUploads, removeFromQueue, clearCompletedUploads } from '../uploadQueue';
 import { createPreview } from '../imageUtils';
 import { extractMp4CreationTime } from '../utils/videoMetadata';
@@ -209,25 +209,40 @@ class UploadManager {
     this.notify();
   }
 
-  /** Cancel a single upload. Pending items are removed immediately; in-progress items are flagged and aborted after the current chunk. */
+  /** Cancel a single upload — always available, regardless of status.
+   *  Removes the item from the local queue immediately (so the UI never
+   *  gets stuck), and best-effort cleans up any half-uploaded data on the
+   *  backend (aborts the R2 multipart upload and deletes the orphaned photo
+   *  row) so cancelled uploads never linger as "half uploaded photos". */
   cancelUpload(itemId: string) {
     const item = this.items.get(itemId);
     if (!item) return;
-    if (item.status === 'pending') {
-      this.items.delete(itemId);
-      removeFromQueue(itemId);
-    } else if (item.status === 'uploading') {
+
+    if (item.status === 'uploading') {
+      // Ask the in-flight chunk loop to stop after its current batch.
       this.cancelled.add(itemId);
-      this.items.delete(itemId);
-      removeFromQueue(itemId);
     }
+
+    this.items.delete(itemId);
+    removeFromQueue(itemId);
     this.notify();
+
+    // Clean up server-side state for anything that ever reached /start
+    // (pending items that were never sent don't have a photoId server-side
+    // yet if photoId is unset, but addFiles always assigns one up-front, so
+    // we conservatively always attempt cleanup — the endpoint is a no-op if
+    // there's nothing to clean up).
+    if (item.photoId) {
+      cancelUploadApi(item.eventSlug, item.photoId, item.uploadId, undefined, item.fileType).catch(err => {
+        console.warn('[UploadManager] Failed to clean up cancelled upload on server:', err);
+      });
+    }
   }
 
-  /** Cancel all pending and in-progress uploads */
+  /** Cancel all pending, in-progress and failed uploads */
   cancelAll() {
     for (const [id, item] of this.items) {
-      if (item.status === 'pending' || item.status === 'uploading') {
+      if (item.status === 'pending' || item.status === 'uploading' || item.status === 'failed') {
         this.cancelUpload(id);
       }
     }

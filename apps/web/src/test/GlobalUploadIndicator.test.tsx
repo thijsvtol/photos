@@ -139,4 +139,70 @@ describe('GlobalUploadIndicator', () => {
 
     expect(screen.queryByTitle('Cancel')).not.toBeInTheDocument();
   });
+
+  it('shows a remove button on failed items so half-uploaded photos can always be cleared', () => {
+    const failedItem = {
+      id: 'failed-1',
+      eventSlug: 'e1',
+      photoId: 'p1',
+      file: { name: 'failed.jpg' },
+      fileType: 'image/jpeg',
+      status: 'failed',
+      progress: 40,
+      retries: 1,
+      error: 'Network error',
+    };
+
+    mockContextValue = {
+      ...mockContextValue,
+      queueItems: [failedItem],
+      hasFailedUploads: true,
+      totalCount: 1,
+      overallProgress: 0,
+    };
+
+    renderIndicator();
+
+    fireEvent.click(screen.getByText(/1 upload failed/));
+
+    // Both Retry and Remove should be available for failed items
+    expect(screen.getByTitle('Retry')).toBeInTheDocument();
+    const removeBtn = screen.getByTitle('Remove');
+    expect(removeBtn).toBeInTheDocument();
+
+    fireEvent.click(removeBtn);
+    expect(mockCancelUpload).toHaveBeenCalledWith('failed-1');
+  });
+
+  it('shows Cancel All button when only failed uploads remain', () => {
+    const failedItem = {
+      id: 'failed-1',
+      eventSlug: 'e1',
+      photoId: 'p1',
+      file: { name: 'failed.jpg' },
+      fileType: 'image/jpeg',
+      status: 'failed',
+      progress: 40,
+      retries: 1,
+      error: 'Network error',
+    };
+
+    mockContextValue = {
+      ...mockContextValue,
+      queueItems: [failedItem],
+      hasActiveUploads: false,
+      hasFailedUploads: true,
+      totalCount: 1,
+      overallProgress: 0,
+    };
+
+    renderIndicator();
+    fireEvent.click(screen.getByText(/1 upload failed/));
+
+    const cancelAllBtn = screen.getByText('Cancel All');
+    expect(cancelAllBtn).toBeInTheDocument();
+
+    fireEvent.click(cancelAllBtn);
+    expect(mockCancelAll).toHaveBeenCalledTimes(1);
+  });
 });

@@ -95,7 +95,7 @@ const GlobalUploadIndicator: React.FC = () => {
             Uploads {totalCount > 0 && `(${completedCount}/${totalCount})`}
           </h3>
           <div className="flex items-center gap-2">
-            {hasActiveUploads && (
+            {(hasActiveUploads || hasFailedUploads) && (
               <button
                 onClick={cancelAll}
                 className="px-3 py-1 text-xs bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300 rounded-full hover:bg-gray-300 dark:hover:bg-gray-600 transition"
@@ -155,8 +155,11 @@ const GlobalUploadIndicator: React.FC = () => {
                         <div className="bg-blue-600 h-1 rounded-full transition-all" style={{ width: `${item.progress}%` }} />
                       </div>
                     )}
-                    {item.status === 'failed' && item.error && (
-                      <p className="text-xs text-red-500 truncate mt-0.5">{item.error}</p>
+                    {item.status === 'pending' && (
+                      <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">Waiting to upload…</p>
+                    )}
+                    {item.status === 'failed' && (
+                      <p className="text-xs text-red-500 truncate mt-0.5">{item.error || 'Upload failed'}</p>
                     )}
                   </div>
 
@@ -171,12 +174,13 @@ const GlobalUploadIndicator: React.FC = () => {
                     </button>
                   )}
 
-                  {/* Cancel button for pending/uploading items */}
-                  {(item.status === 'pending' || item.status === 'uploading') && (
+                  {/* Cancel/remove button — always available so a stuck or
+                      half-uploaded item can be cleared regardless of status */}
+                  {item.status !== 'completed' && (
                     <button
                       onClick={() => cancelUpload(item.id)}
                       className="flex-shrink-0 p-1.5 rounded-full hover:bg-gray-100 dark:hover:bg-gray-700 transition"
-                      title="Cancel"
+                      title={item.status === 'failed' ? 'Remove' : 'Cancel'}
                     >
                       <X className="w-4 h-4 text-gray-500" />
                     </button>
