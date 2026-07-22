@@ -1,7 +1,7 @@
 import { Hono } from 'hono';
 import type { Env, StartUploadRequest, CompleteUploadRequest, User } from '../../types';
 import { requireUploadPermission, isAdmin } from '../../auth';
-import { sendUploadNotification, logCollaborationAction } from '../collaborators';
+import { logCollaborationAction } from '../collaborators';
 import { checkFeature } from '../../features';
 
 type Variables = {
@@ -178,8 +178,10 @@ app.post('/:photoId/complete', requireUploadPermission, async (c) => {
     const upload = c.env.PHOTOS_BUCKET.resumeMultipartUpload(key, body.uploadId);
     await upload.complete(body.parts);
     
-    // Send notification if uploader is a collaborator (not admin)
-    // Only send for original uploads, not previews, and only if feature is enabled
+    // Log collaborator uploads to history (not admins, originals only).
+    // Email notifications are sent by the hourly scheduled job (see
+    // apps/worker/src/scheduled.ts), which batches new photos per event and
+    // notifies collaborators + admins, avoiding a spammy email per photo.
     if (!isPreview && !isAdmin(c) && checkFeature(c.env, 'enableCollaborators')) {
       const user = c.get('user');
       if (user) {
@@ -196,28 +198,6 @@ app.post('/:photoId/complete', requireUploadPermission, async (c) => {
         }>();
         
         if (eventInfo) {
-          // Get admin emails from environment
-          const adminEmails = c.env.ADMIN_EMAILS || '';
-          const adminList = adminEmails.split(',').map(email => email.trim()).filter(Boolean);
-          
-          // Send notification to all admins (only if Mailgun is configured)
-          if (checkFeature(c.env, 'canSendEmails')) {
-            for (const adminEmail of adminList) {
-              console.log('[Upload Notification] Sending to admin:', adminEmail);
-              await sendUploadNotification(c.env, {
-                adminEmail: adminEmail,
-                adminName: null,
-                uploaderName: user.name || null,
-                uploaderEmail: user.email,
-                eventName: eventInfo.name,
-                eventSlug: slug,
-                photoCount: 1 // Single photo per completion
-              });
-            }
-          } else {
-            console.log('[Upload Notification] Skipped - email feature not enabled');
-          }
-          
           // Log upload action to history
           await logCollaborationAction(c.env.DB, {
             eventId: eventInfo.id,
