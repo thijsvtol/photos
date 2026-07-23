@@ -34,6 +34,9 @@ public class UploadForegroundService extends Service {
     public static final String EXTRA_NOTIFICATION_ID = "notificationId";
     public static final String EXTRA_TITLE = "title";
     public static final String EXTRA_BODY = "body";
+    // Fallback only — in practice the caller (ProgressNotificationPlugin.startForeground)
+    // always supplies EXTRA_NOTIFICATION_ID, matching the id used for the
+    // corresponding ProgressNotification.show()/cancel() calls in backgroundSync.ts.
     private static final int DEFAULT_NOTIFICATION_ID = 999999001;
 
     @Override
@@ -91,7 +94,11 @@ public class UploadForegroundService extends Service {
 
     @Override
     public void onDestroy() {
-        stopForeground(true);
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+            stopForeground(STOP_FOREGROUND_REMOVE);
+        } else {
+            stopForeground(true);
+        }
         super.onDestroy();
     }
 }
