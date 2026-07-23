@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 // Bypass permission checks for this route-logic test — the permission
 // middleware itself is covered by auth.test.ts and accessControl.test.ts.
@@ -15,12 +15,11 @@ vi.mock('../auth', async (importOriginal) => {
 
 import uploadsRouter from '../routes/admin/uploads';
 import { Hono } from 'hono';
-import { vi } from 'vitest';
 
 interface FakePhoto {
   id: string;
-  event_id: number;
-  original_filename: string;
+  eventId: number;
+  originalFilename: string;
   file_type: string;
   upload_complete: number;
 }
@@ -31,7 +30,7 @@ interface FakePhoto {
  * semantics used by POST /start, so this test would fail against a naive
  * plain INSERT (which throws on a duplicate primary key).
  */
-function createFakeEnv(photos: FakePhoto[]) {
+function createFakeEnv(photos: FakePhoto[]): { DB: any; PHOTOS_BUCKET: any } {
   const db = {
     prepare(query: string) {
       let boundArgs: unknown[] = [];
@@ -48,16 +47,16 @@ function createFakeEnv(photos: FakePhoto[]) {
         },
         async run() {
           if (query.includes('INSERT INTO photos')) {
-            const [id, event_id, original_filename, file_type] = boundArgs as [
+            const [id, eventId, originalFilename, file_type] = boundArgs as [
               string, number, string, string, ...unknown[]
             ];
             const existing = photos.find(p => p.id === id);
             if (!existing) {
-              photos.push({ id, event_id, original_filename, file_type, upload_complete: 0 });
+              photos.push({ id, eventId, originalFilename, file_type, upload_complete: 0 });
             } else if (existing.upload_complete === 0) {
               // Emulate the ON CONFLICT ... WHERE upload_complete = 0 upsert.
-              existing.event_id = event_id;
-              existing.original_filename = original_filename;
+              existing.eventId = eventId;
+              existing.originalFilename = originalFilename;
               existing.file_type = file_type;
             }
             return { success: true, meta: { changes: 1 } };
@@ -76,7 +75,7 @@ function createFakeEnv(photos: FakePhoto[]) {
     },
   };
 
-  return { DB: db, PHOTOS_BUCKET: bucket } as any;
+  return { DB: db, PHOTOS_BUCKET: bucket };
 }
 
 function buildApp() {
@@ -149,8 +148,8 @@ describe('POST /events/:slug/uploads/start', () => {
   it('does not overwrite an already-completed photo row on a stray retry', async () => {
     photos.push({
       id: 'photo-1',
-      event_id: 1,
-      original_filename: 'original.jpg',
+      eventId: 1,
+      originalFilename: 'original.jpg',
       file_type: 'image/jpeg',
       upload_complete: 1,
     });
@@ -167,7 +166,7 @@ describe('POST /events/:slug/uploads/start', () => {
     );
 
     expect(res.status).toBe(200);
-    expect(photos[0].original_filename).toBe('original.jpg');
+    expect(photos[0].originalFilename).toBe('original.jpg');
     expect(photos[0].upload_complete).toBe(1);
   });
 });
