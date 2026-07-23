@@ -82,8 +82,7 @@ export function setupAuthMocks() {
             : null;
 
           const allowedBySlug = (slug && collaboratorAccessBySlug[slug]) || [];
-          const allowedFallback = Object.values(collaboratorAccessBySlug).flat();
-          if (!collaborator && !allowedBySlug.includes(currentUser.email) && !allowedFallback.includes(currentUser.email)) {
+          if (!collaborator && !allowedBySlug.includes(currentUser.email)) {
             return c.json({ error: 'You do not have access to this event.' }, 403);
           }
         }
