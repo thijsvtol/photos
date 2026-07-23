@@ -276,18 +276,30 @@ app.post('/:photoId/complete', requireUploadPermission, async (c) => {
     // it becomes visible in galleries/detail. Preview uploads (isPreview) are a
     // progressive enhancement that happens afterwards; the media endpoint falls
     // back to the original if the preview isn't ready yet.
+    //
+    // Guard with "AND upload_complete = 0" and only proceed with the history
+    // log below when this call was the one that actually flipped the flag.
+    // Without this, a retried /complete (e.g. the first call succeeded
+    // server-side but its response was lost, so the client retries the whole
+    // upload) would re-run this handler for an already-completed photo and
+    // insert a second "upload" row into collaboration_history, showing up as
+    // a duplicate entry in the activity log.
+    let firstCompletion = true;
     if (!isPreview) {
-      await c.env.DB
-        .prepare('UPDATE photos SET upload_complete = 1 WHERE id = ?')
+      const result = await c.env.DB
+        .prepare('UPDATE photos SET upload_complete = 1 WHERE id = ? AND upload_complete = 0')
         .bind(photoId)
         .run();
+      firstCompletion = result.meta.changes > 0;
     }
     
     // Log collaborator uploads to history (not admins, originals only).
+    // Only on the first completion, so retries never create duplicate
+    // history entries for the same photo.
     // Email notifications are sent by the hourly scheduled job (see
     // apps/worker/src/scheduled.ts), which batches new photos per event and
     // notifies collaborators + admins, avoiding a spammy email per photo.
-    if (!isPreview && !isAdmin(c) && checkFeature(c.env, 'enableCollaborators')) {
+    if (!isPreview && firstCompletion && !isAdmin(c) && checkFeature(c.env, 'enableCollaborators')) {
       const user = c.get('user');
       if (user) {
         // Get event info
