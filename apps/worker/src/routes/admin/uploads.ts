@@ -58,12 +58,38 @@ app.post('/start', requireUploadPermission, async (c) => {
         uploaderName = user.name.split(' ')[0]; // Get first name
       }
       
+      // Upload retries (e.g. after a transient network/R2 failure) call /start
+      // again with the *same* photoId, since a fresh multipart upload has to
+      // be created either way. A plain INSERT would then hit the photos.id
+      // PRIMARY KEY and throw, causing an immediate 500 on retry. Use an
+      // upsert instead so re-starting an incomplete upload just refreshes its
+      // metadata; if the row is already complete, the WHERE guard makes the
+      // update a no-op so a finished photo is never touched.
       await c.env.DB
         .prepare(`INSERT INTO photos (
           id, event_id, original_filename, file_type, capture_time, uploaded_by, width, height,
           iso, aperture, shutter_speed, focal_length, camera_make, camera_model, lens_model,
           latitude, longitude, blur_placeholder, upload_complete
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)`)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)
+        ON CONFLICT(id) DO UPDATE SET
+          event_id = excluded.event_id,
+          original_filename = excluded.original_filename,
+          file_type = excluded.file_type,
+          capture_time = excluded.capture_time,
+          uploaded_by = excluded.uploaded_by,
+          width = excluded.width,
+          height = excluded.height,
+          iso = excluded.iso,
+          aperture = excluded.aperture,
+          shutter_speed = excluded.shutter_speed,
+          focal_length = excluded.focal_length,
+          camera_make = excluded.camera_make,
+          camera_model = excluded.camera_model,
+          lens_model = excluded.lens_model,
+          latitude = excluded.latitude,
+          longitude = excluded.longitude,
+          blur_placeholder = excluded.blur_placeholder
+        WHERE photos.upload_complete = 0`)
         .bind(
           body.photoId, event.id, body.filename, fileType, captureTime, 
           uploaderName, // Store uploader's first name
