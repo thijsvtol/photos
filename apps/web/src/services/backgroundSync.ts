@@ -232,15 +232,29 @@ class BackgroundSyncService {
 
     console.log(`Processing ${pendingUploads.length} pending uploads in background`);
 
-    let successCount = 0;
-    let failCount = 0;
     const notificationId = Math.floor(Math.random() * 2147483647);
     
     // Track which event we're uploading to (use first upload's event)
     const eventSlug = pendingUploads.length > 0 ? pendingUploads[0].eventSlug : null;
 
-    // Show initial progress notification (native only)
+    // Start a foreground service (native only) so the OS treats these
+    // uploads as important, user-visible work and doesn't throttle network
+    // access or suspend the app when it's backgrounded/screen locked —
+    // without this, in-flight chunk uploads get aborted with generic
+    // network errors as soon as the phone is locked mid-upload.
     if (isNative) {
+      try {
+        await ProgressNotification.startForeground({
+          id: notificationId,
+          title: 'Uploading Photos',
+          body: `0 of ${pendingUploads.length} completed`,
+        });
+      } catch (err) {
+        console.warn('[BackgroundSync] Failed to start upload foreground service:', err);
+      }
+
+      // Show initial progress notification (same id as the foreground
+      // service notification, so this simply updates it in place).
       await ProgressNotification.show({
         id: notificationId,
         title: 'Uploading Photos',
@@ -252,6 +266,32 @@ class BackgroundSyncService {
         eventSlug: eventSlug || undefined,
       });
     }
+
+    try {
+      await this.uploadBatch(pendingUploads, notificationId, eventSlug, isNative);
+    } finally {
+      if (isNative) {
+        try {
+          await ProgressNotification.stopForeground();
+        } catch (err) {
+          console.warn('[BackgroundSync] Failed to stop upload foreground service:', err);
+        }
+      }
+    }
+  }
+
+  /** Uploads every pending item in `pendingUploads` sequentially, updating
+   *  progress notifications and the queue as it goes, then shows the final
+   *  completion notification. Split out from processPendingUploads() so the
+   *  foreground service can be reliably stopped in a finally block. */
+  private async uploadBatch(
+    pendingUploads: UploadQueueItem[],
+    notificationId: number,
+    eventSlug: string | null,
+    isNative: boolean
+  ) {
+    let successCount = 0;
+    let failCount = 0;
 
     for (let idx = 0; idx < pendingUploads.length; idx++) {
       const upload = pendingUploads[idx];

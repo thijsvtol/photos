@@ -77,6 +77,13 @@
             android:grantUriPermissions="true">
             <meta-data android:name="android.support.FILE_PROVIDER_PATHS" android:resource="@xml/file_paths" />
         </provider>
+
+        <!-- Keeps uploads running (and network access unrestricted) while the
+             app is backgrounded/screen is locked. See UploadForegroundService. -->
+        <service
+            android:name=".UploadForegroundService"
+            android:exported="false"
+            android:foregroundServiceType="dataSync" />
     </application>
 
     <!-- Permissions -->
@@ -87,4 +94,8 @@
          and @capacitor/local-notifications. Without this, requestPermissions()
          is silently denied and notifications never appear. -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <!-- Required to run UploadForegroundService, which keeps uploads running
+         when the app is backgrounded/screen is locked. -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
 </manifest>
