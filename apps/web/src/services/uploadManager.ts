@@ -410,7 +410,7 @@ class UploadManager {
       // got as far as completeUpload but then failed during the preview
       // upload), skip re-uploading the original entirely — only the preview
       // is missing.
-      const originalAlreadyUploaded = !isVideo && item.progress >= originalProgressMax && item.uploadId != null;
+      const originalAlreadyUploaded = !isVideo && item.progress >= originalProgressMax && item.uploadId !== undefined;
 
       if (!originalAlreadyUploaded) {
         // Resume support: if a previous attempt already uploaded some chunks
