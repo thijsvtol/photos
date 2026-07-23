@@ -48,7 +48,7 @@ function createFakeEnv(photos: FakePhoto[], historyRows: unknown[][]): { DB: any
             const photo = photos.find(p => p.id === id);
             return (photo ? { file_type: photo.file_type } : null) as T | null;
           }
-          if (query.includes('SELECT') && query.includes('FROM events') && query.includes('e.id')) {
+          if (query.includes('FROM events e')) {
             return { id: 1, name: 'Test Event' } as T;
           }
           return null as T | null;

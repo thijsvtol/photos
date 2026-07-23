@@ -48,7 +48,7 @@ function createFakeEnv(photos: FakePhoto[]): { DB: any; PHOTOS_BUCKET: any } {
         async run() {
           if (query.includes('INSERT INTO photos')) {
             const [id, eventId, originalFilename, file_type] = boundArgs as [
-              string, number, string, string, ...unknown[]
+              string, number, string, string
             ];
             const existing = photos.find(p => p.id === id);
             if (!existing) {

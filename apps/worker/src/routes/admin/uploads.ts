@@ -284,7 +284,7 @@ app.post('/:photoId/complete', requireUploadPermission, async (c) => {
     // upload) would re-run this handler for an already-completed photo and
     // insert a second "upload" row into collaboration_history, showing up as
     // a duplicate entry in the activity log.
-    let firstCompletion = true;
+    let firstCompletion = false;
     if (!isPreview) {
       const result = await c.env.DB
         .prepare('UPDATE photos SET upload_complete = 1 WHERE id = ? AND upload_complete = 0')
