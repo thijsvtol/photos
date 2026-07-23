@@ -15,11 +15,12 @@ type Variables = {
 const app = new Hono<{ Bindings: Env; Variables: Variables }>();
 
 // Apply conditional admin authentication
-// Upload routes handle their own permission checks
+// Upload routes and per-event stats handle their own permission checks
+// (stats must also be readable by non-admin collaborators, e.g. on the upload page).
+const eventStatsPathPattern = /\/events\/[^/]+\/stats$/;
 app.use('/*', async (c, next) => {
   const path = c.req.path;
-  // Skip admin check for upload routes - they have their own permission check
-  if (path.includes('/uploads/')) {
+  if (path.includes('/uploads/') || eventStatsPathPattern.test(path)) {
     await next();
   } else {
     return requireAdmin(c, next);

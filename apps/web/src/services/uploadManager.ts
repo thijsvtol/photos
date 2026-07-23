@@ -178,10 +178,10 @@ class UploadManager {
         this.notify();
       } catch (err) {
         console.error('[UploadManager] background sync delegation failed, falling back to foreground:', err);
-        for (const item of enqueued) this.processUpload(item);
+        for (const item of enqueued) this.enqueueUpload(item);
       }
     } else {
-      for (const item of enqueued) this.processUpload(item);
+      for (const item of enqueued) this.enqueueUpload(item);
     }
   }
 
@@ -200,7 +200,7 @@ class UploadManager {
     this.items.set(itemId, reset);
     this.notify();
     updateQueueItem(itemId, { status: 'pending', progress: 0, error: undefined, uploadId: undefined, parts: undefined });
-    this.processUpload(reset);
+    this.enqueueUpload(reset);
   }
 
   /** Retry all failed uploads */
@@ -277,7 +277,7 @@ class UploadManager {
 
         this.items.set(item.id, item);
         if (item.status === 'pending' || item.status === 'failed') {
-          this.processUpload(item);
+          this.enqueueUpload(item);
         }
       }
       this.notify();
@@ -310,6 +310,23 @@ class UploadManager {
   }
 
   // ── Core upload logic (moved from useUpload hook) ──
+
+  /** Queue an item for processing, respecting MAX_CONCURRENT_UPLOADS. */
+  private enqueueUpload(item: UploadQueueItem) {
+    if (this.processing.size < MAX_CONCURRENT_UPLOADS) {
+      this.processUpload(item);
+    } else {
+      this.uploadQueue.push(item);
+    }
+  }
+
+  /** Pull the next queued item(s) into processing once a slot frees up. */
+  private pumpQueue() {
+    while (this.uploadQueue.length > 0 && this.processing.size < MAX_CONCURRENT_UPLOADS) {
+      const next = this.uploadQueue.shift()!;
+      this.processUpload(next);
+    }
+  }
 
   private async processUpload(item: UploadQueueItem) {
     if (this.processing.has(item.id)) return;
@@ -449,6 +466,7 @@ class UploadManager {
       await updateQueueItem(item.id, updates);
     } finally {
       this.processing.delete(item.id);
+      this.pumpQueue();
     }
   }
 

@@ -64,6 +64,31 @@ export function setupAuthMocks() {
         c.set('user', currentUser);
         await next();
       },
+      requireEventViewAccess: async (c: any, next: any) => {
+        if (!currentUser) {
+          return c.json({ error: 'Authentication required' }, 401);
+        }
+        if (!currentIsAdmin) {
+          let slug = c.req.param('slug');
+          if (!slug) {
+            const match = c.req.path.match(/\/events\/([^/]+)\/stats/);
+            slug = match?.[1] || '';
+          }
+
+          const collaborator = slug
+            ? await c.env.DB.prepare(
+                'SELECT 1 FROM event_collaborators ec JOIN events e ON ec.event_id = e.id WHERE e.slug = ? AND ec.user_email = ?'
+              ).bind(slug, currentUser.email).first()
+            : null;
+
+          const allowedBySlug = (slug && collaboratorAccessBySlug[slug]) || [];
+          if (!collaborator && !allowedBySlug.includes(currentUser.email)) {
+            return c.json({ error: 'You do not have access to this event.' }, 403);
+          }
+        }
+        c.set('user', currentUser);
+        await next();
+      },
       requireEventCapability: () => async (c: any, next: any) => {
         if (!currentUser) {
           return c.json({ error: 'Authentication required' }, 401);
