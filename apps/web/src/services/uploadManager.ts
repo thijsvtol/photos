@@ -186,20 +186,22 @@ class UploadManager {
   }
 
   /** Retry a single failed upload */
+  /** Retry a single failed upload.
+   *
+   *  Deliberately keeps `uploadId`/`parts`/`progress` intact — processUpload()
+   *  uses them to resume the existing R2 multipart upload from the last
+   *  successfully uploaded chunk instead of restarting the whole file from 0%. */
   retryUpload(itemId: string) {
     const item = this.items.get(itemId);
     if (!item) return;
     const reset: UploadQueueItem = {
       ...item,
       status: 'pending',
-      progress: 0,
       error: undefined,
-      uploadId: undefined,
-      parts: undefined,
     };
     this.items.set(itemId, reset);
     this.notify();
-    updateQueueItem(itemId, { status: 'pending', progress: 0, error: undefined, uploadId: undefined, parts: undefined });
+    updateQueueItem(itemId, { status: 'pending', error: undefined });
     this.enqueueUpload(reset);
   }
 
@@ -265,14 +267,15 @@ class UploadManager {
         // Skip items that are currently being processed to avoid overwriting live progress
         if (this.processing.has(item.id)) continue;
 
-        // Items stuck as 'uploading' in IndexedDB were interrupted (app was killed).
-        // Reset them to 'pending' so they get retried from scratch.
+        // Items stuck as 'uploading' in IndexedDB were interrupted (app was
+        // killed/reloaded mid-upload). Reset their status to 'pending' so
+        // they get picked up again, but keep uploadId/parts/progress intact —
+        // processUpload() will resume the existing R2 multipart upload from
+        // the last successfully uploaded chunk instead of restarting the
+        // whole file from 0%.
         if (item.status === 'uploading') {
           item.status = 'pending';
-          item.progress = 0;
-          item.uploadId = undefined;
-          item.parts = undefined;
-          await updateQueueItem(item.id, { status: 'pending', progress: 0, uploadId: undefined, parts: undefined });
+          await updateQueueItem(item.id, { status: 'pending' });
         }
 
         this.items.set(item.id, item);
@@ -390,7 +393,11 @@ class UploadManager {
       let previewBlob: Blob | null = null;
       if (!isVideo) previewBlob = await createPreview(item.file);
 
-      const { uploadId } = await startUpload(
+      const chunkSize = isVideo ? VIDEO_CHUNK_SIZE : CHUNK_SIZE;
+      const totalParts = Math.ceil(item.file.size / chunkSize);
+      const originalProgressMax = isVideo ? 100 : 80;
+
+      const startOriginalUpload = () => startUpload(
         merged.eventSlug, photoId, item.file.name,
         merged.captureTime, merged.width, merged.height, merged.iso,
         merged.aperture, merged.shutterSpeed, merged.focalLength,
@@ -398,57 +405,99 @@ class UploadManager {
         merged.latitude, merged.longitude, merged.blurPlaceholder,
         false, fileType,
       );
-      await updateQueueItem(item.id, { uploadId });
 
-      const chunkSize = isVideo ? VIDEO_CHUNK_SIZE : CHUNK_SIZE;
-      const totalParts = Math.ceil(item.file.size / chunkSize);
-      const originalProgressMax = isVideo ? 100 : 80;
-      const partsCompleted: Array<{ partNumber: number; etag: string }> = [];
-      let completedChunks = 0;
+      // Once the original file has already fully uploaded (a previous attempt
+      // got as far as completeUpload but then failed during the preview
+      // upload), skip re-uploading the original entirely — only the preview
+      // is missing.
+      const originalAlreadyUploaded = !isVideo && item.progress >= originalProgressMax && item.uploadId != null;
 
-      // Upload chunks in parallel batches for speed
-      for (let batchStart = 1; batchStart <= totalParts; batchStart += PARALLEL_CHUNKS) {
-        const batchEnd = Math.min(batchStart + PARALLEL_CHUNKS - 1, totalParts);
-        const batch: Promise<{ partNumber: number; etag: string }>[] = [];
+      if (!originalAlreadyUploaded) {
+        // Resume support: if a previous attempt already uploaded some chunks
+        // (uploadId + parts persisted from before a failure/interruption),
+        // reuse that same R2 multipart upload and only send the chunks that
+        // are still missing, instead of discarding that progress and
+        // re-uploading the whole file from 0%.
+        let uploadId = item.uploadId;
+        let partsCompleted: Array<{ partNumber: number; etag: string }> =
+          item.progress < originalProgressMax ? [...(item.parts || [])] : [];
+        let resuming = !!uploadId && partsCompleted.length > 0 && partsCompleted.length < totalParts;
 
-        for (let partNumber = batchStart; partNumber <= batchEnd; partNumber++) {
-          const start = (partNumber - 1) * chunkSize;
-          const end = Math.min(start + chunkSize, item.file.size);
-          const chunk = item.file.slice(start, end);
-          batch.push(
-            this.uploadChunkWithRetry(
-              item.eventSlug, photoId, uploadId, partNumber, chunk, false, fileType,
-            ).then(({ etag }) => ({ partNumber, etag }))
-          );
+        if (!resuming) {
+          partsCompleted = [];
+          const started = await startOriginalUpload();
+          uploadId = started.uploadId;
+          await updateQueueItem(item.id, { uploadId, parts: [] });
         }
 
-        const results = await Promise.all(batch);
-        partsCompleted.push(...results);
-        completedChunks += results.length;
+        const uploadRemainingParts = async (): Promise<boolean> => {
+          const completedPartNumbers = new Set(partsCompleted.map(p => p.partNumber));
+          let completedChunks = partsCompleted.length;
+          const remaining: number[] = [];
+          for (let n = 1; n <= totalParts; n++) {
+            if (!completedPartNumbers.has(n)) remaining.push(n);
+          }
 
-        // Check for cancellation between batches
-        if (this.cancelled.has(item.id)) {
-          this.cancelled.delete(item.id);
-          this.processing.delete(item.id);
-          return;
+          // Upload chunks in parallel batches for speed
+          for (let batchStart = 0; batchStart < remaining.length; batchStart += PARALLEL_CHUNKS) {
+            const batchNumbers = remaining.slice(batchStart, batchStart + PARALLEL_CHUNKS);
+            const batch = batchNumbers.map(partNumber => {
+              const start = (partNumber - 1) * chunkSize;
+              const end = Math.min(start + chunkSize, item.file.size);
+              const chunk = item.file.slice(start, end);
+              return this.uploadChunkWithRetry(
+                item.eventSlug, photoId, uploadId!, partNumber, chunk, false, fileType,
+              ).then(({ etag }) => ({ partNumber, etag }));
+            });
+
+            const results = await Promise.all(batch);
+            partsCompleted.push(...results);
+            completedChunks += results.length;
+
+            // Check for cancellation between batches
+            if (this.cancelled.has(item.id)) {
+              this.cancelled.delete(item.id);
+              this.processing.delete(item.id);
+              return false;
+            }
+
+            const progress = Math.round((completedChunks / totalParts) * originalProgressMax);
+            this.updateItem(item.id, { progress, parts: [...partsCompleted] });
+            await updateQueueItem(item.id, { progress, parts: [...partsCompleted] });
+          }
+          return true;
+        };
+
+        let notCancelled: boolean;
+        try {
+          notCancelled = await uploadRemainingParts();
+        } catch (err) {
+          if (!resuming) throw err;
+          // The resumed multipart upload may have expired or been aborted
+          // server-side — fall back to a brand-new upload and retry once
+          // from scratch rather than getting stuck retrying forever.
+          partsCompleted = [];
+          const started = await startOriginalUpload();
+          uploadId = started.uploadId;
+          await updateQueueItem(item.id, { uploadId, parts: [] });
+          notCancelled = await uploadRemainingParts();
         }
+        if (!notCancelled) return;
 
-        const progress = Math.round((completedChunks / totalParts) * originalProgressMax);
-        this.updateItem(item.id, { progress, parts: [...partsCompleted] });
-        await updateQueueItem(item.id, { progress, parts: [...partsCompleted] });
+        // Sort parts by partNumber for completeUpload (R2 requires ordered parts)
+        partsCompleted.sort((a, b) => a.partNumber - b.partNumber);
+
+        await completeUpload(item.eventSlug, photoId, uploadId!, partsCompleted);
       }
-
-      // Sort parts by partNumber for completeUpload (R2 requires ordered parts)
-      partsCompleted.sort((a, b) => a.partNumber - b.partNumber);
-
-      await completeUpload(item.eventSlug, photoId, uploadId, partsCompleted);
 
       if (isVideo) {
         this.updateItem(item.id, { status: 'completed', progress: 100 });
         await updateQueueItem(item.id, { status: 'completed', progress: 100 });
       } else {
-        this.updateItem(item.id, { progress: 85 });
-        await updateQueueItem(item.id, { progress: 85 });
+        if (!originalAlreadyUploaded) {
+          this.updateItem(item.id, { progress: 85 });
+          await updateQueueItem(item.id, { progress: 85 });
+        }
         await this.uploadPreview(item.eventSlug, photoId, previewBlob!);
         this.updateItem(item.id, { status: 'completed', progress: 100 });
         await updateQueueItem(item.id, { status: 'completed', progress: 100 });

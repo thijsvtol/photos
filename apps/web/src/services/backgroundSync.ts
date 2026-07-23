@@ -340,7 +340,8 @@ class BackgroundSyncService {
         const isVideo = upload.file.type === 'video/mp4';
         const chunkSize = isVideo ? VIDEO_CHUNK_SIZE : CHUNK_SIZE;
         const totalChunks = Math.ceil(upload.file.size / chunkSize);
-        const uploadData = await startUpload(
+
+        const startOriginalUpload = () => startUpload(
           upload.eventSlug,
           photoId,
           upload.file.name,
@@ -361,47 +362,82 @@ class BackgroundSyncService {
           upload.file.type
         );
 
-        const parts: Array<{ partNumber: number; etag: string }> = [];
-        let completedChunks = 0;
+        // Resume support: if a previous attempt already uploaded some chunks
+        // (uploadId + parts persisted from before a failure/interruption),
+        // reuse that same R2 multipart upload and only send the chunks that
+        // are still missing, instead of discarding that progress and
+        // re-uploading the whole file from 0%.
+        let uploadId = upload.uploadId;
+        let parts: Array<{ partNumber: number; etag: string }> =
+          upload.progress < 100 ? [...(upload.parts || [])] : [];
+        let resuming = !!uploadId && parts.length > 0 && parts.length < totalChunks;
 
-        // Upload chunks in parallel batches for speed
-        for (let batchStart = 0; batchStart < totalChunks; batchStart += PARALLEL_CHUNKS) {
-          const batchEnd = Math.min(batchStart + PARALLEL_CHUNKS, totalChunks);
-          const batch: Promise<{ partNumber: number; etag: string }>[] = [];
+        if (!resuming) {
+          parts = [];
+          const uploadData = await startOriginalUpload();
+          uploadId = uploadData.uploadId;
+          await this.updateQueueItemAndSync(upload.id, { uploadId, parts: [] });
+        }
 
-          for (let i = batchStart; i < batchEnd; i++) {
-            const start = i * chunkSize;
-            const end = Math.min(start + chunkSize, upload.file.size);
-            const chunk = upload.file.slice(start, end);
-            batch.push(
-              this.uploadChunkWithRetry(
-                upload.eventSlug, photoId, uploadData.uploadId, i + 1, chunk
-              ).then(({ etag }) => ({ partNumber: i + 1, etag }))
-            );
+        let completedChunks = parts.length;
+
+        const uploadRemainingParts = async () => {
+          const completedPartNumbers = new Set(parts.map(p => p.partNumber));
+          const remaining: number[] = [];
+          for (let n = 1; n <= totalChunks; n++) {
+            if (!completedPartNumbers.has(n)) remaining.push(n);
           }
 
-          const results = await Promise.all(batch);
-          parts.push(...results);
-          completedChunks += results.length;
-
-          // Update progress
-          const progress = Math.round((completedChunks / totalChunks) * 100);
-          await this.updateQueueItemAndSync(upload.id, { progress });
-          
-          // Update notification with chunk progress (native only)
-          if (isNative) {
-            await ProgressNotification.show({
-              id: notificationId,
-              title: 'Uploading Photos',
-              body: `${idx} of ${pendingUploads.length} completed`,
-              largeBody: `Current file: ${upload.file.name} (${progress}%)`,
-              progress: idx,
-              maxProgress: pendingUploads.length,
-              indeterminate: false,
-              ongoing: true,
-              eventSlug: eventSlug || undefined,
+          // Upload chunks in parallel batches for speed
+          for (let batchStart = 0; batchStart < remaining.length; batchStart += PARALLEL_CHUNKS) {
+            const batchNumbers = remaining.slice(batchStart, batchStart + PARALLEL_CHUNKS);
+            const batch = batchNumbers.map(partNumber => {
+              const start = (partNumber - 1) * chunkSize;
+              const end = Math.min(start + chunkSize, upload.file.size);
+              const chunk = upload.file.slice(start, end);
+              return this.uploadChunkWithRetry(
+                upload.eventSlug, photoId, uploadId!, partNumber, chunk
+              ).then(({ etag }) => ({ partNumber, etag }));
             });
+
+            const results = await Promise.all(batch);
+            parts.push(...results);
+            completedChunks += results.length;
+
+            // Update progress
+            const progress = Math.round((completedChunks / totalChunks) * 100);
+            await this.updateQueueItemAndSync(upload.id, { progress, parts: [...parts] });
+
+            // Update notification with chunk progress (native only)
+            if (isNative) {
+              await ProgressNotification.show({
+                id: notificationId,
+                title: 'Uploading Photos',
+                body: `${idx} of ${pendingUploads.length} completed`,
+                largeBody: `Current file: ${upload.file.name} (${progress}%)`,
+                progress: idx,
+                maxProgress: pendingUploads.length,
+                indeterminate: false,
+                ongoing: true,
+                eventSlug: eventSlug || undefined,
+              });
+            }
           }
+        };
+
+        try {
+          await uploadRemainingParts();
+        } catch (err) {
+          if (!resuming) throw err;
+          // The resumed multipart upload may have expired or been aborted
+          // server-side — fall back to a brand-new upload and retry once
+          // from scratch rather than getting stuck retrying forever.
+          parts = [];
+          completedChunks = 0;
+          const uploadData = await startOriginalUpload();
+          uploadId = uploadData.uploadId;
+          await this.updateQueueItemAndSync(upload.id, { uploadId, parts: [] });
+          await uploadRemainingParts();
         }
 
         // Sort parts by partNumber (R2 requires ordered parts)
@@ -411,7 +447,7 @@ class BackgroundSyncService {
         await completeUpload(
           upload.eventSlug,
           photoId,
-          uploadData.uploadId,
+          uploadId!,
           parts
         );
 
