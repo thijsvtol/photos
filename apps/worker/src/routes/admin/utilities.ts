@@ -1,6 +1,6 @@
 import { Hono } from 'hono';
 import type { Env, User } from '../../types';
-import { requireAdmin } from '../../auth';
+import { requireAdmin, requireEventViewAccess } from '../../auth';
 import { getCityFromCoordinates } from '../../geocoding';
 
 type Variables = {
@@ -9,8 +9,12 @@ type Variables = {
 
 const app = new Hono<{ Bindings: Env; Variables: Variables }>();
 
-// Apply admin authentication
-app.use('/*', requireAdmin);
+// Most utility routes are admin-only, but /stats is also needed by
+// non-admin collaborators (e.g. on the upload page), so it uses a
+// dedicated middleware applied per-route below instead of the blanket one.
+app.use('/regenerate-thumbnails', requireAdmin);
+app.use('/geocode-photos', requireAdmin);
+app.use('/stats', requireEventViewAccess);
 
 /**
  * POST /regenerate-thumbnails

@@ -9,8 +9,16 @@ type Variables = {
 
 const app = new Hono<{ Bindings: Env; Variables: Variables }>();
 
-// Apply admin authentication
-app.use('/*', requireAdmin);
+// Apply admin authentication only to the routes this router actually defines.
+// Using a blanket '/*' would also match nested sub-router paths mounted
+// under /events/:slug in the parent app (e.g. /events/:slug/uploads/* and
+// /events/:slug/stats), incorrectly blocking non-admin collaborators from
+// those endpoints since Hono matches middleware by path pattern regardless
+// of mount order.
+app.use('/', requireAdmin);
+app.use('/:slug', requireAdmin);
+app.use('/:slug/location', requireAdmin);
+app.use('/:slug/tags', requireAdmin);
 
 /**
  * POST /events

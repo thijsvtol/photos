@@ -455,6 +455,40 @@ export function requireEventCapability(capability: EventCapability, errorMessage
 }
 
 /**
+ * Middleware to require event view access (admin or any event collaborator).
+ * Use this for read-only, per-event endpoints (e.g. event stats) that
+ * collaborators need while uploading, but that shouldn't be exposed publicly.
+ */
+export async function requireEventViewAccess(c: Context<{ Bindings: Env; Variables: Variables }>, next: Next) {
+  const user = await extractUser(c);
+
+  if (!user) {
+    console.log('Event view access denied - no user found');
+    return c.json({ error: 'Authentication required' }, 401);
+  }
+
+  // Store user in context
+  c.set('user', user);
+  await upsertUser(c.env.DB, user);
+
+  // Global admins can always proceed
+  if (isAdmin(c)) {
+    await next();
+    return;
+  }
+
+  // Any collaborator (regardless of role) can view event stats
+  const eventSlug = c.req.param('slug');
+  if (eventSlug && await isCollaborator(c.env.DB, eventSlug, user.email)) {
+    await next();
+    return;
+  }
+
+  console.log('Event view access denied for user:', user.email);
+  return c.json({ error: 'You do not have access to this event.' }, 403);
+}
+
+/**
  * Middleware to require upload permission (admin or event collaborator)
  * Use this for upload endpoints that should allow both admins and collaborators
  */

@@ -60,6 +60,13 @@ vi.mock('../auth', () => {
       c.set('user', currentUser);
       await next();
     },
+    requireEventViewAccess: async (c: any, next: any) => {
+      if (!currentUser) {
+        return c.json({ error: 'Authentication required' }, 401);
+      }
+      c.set('user', currentUser);
+      await next();
+    },
     hasEventCapabilityByEventId: async () => currentIsAdmin,
     getCollaboratorRole: async () => (currentIsAdmin ? 'admin' : 'viewer'),
     getCollaboratorRoleByEventId: async () => (currentIsAdmin ? 'admin' : 'viewer'),

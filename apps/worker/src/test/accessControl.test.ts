@@ -84,6 +84,32 @@ vi.mock('../auth', () => {
       c.set('user', currentUser);
       await next();
     },
+    requireEventViewAccess: async (c: any, next: any) => {
+      if (!currentUser) {
+        return c.json({ error: 'Authentication required' }, 401);
+      }
+      if (!currentIsAdmin) {
+        let slug = c.req.param('slug');
+        if (!slug) {
+          const match = c.req.path.match(/\/events\/([^/]+)\/stats/);
+          slug = match?.[1] || '';
+        }
+
+        const collaborator = slug
+          ? await c.env.DB.prepare(
+              'SELECT 1 FROM event_collaborators ec JOIN events e ON ec.event_id = e.id WHERE e.slug = ? AND ec.user_email = ?'
+            ).bind(slug, currentUser.email).first()
+          : null;
+
+        const allowedBySlug = (slug && collaboratorAccessBySlug[slug]) || [];
+        const allowedFallback = Object.values(collaboratorAccessBySlug).flat();
+        if (!collaborator && !allowedBySlug.includes(currentUser.email) && !allowedFallback.includes(currentUser.email)) {
+          return c.json({ error: 'You do not have access to this event.' }, 403);
+        }
+      }
+      c.set('user', currentUser);
+      await next();
+    },
     hasEventCapabilityByEventId: async () => currentIsAdmin,
     getCollaboratorRole: async () => (currentIsAdmin ? 'admin' : 'viewer'),
     getCollaboratorRoleByEventId: async (db: any, eventId: number, userEmail: string) => {
@@ -290,6 +316,41 @@ describe('Access control', () => {
 
     const privatePhotosResponse = await publicRoutes.request('http://localhost/api/events/private-event/photos', {}, env);
     expect(privatePhotosResponse.status).toBe(403);
+  });
+
+  it('allows event collaborators (non-admin) to view event stats but blocks outsiders', async () => {
+    currentUser = { id: 'user-1', email: 'collab@example.com', name: 'Collaborator' };
+    const db = new MockD1Database(baseEvents, basePhotos, { 3: ['collab@example.com'] });
+    const env = createEnv(db);
+
+    const collabStatsResponse = await adminRoutes.request('http://localhost/events/collab-event/stats', {}, env);
+    expect(collabStatsResponse.status).toBe(200);
+
+    currentUser = { id: 'user-2', email: 'outsider@example.com', name: 'Outsider' };
+    const outsiderStatsResponse = await adminRoutes.request('http://localhost/events/collab-event/stats', {}, env);
+    expect(outsiderStatsResponse.status).toBe(403);
+  });
+
+  it('allows non-admin collaborators to start an upload (not blocked by admin-only events middleware)', async () => {
+    currentUser = { id: 'user-1', email: 'collab@example.com', name: 'Collaborator' };
+    const db = new MockD1Database(baseEvents, basePhotos, { 3: ['collab@example.com'] });
+    const env = createEnv(db);
+
+    const startResponse = await adminRoutes.request('http://localhost/events/collab-event/uploads/start', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ photoId: 'new-photo', filename: 'new-photo.jpg' }),
+    }, env);
+    expect(startResponse.status).not.toBe(403);
+    expect(startResponse.status).toBe(200);
+
+    currentUser = { id: 'user-2', email: 'outsider@example.com', name: 'Outsider' };
+    const blockedResponse = await adminRoutes.request('http://localhost/events/collab-event/uploads/start', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ photoId: 'new-photo-2', filename: 'new-photo-2.jpg' }),
+    }, env);
+    expect(blockedResponse.status).toBe(403);
   });
 
   it('allows admins to view all events', async () => {
