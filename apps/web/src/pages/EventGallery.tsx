@@ -652,8 +652,18 @@ const EventGallery: React.FC = () => {
       if (photoIndex >= 0) {
         // Ensure the photo is within the visible window
         setVisibleSinglePhotoCount(Math.min(Math.max(140, photoIndex + 80), photos.length));
-        // For multi-date view, expand date count too
-        setVisibleDateCount(Math.min(Math.max(8, Math.ceil((photoIndex / photos.length) * dates.length) + 4), dates.length || 8));
+        // For multi-date view, find the exact date bucket containing the photo
+        // (a proportional estimate can under/overshoot when date buckets are uneven in size).
+        const photoDate = photos[photoIndex].capture_time.split('T')[0];
+        const uniqueDates = Array.from(new Set(photos.map(p => p.capture_time.split('T')[0]))).sort(
+          (a, b) => (sortBy.startsWith('date_desc') ? b.localeCompare(a) : a.localeCompare(b))
+        );
+        const dateIndex = uniqueDates.indexOf(photoDate);
+        setVisibleDateCount(
+          dateIndex >= 0
+            ? Math.min(Math.max(8, dateIndex + 4), uniqueDates.length || 8)
+            : (uniqueDates.length || 8)
+        );
       } else {
         setVisibleDateCount(8);
         setVisibleSinglePhotoCount(140);
