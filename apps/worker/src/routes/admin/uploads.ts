@@ -268,9 +268,28 @@ app.post('/:photoId/complete', requireUploadPermission, async (c) => {
     const folder = isPreview ? 'preview' : 'original';
     const key = `${folder}/${slug}/${photoId}.${extension}`;
     
-    // Complete the multipart upload
+    // Complete the multipart upload. R2 enforces the S3 multipart rule that
+    // every part except the last must be >= 5MB — surface that (and other
+    // known R2 completion errors) as a specific, actionable 400 instead of a
+    // generic "Failed to complete upload" 500, so a buggy/misbehaving client
+    // gets a message it can actually act on.
     const upload = c.env.PHOTOS_BUCKET.resumeMultipartUpload(key, body.uploadId);
-    await upload.complete(body.parts);
+    try {
+      await upload.complete(body.parts);
+    } catch (completeError) {
+      console.error('[UPLOAD] R2 multipart complete failed:', completeError);
+      const message = completeError instanceof Error ? completeError.message : String(completeError);
+      if (/EntityTooSmall/i.test(message)) {
+        return c.json({ error: 'Upload failed: one or more parts is smaller than the 5MB minimum required for all parts except the last.' }, 400);
+      }
+      if (/InvalidPart/i.test(message)) {
+        return c.json({ error: 'Upload failed: one or more parts is missing, out of order, or has a mismatched ETag.' }, 400);
+      }
+      if (/NoSuchUpload/i.test(message)) {
+        return c.json({ error: 'Upload failed: the upload session has expired or was already completed/aborted.' }, 400);
+      }
+      return c.json({ error: 'Failed to complete upload' }, 500);
+    }
 
     // Mark the photo as fully uploaded once the ORIGINAL media lands in R2, so
     // it becomes visible in galleries/detail. Preview uploads (isPreview) are a

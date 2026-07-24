@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { useLocation } from 'react-router-dom';
 import { CheckCircle, AlertCircle, Loader2, ChevronDown, ChevronUp, RotateCcw, X } from 'lucide-react';
 import { useUploadContext } from '../contexts/UploadContext';
+import { MAX_RETRIES } from '../services/uploadManager';
 
 /**
  * Global upload indicator rendered at app root — visible on ALL pages.
@@ -160,6 +161,11 @@ const GlobalUploadIndicator: React.FC = () => {
                     )}
                     {item.status === 'failed' && (
                       <p className="text-xs text-red-500 truncate mt-0.5">{item.error || 'Upload failed'}</p>
+                    )}
+                    {item.status === 'failed' && (item.retries || 0) >= MAX_RETRIES && (
+                      <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
+                        Auto-retry stopped after {MAX_RETRIES} attempts — retry to try again.
+                      </p>
                     )}
                   </div>
 

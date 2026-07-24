@@ -15,6 +15,7 @@ import com.getcapacitor.PluginMethod;
 import com.getcapacitor.annotation.CapacitorPlugin;
 import nl.thijsvtol.photos.MainActivity;
 import nl.thijsvtol.photos.R;
+import nl.thijsvtol.photos.UploadForegroundService;
 
 @CapacitorPlugin(name = "ProgressNotification")
 public class ProgressNotificationPlugin extends Plugin {
@@ -107,6 +108,44 @@ public class ProgressNotificationPlugin extends Plugin {
         }
 
         notificationManager.cancel(id);
+        call.resolve();
+    }
+
+    /**
+     * Start a foreground service that keeps the app process alive (and
+     * network access unrestricted) while uploads are in progress, so uploads
+     * survive the app being backgrounded/screen locked instead of being
+     * aborted with generic network errors. Uses the same notification id as
+     * subsequent show() calls, so only a single notification is shown.
+     */
+    @PluginMethod
+    public void startForeground(PluginCall call) {
+        Integer id = call.getInt("id");
+        if (id == null) {
+            call.reject("must provide notification id");
+            return;
+        }
+        String title = call.getString("title", "Uploading photos");
+        String body = call.getString("body", "Upload in progress");
+
+        Intent intent = new Intent(getContext(), UploadForegroundService.class);
+        intent.putExtra(UploadForegroundService.EXTRA_NOTIFICATION_ID, id);
+        intent.putExtra(UploadForegroundService.EXTRA_TITLE, title);
+        intent.putExtra(UploadForegroundService.EXTRA_BODY, body);
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            getContext().startForegroundService(intent);
+        } else {
+            getContext().startService(intent);
+        }
+
+        call.resolve();
+    }
+
+    /** Stop the upload foreground service once all uploads are finished. */
+    @PluginMethod
+    public void stopForeground(PluginCall call) {
+        getContext().stopService(new Intent(getContext(), UploadForegroundService.class));
         call.resolve();
     }
 }

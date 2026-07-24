@@ -109,6 +109,30 @@ async function markPhotosNotified(env: Env, photoIds: string[]): Promise<void> {
 }
 
 /**
+ * Defense-in-depth cleanup for incomplete uploads.
+ *
+ * Every multipart upload creates a `photos` row with `upload_complete = 0`
+ * at /start time (see routes/admin/uploads.ts). If a client abandons an
+ * upload without ever calling /cancel (app uninstalled, browser tab closed
+ * permanently, retries exhausted with no server-side abort reachable, etc.)
+ * that row — and its in-progress R2 multipart upload/parts — would
+ * otherwise linger forever. This job deletes stale incomplete rows so they
+ * don't accumulate; the corresponding R2 multipart upload (if any) will be
+ * cleaned up by R2's own automatic abort-incomplete-multipart-upload
+ * behavior/lifecycle rules, since the Workers R2 binding has no API to list
+ * or abort multipart uploads it didn't create in this request.
+ */
+const STALE_UPLOAD_THRESHOLD_HOURS = 48;
+
+export async function runStaleUploadCleanup(env: Env): Promise<void> {
+  const cutoff = new Date(Date.now() - STALE_UPLOAD_THRESHOLD_HOURS * 60 * 60 * 1000).toISOString();
+  await env.DB
+    .prepare(`DELETE FROM photos WHERE upload_complete = 0 AND uploaded_at < ?`)
+    .bind(cutoff)
+    .run();
+}
+
+/**
  * Entry point invoked by the Worker `scheduled` handler. Finds collaborator
  * uploads that have not yet been notified, emails a batched summary, and marks
  * the photos as notified so they are not reported again.
