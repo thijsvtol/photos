@@ -192,7 +192,6 @@ class UploadManager {
     }
   }
 
-  /** Retry a single failed upload */
   /** Retry a single failed upload.
    *
    *  Deliberately keeps `uploadId`/`parts`/`progress` intact — processUpload()

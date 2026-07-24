@@ -21,7 +21,6 @@ const MAX_CHUNK_RETRIES = 3; // Retry individual chunks up to 3 times
 const PERIODIC_SYNC_INTERVAL = 4 * 60 * 60 * 1000; // 4 hours between folder scans
 const FOREGROUND_CHECK_INTERVAL = 2 * 60 * 60 * 1000; // Check every 2 hours while app is open
 
-
 /**
  * Background sync service for uploading photos when app is in background.
  * Also handles periodic foreground folder checks and resume-on-focus syncing.

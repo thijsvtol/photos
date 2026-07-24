@@ -164,7 +164,7 @@ const GlobalUploadIndicator: React.FC = () => {
                     )}
                     {item.status === 'failed' && (item.retries || 0) >= MAX_RETRIES && (
                       <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
-                        Auto-retry stopped after {MAX_RETRIES} attempts — tap retry to try again.
+                        Auto-retry stopped after {MAX_RETRIES} attempts — retry to try again.
                       </p>
                     )}
                   </div>
