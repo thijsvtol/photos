@@ -39,7 +39,12 @@ export const getQueueItems = async (eventSlug?: string): Promise<UploadQueueItem
 };
 
 export const getPendingUploads = async (eventSlug?: string): Promise<UploadQueueItem[]> => {
-  const query = db.uploads.where('status').anyOf(['pending', 'uploading']);
+  // Include 'failed' items too, so callers (uploadManager.resumeAll(),
+  // backgroundSync.uploadBatch()) can automatically retry them on
+  // reconnect/app-foreground/reload instead of requiring a manual "Retry"
+  // click. Callers are responsible for gating retries (backoff/attempt
+  // limits) so a permanently-broken upload isn't hammered forever.
+  const query = db.uploads.where('status').anyOf(['pending', 'uploading', 'failed']);
   if (eventSlug) {
     return await query.and(item => item.eventSlug === eventSlug).toArray();
   }

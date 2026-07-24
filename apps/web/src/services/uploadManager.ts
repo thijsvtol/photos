@@ -19,6 +19,13 @@ const VIDEO_CHUNK_SIZE = 10 * 1024 * 1024; // 10MB for videos — fewer round-tr
 const PARALLEL_CHUNKS = 4; // Upload up to 4 chunks simultaneously
 const MAX_CHUNK_RETRIES = 3;
 const CHUNK_RETRY_DELAY = 2000;
+// Whole-file auto-retry limit (distinct from MAX_CHUNK_RETRIES, which only
+// covers a single chunk's HTTP retries). Once an item's `retries` count
+// reaches this, resumeAll() stops auto-retrying it — only a manual
+// "Retry"/"Retry all" click will try again — so a permanently-broken upload
+// isn't hammered forever.
+export const MAX_RETRIES = 5;
+const RETRY_BACKOFF_BASE_MS = 2000;
 // Cap how many files are uploaded at once on the web (foreground) path.
 // Without this, selecting many/large files (photos + videos) fires off an
 // unbounded number of concurrent uploads, each already doing up to
@@ -259,6 +266,18 @@ class UploadManager {
     }
   }
 
+  /** Whether a failed item is due for an automatic retry: gated by both
+   *  MAX_RETRIES (give up permanently past a point) and an exponential
+   *  backoff since its last attempt, so a persistently-broken upload isn't
+   *  hammered on every reconnect/foreground/reload event. */
+  private shouldAutoRetry(item: UploadQueueItem): boolean {
+    const retries = item.retries || 0;
+    if (retries >= MAX_RETRIES) return false;
+    const lastRetryTime = item.lastRetryTime || 0;
+    const backoffDelay = RETRY_BACKOFF_BASE_MS * Math.pow(2, retries);
+    return Date.now() - lastRetryTime >= backoffDelay;
+  }
+
   /** Resume any pending/failed/interrupted uploads */
   private async resumeAll() {
     try {
@@ -279,8 +298,10 @@ class UploadManager {
         }
 
         this.items.set(item.id, item);
-        if (item.status === 'pending' || item.status === 'failed') {
+        if (item.status === 'pending') {
           this.enqueueUpload(item);
+        } else if (item.status === 'failed' && this.shouldAutoRetry(item)) {
+          this.retryUpload(item.id);
         }
       }
       this.notify();
@@ -335,6 +356,15 @@ class UploadManager {
     if (this.processing.has(item.id)) return;
     if (this.cancelled.has(item.id)) { this.cancelled.delete(item.id); return; }
     this.processing.add(item.id);
+
+    // Hoisted so the catch block below can abort the in-progress R2
+    // multipart upload (if any) when giving up permanently. originalDone
+    // tracks whether the *original* file's multipart upload has already been
+    // completed (server-side), so we never clear uploadId/parts — and never
+    // try to abort an already-finished upload — once only the preview
+    // remains, which would otherwise force a wasteful full re-upload later.
+    let currentUploadId: string | undefined = item.uploadId;
+    let originalDone = false;
 
     try {
       this.updateItem(item.id, { status: 'uploading' });
@@ -411,6 +441,7 @@ class UploadManager {
       // upload), skip re-uploading the original entirely — only the preview
       // is missing.
       const originalAlreadyUploaded = !isVideo && item.progress >= originalProgressMax && item.uploadId !== undefined;
+      if (originalAlreadyUploaded) originalDone = true;
 
       if (!originalAlreadyUploaded) {
         // Resume support: if a previous attempt already uploaded some chunks
@@ -427,6 +458,7 @@ class UploadManager {
           partsCompleted = [];
           const started = await startOriginalUpload();
           uploadId = started.uploadId;
+          currentUploadId = uploadId;
           await updateQueueItem(item.id, { uploadId, parts: [] });
         }
 
@@ -479,6 +511,7 @@ class UploadManager {
           partsCompleted = [];
           const started = await startOriginalUpload();
           uploadId = started.uploadId;
+          currentUploadId = uploadId;
           await updateQueueItem(item.id, { uploadId, parts: [] });
           notCancelled = await uploadRemainingParts();
         }
@@ -488,6 +521,7 @@ class UploadManager {
         partsCompleted.sort((a, b) => a.partNumber - b.partNumber);
 
         await completeUpload(item.eventSlug, photoId, uploadId!, partsCompleted);
+        originalDone = true;
       }
 
       if (isVideo) {
@@ -505,12 +539,37 @@ class UploadManager {
     } catch (err) {
       const currentRetries = ((this.items.get(item.id)?.retries) || 0) + 1;
       const errorMsg = err instanceof Error ? err.message : String(err);
-      const updates = {
+      const giveUp = currentRetries >= MAX_RETRIES;
+      const updates: Partial<UploadQueueItem> = {
         status: 'failed' as const,
-        error: `Upload failed: ${errorMsg}`,
+        error: giveUp
+          ? `Upload failed after ${MAX_RETRIES} attempts: ${errorMsg}`
+          : `Upload failed: ${errorMsg}`,
         retries: currentRetries,
         lastRetryTime: Date.now(),
       };
+
+      if (giveUp) {
+        // Permanently giving up (past MAX_RETRIES) — best-effort abort the
+        // orphaned R2 multipart upload now rather than leaving it (and its
+        // uploaded parts) to linger in R2 indefinitely. Only do this (and
+        // clear uploadId/parts) if the *original* file's upload never
+        // finished — if only the preview upload is failing, uploadId/parts
+        // must be preserved so a later retry doesn't wastefully re-upload
+        // the original from scratch.
+        if (!originalDone) {
+          const photoId = this.items.get(item.id)?.photoId;
+          const fileType = this.items.get(item.id)?.fileType;
+          if (photoId && currentUploadId) {
+            cancelUploadApi(item.eventSlug, photoId, { uploadId: currentUploadId, fileType }).catch(cleanupErr => {
+              console.warn('[UploadManager] Failed to abort orphaned multipart upload:', cleanupErr);
+            });
+          }
+          updates.uploadId = undefined;
+          updates.parts = [];
+        }
+      }
+
       this.updateItem(item.id, updates);
       await updateQueueItem(item.id, updates);
     } finally {
