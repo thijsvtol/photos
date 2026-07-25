@@ -714,12 +714,36 @@ const EventGallery: React.FC = () => {
 
         // Poll until the target photo element exists or page is tall enough
         let attempts = 0;
+        let cancelled = false;
+        // Once the target element is found, the justified grid (react-photo-album)
+        // is still settling its layout — it measures the container width via a
+        // ResizeObserver and recomputes row heights over the following frames,
+        // which shifts the element's position after we've already scrolled to it.
+        // Keep re-asserting the scroll position until the page height stops
+        // changing so we land on the photo's final, settled position.
+        let lastScrollHeight = -1;
+        let stableFrames = 0;
         const tryScroll = () => {
+          if (cancelled) return;
           // Try to find the specific photo element first
           if (savedPhotoId) {
             const el = document.querySelector(`[data-photo-id="${CSS.escape(savedPhotoId)}"]`);
             if (el) {
               el.scrollIntoView({ block: 'center' });
+
+              const currentScrollHeight = document.documentElement.scrollHeight;
+              if (currentScrollHeight === lastScrollHeight) {
+                stableFrames++;
+              } else {
+                stableFrames = 0;
+                lastScrollHeight = currentScrollHeight;
+              }
+
+              if (stableFrames >= 6 || attempts >= 90) {
+                return;
+              }
+              attempts++;
+              requestAnimationFrame(tryScroll);
               return;
             }
           }
@@ -732,6 +756,9 @@ const EventGallery: React.FC = () => {
           }
         };
         requestAnimationFrame(tryScroll);
+        return () => {
+          cancelled = true;
+        };
       }
     }
   }, [slug, loading, photos]);
