@@ -31,6 +31,7 @@ interface FakePhoto {
   id: string;
   file_type: string;
   upload_complete: number;
+  preview_complete: number;
 }
 
 function createFakeEnv(photos: FakePhoto[], historyRows: unknown[][]): { DB: any; PHOTOS_BUCKET: any } {
@@ -59,6 +60,15 @@ function createFakeEnv(photos: FakePhoto[], historyRows: unknown[][]): { DB: any
             const photo = photos.find(p => p.id === id);
             if (photo && photo.upload_complete === 0) {
               photo.upload_complete = 1;
+              return { success: true, meta: { changes: 1 } };
+            }
+            return { success: true, meta: { changes: 0 } };
+          }
+          if (query.includes('UPDATE photos SET preview_complete = 1 WHERE id = ? AND preview_complete = 0')) {
+            const [id] = boundArgs as [string];
+            const photo = photos.find(p => p.id === id);
+            if (photo && photo.preview_complete === 0) {
+              photo.preview_complete = 1;
               return { success: true, meta: { changes: 1 } };
             }
             return { success: true, meta: { changes: 0 } };
@@ -94,7 +104,7 @@ describe('POST /events/:slug/uploads/:photoId/complete', () => {
   let env: ReturnType<typeof createFakeEnv>;
 
   beforeEach(() => {
-    photos = [{ id: 'photo-1', file_type: 'image/jpeg', upload_complete: 0 }];
+    photos = [{ id: 'photo-1', file_type: 'image/jpeg', upload_complete: 0, preview_complete: 0 }];
     historyRows = [];
     env = createFakeEnv(photos, historyRows);
   });
@@ -130,5 +140,42 @@ describe('POST /events/:slug/uploads/:photoId/complete', () => {
     expect(photos[0].upload_complete).toBe(1);
     // Still only one history row — the retry did not duplicate it.
     expect(historyRows).toHaveLength(1);
+  });
+
+  it('marks preview_complete on the preview completion call without touching upload_complete or history', async () => {
+    // Original already completed; only the preview upload is being completed now.
+    photos[0].upload_complete = 1;
+
+    const app = buildApp();
+    const res = await app.request(
+      '/events/my-event/uploads/photo-1/complete?preview=true',
+      completeReq(),
+      env
+    );
+
+    expect(res.status).toBe(200);
+    expect(photos[0].preview_complete).toBe(1);
+    expect(photos[0].upload_complete).toBe(1);
+    expect(historyRows).toHaveLength(0);
+  });
+
+  it('does not error when the preview /complete call is retried', async () => {
+    photos[0].upload_complete = 1;
+
+    const app = buildApp();
+    const first = await app.request(
+      '/events/my-event/uploads/photo-1/complete?preview=true',
+      completeReq(),
+      env
+    );
+    expect(first.status).toBe(200);
+
+    const retry = await app.request(
+      '/events/my-event/uploads/photo-1/complete?preview=true',
+      completeReq(),
+      env
+    );
+    expect(retry.status).toBe(200);
+    expect(photos[0].preview_complete).toBe(1);
   });
 });

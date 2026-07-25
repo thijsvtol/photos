@@ -287,7 +287,7 @@ app.get('/api/events/:slug/photos', optionalAuth, async (c) => {
       SELECT p.*, COALESCE(u.name, u.email, p.uploaded_by) as uploader_name
       FROM photos p
       LEFT JOIN users u ON p.uploaded_by = u.email
-      WHERE p.event_id = ? AND p.upload_complete = 1
+      WHERE p.event_id = ? AND p.upload_complete = 1 AND p.preview_complete = 1
       ORDER BY ${orderBy}
     `;
     
@@ -363,7 +363,7 @@ app.get('/api/events/:slug/photos/:photoId', optionalAuth, async (c) => {
         SELECT p.*, COALESCE(u.name, u.email, p.uploaded_by) as uploader_name
         FROM photos p
         LEFT JOIN users u ON p.uploaded_by = u.email
-        WHERE p.id = ? AND p.event_id = ? AND p.upload_complete = 1
+        WHERE p.id = ? AND p.event_id = ? AND p.upload_complete = 1 AND p.preview_complete = 1
       `)
       .bind(photoId, event.id)
       .first<Photo>();
@@ -490,6 +490,7 @@ app.get('/api/timeline', optionalAuth, async (c) => {
         FROM photos p
         WHERE p.event_id IN (${placeholders})
           AND p.upload_complete = 1
+          AND p.preview_complete = 1
           AND p.capture_time < ?
         ORDER BY p.capture_time DESC
         LIMIT ?
@@ -504,6 +505,7 @@ app.get('/api/timeline', optionalAuth, async (c) => {
         FROM photos p
         WHERE p.event_id IN (${placeholders})
           AND p.upload_complete = 1
+          AND p.preview_complete = 1
         ORDER BY p.capture_time DESC
         LIMIT ?
       `;

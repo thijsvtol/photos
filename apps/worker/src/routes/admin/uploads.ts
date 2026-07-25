@@ -51,6 +51,11 @@ app.post('/start', requireUploadPermission, async (c) => {
     if (!body.isPreview) {
       const captureTime = body.captureTime || new Date().toISOString();
       const user = c.get('user'); // Get authenticated user (admin or collaborator)
+
+      // Videos never get a separate preview file uploaded (media.ts always
+      // falls back to the original .mp4), so they're immediately treated as
+      // preview-complete; only images start out pending a preview upload.
+      const initialPreviewComplete = isVideo ? 1 : 0;
       
       // Get first name from full name, or use full name if no space
       let uploaderName = null;
@@ -69,8 +74,8 @@ app.post('/start', requireUploadPermission, async (c) => {
         .prepare(`INSERT INTO photos (
           id, event_id, original_filename, file_type, capture_time, uploaded_by, width, height,
           iso, aperture, shutter_speed, focal_length, camera_make, camera_model, lens_model,
-          latitude, longitude, blur_placeholder, upload_complete
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)
+          latitude, longitude, blur_placeholder, upload_complete, preview_complete
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?)
         ON CONFLICT(id) DO UPDATE SET
           event_id = excluded.event_id,
           original_filename = excluded.original_filename,
@@ -97,7 +102,7 @@ app.post('/start', requireUploadPermission, async (c) => {
           body.iso || null, body.aperture || null, body.shutterSpeed || null,
           body.focalLength || null, body.cameraMake || null, body.cameraModel || null,
           body.lensModel || null, body.latitude || null, body.longitude || null,
-          body.blurPlaceholder || null
+          body.blurPlaceholder || null, initialPreviewComplete
         )
         .run();
       
@@ -294,7 +299,10 @@ app.post('/:photoId/complete', requireUploadPermission, async (c) => {
     // Mark the photo as fully uploaded once the ORIGINAL media lands in R2, so
     // it becomes visible in galleries/detail. Preview uploads (isPreview) are a
     // progressive enhancement that happens afterwards; the media endpoint falls
-    // back to the original if the preview isn't ready yet.
+    // back to the original if the preview isn't ready yet. However, the photo
+    // still stays hidden from galleries/timeline until preview_complete flips
+    // to 1 below, so listings never show only-original photos that would
+    // otherwise load the full-size image where a lightweight preview belongs.
     //
     // Guard with "AND upload_complete = 0" and only proceed with the history
     // log below when this call was the one that actually flipped the flag.
@@ -310,6 +318,13 @@ app.post('/:photoId/complete', requireUploadPermission, async (c) => {
         .bind(photoId)
         .run();
       firstCompletion = result.meta.changes > 0;
+    } else {
+      // Same idempotent guard as above, applied to the preview flag: a
+      // retried preview /complete call must not error or double-count.
+      await c.env.DB
+        .prepare('UPDATE photos SET preview_complete = 1 WHERE id = ? AND preview_complete = 0')
+        .bind(photoId)
+        .run();
     }
     
     // Log collaborator uploads to history (not admins, originals only).

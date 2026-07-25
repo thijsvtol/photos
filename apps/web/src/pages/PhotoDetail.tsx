@@ -1355,7 +1355,7 @@ const PhotoDetail: React.FC = () => {
     : '';
 
   return (
-    <div className="fixed inset-0 bg-black z-50 overflow-hidden" ref={containerRef} style={{ overscrollBehavior: 'none' }}>
+    <div className="fixed inset-0 bg-black z-50 overflow-hidden" ref={containerRef} style={{ overscrollBehavior: 'none' }} data-no-pull-refresh>
       {ConfirmDialog}
       {photo && (
         <SEO

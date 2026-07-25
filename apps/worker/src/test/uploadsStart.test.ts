@@ -22,6 +22,7 @@ interface FakePhoto {
   originalFilename: string;
   file_type: string;
   upload_complete: number;
+  preview_complete: number;
 }
 
 /**
@@ -50,9 +51,10 @@ function createFakeEnv(photos: FakePhoto[]): { DB: any; PHOTOS_BUCKET: any } {
             const [id, eventId, originalFilename, file_type] = boundArgs as [
               string, number, string, string
             ];
+            const previewComplete = boundArgs[boundArgs.length - 1] as number;
             const existing = photos.find(p => p.id === id);
             if (!existing) {
-              photos.push({ id, eventId, originalFilename, file_type, upload_complete: 0 });
+              photos.push({ id, eventId, originalFilename, file_type, upload_complete: 0, preview_complete: previewComplete });
             } else if (existing.upload_complete === 0) {
               // Emulate the ON CONFLICT ... WHERE upload_complete = 0 upsert.
               existing.eventId = eventId;
@@ -109,7 +111,23 @@ describe('POST /events/:slug/uploads/start', () => {
     const json = await res.json() as any;
     expect(json.uploadId).toBe('upload-1');
     expect(photos).toHaveLength(1);
-    expect(photos[0]).toMatchObject({ id: 'photo-1', upload_complete: 0 });
+    expect(photos[0]).toMatchObject({ id: 'photo-1', upload_complete: 0, preview_complete: 0 });
+  });
+
+  it('starts videos as preview_complete since they never get a separate preview file', async () => {
+    const app = buildApp();
+    const res = await app.request(
+      '/events/my-event/uploads/start',
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ photoId: 'video-1', filename: 'a.mp4', fileType: 'video/mp4' }),
+      },
+      env
+    );
+
+    expect(res.status).toBe(200);
+    expect(photos[0]).toMatchObject({ id: 'video-1', preview_complete: 1 });
   });
 
   it('does not 500 when retried with the same photoId before completion', async () => {
@@ -152,6 +170,7 @@ describe('POST /events/:slug/uploads/start', () => {
       originalFilename: 'original.jpg',
       file_type: 'image/jpeg',
       upload_complete: 1,
+      preview_complete: 1,
     });
 
     const app = buildApp();
