@@ -739,6 +739,9 @@ const EventGallery: React.FC = () => {
                 lastScrollHeight = currentScrollHeight;
               }
 
+              // 6 consecutive unchanged frames (~100ms at 60fps) is enough to be
+              // confident the layout has settled; 90 attempts (~1.5s) caps how
+              // long we keep polling in case the layout never fully stabilizes.
               if (stableFrames >= 6 || attempts >= 90) {
                 return;
               }
