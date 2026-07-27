@@ -59,9 +59,9 @@ function queryAwareDb() {
 
           const eventId = boundArgs[0];
           const requireUploadComplete = query.includes('p.upload_complete = 1');
-          const requirePreviewReady = query.includes('p.preview_complete = 1 OR p.uploaded_at <=');
+          const requirePreviewReady = query.includes("p.preview_complete = 1 OR p.uploaded_at <= datetime('now', '-");
 
-          const graceMatch = query.match(/'-(\d+) minutes'/);
+          const graceMatch = query.match(/datetime\('now', '-(\d+) minutes'\)/);
           const graceMinutes = graceMatch ? Number(graceMatch[1]) : 0;
           const cutoff = new Date(NOW.getTime() - graceMinutes * 60 * 1000).toISOString().replace('T', ' ').slice(0, 19);
 
