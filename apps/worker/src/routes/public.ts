@@ -9,6 +9,20 @@ const app = new Hono<{ Bindings: Env }>();
 // Validate slug format (alphanumeric + hyphens only)
 const isValidSlug = (slug: string): boolean => /^[a-z0-9][a-z0-9\-]*[a-z0-9]$|^[a-z0-9]$/.test(slug);
 
+// A photo's small watermarked preview is uploaded client-side as a
+// progressive enhancement *after* the original finishes (see
+// uploadManager.ts). Normally this only takes a few seconds, but if that
+// second upload step never completes — a transient network error, retries
+// exhausted, or the tab/app being closed before it finishes — the original
+// photo (which uploaded successfully) must not stay hidden forever. Once
+// the original has been sitting long enough that any in-flight preview
+// upload would realistically have finished, fall back to showing the photo
+// even without a preview; media.ts already falls back to serving the
+// original file when no preview exists in R2.
+const PREVIEW_GRACE_MINUTES = 10;
+const PREVIEW_READY_CLAUSE =
+  `(p.preview_complete = 1 OR p.uploaded_at <= datetime('now', '-${PREVIEW_GRACE_MINUTES} minutes'))`;
+
 // CORS configuration for same-origin requests
 app.use('/*', cors({
   origin: '*',
@@ -287,7 +301,7 @@ app.get('/api/events/:slug/photos', optionalAuth, async (c) => {
       SELECT p.*, COALESCE(u.name, u.email, p.uploaded_by) as uploader_name
       FROM photos p
       LEFT JOIN users u ON p.uploaded_by = u.email
-      WHERE p.event_id = ? AND p.upload_complete = 1 AND p.preview_complete = 1
+      WHERE p.event_id = ? AND p.upload_complete = 1 AND ${PREVIEW_READY_CLAUSE}
       ORDER BY ${orderBy}
     `;
     
@@ -363,7 +377,7 @@ app.get('/api/events/:slug/photos/:photoId', optionalAuth, async (c) => {
         SELECT p.*, COALESCE(u.name, u.email, p.uploaded_by) as uploader_name
         FROM photos p
         LEFT JOIN users u ON p.uploaded_by = u.email
-        WHERE p.id = ? AND p.event_id = ? AND p.upload_complete = 1 AND p.preview_complete = 1
+        WHERE p.id = ? AND p.event_id = ? AND p.upload_complete = 1 AND ${PREVIEW_READY_CLAUSE}
       `)
       .bind(photoId, event.id)
       .first<Photo>();
@@ -490,7 +504,7 @@ app.get('/api/timeline', optionalAuth, async (c) => {
         FROM photos p
         WHERE p.event_id IN (${placeholders})
           AND p.upload_complete = 1
-          AND p.preview_complete = 1
+          AND ${PREVIEW_READY_CLAUSE}
           AND p.capture_time < ?
         ORDER BY p.capture_time DESC
         LIMIT ?
@@ -505,7 +519,7 @@ app.get('/api/timeline', optionalAuth, async (c) => {
         FROM photos p
         WHERE p.event_id IN (${placeholders})
           AND p.upload_complete = 1
-          AND p.preview_complete = 1
+          AND ${PREVIEW_READY_CLAUSE}
         ORDER BY p.capture_time DESC
         LIMIT ?
       `;
