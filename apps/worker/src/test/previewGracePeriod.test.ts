@@ -25,17 +25,18 @@ interface Ph {
 }
 
 const NOW = new Date();
-const minutesAgo = (m: number) => new Date(NOW.getTime() - m * 60 * 1000).toISOString().replace('T', ' ').slice(0, 19);
+/** Format a point in time N minutes ago as a SQLite `datetime('now')`-style string. */
+const sqlDatetimeMinutesAgo = (m: number) => new Date(NOW.getTime() - m * 60 * 1000).toISOString().replace('T', ' ').slice(0, 19);
 
 const photos: Ph[] = [
   // Original done, preview done — always visible.
-  { id: 'ready', event_id: 1, upload_complete: 1, preview_complete: 1, uploaded_at: minutesAgo(1), capture_time: '2024-01-01' },
+  { id: 'ready', event_id: 1, upload_complete: 1, preview_complete: 1, uploaded_at: sqlDatetimeMinutesAgo(1), capture_time: '2024-01-01' },
   // Original done, preview still pending, uploaded seconds ago — hidden (preview upload may still be in flight).
-  { id: 'just-uploaded-no-preview', event_id: 1, upload_complete: 1, preview_complete: 0, uploaded_at: minutesAgo(1), capture_time: '2024-01-02' },
+  { id: 'just-uploaded-no-preview', event_id: 1, upload_complete: 1, preview_complete: 0, uploaded_at: sqlDatetimeMinutesAgo(1), capture_time: '2024-01-02' },
   // Original done, preview never finished, uploaded long ago — must fall back to visible.
-  { id: 'stuck-preview', event_id: 1, upload_complete: 1, preview_complete: 0, uploaded_at: minutesAgo(60), capture_time: '2024-01-03' },
+  { id: 'stuck-preview', event_id: 1, upload_complete: 1, preview_complete: 0, uploaded_at: sqlDatetimeMinutesAgo(60), capture_time: '2024-01-03' },
   // Original itself still in progress — always hidden regardless of preview/age.
-  { id: 'original-in-progress', event_id: 1, upload_complete: 0, preview_complete: 0, uploaded_at: minutesAgo(60), capture_time: '2024-01-04' },
+  { id: 'original-in-progress', event_id: 1, upload_complete: 0, preview_complete: 0, uploaded_at: sqlDatetimeMinutesAgo(60), capture_time: '2024-01-04' },
 ];
 
 function queryAwareDb() {
@@ -60,7 +61,7 @@ function queryAwareDb() {
           const requireUploadComplete = query.includes('p.upload_complete = 1');
           const requirePreviewReady = query.includes('p.preview_complete = 1 OR p.uploaded_at <=');
 
-          const graceMatch = query.match(/-(\d+) minutes/);
+          const graceMatch = query.match(/'-(\d+) minutes'/);
           const graceMinutes = graceMatch ? Number(graceMatch[1]) : 0;
           const cutoff = new Date(NOW.getTime() - graceMinutes * 60 * 1000).toISOString().replace('T', ' ').slice(0, 19);
 
