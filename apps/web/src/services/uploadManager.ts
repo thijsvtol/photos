@@ -161,21 +161,19 @@ class UploadManager {
       f => f.type === 'image/jpeg' || f.type === 'video/mp4'
     );
 
+    if (supportedFiles.length === 0) return;
+
+    // Enqueue every item immediately with bare-bones metadata so the UI
+    // (GlobalUploadIndicator) can show the upload popup right away instead
+    // of only after EXIF/video-metadata has been extracted from every file
+    // one by one — that extraction can take several seconds for large
+    // batches and was delaying the popup's first appearance noticeably.
+    // captureTime/EXIF are extracted lazily by processUpload() when missing,
+    // so it's safe to skip them here.
     const enqueued: UploadQueueItem[] = [];
     for (const file of supportedFiles) {
       const id = ulid();
       const photoId = ulid();
-      const isVideo = file.type === 'video/mp4';
-
-      let exif: Record<string, unknown> = {};
-      if (isVideo) {
-        const sliceSize = Math.min(1024 * 1024, file.size);
-        const buffer = await file.slice(0, sliceSize).arrayBuffer();
-        const captureTime = extractMp4CreationTime(buffer) ?? new Date(file.lastModified).toISOString();
-        exif = { captureTime };
-      } else {
-        exif = await this.extractExifData(file);
-      }
 
       const item: UploadQueueItem = {
         id,
@@ -185,7 +183,6 @@ class UploadManager {
         status: 'pending',
         progress: 0,
         photoId,
-        ...exif,
       };
 
       await addToQueue(item);
@@ -194,8 +191,6 @@ class UploadManager {
     }
 
     this.notify();
-
-    if (enqueued.length === 0) return;
 
     if (Capacitor.isNativePlatform()) {
       // Delegate to the background-sync pipeline (progress notifications,

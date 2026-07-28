@@ -26,6 +26,7 @@ const GlobalUploadIndicator: React.FC = () => {
   } = useUploadContext();
 
   const [isExpanded, setIsExpanded] = useState(false);
+  const [visibleCount, setVisibleCount] = useState(50);
 
   // Hide on fullscreen photo detail page (/p/:slug/:photoId)
   if (location.pathname.startsWith('/p/')) return null;
@@ -138,7 +139,7 @@ const GlobalUploadIndicator: React.FC = () => {
             </div>
           ) : (
             <div className="divide-y divide-gray-100 dark:divide-gray-700">
-              {queueItems.slice().reverse().slice(0, 50).map((item) => (
+              {queueItems.slice().reverse().slice(0, visibleCount).map((item) => (
                 <div key={item.id} className="px-4 py-2.5 flex items-center gap-3">
                   {/* Status icon */}
                   <div className="flex-shrink-0">
@@ -198,10 +199,13 @@ const GlobalUploadIndicator: React.FC = () => {
                   )}
                 </div>
               ))}
-              {queueItems.length > 50 && (
-                <div className="px-4 py-2 text-xs text-gray-500 dark:text-gray-400 text-center">
-                  +{queueItems.length - 50} more items
-                </div>
+              {queueItems.length > visibleCount && (
+                <button
+                  onClick={() => setVisibleCount(c => c + 50)}
+                  className="w-full px-4 py-2 text-xs text-blue-600 dark:text-blue-400 text-center hover:bg-gray-50 dark:hover:bg-gray-700/50 transition"
+                >
+                  +{queueItems.length - visibleCount} more — show more
+                </button>
               )}
             </div>
           )}
