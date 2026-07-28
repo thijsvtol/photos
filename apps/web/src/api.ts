@@ -278,7 +278,13 @@ export const uploadPart = async (
         'X-Upload-Id': uploadId,
         'X-File-Type': fileType || 'image/jpeg',
         'Content-Type': 'application/octet-stream',
-      } 
+      },
+      // Without a timeout, a stalled connection (common on flaky mobile
+      // networks) hangs indefinitely instead of failing and letting the
+      // existing chunk-retry logic kick in. 2 minutes comfortably covers a
+      // 10MB video chunk even on a slow connection while still detecting a
+      // truly dead connection in bounded time.
+      timeout: 120_000,
     }
   );
   return response.data;
@@ -294,7 +300,7 @@ export const completeUpload = async (
   await api.post(
     `/admin/events/${slug}/uploads/${photoId}/complete${isPreview ? '?preview=true' : ''}`,
     { uploadId, parts },
-    { headers: getAdminHeaders() }
+    { headers: getAdminHeaders(), timeout: 60_000 }
   );
 };
 

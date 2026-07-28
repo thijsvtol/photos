@@ -8,11 +8,30 @@
 import { ulid } from 'ulid';
 import { Capacitor } from '@capacitor/core';
 import ExifReader from 'exifreader';
+import axios from 'axios';
 import { startUpload, uploadPart, completeUpload, cancelUpload as cancelUploadApi } from '../api';
 import { addToQueue, updateQueueItem, getQueueItems, getPendingUploads, removeFromQueue, clearCompletedUploads } from '../uploadQueue';
 import { createPreview } from '../imageUtils';
 import { extractMp4CreationTime } from '../utils/videoMetadata';
 import type { UploadQueueItem } from '../types';
+
+/**
+ * HTTP status codes that indicate the request itself is invalid/rejected
+ * rather than a transient network/server problem — retrying the exact same
+ * chunk won't help (400 bad request, 401/403 auth, 404 upload session
+ * gone/expired, 413 payload too large, 422 unprocessable). Everything else
+ * (network errors with no response, timeouts, 5xx, 429 rate limiting) is
+ * treated as retryable.
+ */
+const NON_RETRYABLE_STATUS_CODES = new Set([400, 401, 403, 404, 413, 422]);
+
+export function isNonRetryableUploadError(err: unknown): boolean {
+  if (axios.isAxiosError(err)) {
+    const status = err.response?.status;
+    return status !== undefined && NON_RETRYABLE_STATUS_CODES.has(status);
+  }
+  return false;
+}
 
 const CHUNK_SIZE = 5 * 1024 * 1024; // 5MB for images
 const VIDEO_CHUNK_SIZE = 10 * 1024 * 1024; // 10MB for videos — fewer round-trips
@@ -614,9 +633,15 @@ class UploadManager {
         return await uploadPart(eventSlug, photoId, uploadId, partNumber, chunk, isPreview, fileType);
       } catch (err) {
         lastError = err;
-        if (attempt < MAX_CHUNK_RETRIES) {
-          await new Promise(resolve => setTimeout(resolve, CHUNK_RETRY_DELAY * (attempt + 1)));
+        // Client errors (bad request, auth, not found, payload too large, etc.)
+        // will never succeed by retrying the same chunk unchanged — retrying
+        // just delays the inevitable failure and wastes the user's data/battery.
+        // Only retry on network failures, timeouts, and server-side errors
+        // (5xx/429), which are the transient cases retries actually help with.
+        if (isNonRetryableUploadError(err) || attempt >= MAX_CHUNK_RETRIES) {
+          break;
         }
+        await new Promise(resolve => setTimeout(resolve, CHUNK_RETRY_DELAY * (attempt + 1)));
       }
     }
     throw lastError;

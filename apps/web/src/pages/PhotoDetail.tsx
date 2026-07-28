@@ -1244,6 +1244,17 @@ const PhotoDetail: React.FC = () => {
       toast.showSuccess('Photo deleted successfully');
       setShowMobileMenu(false);
 
+      // Immediately stop and detach any playing video so its audio/frame
+      // can never linger after the item it belongs to has been deleted and
+      // we've navigated away from it (React unmounting the <video> element
+      // later in the same tick isn't always enough to stop playback
+      // instantly, e.g. right after deleting a video itself).
+      if (videoRef.current) {
+        videoRef.current.pause();
+        videoRef.current.removeAttribute('src');
+        videoRef.current.load();
+      }
+
       const remainingPhotos = allPhotos.filter((p) => p.id !== currentPhotoId);
       setAllPhotos(remainingPhotos);
       const remainingDisplayPhotos = fromFavorites && favoritePhotos.length > 0
@@ -1254,6 +1265,23 @@ const PhotoDetail: React.FC = () => {
         const currentDisplayIndex = Math.max(0, (displayPhotos.length > 0 ? displayPhotos : allPhotos).findIndex((p) => p.id === currentPhotoId));
         const nextIndex = Math.min(currentDisplayIndex, remainingDisplayPhotos.length - 1);
         const nextPhoto = remainingDisplayPhotos[nextIndex];
+
+        // Set the next photo's state synchronously here instead of relying
+        // solely on the photoId-driven effect below (which only fires on
+        // the *next* render once the URL has updated). Without this, there
+        // is a render where `allPhotos` already excludes the deleted photo
+        // but `photo` still refers to it, which can briefly re-render the
+        // deleted media (e.g. a video) before the effect catches up.
+        setPreviousPhoto(null);
+        setCurrentIndex(nextIndex);
+        setPhoto(nextPhoto);
+        setImageLoaded(false);
+        setVideoProgress(0);
+        setVideoBuffered(0);
+        setVideoDuration(0);
+        setVideoBuffering(false);
+        setVideoPaused(false);
+
         navigate(`/p/${slug}/${nextPhoto.id}`, {
           replace: true,
           state: location.state,

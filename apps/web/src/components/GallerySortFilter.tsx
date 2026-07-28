@@ -1,13 +1,16 @@
-import { X, CheckSquare, Heart, Star, Download, Trash2, Loader2, Copy, Search, Grid3X3, Grid2X2, LayoutGrid } from 'lucide-react';
+import { X, CheckSquare, Heart, Star, Download, Trash2, Loader2, Copy, Search, Grid3X3, Grid2X2, LayoutGrid, Image, Video, LayoutList } from 'lucide-react';
 import { Capacitor } from '@capacitor/core';
 
 type DensityLevel = 'comfortable' | 'default' | 'dense';
+export type MediaTypeFilter = 'all' | 'photos' | 'videos';
 
 interface GallerySortFilterProps {
   sortBy: string;
   onSortChange: (value: string) => void;
   searchQuery: string;
   onSearchChange: (value: string) => void;
+  mediaTypeFilter?: MediaTypeFilter;
+  onMediaTypeFilterChange?: (value: MediaTypeFilter) => void;
   selectedCount: number;
   onSelectAllVisible?: () => void;
   onClearSelection?: () => void;
@@ -32,6 +35,8 @@ export function GallerySortFilter({
   onSortChange,
   searchQuery,
   onSearchChange,
+  mediaTypeFilter = 'all',
+  onMediaTypeFilterChange,
   selectedCount,
   onSelectAllVisible,
   onClearSelection,
@@ -190,6 +195,45 @@ export function GallerySortFilter({
               <option value="name_desc">Name (Z-A)</option>
             </select>
           </div>
+          {/* Media type filter: All / Photos / Videos */}
+          {onMediaTypeFilterChange && (
+            <div
+              className="flex items-center gap-0.5 border border-gray-300 dark:border-gray-600 rounded-lg p-0.5"
+              role="group"
+              aria-label="Filter by media type"
+            >
+              <button
+                onClick={() => onMediaTypeFilterChange('all')}
+                className={`flex items-center gap-1 px-2 py-1.5 rounded text-xs font-medium transition-colors ${mediaTypeFilter === 'all' ? 'bg-blue-100 dark:bg-blue-900/40 text-blue-600 dark:text-blue-400' : 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300'}`}
+                title="Show all media"
+                aria-label="Show all media"
+                aria-pressed={mediaTypeFilter === 'all'}
+              >
+                <LayoutList className="w-4 h-4" />
+                <span className="hidden sm:inline">All</span>
+              </button>
+              <button
+                onClick={() => onMediaTypeFilterChange('photos')}
+                className={`flex items-center gap-1 px-2 py-1.5 rounded text-xs font-medium transition-colors ${mediaTypeFilter === 'photos' ? 'bg-blue-100 dark:bg-blue-900/40 text-blue-600 dark:text-blue-400' : 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300'}`}
+                title="Show photos only"
+                aria-label="Show photos only"
+                aria-pressed={mediaTypeFilter === 'photos'}
+              >
+                <Image className="w-4 h-4" />
+                <span className="hidden sm:inline">Photos</span>
+              </button>
+              <button
+                onClick={() => onMediaTypeFilterChange('videos')}
+                className={`flex items-center gap-1 px-2 py-1.5 rounded text-xs font-medium transition-colors ${mediaTypeFilter === 'videos' ? 'bg-blue-100 dark:bg-blue-900/40 text-blue-600 dark:text-blue-400' : 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300'}`}
+                title="Show videos only"
+                aria-label="Show videos only"
+                aria-pressed={mediaTypeFilter === 'videos'}
+              >
+                <Video className="w-4 h-4" />
+                <span className="hidden sm:inline">Videos</span>
+              </button>
+            </div>
+          )}
           <div className="flex-1 relative">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
             <input
