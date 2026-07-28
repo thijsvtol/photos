@@ -19,8 +19,21 @@ export function useAndroidBackButton() {
     const handler = App.addListener('backButton', ({ canGoBack }) => {
       const path = location.pathname;
 
-      // Photo detail → back to gallery/timeline/favorites
+      // Photo detail → back to gallery/timeline/favorites.
+      // Prefer a real history pop (navigate(-1)) over pushing a fresh route:
+      // PhotoDetail always arrives via a push from the gallery/timeline/
+      // favorites view (and uses `replace: true` when swiping between
+      // photos), so history[-1] is exactly that originating view. Popping
+      // it — instead of pushing a brand new `/events/:slug` entry — is what
+      // lets that view's scroll-restoration logic (which runs on mount)
+      // reliably kick in, and avoids growing the history stack with
+      // duplicate gallery entries on repeated back navigations.
       if (path.startsWith('/p/')) {
+        if (canGoBack) {
+          navigate(-1);
+          return;
+        }
+
         const state = location.state as Record<string, unknown> | null;
         if (state?.fromFavorites) {
           navigate('/favorites');
@@ -32,7 +45,10 @@ export function useAndroidBackButton() {
           if (slug) {
             navigate(`/events/${slug}`);
           } else {
-            navigate(-1);
+            // No history to pop (canGoBack is false) and no slug to build a
+            // gallery URL from (malformed path) — there's nowhere sensible
+            // to go back to, so fall back to the top-level events list.
+            navigate('/events');
           }
         }
         return;

@@ -38,6 +38,15 @@ const extractEventSlugFromApiPath = (requestUrl?: string): string | null => {
   return match?.[1] ?? null;
 };
 
+// Chunked upload requests need generous per-request timeouts: without one,
+// a stalled connection (common on flaky mobile networks) hangs indefinitely
+// instead of failing and letting the chunk-retry logic in uploadManager
+// kick in. These comfortably cover a 10MB video chunk / multipart-complete
+// call even on a slow connection while still detecting a dead connection in
+// bounded time.
+const CHUNK_UPLOAD_TIMEOUT_MS = 120_000;
+const UPLOAD_COMPLETE_TIMEOUT_MS = 60_000;
+
 const api = axios.create({
   baseURL: import.meta.env.VITE_API_URL || '/api',
   // Only use credentials in browser, not in native app
@@ -278,7 +287,11 @@ export const uploadPart = async (
         'X-Upload-Id': uploadId,
         'X-File-Type': fileType || 'image/jpeg',
         'Content-Type': 'application/octet-stream',
-      } 
+      },
+      // Without a timeout, a stalled connection (common on flaky mobile
+      // networks) hangs indefinitely instead of failing and letting the
+      // existing chunk-retry logic kick in.
+      timeout: CHUNK_UPLOAD_TIMEOUT_MS,
     }
   );
   return response.data;
@@ -294,7 +307,7 @@ export const completeUpload = async (
   await api.post(
     `/admin/events/${slug}/uploads/${photoId}/complete${isPreview ? '?preview=true' : ''}`,
     { uploadId, parts },
-    { headers: getAdminHeaders() }
+    { headers: getAdminHeaders(), timeout: UPLOAD_COMPLETE_TIMEOUT_MS }
   );
 };
 

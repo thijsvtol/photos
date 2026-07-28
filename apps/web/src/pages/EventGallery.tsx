@@ -42,6 +42,7 @@ const EventGallery: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
   const [sortBy, setSortBy] = useState('date_desc');
   const [searchQuery, setSearchQuery] = useState('');
+  const [mediaTypeFilter, setMediaTypeFilter] = useState<'all' | 'photos' | 'videos'>('all');
   const [userFavorites, setUserFavorites] = useState<Set<string>>(new Set());
   const [deleting, setDeleting] = useState(false);
   const [copying, setCopying] = useState(false);
@@ -65,7 +66,7 @@ const EventGallery: React.FC = () => {
   const [showEventSettings, setShowEventSettings] = useState(false);
 
   // Upload hook for drag-drop
-  const { handleDragOver, handleDragLeave, handleDrop, handleFileInput } = useUpload(slug);
+  const { handleDragOver, handleDragLeave, handleDrop, handleFileInput, queueItems } = useUpload(slug);
 
   // Use custom hook for photo selection
   const {
@@ -252,6 +253,45 @@ const EventGallery: React.FC = () => {
       await Promise.all([loadEvent(), loadPhotos()]);
     }
   };
+
+  // Auto-refresh the gallery as soon as any upload for this event finishes,
+  // instead of only refetching once the *entire* batch is done. This fixes
+  // two related bugs:
+  //  - Videos (and photos) not appearing until a manual page refresh: the
+  //    previous approach only refetched on a "some active -> none active"
+  //    edge detected inside <UploadPanel>, which is missed entirely if this
+  //    component (re)mounts after uploads already completed (e.g. the user
+  //    navigated away mid-upload and came back, or uploads finished via the
+  //    native background-sync pipeline while this page wasn't mounted).
+  //  - A slow item in a mixed batch (e.g. a large video) delaying the
+  //    appearance of already-finished photos, since the old logic only
+  //    fired once every item was done.
+  // Comparing against a ref (not state) means every *newly seen* completed
+  // item — including ones already completed at mount — triggers exactly one
+  // refetch, so the gallery is always eventually consistent with the queue.
+  const seenCompletedUploadIdsRef = useRef<Set<string>>(new Set());
+  useEffect(() => {
+    if (!authenticated) return;
+    const completedIds = queueItems
+      .filter((item) => item.status === 'completed')
+      .map((item) => item.id);
+    const hasNewlyCompleted = completedIds.some(
+      (id) => !seenCompletedUploadIdsRef.current.has(id)
+    );
+    // Rebuild the tracked set from the current queue on every run (instead
+    // of only adding to it) so it can't grow unbounded across a long-lived
+    // session — items the manager has since purged (e.g. via
+    // clearCompleted()) are dropped rather than retained forever.
+    seenCompletedUploadIdsRef.current = new Set(completedIds);
+    if (hasNewlyCompleted) {
+      loadPhotos();
+    }
+    // `loadPhotos` intentionally omitted: it's a plain (non-memoized) async
+    // function redefined every render, and it doesn't need to be in the
+    // dependency array — this effect should only re-run when the upload
+    // queue or auth state changes, not on every render.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [queueItems, authenticated]);
 
   // Reload photos when sort changes
   useEffect(() => {
@@ -501,9 +541,18 @@ const EventGallery: React.FC = () => {
     };
   }, [photos]);
 
+  // Filter photos by media type (all/photos/videos)
+  const mediaTypeFilteredPhotos = mediaTypeFilter === 'all'
+    ? photos
+    : photos.filter((photo) => (
+        mediaTypeFilter === 'videos'
+          ? photo.file_type === 'video/mp4'
+          : photo.file_type !== 'video/mp4'
+      ));
+
   // Filter photos by search query
   const filteredPhotos = searchQuery.trim()
-    ? photos.filter((photo) => {
+    ? mediaTypeFilteredPhotos.filter((photo) => {
         const query = searchQuery.toLowerCase();
         return (
           photo.original_filename.toLowerCase().includes(query) ||
@@ -514,7 +563,7 @@ const EventGallery: React.FC = () => {
           (photo.capture_time && photo.capture_time.toLowerCase().includes(query))
         );
       })
-    : photos;
+    : mediaTypeFilteredPhotos;
 
   const { groups: photosByDate, dates } = groupPhotosByDate(filteredPhotos);
 
@@ -1069,6 +1118,8 @@ const EventGallery: React.FC = () => {
           onSortChange={setSortBy}
           searchQuery={searchQuery}
           onSearchChange={setSearchQuery}
+          mediaTypeFilter={mediaTypeFilter}
+          onMediaTypeFilterChange={setMediaTypeFilter}
           selectedCount={selectedPhotos.size}
           onSelectAllVisible={selectAllVisiblePhotos}
           onClearSelection={() => {

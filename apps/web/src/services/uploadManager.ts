@@ -8,11 +8,41 @@
 import { ulid } from 'ulid';
 import { Capacitor } from '@capacitor/core';
 import ExifReader from 'exifreader';
+import axios from 'axios';
 import { startUpload, uploadPart, completeUpload, cancelUpload as cancelUploadApi } from '../api';
 import { addToQueue, updateQueueItem, getQueueItems, getPendingUploads, removeFromQueue, clearCompletedUploads } from '../uploadQueue';
 import { createPreview } from '../imageUtils';
 import { extractMp4CreationTime } from '../utils/videoMetadata';
 import type { UploadQueueItem } from '../types';
+
+/**
+ * HTTP status codes that indicate the request itself is invalid/rejected
+ * rather than a transient network/server problem — retrying the exact same
+ * chunk won't help. Everything else (network errors with no response,
+ * timeouts, 5xx, 429 rate limiting) is treated as retryable.
+ */
+const HTTP_BAD_REQUEST = 400;
+const HTTP_UNAUTHORIZED = 401;
+const HTTP_FORBIDDEN = 403;
+const HTTP_NOT_FOUND = 404; // upload session gone/expired
+const HTTP_PAYLOAD_TOO_LARGE = 413;
+const HTTP_UNPROCESSABLE_ENTITY = 422;
+const NON_RETRYABLE_STATUS_CODES = new Set([
+  HTTP_BAD_REQUEST,
+  HTTP_UNAUTHORIZED,
+  HTTP_FORBIDDEN,
+  HTTP_NOT_FOUND,
+  HTTP_PAYLOAD_TOO_LARGE,
+  HTTP_UNPROCESSABLE_ENTITY,
+]);
+
+export function isNonRetryableUploadError(err: unknown): boolean {
+  if (axios.isAxiosError(err)) {
+    const status = err.response?.status;
+    return status !== undefined && NON_RETRYABLE_STATUS_CODES.has(status);
+  }
+  return false;
+}
 
 const CHUNK_SIZE = 5 * 1024 * 1024; // 5MB for images
 const VIDEO_CHUNK_SIZE = 10 * 1024 * 1024; // 10MB for videos — fewer round-trips
@@ -131,21 +161,20 @@ class UploadManager {
       f => f.type === 'image/jpeg' || f.type === 'video/mp4'
     );
 
+    // Nothing to do — bail out before touching the queue.
+    if (supportedFiles.length === 0) return;
+
+    // Enqueue every item immediately with bare-bones metadata so the UI
+    // (GlobalUploadIndicator) can show the upload popup right away instead
+    // of only after EXIF/video-metadata has been extracted from every file
+    // one by one — that extraction can take several seconds for large
+    // batches and was delaying the popup's first appearance noticeably.
+    // captureTime/EXIF are extracted lazily by processUpload() when missing,
+    // so it's safe to skip them here.
     const enqueued: UploadQueueItem[] = [];
     for (const file of supportedFiles) {
       const id = ulid();
       const photoId = ulid();
-      const isVideo = file.type === 'video/mp4';
-
-      let exif: Record<string, unknown> = {};
-      if (isVideo) {
-        const sliceSize = Math.min(1024 * 1024, file.size);
-        const buffer = await file.slice(0, sliceSize).arrayBuffer();
-        const captureTime = extractMp4CreationTime(buffer) ?? new Date(file.lastModified).toISOString();
-        exif = { captureTime };
-      } else {
-        exif = await this.extractExifData(file);
-      }
 
       const item: UploadQueueItem = {
         id,
@@ -155,7 +184,6 @@ class UploadManager {
         status: 'pending',
         progress: 0,
         photoId,
-        ...exif,
       };
 
       await addToQueue(item);
@@ -164,8 +192,6 @@ class UploadManager {
     }
 
     this.notify();
-
-    if (enqueued.length === 0) return;
 
     if (Capacitor.isNativePlatform()) {
       // Delegate to the background-sync pipeline (progress notifications,
@@ -614,9 +640,15 @@ class UploadManager {
         return await uploadPart(eventSlug, photoId, uploadId, partNumber, chunk, isPreview, fileType);
       } catch (err) {
         lastError = err;
-        if (attempt < MAX_CHUNK_RETRIES) {
-          await new Promise(resolve => setTimeout(resolve, CHUNK_RETRY_DELAY * (attempt + 1)));
+        // Client errors (bad request, auth, not found, payload too large, etc.)
+        // will never succeed by retrying the same chunk unchanged — retrying
+        // just delays the inevitable failure and wastes the user's data/battery.
+        // Only retry on network failures, timeouts, and server-side errors
+        // (5xx/429), which are the transient cases retries actually help with.
+        if (isNonRetryableUploadError(err) || attempt >= MAX_CHUNK_RETRIES) {
+          break;
         }
+        await new Promise(resolve => setTimeout(resolve, CHUNK_RETRY_DELAY * (attempt + 1)));
       }
     }
     throw lastError;

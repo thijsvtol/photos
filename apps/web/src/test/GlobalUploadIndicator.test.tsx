@@ -174,6 +174,40 @@ describe('GlobalUploadIndicator', () => {
     expect(mockCancelUpload).toHaveBeenCalledWith('failed-1');
   });
 
+  it('shows a clickable "show more" button instead of static text when there are more than 50 items', () => {
+    const items = Array.from({ length: 60 }, (_, i) => ({
+      id: `item-${i}`,
+      eventSlug: 'e1',
+      photoId: `p${i}`,
+      file: { name: `file-${i}.jpg` },
+      fileType: 'image/jpeg',
+      status: 'completed',
+      progress: 100,
+      retries: 0,
+    }));
+
+    mockContextValue = {
+      ...mockContextValue,
+      queueItems: items,
+      hasActiveUploads: false,
+      hasFailedUploads: false,
+      completedCount: 60,
+      totalCount: 60,
+      overallProgress: 100,
+    };
+
+    renderIndicator();
+    fireEvent.click(screen.getByText(/60 uploads complete/));
+
+    const moreBtn = screen.getByRole('button', { name: /10 more/ });
+    expect(moreBtn).toBeInTheDocument();
+
+    fireEvent.click(moreBtn);
+
+    // After clicking, all 60 items should now be visible (no more "more" button).
+    expect(screen.queryByRole('button', { name: /more/ })).not.toBeInTheDocument();
+  });
+
   it('shows Cancel All button when only failed uploads remain', () => {
     const failedItem = {
       id: 'failed-1',
