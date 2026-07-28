@@ -27,6 +27,7 @@ const GlobalUploadIndicator: React.FC = () => {
 
   const [isExpanded, setIsExpanded] = useState(false);
   const [visibleCount, setVisibleCount] = useState(50);
+  const collapse = () => { setIsExpanded(false); setVisibleCount(50); };
 
   // Hide on fullscreen photo detail page (/p/:slug/:photoId)
   if (location.pathname.startsWith('/p/')) return null;
@@ -87,7 +88,7 @@ const GlobalUploadIndicator: React.FC = () => {
       {/* Backdrop tap to collapse */}
       <div
         className="flex-shrink-0 h-8 bg-gradient-to-b from-transparent to-black/20 cursor-pointer"
-        onClick={() => setIsExpanded(false)}
+        onClick={collapse}
       />
 
       <div className="bg-white dark:bg-gray-800 rounded-t-2xl shadow-xl border-t border-gray-200 dark:border-gray-700 flex flex-col overflow-hidden">
@@ -123,7 +124,7 @@ const GlobalUploadIndicator: React.FC = () => {
               </button>
             )}
             <button
-              onClick={() => setIsExpanded(false)}
+              onClick={collapse}
               className="p-1.5 rounded-full hover:bg-gray-100 dark:hover:bg-gray-700 transition"
             >
               <ChevronDown className="w-4 h-4 text-gray-500 dark:text-gray-400" />

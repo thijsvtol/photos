@@ -161,6 +161,7 @@ class UploadManager {
       f => f.type === 'image/jpeg' || f.type === 'video/mp4'
     );
 
+    // Nothing to do — bail out before touching the queue.
     if (supportedFiles.length === 0) return;
 
     // Enqueue every item immediately with bare-bones metadata so the UI
