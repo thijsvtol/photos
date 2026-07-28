@@ -11,7 +11,7 @@ const baseProps = {
   onDownloadSelected: vi.fn(),
 };
 
-describe('GallerySortFilter media type filter', () => {
+describe('media type filter', () => {
   it('does not render the filter when onMediaTypeFilterChange is not provided', () => {
     render(<GallerySortFilter {...baseProps} />);
     expect(screen.queryByLabelText('Show photos only')).not.toBeInTheDocument();

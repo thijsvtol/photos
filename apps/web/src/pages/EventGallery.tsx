@@ -278,9 +278,11 @@ const EventGallery: React.FC = () => {
     const hasNewlyCompleted = completedIds.some(
       (id) => !seenCompletedUploadIdsRef.current.has(id)
     );
-    for (const id of completedIds) {
-      seenCompletedUploadIdsRef.current.add(id);
-    }
+    // Rebuild the tracked set from the current queue on every run (instead
+    // of only adding to it) so it can't grow unbounded across a long-lived
+    // session — items the manager has since purged (e.g. via
+    // clearCompleted()) are dropped rather than retained forever.
+    seenCompletedUploadIdsRef.current = new Set(completedIds);
     if (hasNewlyCompleted) {
       loadPhotos();
     }

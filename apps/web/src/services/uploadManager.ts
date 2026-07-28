@@ -18,12 +18,23 @@ import type { UploadQueueItem } from '../types';
 /**
  * HTTP status codes that indicate the request itself is invalid/rejected
  * rather than a transient network/server problem — retrying the exact same
- * chunk won't help (400 bad request, 401/403 auth, 404 upload session
- * gone/expired, 413 payload too large, 422 unprocessable). Everything else
- * (network errors with no response, timeouts, 5xx, 429 rate limiting) is
- * treated as retryable.
+ * chunk won't help. Everything else (network errors with no response,
+ * timeouts, 5xx, 429 rate limiting) is treated as retryable.
  */
-const NON_RETRYABLE_STATUS_CODES = new Set([400, 401, 403, 404, 413, 422]);
+const HTTP_BAD_REQUEST = 400;
+const HTTP_UNAUTHORIZED = 401;
+const HTTP_FORBIDDEN = 403;
+const HTTP_NOT_FOUND = 404; // upload session gone/expired
+const HTTP_PAYLOAD_TOO_LARGE = 413;
+const HTTP_UNPROCESSABLE_ENTITY = 422;
+const NON_RETRYABLE_STATUS_CODES = new Set([
+  HTTP_BAD_REQUEST,
+  HTTP_UNAUTHORIZED,
+  HTTP_FORBIDDEN,
+  HTTP_NOT_FOUND,
+  HTTP_PAYLOAD_TOO_LARGE,
+  HTTP_UNPROCESSABLE_ENTITY,
+]);
 
 export function isNonRetryableUploadError(err: unknown): boolean {
   if (axios.isAxiosError(err)) {
