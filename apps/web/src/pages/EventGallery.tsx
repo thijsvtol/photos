@@ -269,21 +269,25 @@ const EventGallery: React.FC = () => {
   // Comparing against a ref (not state) means every *newly seen* completed
   // item — including ones already completed at mount — triggers exactly one
   // refetch, so the gallery is always eventually consistent with the queue.
-  const notifiedCompletedUploadIdsRef = useRef<Set<string>>(new Set());
+  const seenCompletedUploadIdsRef = useRef<Set<string>>(new Set());
   useEffect(() => {
     if (!authenticated) return;
     const completedIds = queueItems
       .filter((item) => item.status === 'completed')
       .map((item) => item.id);
     const hasNewlyCompleted = completedIds.some(
-      (id) => !notifiedCompletedUploadIdsRef.current.has(id)
+      (id) => !seenCompletedUploadIdsRef.current.has(id)
     );
     for (const id of completedIds) {
-      notifiedCompletedUploadIdsRef.current.add(id);
+      seenCompletedUploadIdsRef.current.add(id);
     }
     if (hasNewlyCompleted) {
       loadPhotos();
     }
+    // `loadPhotos` intentionally omitted: it's a plain (non-memoized) async
+    // function redefined every render, and it doesn't need to be in the
+    // dependency array — this effect should only re-run when the upload
+    // queue or auth state changes, not on every render.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [queueItems, authenticated]);
 

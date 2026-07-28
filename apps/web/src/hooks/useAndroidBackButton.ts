@@ -45,6 +45,9 @@ export function useAndroidBackButton() {
           if (slug) {
             navigate(`/events/${slug}`);
           } else {
+            // No history to pop (canGoBack is false) and no slug to build a
+            // gallery URL from (malformed path) — there's nowhere sensible
+            // to go back to, so fall back to the top-level events list.
             navigate('/events');
           }
         }
