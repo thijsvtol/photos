@@ -297,8 +297,19 @@ app.get('/api/events/:slug/photos', optionalAuth, async (c) => {
         break;
     }
     
+    // uploader_name must never leak a collaborator's raw email address to
+    // anonymous viewers of a public event: prefer their display name, and
+    // only fall back to the local part of the email (before '@') — never
+    // the full address. Also covers legacy rows where uploaded_by stored a
+    // first name instead of an email (no '@', so the CASE falls through as-is).
     const query = `
-      SELECT p.*, COALESCE(u.name, u.email, p.uploaded_by) as uploader_name
+      SELECT p.*, COALESCE(
+        u.name,
+        CASE WHEN instr(p.uploaded_by, '@') > 0
+          THEN substr(p.uploaded_by, 1, instr(p.uploaded_by, '@') - 1)
+          ELSE p.uploaded_by
+        END
+      ) as uploader_name
       FROM photos p
       LEFT JOIN users u ON p.uploaded_by = u.email
       WHERE p.event_id = ? AND p.upload_complete = 1 AND ${PREVIEW_READY_CLAUSE}
@@ -371,10 +382,17 @@ app.get('/api/events/:slug/photos/:photoId', optionalAuth, async (c) => {
       }
     }
     
-    // Get photo with uploader display name
+    // Get photo with uploader display name (see the analogous query above for
+    // why the fallback never exposes a raw email address).
     const photo = await c.env.DB
       .prepare(`
-        SELECT p.*, COALESCE(u.name, u.email, p.uploaded_by) as uploader_name
+        SELECT p.*, COALESCE(
+          u.name,
+          CASE WHEN instr(p.uploaded_by, '@') > 0
+            THEN substr(p.uploaded_by, 1, instr(p.uploaded_by, '@') - 1)
+            ELSE p.uploaded_by
+          END
+        ) as uploader_name
         FROM photos p
         LEFT JOIN users u ON p.uploaded_by = u.email
         WHERE p.id = ? AND p.event_id = ? AND p.upload_complete = 1 AND ${PREVIEW_READY_CLAUSE}
@@ -395,11 +413,19 @@ app.get('/api/events/:slug/photos/:photoId', optionalAuth, async (c) => {
 
 /**
  * GET /api/map/photos
- * Returns all photos with GPS coordinates from public, non-password-protected events.
+ * Returns all photos with GPS coordinates from events the caller can access:
+ * public events (anonymous or logged-in), plus — when authenticated — events
+ * the user owns/collaborates on or, for admins, every event regardless of
+ * visibility. Mirrors the access-control pattern used by /api/timeline so
+ * logged-in collaborators see the same events on the map as everywhere else.
  * Minimal fields for fast map rendering.
  */
-app.get('/api/map/photos', async (c) => {
+app.get('/api/map/photos', optionalAuth, async (c) => {
   try {
+    const user = getUser(c);
+    const userIsAdmin = isAdmin(c);
+    const userEmail = user?.email || '';
+
     const results = await c.env.DB
       .prepare(`
         SELECT 
@@ -414,18 +440,30 @@ app.get('/api/map/photos', async (c) => {
           e.name as event_name
         FROM photos p
         JOIN events e ON p.event_id = e.id
+        LEFT JOIN event_collaborators ec ON e.id = ec.event_id AND ec.user_email = ?
         WHERE p.latitude IS NOT NULL 
           AND p.longitude IS NOT NULL
-          AND e.visibility = 'public'
-          AND e.password_hash IS NULL
           AND LOWER(e.name) NOT LIKE '[prive]%'
           AND LOWER(e.name) NOT LIKE '[hidden]%'
+          AND (
+            (e.visibility = 'public' AND e.password_hash IS NULL)
+            OR (? = 1)
+            OR (e.visibility = 'collaborators_only' AND ec.user_email IS NOT NULL)
+          )
         ORDER BY p.capture_time DESC
       `)
+      .bind(userEmail, userIsAdmin ? 1 : 0)
       .all();
 
+    // Anonymous/public results are cacheable across users; authenticated
+    // responses can include private data and must not be shared via a
+    // shared/public cache.
+    const cacheControl = user
+      ? 'private, max-age=60'
+      : 'public, max-age=300, s-maxage=600';
+
     return c.json({ photos: results.results || [] }, 200, {
-      'Cache-Control': 'public, max-age=300, s-maxage=600',
+      'Cache-Control': cacheControl,
     });
   } catch (error) {
     console.error('Error fetching map photos:', error);

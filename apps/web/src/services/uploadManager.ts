@@ -52,7 +52,23 @@ export function isNonRetryableUploadError(err: unknown): boolean {
 }
 
 const CHUNK_SIZE = 5 * 1024 * 1024; // 5MB for images
-const VIDEO_CHUNK_SIZE = 10 * 1024 * 1024; // 10MB for videos — fewer round-trips
+const VIDEO_CHUNK_SIZE = 10 * 1024 * 1024; // base 10MB for videos — fewer round-trips
+// R2's multipart upload API caps a single object at 10,000 parts. A flat 10MB
+// video chunk size hits that ceiling at just 100GB (10,000 * 10MB), leaving no
+// margin for supporting the large (up to ~100GB) video uploads this app needs
+// to handle. Scale the chunk size up for large files so the part count stays
+// well under the limit, while capping the per-request chunk size well below
+// a Cloudflare Worker's ~128MB memory limit — the worker buffers each part's
+// body into memory via `c.req.arrayBuffer()` before forwarding it to R2, so a
+// too-large chunk would crash the Worker outright, not just be slow.
+const VIDEO_CHUNK_TARGET_MAX_PARTS = 2000; // stay well under R2's 10,000-part ceiling
+const VIDEO_CHUNK_MAX_SIZE = 64 * 1024 * 1024; // 64MB cap per part (well under Workers' 128MB memory limit)
+function computeVideoChunkSize(fileSize: number): number {
+  const sizeAtBaseChunking = VIDEO_CHUNK_SIZE * VIDEO_CHUNK_TARGET_MAX_PARTS; // ~19.5GB
+  if (fileSize <= sizeAtBaseChunking) return VIDEO_CHUNK_SIZE;
+  const scaled = Math.ceil(fileSize / VIDEO_CHUNK_TARGET_MAX_PARTS);
+  return Math.min(scaled, VIDEO_CHUNK_MAX_SIZE);
+}
 const PARALLEL_CHUNKS = 4; // Upload up to 4 chunks simultaneously
 const MAX_CHUNK_RETRIES = 3;
 const CHUNK_RETRY_DELAY = 2000;
@@ -546,7 +562,7 @@ class UploadManager {
           : await createPreview(item.file);
       }
 
-      const chunkSize = isVideo ? VIDEO_CHUNK_SIZE : CHUNK_SIZE;
+      const chunkSize = isVideo ? computeVideoChunkSize(item.file.size) : CHUNK_SIZE;
       const totalParts = Math.ceil(item.file.size / chunkSize);
       const originalProgressMax = isVideo ? 100 : 80;
 
@@ -786,11 +802,28 @@ class UploadManager {
 
       // Capture a first-frame poster as a tiny blur placeholder. The file is a
       // local blob, so drawing to canvas is not cross-origin tainted here.
+      // Previously this used a 1.5s timeout and only listened for `seeked`,
+      // which was too short for slow mobile hardware decoders / long-GOP
+      // codecs and unreliable across browsers — the timeout would win, the
+      // poster capture would be silently skipped, and the video appeared as
+      // a blank tile in grids/timeline until the user actually played it.
       let blurPlaceholder: string | undefined;
       try {
         await new Promise<void>((resolve) => {
-          const safety = setTimeout(resolve, 1500);
-          video.onseeked = () => { clearTimeout(safety); resolve(); };
+          let settled = false;
+          const finish = () => {
+            if (settled) return;
+            settled = true;
+            clearTimeout(safety);
+            resolve();
+          };
+          const safety = setTimeout(finish, 4000);
+          video.onseeked = finish;
+          // `seeked` doesn't fire reliably for every codec/browser at a seek
+          // this close to 0 — `loadeddata`/`canplay` firing means a frame is
+          // available too, which is good enough for a poster capture.
+          video.onloadeddata = finish;
+          video.oncanplay = finish;
           video.currentTime = Math.min(0.1, (video.duration || 1) / 2);
         });
         if (video.videoWidth) {

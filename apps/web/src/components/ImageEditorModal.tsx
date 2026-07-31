@@ -233,52 +233,57 @@ const ImageEditorModal: React.FC<ImageEditorModalProps> = ({ imageUrl, nativeWid
 
   return (
     <div className="fixed inset-0 z-[200] flex flex-col bg-gray-900 overscroll-contain">
-      {/* Header */}
-      <div className="flex items-center justify-between px-4 py-3 bg-gray-800 border-b border-gray-700 shrink-0">
-        <div className="flex items-center gap-3">
+      {/* Header — split into two rows so Close/Title/Save always have
+          guaranteed space and don't fight the tab switcher for room on
+          narrow screens (previously all in one row, tab labels had to be
+          hidden on mobile and the row felt cramped). */}
+      <div className="bg-gray-800 border-b border-gray-700 shrink-0">
+        <div className="flex items-center justify-between px-4 py-3 gap-3">
+          <div className="flex items-center gap-3 min-w-0">
+            <button
+              onClick={onClose}
+              className="text-gray-400 hover:text-white transition p-1 -ml-1 shrink-0"
+              aria-label="Close editor"
+            >
+              <X className="w-5 h-5" />
+            </button>
+            <h2 className="text-white font-semibold text-lg truncate">Edit Photo</h2>
+          </div>
+
+          {/* Save button */}
           <button
-            onClick={onClose}
-            className="text-gray-400 hover:text-white transition p-1"
-            aria-label="Close editor"
+            onClick={handleFinalSave}
+            disabled={saving}
+            className="flex items-center gap-2 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed transition font-medium text-sm shrink-0"
           >
-            <X className="w-5 h-5" />
+            {saving ? (
+              <>
+                <Loader2 className="w-4 h-4 animate-spin" />
+                Saving...
+              </>
+            ) : (
+              'Save Changes'
+            )}
           </button>
-          <h2 className="text-white font-semibold text-lg">Edit Photo</h2>
         </div>
 
-        {/* Tab switcher */}
-        <div className="flex gap-1">
+        {/* Tab switcher — its own row, full width, labels always visible for clarity */}
+        <div className="flex gap-1.5 px-4 pb-3 overflow-x-auto scrollbar-hide">
           {tabs.map(({ key, label, icon }) => (
             <button
               key={key}
               onClick={() => setActiveTab(key)}
-              className={`flex items-center gap-1.5 px-3 py-1.5 text-sm rounded-lg transition ${
+              className={`flex items-center gap-1.5 px-3 py-2 text-sm rounded-lg transition whitespace-nowrap shrink-0 ${
                 activeTab === key
                   ? 'bg-blue-600 text-white'
                   : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
               }`}
             >
               {icon}
-              <span className="hidden sm:inline">{label}</span>
+              <span>{label}</span>
             </button>
           ))}
         </div>
-
-        {/* Save button */}
-        <button
-          onClick={handleFinalSave}
-          disabled={saving}
-          className="flex items-center gap-2 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed transition font-medium text-sm"
-        >
-          {saving ? (
-            <>
-              <Loader2 className="w-4 h-4 animate-spin" />
-              Saving...
-            </>
-          ) : (
-            'Save Changes'
-          )}
-        </button>
       </div>
 
       {/* Editor Body */}

@@ -38,31 +38,15 @@ const VideoEditorModal: React.FC<VideoEditorModalProps> = ({ videoUrl, onSave, o
 
   // Speed state
   const [speed, setSpeed] = useState(1);
+  const [videoLoadError, setVideoLoadError] = useState<string | null>(null);
 
-  // Initialize video metadata and FFmpeg
+  // Initialize FFmpeg (lazy load). Video metadata (duration/dimensions) is
+  // wired up separately below, once the <video> element actually exists.
   useEffect(() => {
     const initializeEditor = async () => {
       try {
         setError(null);
-        
-        // Initialize FFmpeg (lazy load)
         await initFFmpeg();
-        
-        // Wait for video metadata
-        if (videoRef.current) {
-          videoRef.current.onloadedmetadata = () => {
-            const duration = videoRef.current!.duration;
-            setVideoDuration(duration);
-            setTrimEnd(duration);
-            
-            // Initialize crop to full video dimensions
-            if (videoRef.current?.videoWidth && videoRef.current?.videoHeight) {
-              setCropWidth(videoRef.current.videoWidth);
-              setCropHeight(videoRef.current.videoHeight);
-            }
-          };
-        }
-        
         setInitializing(false);
       } catch (err) {
         setError(err instanceof Error ? err.message : 'Failed to initialize video editor');
@@ -77,6 +61,46 @@ const VideoEditorModal: React.FC<VideoEditorModalProps> = ({ videoUrl, onSave, o
       unloadFFmpeg().catch(() => {});
     };
   }, [videoUrl]);
+
+  // Attach video metadata handling once the <video> element actually exists.
+  // While `initializing` is true, the component returns an early loading-spinner
+  // view (below) and the <video> tag isn't rendered at all — previously this
+  // handler was attached inside the async initializeEditor() above, BEFORE the
+  // element had ever mounted, so `videoRef.current` was always null and
+  // `onloadedmetadata` never fired. That left videoDuration/trimEnd/cropWidth/
+  // cropHeight stuck at 0 forever, so the trim/crop sliders had a max of 0 and
+  // appeared broken/frozen — reported as "the video doesn't seem to load".
+  useEffect(() => {
+    if (initializing) return;
+    const video = videoRef.current;
+    if (!video) return;
+
+    const handleLoadedMetadata = () => {
+      const duration = video.duration;
+      setVideoDuration(duration);
+      setTrimEnd(duration);
+      if (video.videoWidth && video.videoHeight) {
+        setCropWidth(video.videoWidth);
+        setCropHeight(video.videoHeight);
+      }
+    };
+    const handleError = () => {
+      setVideoLoadError('Failed to load the video for preview. Try again or use a different network connection.');
+    };
+
+    video.addEventListener('loadedmetadata', handleLoadedMetadata);
+    video.addEventListener('error', handleError);
+    // Metadata may already be available (e.g. cached/fast network) by the
+    // time this effect runs — read it immediately instead of waiting for an
+    // event that already fired before the listener was attached.
+    if (video.readyState >= 1 && video.duration) {
+      handleLoadedMetadata();
+    }
+    return () => {
+      video.removeEventListener('loadedmetadata', handleLoadedMetadata);
+      video.removeEventListener('error', handleError);
+    };
+  }, [initializing]);
 
   const handleSave = async () => {
     setSaving(true);
@@ -183,61 +207,65 @@ const VideoEditorModal: React.FC<VideoEditorModalProps> = ({ videoUrl, onSave, o
 
   return (
     <div className="fixed inset-0 z-[200] flex flex-col bg-gray-900">
-      {/* Header */}
-      <div className="flex items-center justify-between px-4 py-3 bg-gray-800 border-b border-gray-700 shrink-0">
-        <div className="flex items-center gap-3">
+      {/* Header — split into two rows so Close/Title/Save always have
+          guaranteed space and don't fight the tab switcher for room on
+          narrow screens. */}
+      <div className="bg-gray-800 border-b border-gray-700 shrink-0">
+        <div className="flex items-center justify-between px-4 py-3 gap-3">
+          <div className="flex items-center gap-3 min-w-0">
+            <button
+              onClick={onClose}
+              className="text-gray-400 hover:text-white transition p-1 -ml-1 shrink-0"
+              aria-label="Close editor"
+            >
+              <X className="w-5 h-5" />
+            </button>
+            <h2 className="text-white font-semibold text-lg truncate">Edit Video</h2>
+          </div>
+
+          {/* Save button */}
           <button
-            onClick={onClose}
-            className="text-gray-400 hover:text-white transition p-1"
-            aria-label="Close editor"
+            onClick={handleSave}
+            disabled={saving}
+            className="flex items-center gap-2 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed transition font-medium text-sm shrink-0"
           >
-            <X className="w-5 h-5" />
+            {saving ? (
+              <>
+                <Loader2 className="w-4 h-4 animate-spin" />
+                Processing...
+              </>
+            ) : (
+              'Save Changes'
+            )}
           </button>
-          <h2 className="text-white font-semibold text-lg">Edit Video</h2>
         </div>
 
-        {/* Tab switcher */}
-        <div className="flex gap-1">
+        {/* Tab switcher — its own row, full width, labels always visible */}
+        <div className="flex gap-1.5 px-4 pb-3 overflow-x-auto scrollbar-hide">
           {tabs.map(({ key, label, icon }) => (
             <button
               key={key}
               onClick={() => setActiveTab(key)}
-              className={`flex items-center gap-1.5 px-3 py-1.5 text-sm rounded-lg transition ${
+              className={`flex items-center gap-1.5 px-3 py-2 text-sm rounded-lg transition whitespace-nowrap shrink-0 ${
                 activeTab === key
                   ? 'bg-blue-600 text-white'
                   : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
               }`}
             >
               {icon}
-              <span className="hidden sm:inline">{label}</span>
+              <span>{label}</span>
             </button>
           ))}
         </div>
-
-        {/* Save button */}
-        <button
-          onClick={handleSave}
-          disabled={saving}
-          className="flex items-center gap-2 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed transition font-medium text-sm"
-        >
-          {saving ? (
-            <>
-              <Loader2 className="w-4 h-4 animate-spin" />
-              Processing...
-            </>
-          ) : (
-            'Save Changes'
-          )}
-        </button>
       </div>
 
       {/* Error message */}
-      {error && (
+      {(error || videoLoadError) && (
         <div className="bg-red-900 border-b border-red-700 text-red-100 px-4 py-3 flex items-gap-3 gap-2">
           <AlertCircle className="w-5 h-5 shrink-0 mt-0.5" />
           <div>
             <p className="font-semibold">Error</p>
-            <p className="text-sm">{error}</p>
+            <p className="text-sm">{error || videoLoadError}</p>
           </div>
         </div>
       )}

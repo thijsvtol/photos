@@ -18,7 +18,11 @@ export function useGridDensity() {
     if (saved && DENSITY_ORDER.includes(saved as DensityLevel)) {
       return saved as DensityLevel;
     }
-    return 'default';
+    // No saved preference yet: pick a sensible device-aware default instead of
+    // always defaulting to 'default' regardless of screen size. Matches the
+    // app's `sm` breakpoint (640px) used elsewhere for mobile/desktop layout.
+    const isDesktop = typeof window !== 'undefined' && window.matchMedia('(min-width: 640px)').matches;
+    return isDesktop ? 'dense' : 'default';
   });
 
   const containerRef = useRef<HTMLDivElement>(null);

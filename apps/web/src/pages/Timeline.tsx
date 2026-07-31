@@ -5,10 +5,11 @@ import Footer from '../components/Footer';
 import { TimelineSkeleton } from '../components/Skeletons';
 import SEO from '../components/SEO';
 import JustifiedGrid from '../components/JustifiedGrid';
-import DateScrubber from '../components/DateScrubber';
+import VerticalDateScrubber from '../components/VerticalDateScrubber';
 import { useGridDensity } from '../hooks/useGridDensity';
 import { usePhotoSelection } from '../hooks/usePhotoSelection';
 import { getTimeline, getUserFavoriteIds, toggleFavorite as toggleFavoriteAPI, requestZip, downloadZip } from '../api';
+import { getCachedTimelinePhotos, cacheTimelinePhotos } from '../services/timelineCache';
 import type { Photo } from '../types';
 import { config } from '../config';
 import { useAuth } from '../contexts/AuthContext';
@@ -96,10 +97,13 @@ const Timeline: React.FC = () => {
   const toast = useToast();
   const [photos, setPhotos] = useState<Photo[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [nextCursor, setNextCursor] = useState<string | undefined>(undefined);
   const [activeDate, setActiveDate] = useState<string | null>(null);
   const [supportsHover, setSupportsHover] = useState(true);
   const [userFavorites, setUserFavorites] = useState<Set<string>>(new Set());
   const dateRefs = useRef<Map<string, HTMLDivElement>>(new Map());
+  const loadMoreRef = useRef<HTMLDivElement | null>(null);
   const { targetRowHeight, containerRef: densityContainerRef } = useGridDensity();
 
   const {
@@ -162,24 +166,43 @@ const Timeline: React.FC = () => {
     return () => mq.removeEventListener('change', handler);
   }, []);
 
-  // Initial load — fetch all timeline photos at once so cached images render immediately
+  // Initial load — render whatever is already cached in IndexedDB immediately
+  // (instant, no network wait — this is what makes reopening the Timeline on
+  // Android/mobile feel cached rather than re-downloading the whole library
+  // every time), then fetch just the newest page from the network in the
+  // background and merge it in (new uploads + edits to recent photos). Older
+  // pages are only re-fetched as the user scrolls (see the load-more effect
+  // below), and each fetched page is persisted to the cache as it arrives, so
+  // the offline/instant-render coverage grows every session.
+  //
+  // Previously this blocked on fetching EVERY page (a `do...while` loop) before
+  // rendering anything, which meant a library with thousands of photos across
+  // dozens of pages had to finish dozens of sequential round-trips before the
+  // very first photo appeared — every single time the page was opened.
   useEffect(() => {
     let cancelled = false;
     const load = async () => {
-      setLoading(true);
       try {
-        // Fetch all pages at once
-        let allPhotos: Photo[] = [];
-        let cursor: string | undefined;
-        do {
-          const data = await getTimeline(200, cursor);
-          allPhotos = [...allPhotos, ...data.photos];
-          cursor = data.nextCursor || undefined;
-        } while (cursor && !cancelled);
-
-        if (!cancelled) {
-          setPhotos(allPhotos);
+        const cached = await getCachedTimelinePhotos();
+        if (!cancelled && cached.length > 0) {
+          setPhotos(cached);
           setLoading(false);
+        }
+      } catch (err) {
+        console.error('Failed to read timeline cache:', err);
+      }
+
+      try {
+        const data = await getTimeline(200);
+        if (!cancelled) {
+          setPhotos((prev) => {
+            const merged = new Map(prev.map((p) => [p.id, p]));
+            for (const photo of data.photos) merged.set(photo.id, photo);
+            return Array.from(merged.values()).sort((a, b) => (b.capture_time || '').localeCompare(a.capture_time || ''));
+          });
+          setNextCursor(data.nextCursor || undefined);
+          setLoading(false);
+          void cacheTimelinePhotos(data.photos);
         }
         // Load favorites if authenticated (non-blocking)
         if (isAuthenticated) {
@@ -196,6 +219,36 @@ const Timeline: React.FC = () => {
     load();
     return () => { cancelled = true; };
   }, []);
+
+  // Load additional pages as the user scrolls near the bottom sentinel.
+  useEffect(() => {
+    if (!loadMoreRef.current || !nextCursor) return;
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        entries.forEach((entry) => {
+          if (!entry.isIntersecting || loadingMore) return;
+
+          setLoadingMore(true);
+          getTimeline(200, nextCursor)
+            .then((data) => {
+              setPhotos((prev) => [...prev, ...data.photos]);
+              setNextCursor(data.nextCursor || undefined);
+              void cacheTimelinePhotos(data.photos);
+            })
+            .catch((err) => {
+              console.error('Failed to load more timeline photos:', err);
+            })
+            .finally(() => setLoadingMore(false));
+        });
+      },
+      { rootMargin: '800px 0px' }
+    );
+
+    observer.observe(loadMoreRef.current);
+    return () => observer.disconnect();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [nextCursor, loadingMore]);
 
   // Track active date on scroll (throttled to avoid excessive re-renders)
   useEffect(() => {
@@ -226,6 +279,13 @@ const Timeline: React.FC = () => {
   }, []);
 
   const { dates, groups } = useMemo(() => groupByDate(photos), [photos]);
+
+  const scrollToDate = (date: string) => {
+    const el = dateRefs.current.get(date);
+    if (!el) return;
+    const y = el.getBoundingClientRect().top + window.scrollY - 120;
+    window.scrollTo({ top: y, behavior: 'smooth' });
+  };
 
   return (
     <div className="min-h-screen bg-gray-50 dark:bg-gray-900 flex flex-col">
@@ -290,7 +350,7 @@ const Timeline: React.FC = () => {
                     else dateRefs.current.delete(date);
                   }}
                 >
-                  <div className="mb-3 sm:mb-4 sticky top-[6.5rem] z-20 backdrop-blur-sm bg-white/80 dark:bg-gray-900/70 rounded-xl px-3 py-2 border border-gray-200/70 dark:border-gray-700/70">
+                  <div className="mb-3 sm:mb-4 sticky top-20 z-20 backdrop-blur-sm bg-white/80 dark:bg-gray-900/70 rounded-xl px-3 py-2 border border-gray-200/70 dark:border-gray-700/70">
                     <h2 className="text-lg sm:text-xl font-semibold text-gray-900 dark:text-white">
                       {formattedDate}
                     </h2>
@@ -329,18 +389,27 @@ const Timeline: React.FC = () => {
               );
             })}
 
+            {/* Sentinel for incrementally loading more pages as the user scrolls down */}
+            {nextCursor && (
+              <div ref={loadMoreRef} className="h-12 flex items-center justify-center" aria-hidden="true">
+                {loadingMore && (
+                  <div className="w-6 h-6 border-2 border-blue-400 border-t-transparent rounded-full animate-spin" />
+                )}
+              </div>
+            )}
+
             {/* End of timeline indicator */}
-            {!loading && photos.length > 0 && (
+            {!loading && !nextCursor && photos.length > 0 && (
               <div className="py-8 text-center text-sm text-gray-400 dark:text-gray-500">
                 You've reached the end of the timeline
               </div>
             )}
 
-            {/* Date Scrubber */}
-            <DateScrubber
-              dateRefs={dateRefs}
+            {/* Vertical date scrubber */}
+            <VerticalDateScrubber
               dates={dates}
               activeDate={activeDate}
+              onSelectDate={scrollToDate}
             />
           </div>
         )}

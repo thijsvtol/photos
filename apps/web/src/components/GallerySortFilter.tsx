@@ -1,7 +1,6 @@
-import { X, CheckSquare, Heart, Star, Download, Trash2, Loader2, Copy, Search, Grid3X3, Grid2X2, LayoutGrid, Image, Video, LayoutList } from 'lucide-react';
+import { useState } from 'react';
+import { X, CheckSquare, Heart, Star, Download, Trash2, Loader2, Copy, Search, Grid3X3, Grid2X2, LayoutGrid, Image, Video, LayoutList, SlidersHorizontal, MapPin } from 'lucide-react';
 import { Capacitor } from '@capacitor/core';
-import CastButton from './CastButton';
-import type { CastMediaMessage } from '../services/castService';
 
 type DensityLevel = 'comfortable' | 'default' | 'dense';
 export type MediaTypeFilter = 'all' | 'photos' | 'videos';
@@ -25,11 +24,12 @@ interface GallerySortFilterProps {
   isAdmin?: boolean;
   isDeleting?: boolean;
   isCopying?: boolean;
+  /** Global-admin-only action: open the location picker for the selected photos.
+   *  Omit to hide the action (e.g. for non-admin collaborators). */
+  onSetLocationSelected?: () => void;
+  isGlobalAdmin?: boolean;
   density?: DensityLevel;
   onDensityChange?: (density: DensityLevel) => void;
-  /** Builds the "cast whole album as a slideshow" message. Omit to hide the
-   *  Cast button entirely (e.g. when there's nothing castable yet). */
-  onGetCastAlbumMedia?: () => CastMediaMessage;
 }
 
 /**
@@ -54,11 +54,20 @@ export function GallerySortFilter({
   isAdmin = false,
   isDeleting = false,
   isCopying = false,
+  onSetLocationSelected,
+  isGlobalAdmin = false,
   density,
   onDensityChange,
-  onGetCastAlbumMedia,
 }: GallerySortFilterProps) {
   const isAndroid = Capacitor.getPlatform() === 'android';
+  // On mobile, the media-type filter + grid-density controls are tucked into a
+  // collapsible row (toggled via the Filters button) so the always-visible row
+  // only has Sort + Search — previously all 4-5 control groups tried to fit on
+  // one line and wrapped messily on narrow screens. On sm+ screens this row is
+  // always shown regardless of this state (see `sm:flex` below).
+  const [showMobileFilters, setShowMobileFilters] = useState(false);
+  const hasSecondRow = Boolean(onMediaTypeFilterChange) || Boolean(density && onDensityChange);
+  const hasActiveMobileFilter = mediaTypeFilter !== 'all';
   
   return (
     <>
@@ -161,6 +170,19 @@ export function GallerySortFilter({
                   </button>
                 )}
 
+                {/* Set Location (global admin only) */}
+                {isGlobalAdmin && onSetLocationSelected && (
+                  <button
+                    onClick={onSetLocationSelected}
+                    className="flex-shrink-0 flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-white hover:bg-white/15 transition text-sm font-medium whitespace-nowrap"
+                    aria-label="Set location for selected photos"
+                    title="Set Location"
+                  >
+                    <MapPin className="w-4 h-4" />
+                    <span className="hidden sm:inline">Set Location</span>
+                  </button>
+                )}
+
                 {/* Delete (admin, destructive — last) */}
                 {isAdmin && onDeleteSelected && (
                   <button
@@ -184,16 +206,18 @@ export function GallerySortFilter({
       )}
 
       {/* Sort controls - always visible */}
-      <div data-gallery-controls="true" className="bg-white dark:bg-gray-800 rounded-lg shadow p-3 sm:p-4 mb-6">
-        <div className="flex flex-col sm:flex-row sm:items-center gap-3">
-          <div className="flex items-center">
-            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mr-3">
+      <div data-gallery-controls="true" className="bg-white dark:bg-gray-800 rounded-lg shadow p-3 sm:p-4 mb-3 sm:mb-4">
+        {/* Row 1: Sort + Search + mobile Filters toggle — always visible */}
+        <div className="flex items-center gap-3">
+          <div className="flex items-center flex-shrink-0">
+            <label className="hidden sm:block text-sm font-medium text-gray-700 dark:text-gray-300 mr-3">
               Sort by
             </label>
             <select
               value={sortBy}
               onChange={(e) => onSortChange(e.target.value)}
               className="px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg text-sm bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+              aria-label="Sort by"
             >
               <option value="date_desc">Date (Newest First)</option>
               <option value="date_asc">Date (Oldest First)</option>
@@ -201,45 +225,7 @@ export function GallerySortFilter({
               <option value="name_desc">Name (Z-A)</option>
             </select>
           </div>
-          {/* Media type filter: All / Photos / Videos */}
-          {onMediaTypeFilterChange && (
-            <div
-              className="flex items-center gap-0.5 border border-gray-300 dark:border-gray-600 rounded-lg p-0.5"
-              role="group"
-              aria-label="Filter by media type"
-            >
-              <button
-                onClick={() => onMediaTypeFilterChange('all')}
-                className={`flex items-center gap-1 px-2 py-1.5 rounded text-xs font-medium transition-colors ${mediaTypeFilter === 'all' ? 'bg-blue-100 dark:bg-blue-900/40 text-blue-600 dark:text-blue-400' : 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300'}`}
-                title="Show all media"
-                aria-label="Show all media"
-                aria-pressed={mediaTypeFilter === 'all'}
-              >
-                <LayoutList className="w-4 h-4" />
-                <span className="hidden sm:inline">All</span>
-              </button>
-              <button
-                onClick={() => onMediaTypeFilterChange('photos')}
-                className={`flex items-center gap-1 px-2 py-1.5 rounded text-xs font-medium transition-colors ${mediaTypeFilter === 'photos' ? 'bg-blue-100 dark:bg-blue-900/40 text-blue-600 dark:text-blue-400' : 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300'}`}
-                title="Show photos only"
-                aria-label="Show photos only"
-                aria-pressed={mediaTypeFilter === 'photos'}
-              >
-                <Image className="w-4 h-4" />
-                <span className="hidden sm:inline">Photos</span>
-              </button>
-              <button
-                onClick={() => onMediaTypeFilterChange('videos')}
-                className={`flex items-center gap-1 px-2 py-1.5 rounded text-xs font-medium transition-colors ${mediaTypeFilter === 'videos' ? 'bg-blue-100 dark:bg-blue-900/40 text-blue-600 dark:text-blue-400' : 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300'}`}
-                title="Show videos only"
-                aria-label="Show videos only"
-                aria-pressed={mediaTypeFilter === 'videos'}
-              >
-                <Video className="w-4 h-4" />
-                <span className="hidden sm:inline">Videos</span>
-              </button>
-            </div>
-          )}
+
           <div className="flex-1 relative">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
             <input
@@ -259,39 +245,105 @@ export function GallerySortFilter({
               </button>
             )}
           </div>
-          {/* Grid density controls */}
-          {density && onDensityChange && (
-            <div className="flex items-center gap-0.5 border border-gray-300 dark:border-gray-600 rounded-lg p-0.5">
-              <button
-                onClick={() => onDensityChange('comfortable')}
-                className={`p-1.5 rounded transition-colors ${density === 'comfortable' ? 'bg-blue-100 dark:bg-blue-900/40 text-blue-600 dark:text-blue-400' : 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300'}`}
-                title="Comfortable (larger photos)"
-                aria-label="Comfortable grid density"
-              >
-                <LayoutGrid className="w-4 h-4" />
-              </button>
-              <button
-                onClick={() => onDensityChange('default')}
-                className={`p-1.5 rounded transition-colors ${density === 'default' ? 'bg-blue-100 dark:bg-blue-900/40 text-blue-600 dark:text-blue-400' : 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300'}`}
-                title="Default"
-                aria-label="Default grid density"
-              >
-                <Grid2X2 className="w-4 h-4" />
-              </button>
-              <button
-                onClick={() => onDensityChange('dense')}
-                className={`p-1.5 rounded transition-colors ${density === 'dense' ? 'bg-blue-100 dark:bg-blue-900/40 text-blue-600 dark:text-blue-400' : 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300'}`}
-                title="Dense (more photos per row)"
-                aria-label="Dense grid density"
-              >
-                <Grid3X3 className="w-4 h-4" />
-              </button>
-            </div>
-          )}
-          {onGetCastAlbumMedia && (
-            <CastButton variant="labeled" getMedia={onGetCastAlbumMedia} />
+
+          {/* Filters toggle — mobile only; media type + grid density live in row 2 below */}
+          {hasSecondRow && (
+            <button
+              onClick={() => setShowMobileFilters((prev) => !prev)}
+              className={`sm:hidden relative flex-shrink-0 flex items-center justify-center w-9 h-9 rounded-lg border transition-colors ${
+                showMobileFilters
+                  ? 'bg-blue-100 dark:bg-blue-900/40 border-blue-300 dark:border-blue-700 text-blue-600 dark:text-blue-400'
+                  : 'border-gray-300 dark:border-gray-600 text-gray-500 dark:text-gray-400'
+              }`}
+              aria-label="Toggle filters and view options"
+              aria-expanded={showMobileFilters}
+              title="Filters & view"
+            >
+              <SlidersHorizontal className="w-4 h-4" />
+              {hasActiveMobileFilter && (
+                <span className="absolute -top-1 -right-1 w-2.5 h-2.5 rounded-full bg-blue-500" aria-hidden="true" />
+              )}
+            </button>
           )}
         </div>
+
+        {/* Row 2: Media type filter + grid density — collapsible on mobile (toggled
+            above), always visible on sm+ screens regardless of the toggle state. */}
+        {hasSecondRow && (
+          <div
+            className={`${showMobileFilters ? 'flex' : 'hidden'} sm:flex flex-wrap items-center gap-3 mt-3 pt-3 border-t border-gray-100 dark:border-gray-700`}
+          >
+            {/* Media type filter: All / Photos / Videos */}
+            {onMediaTypeFilterChange && (
+              <div
+                className="flex items-center gap-0.5 border border-gray-300 dark:border-gray-600 rounded-lg p-0.5"
+                role="group"
+                aria-label="Filter by media type"
+              >
+                <button
+                  onClick={() => onMediaTypeFilterChange('all')}
+                  className={`flex items-center gap-1 px-2 py-1.5 rounded text-xs font-medium transition-colors ${mediaTypeFilter === 'all' ? 'bg-blue-100 dark:bg-blue-900/40 text-blue-600 dark:text-blue-400' : 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300'}`}
+                  title="Show all media"
+                  aria-label="Show all media"
+                  aria-pressed={mediaTypeFilter === 'all'}
+                >
+                  <LayoutList className="w-4 h-4" />
+                  <span className="inline">All</span>
+                </button>
+                <button
+                  onClick={() => onMediaTypeFilterChange('photos')}
+                  className={`flex items-center gap-1 px-2 py-1.5 rounded text-xs font-medium transition-colors ${mediaTypeFilter === 'photos' ? 'bg-blue-100 dark:bg-blue-900/40 text-blue-600 dark:text-blue-400' : 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300'}`}
+                  title="Show photos only"
+                  aria-label="Show photos only"
+                  aria-pressed={mediaTypeFilter === 'photos'}
+                >
+                  <Image className="w-4 h-4" />
+                  <span className="inline">Photos</span>
+                </button>
+                <button
+                  onClick={() => onMediaTypeFilterChange('videos')}
+                  className={`flex items-center gap-1 px-2 py-1.5 rounded text-xs font-medium transition-colors ${mediaTypeFilter === 'videos' ? 'bg-blue-100 dark:bg-blue-900/40 text-blue-600 dark:text-blue-400' : 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300'}`}
+                  title="Show videos only"
+                  aria-label="Show videos only"
+                  aria-pressed={mediaTypeFilter === 'videos'}
+                >
+                  <Video className="w-4 h-4" />
+                  <span className="inline">Videos</span>
+                </button>
+              </div>
+            )}
+
+            {/* Grid density controls */}
+            {density && onDensityChange && (
+              <div className="flex items-center gap-0.5 border border-gray-300 dark:border-gray-600 rounded-lg p-0.5">
+                <button
+                  onClick={() => onDensityChange('comfortable')}
+                  className={`p-1.5 rounded transition-colors ${density === 'comfortable' ? 'bg-blue-100 dark:bg-blue-900/40 text-blue-600 dark:text-blue-400' : 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300'}`}
+                  title="Comfortable (larger photos)"
+                  aria-label="Comfortable grid density"
+                >
+                  <LayoutGrid className="w-4 h-4" />
+                </button>
+                <button
+                  onClick={() => onDensityChange('default')}
+                  className={`p-1.5 rounded transition-colors ${density === 'default' ? 'bg-blue-100 dark:bg-blue-900/40 text-blue-600 dark:text-blue-400' : 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300'}`}
+                  title="Default"
+                  aria-label="Default grid density"
+                >
+                  <Grid2X2 className="w-4 h-4" />
+                </button>
+                <button
+                  onClick={() => onDensityChange('dense')}
+                  className={`p-1.5 rounded transition-colors ${density === 'dense' ? 'bg-blue-100 dark:bg-blue-900/40 text-blue-600 dark:text-blue-400' : 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300'}`}
+                  title="Dense (more photos per row)"
+                  aria-label="Dense grid density"
+                >
+                  <Grid3X3 className="w-4 h-4" />
+                </button>
+              </div>
+            )}
+          </div>
+        )}
       </div>
     </>
   );

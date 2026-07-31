@@ -5,7 +5,7 @@ import Navbar from '../components/Navbar';
 import Footer from '../components/Footer';
 import { GallerySkeleton } from '../components/Skeletons';
 import JustifiedGrid from '../components/JustifiedGrid';
-import DateScrubber from '../components/DateScrubber';
+import VerticalDateScrubber from '../components/VerticalDateScrubber';
 import SEO from '../components/SEO';
 import { useRefresh } from '../contexts/RefreshContext';
 import { useGridDensity } from '../hooks/useGridDensity';
@@ -43,6 +43,41 @@ const MyFavorites: React.FC = () => {
 
   // All favorites are favorited by definition
   const userFavorites = useMemo(() => new Set(photos.map(p => p.id)), [photos]);
+
+  // Group once and reuse for both rendering and navigation state, so the
+  // next/prev order passed to PhotoDetail exactly matches what's on screen
+  // (date-desc, then grouped by event within each date).
+  const { dates, groups } = useMemo(() => groupByDate(photos), [photos]);
+
+  const scrollToDate = (date: string) => {
+    const el = dateRefs.current.get(date);
+    if (!el) return;
+    const y = el.getBoundingClientRect().top + window.scrollY - 120;
+    window.scrollTo({ top: y, behavior: 'smooth' });
+  };
+
+  // Navigation state passed to PhotoDetail so swiping next/prev stays within
+  // the full favorites list (across all events/dates) instead of falling back
+  // to the clicked photo's parent event.
+  const favoritesLinkState = useMemo(() => {
+    const ordered: FavoritePhoto[] = [];
+    for (const date of dates) {
+      const datePhotos = groups.get(date) || [];
+      const byEvent = new Map<string, FavoritePhoto[]>();
+      for (const p of datePhotos) {
+        const arr = byEvent.get(p.event_slug) || [];
+        arr.push(p);
+        byEvent.set(p.event_slug, arr);
+      }
+      for (const eventPhotos of byEvent.values()) {
+        ordered.push(...eventPhotos);
+      }
+    }
+    return {
+      fromFavorites: true,
+      favoritePhotos: ordered.map(p => ({ id: p.id, slug: p.event_slug })),
+    };
+  }, [dates, groups]);
 
   // Detect hover support
   useEffect(() => {
@@ -204,8 +239,6 @@ const MyFavorites: React.FC = () => {
     );
   }
 
-  const { dates, groups } = groupByDate(photos);
-
   return (
     <div className="min-h-screen bg-gray-50 dark:bg-gray-900 flex flex-col">
       <SEO
@@ -318,6 +351,7 @@ const MyFavorites: React.FC = () => {
                         userFavorites={userFavorites}
                         supportsHover={supportsHover}
                         onToggleFavorite={toggleFavorite}
+                        linkState={favoritesLinkState}
                       />
                     </div>
                   ))}
@@ -325,12 +359,12 @@ const MyFavorites: React.FC = () => {
               );
             })}
 
-            {/* Date Scrubber */}
+            {/* Vertical date scrubber */}
             {dates.length > 1 && (
-              <DateScrubber
-                dateRefs={dateRefs}
+              <VerticalDateScrubber
                 dates={dates}
                 activeDate={activeDate}
+                onSelectDate={scrollToDate}
               />
             )}
           </div>

@@ -129,11 +129,16 @@ const ProgressiveVideo: React.FC<ProgressiveVideoProps> = ({
             playsInline
             preload="metadata"
             poster={poster || undefined}
-            // Force the first frame to decode/paint. Some Android WebViews don't
-            // render a preview frame from preload="metadata" alone, leaving the
-            // tile blank — seeking a hair past 0 makes the frame appear.
+            // Force the first frame to decode/paint. `preload="metadata"` alone
+            // doesn't guarantee a painted frame on every browser/WebView —
+            // seeking a hair past 0 makes it appear. Previously this only ran
+            // on native (Android WebView), but plain desktop/mobile web
+            // browsers can show the same blank-tile behavior whenever there's
+            // no `poster` (e.g. blur_placeholder failed to capture at upload
+            // time), so this now always runs as a fallback when no poster is
+            // available, regardless of platform.
             onLoadedMetadata={(e) => {
-              if (isNative && e.currentTarget.currentTime === 0) {
+              if ((isNative || !poster) && e.currentTarget.currentTime === 0) {
                 try {
                   e.currentTarget.currentTime = 0.1;
                 } catch {

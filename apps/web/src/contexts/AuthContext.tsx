@@ -1,6 +1,7 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import { Capacitor } from '@capacitor/core';
 import { MobileAuthService } from '../services/mobileAuth';
+import { clearTimelineCache } from '../services/timelineCache';
 
 export interface User {
   id: string;
@@ -157,6 +158,11 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
   };
 
   const logout = () => {
+    // Timeline photos may include private/collaborator-only events visible
+    // only to the logged-in user; clear the IndexedDB cache so they don't
+    // leak to whoever uses this device/browser next.
+    void clearTimelineCache();
+
     if (Capacitor.isNativePlatform()) {
       // Clear token and user state
       MobileAuthService.clearToken();

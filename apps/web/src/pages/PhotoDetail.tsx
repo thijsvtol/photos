@@ -58,6 +58,9 @@ const PhotoDetail: React.FC = () => {
   const [videoDuration, setVideoDuration] = useState(0);
   const [videoBuffered, setVideoBuffered] = useState(0);
   const [videoBuffering, setVideoBuffering] = useState(false);
+  const [videoError, setVideoError] = useState(false);
+  const videoRetryCountRef = useRef(0);
+  const videoRetryTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [seekIndicator, setSeekIndicator] = useState<'left' | 'right' | null>(null);
   const videoControlsTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const videoTapCountRef = useRef(0);
@@ -89,6 +92,15 @@ const PhotoDetail: React.FC = () => {
   const isPanning = useRef(false);
   const lastTapTime = useRef(0);
   const lastZoomBoundaryHaptic = useRef(0);
+  // True only when the OS/browser itself has zoomed the page (visualViewport.scale > 1),
+  // e.g. via accessibility zoom or a pinch gesture that wasn't fully suppressed by
+  // preventDefault. This is intentionally separate from `isZoomed` (our own CSS
+  // transform-based pinch/double-tap zoom): the two used to share one state, and
+  // the interval below polling this every 50ms would immediately stomp `isZoomed`
+  // back to false mid-gesture, causing the pan touch handlers to be detached and
+  // reattached constantly (dropping chunks of the drag), which looked like the
+  // photo being "cropped"/unreachable at its edges when zoomed in.
+  const [isNativeViewportZoomed, setIsNativeViewportZoomed] = useState(false);
 
   // Reset zoom when photo changes
   useEffect(() => {
@@ -101,7 +113,46 @@ const PhotoDetail: React.FC = () => {
     setVideoDuration(0);
     setVideoBuffering(false);
     setVideoPaused(false);
+    setVideoError(false);
+    videoRetryCountRef.current = 0;
+    if (videoRetryTimeoutRef.current) {
+      clearTimeout(videoRetryTimeoutRef.current);
+      videoRetryTimeoutRef.current = null;
+    }
   }, [photoId]);
+
+  // Auto-retry a failed video load a few times with backoff before showing a
+  // manual retry button, mirroring components/ProgressiveVideo.tsx. Previously
+  // there was no onError handler at all here, so a failed load just left a
+  // permanently blank <video> element with no feedback or way to recover.
+  const VIDEO_AUTO_RETRY_LIMIT = 3;
+  const VIDEO_AUTO_RETRY_BASE_DELAY_MS = 800;
+  const handleVideoError = useCallback(() => {
+    setVideoBuffering(false);
+    if (videoRetryCountRef.current < VIDEO_AUTO_RETRY_LIMIT) {
+      videoRetryCountRef.current += 1;
+      const delay = VIDEO_AUTO_RETRY_BASE_DELAY_MS * videoRetryCountRef.current;
+      videoRetryTimeoutRef.current = setTimeout(() => {
+        videoRef.current?.load();
+      }, delay);
+    } else {
+      setVideoError(true);
+    }
+  }, []);
+
+  const handleVideoManualRetry = useCallback(() => {
+    videoRetryCountRef.current = 0;
+    setVideoError(false);
+    setVideoBuffering(false);
+    videoRef.current?.load();
+  }, []);
+
+  // Cleanup pending retry timeout on unmount
+  useEffect(() => {
+    return () => {
+      if (videoRetryTimeoutRef.current) clearTimeout(videoRetryTimeoutRef.current);
+    };
+  }, []);
 
   const imageContainerCallbackRef = useCallback((node: HTMLDivElement | null) => {
     imageContainerRef.current = node;
@@ -649,7 +700,7 @@ const PhotoDetail: React.FC = () => {
       isViewportZoomed = window.visualViewport!.scale >= 1.01;
     }
     
-    setIsZoomed(isViewportZoomed);
+    setIsNativeViewportZoomed(isViewportZoomed);
     return isViewportZoomed;
   };
 
@@ -856,10 +907,14 @@ const PhotoDetail: React.FC = () => {
       e.preventDefault();
       const dx = e.touches[0].clientX - panStart.current.x;
       const dy = e.touches[0].clientY - panStart.current.y;
-      // Clamp translation so the image doesn't leave the viewport
+      // Clamp translation so the image doesn't leave the viewport. Fall back to
+      // the actual viewport dimensions (not an arbitrary guess) if the container
+      // hasn't been measured yet, so panning isn't over-constrained on small screens.
       const container = imageContainerRef.current;
-      const maxX = container ? (container.clientWidth * (zoomScale - 1)) / (2 * zoomScale) : 500;
-      const maxY = container ? (container.clientHeight * (zoomScale - 1)) / (2 * zoomScale) : 500;
+      const containerWidth = container?.clientWidth || window.innerWidth;
+      const containerHeight = container?.clientHeight || window.innerHeight;
+      const maxX = (containerWidth * (zoomScale - 1)) / (2 * zoomScale);
+      const maxY = (containerHeight * (zoomScale - 1)) / (2 * zoomScale);
       setZoomTranslate({
         x: Math.max(-maxX, Math.min(maxX, translateStart.current.x + dx)),
         y: Math.max(-maxY, Math.min(maxY, translateStart.current.y + dy)),
@@ -971,13 +1026,18 @@ const PhotoDetail: React.FC = () => {
     setIsSwiping(false);
   }, []);
 
-  // Conditionally attach/detach touch handlers based on zoom state
+  // Conditionally attach/detach touch handlers based on NATIVE (OS/browser-level)
+  // zoom state only. Our own custom pinch/double-tap zoom (zoomScale/zoomTranslate,
+  // driven by these very handlers) has no native fallback to hand off to — it's a
+  // CSS transform, not a scrollable region — so the handlers must stay attached
+  // throughout a custom zoom/pan gesture. They only need to step aside when the
+  // actual browser/OS has zoomed the viewport (visualViewport), since in that case
+  // native touch panning genuinely takes over.
   useEffect(() => {
     const container = imageContainerRef.current;
     if (!container || !containerReady) return;
 
-    // If zoomed, remove handlers to let browser handle panning natively
-    if (isZoomed) {
+    if (isNativeViewportZoomed) {
       if (handlersAttachedRef.current) {
         container.removeEventListener('touchstart', handleTouchStartNative);
         container.removeEventListener('touchmove', handleTouchMoveNative);
@@ -986,7 +1046,6 @@ const PhotoDetail: React.FC = () => {
         handlersAttachedRef.current = false;
       }
     } else {
-      // Not zoomed, attach handlers for swipe navigation
       if (!handlersAttachedRef.current) {
         container.addEventListener('touchstart', handleTouchStartNative, { passive: false });
         container.addEventListener('touchmove', handleTouchMoveNative, { passive: false });
@@ -1005,7 +1064,7 @@ const PhotoDetail: React.FC = () => {
         handlersAttachedRef.current = false;
       }
     };
-  }, [isZoomed, containerReady, handleTouchStartNative, handleTouchMoveNative, handleTouchEndNative, handleTouchCancelNative]);
+  }, [isNativeViewportZoomed, containerReady, handleTouchStartNative, handleTouchMoveNative, handleTouchEndNative, handleTouchCancelNative]);
 
   const toggleFullscreen = async () => {
     if (!document.fullscreenElement) {
@@ -1403,7 +1462,7 @@ const PhotoDetail: React.FC = () => {
         ref={imageContainerCallbackRef}
         className={`absolute inset-0 flex items-center justify-center select-none overflow-hidden`}
         style={{
-          touchAction: isNative ? 'none' : (isZoomed ? 'pan-x pan-y pinch-zoom' : 'pan-y pinch-zoom'),
+          touchAction: isNative ? 'none' : ((isZoomed || isNativeViewportZoomed) ? 'pan-x pan-y pinch-zoom' : 'pan-y pinch-zoom'),
           overscrollBehavior: 'none',
           WebkitOverflowScrolling: 'touch',
         }}
@@ -1501,6 +1560,7 @@ const PhotoDetail: React.FC = () => {
                   setVideoPaused(true);
                   setShowOverlay(true);
                 }}
+                onError={handleVideoError}
               />
 
               {/* Double-tap seek indicators */}
@@ -1526,9 +1586,25 @@ const PhotoDetail: React.FC = () => {
                 </div>
               )}
               {/* Buffering spinner — shown while the video is waiting for data */}
-              {videoBuffering && !videoPaused && (
+              {videoBuffering && !videoPaused && !videoError && (
                 <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
                   <div className="w-12 h-12 border-4 border-white/30 border-t-white rounded-full animate-spin" />
+                </div>
+              )}
+              {/* Playback error — shown after auto-retries are exhausted */}
+              {videoError && (
+                <div className="absolute inset-0 flex flex-col items-center justify-center bg-black/60 text-white gap-3">
+                  <Info className="w-8 h-8 opacity-70" />
+                  <p className="text-sm opacity-90">This video couldn't be played</p>
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      handleVideoManualRetry();
+                    }}
+                    className="px-4 py-2 bg-white/15 hover:bg-white/25 rounded-full text-sm font-medium transition"
+                  >
+                    Retry
+                  </button>
                 </div>
               )}
             </div>

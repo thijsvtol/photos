@@ -701,6 +701,20 @@ export const setEventLocation = async (slug: string, latitude: number, longitude
   return response.data;
 };
 
+/** Set/override the GPS location for a specific set of photos (admin only). */
+export const bulkUpdatePhotoLocation = async (
+  photoIds: string[],
+  latitude: number,
+  longitude: number
+): Promise<{ updatedCount: number; totalRequested: number }> => {
+  const response = await api.patch<{ updatedCount: number; totalRequested: number }>(
+    '/admin/photos/bulk-location',
+    { photoIds, latitude, longitude },
+    { headers: getAdminHeaders() }
+  );
+  return response.data;
+};
+
 export const geocodeEventPhotos = async (slug: string): Promise<{ updated: number; total: number }> => {
   const response = await api.post<{ updated: number; total: number }>(
     `/admin/events/${slug}/geocode-photos`,

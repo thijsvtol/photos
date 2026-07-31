@@ -1,10 +1,10 @@
-import React, { useEffect, useState, useRef, useMemo } from 'react';
+import React, { useEffect, useState, useRef, useMemo, useCallback } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { Upload, Settings } from 'lucide-react';
 import Navbar from '../components/Navbar';
 import Footer from '../components/Footer';
 import { GallerySkeleton } from '../components/Skeletons';
-import DateTimeline from '../components/DateTimeline';
+import VerticalDateScrubber from '../components/VerticalDateScrubber';
 import JustifiedGrid from '../components/JustifiedGrid';
 import { useGridDensity } from '../hooks/useGridDensity';
 import SEO from '../components/SEO';
@@ -14,9 +14,11 @@ import { useRefresh } from '../contexts/RefreshContext';
 import { EventPasswordForm } from '../components/EventPasswordForm';
 import { GallerySortFilter } from '../components/GallerySortFilter';
 import { ShareEventButton } from '../components/ShareEventButton';
+import CastButton from '../components/CastButton';
 import AlbumPicker from '../components/AlbumPicker';
+import EventLocationPicker from '../components/EventLocationPicker';
 import { useUpload } from '../hooks/useUpload';
-import { getEvent, getPhotos, loginToEvent, getPreviewUrl, requestZip, downloadZip, setPhotoFeatured, getUserFavoriteIds, toggleFavorite as toggleFavoriteAPI, bulkDeletePhotos, bulkCopyPhotos, getCollaborators } from '../api';
+import { getEvent, getPhotos, loginToEvent, getPreviewUrl, requestZip, downloadZip, setPhotoFeatured, getUserFavoriteIds, toggleFavorite as toggleFavoriteAPI, bulkDeletePhotos, bulkCopyPhotos, bulkUpdatePhotoLocation, getCollaborators } from '../api';
 import type { Event, Photo, Collaborator } from '../types';
 import { CollaboratorAvatars } from '../components/CollaboratorAvatars';
 import { useAuth } from '../contexts/AuthContext';
@@ -46,6 +48,7 @@ const EventGallery: React.FC = () => {
   const [deleting, setDeleting] = useState(false);
   const [copying, setCopying] = useState(false);
   const [showCopyPicker, setShowCopyPicker] = useState(false);
+  const [showLocationPicker, setShowLocationPicker] = useState(false);
   const [collaboratorRole, setCollaboratorRole] = useState<'viewer' | 'uploader' | 'editor' | 'admin' | null>(null);
   const [collaborators, setCollaborators] = useState<Collaborator[]>([]);
   const [activeDate, setActiveDate] = useState<string | null>(null);
@@ -443,6 +446,38 @@ const EventGallery: React.FC = () => {
     }
   };
 
+  // Sets/overrides the GPS location for the currently selected photos.
+  // Admin-only (enforced both here and server-side — see /admin/photos/bulk-location).
+  const handleBulkSetLocation = async (latitude: number, longitude: number) => {
+    if (!isAdmin) {
+      toast.showError('Admin access required to edit photo location');
+      return;
+    }
+
+    const selected = Array.from(selectedPhotos);
+    if (selected.length === 0) {
+      toast.showInfo('No photos selected');
+      return;
+    }
+
+    try {
+      const result = await bulkUpdatePhotoLocation(selected, latitude, longitude);
+      setPhotos((prev) =>
+        prev.map((photo) =>
+          selectedPhotos.has(photo.id) ? { ...photo, latitude, longitude } : photo
+        )
+      );
+      setShowLocationPicker(false);
+      clearSelection();
+      await haptics.success();
+      toast.showSuccess(`Updated location for ${result.updatedCount} photo(s)`);
+    } catch (error) {
+      console.error('Error updating photo location:', error);
+      await haptics.error();
+      toast.showError('Failed to update photo location. Please try again.');
+    }
+  };
+
   const handleRemoveDuplicates = async () => {
     if (duplicateGroups.length === 0) return;
 
@@ -739,28 +774,44 @@ const EventGallery: React.FC = () => {
     await haptics.selectionChanged();
   };
 
+  // Expands the lazy-render window (visibleDateCount / visibleSinglePhotoCount)
+  // just enough to include the given photo id, based on its position in the
+  // full `photos` list. Used both when first arriving with a saved target photo
+  // and defensively during scroll restoration if the photo turns out not to be
+  // rendered yet (e.g. a large event where the initial window undershot it).
+  // Returns true if the photo was found (regardless of whether the window
+  // needed to grow), false if it isn't in `photos` at all.
+  const expandWindowForPhotoId = useCallback((targetPhotoId: string): boolean => {
+    const photoIndex = photos.findIndex(p => p.id === targetPhotoId);
+    if (photoIndex < 0) return false;
+
+    setVisibleSinglePhotoCount((prev) => Math.max(prev, Math.min(Math.max(140, photoIndex + 80), photos.length)));
+
+    // For multi-date view, find the exact date bucket containing the photo
+    // (a proportional estimate can under/overshoot when date buckets are uneven in size).
+    const photoDate = photos[photoIndex].capture_time.split('T')[0];
+    const uniqueDates = Array.from(new Set(photos.map(p => p.capture_time.split('T')[0]))).sort(
+      (a, b) => (sortBy.startsWith('date_desc') ? b.localeCompare(a) : a.localeCompare(b))
+    );
+    const dateIndex = uniqueDates.indexOf(photoDate);
+    setVisibleDateCount((prev) =>
+      Math.max(
+        prev,
+        dateIndex >= 0
+          ? Math.min(Math.max(8, dateIndex + 4), uniqueDates.length || 8)
+          : (uniqueDates.length || 8)
+      )
+    );
+    return true;
+  }, [photos, sortBy]);
+
   // Reset lazy-render windows when gallery context changes.
   // If restoring scroll position, expand window to include the target photo.
   useEffect(() => {
     const savedPhotoId = sessionStorage.getItem(`gallery_photo_${slug}`);
     if (savedPhotoId && photos.length > 0) {
-      const photoIndex = photos.findIndex(p => p.id === savedPhotoId);
-      if (photoIndex >= 0) {
-        // Ensure the photo is within the visible window
-        setVisibleSinglePhotoCount(Math.min(Math.max(140, photoIndex + 80), photos.length));
-        // For multi-date view, find the exact date bucket containing the photo
-        // (a proportional estimate can under/overshoot when date buckets are uneven in size).
-        const photoDate = photos[photoIndex].capture_time.split('T')[0];
-        const uniqueDates = Array.from(new Set(photos.map(p => p.capture_time.split('T')[0]))).sort(
-          (a, b) => (sortBy.startsWith('date_desc') ? b.localeCompare(a) : a.localeCompare(b))
-        );
-        const dateIndex = uniqueDates.indexOf(photoDate);
-        setVisibleDateCount(
-          dateIndex >= 0
-            ? Math.min(Math.max(8, dateIndex + 4), uniqueDates.length || 8)
-            : (uniqueDates.length || 8)
-        );
-      } else {
+      const found = expandWindowForPhotoId(savedPhotoId);
+      if (!found) {
         setVisibleDateCount(8);
         setVisibleSinglePhotoCount(140);
       }
@@ -769,6 +820,7 @@ const EventGallery: React.FC = () => {
       setVisibleSinglePhotoCount(140);
     }
     prefetchedPhotoIdsRef.current.clear();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [slug, sortBy, searchQuery, photos.length]);
 
   // Load additional sections/photos when scrolling near the sentinel.
@@ -811,6 +863,7 @@ const EventGallery: React.FC = () => {
         // Poll until the target photo element exists or page is tall enough
         let attempts = 0;
         let cancelled = false;
+        let triedExpandingWindow = false;
         // Once the target element is found, the justified grid (react-photo-album)
         // is still settling its layout — it measures the container width via a
         // ResizeObserver and recomputes row heights over the following frames,
@@ -851,14 +904,42 @@ const EventGallery: React.FC = () => {
               requestAnimationFrame(tryScroll);
               return;
             }
+
+            // Element not found yet. In a large event, the target photo may simply
+            // not be rendered yet because it falls outside the initial lazy-render
+            // window (visibleDateCount / visibleSinglePhotoCount) — the polling used
+            // to just keep waiting for it to appear organically (it never would,
+            // since nothing here was asking for more content to render) and after a
+            // capped number of attempts fell back to a raw saved scrollY number,
+            // which no longer corresponds to the same photo once layout differs.
+            // Instead, explicitly grow the render window to include this photo once,
+            // then keep polling — the element should appear within a few frames.
+            if (!triedExpandingWindow && attempts >= 10) {
+              triedExpandingWindow = true;
+              const found = expandWindowForPhotoId(savedPhotoId);
+              if (!found) {
+                // Photo no longer exists in this event (e.g. deleted) — nothing to
+                // scroll to; stop polling instead of guessing a scroll position.
+                return;
+              }
+            }
           }
-          // Fallback to scroll position
-          if (document.documentElement.scrollHeight >= target + window.innerHeight * 0.5 || attempts >= 60) {
-            window.scrollTo(0, target);
-          } else {
-            attempts++;
-            requestAnimationFrame(tryScroll);
+          // Fallback to scroll position (only relevant when no specific photo id
+          // was saved, e.g. very old sessionStorage entries from before photo-id
+          // tracking was added).
+          if (!savedPhotoId) {
+            if (document.documentElement.scrollHeight >= target + window.innerHeight * 0.5 || attempts >= 60) {
+              window.scrollTo(0, target);
+              return;
+            }
+          } else if (attempts >= 150) {
+            // Expanded the window but the element still never showed up (e.g. it's
+            // filtered out by the current search/media-type filter) — give up
+            // gracefully rather than polling forever.
+            return;
           }
+          attempts++;
+          requestAnimationFrame(tryScroll);
         };
         requestAnimationFrame(tryScroll);
         return () => {
@@ -866,6 +947,7 @@ const EventGallery: React.FC = () => {
         };
       }
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [slug, loading, photos]);
 
   // Prefetch upcoming preview images based on scroll direction.
@@ -1124,6 +1206,15 @@ const EventGallery: React.FC = () => {
         title="Copy to Album"
         description="Choose an album to copy the selected photos to"
       />
+      {isAdmin && (
+        <EventLocationPicker
+          isOpen={showLocationPicker}
+          onClose={() => setShowLocationPicker(false)}
+          onSetLocation={(lat, lng) => {
+            void handleBulkSetLocation(lat, lng);
+          }}
+        />
+      )}
       <SEO
         title={`${event?.name || 'Event Gallery'} - ${config.appName}`}
         description={`Browse ${photos.length} photos from ${event?.name}${event?.cities && event.cities.length > 0 ? ` in ${event.cities.join(', ')}` : ''}. Professional event photography featuring ice skating and inline skating.`}
@@ -1168,12 +1259,27 @@ const EventGallery: React.FC = () => {
               )}
             </div>
             {event && (
-              <ShareEventButton
-                event={event}
-                slug={slug!}
-                photos={photos}
-                canInvite={event.visibility === 'collaborators_only' && canCreateInvite}
-              />
+              <div className="flex items-center gap-2 flex-shrink-0">
+                {filteredPhotos.length > 0 && (
+                  <CastButton
+                    variant="labeled"
+                    getMedia={() => ({
+                      type: 'album',
+                      items: filteredPhotos.map((p) => ({
+                        url: getPreviewUrl(slug!, p.id, p.file_type, p.cache_version),
+                        type: p.file_type === 'video/mp4' ? 'video' : 'photo',
+                        title: p.original_filename,
+                      })),
+                    })}
+                  />
+                )}
+                <ShareEventButton
+                  event={event}
+                  slug={slug!}
+                  photos={photos}
+                  canInvite={event.visibility === 'collaborators_only' && canCreateInvite}
+                />
+              </div>
             )}
           </div>
 
@@ -1242,20 +1348,10 @@ const EventGallery: React.FC = () => {
           isAdmin={canDelete}
           isDeleting={deleting}
           isCopying={copying}
+          onSetLocationSelected={isAdmin ? () => setShowLocationPicker(true) : undefined}
+          isGlobalAdmin={isAdmin}
           density={density}
           onDensityChange={changeDensity}
-          onGetCastAlbumMedia={
-            filteredPhotos.length > 0
-              ? () => ({
-                  type: 'album',
-                  items: filteredPhotos.map((p) => ({
-                    url: getPreviewUrl(slug!, p.id, p.file_type, p.cache_version),
-                    type: p.file_type === 'video/mp4' ? 'video' : 'photo',
-                    title: p.original_filename,
-                  })),
-                })
-              : undefined
-          }
         />
 
         {/* Duplicate photos banner */}
@@ -1282,15 +1378,15 @@ const EventGallery: React.FC = () => {
           </div>
         )}
 
-        {/* Date Timeline - Only show for multi-day events */}
+        {/* Vertical date scrubber - only for multi-day events; replaces the old
+            horizontal fixed bar so photos aren't pushed down by a full-width
+            overlay, and the whole date range is reachable in one drag gesture. */}
         {isMultiDateView && (
-          <div className="fixed top-16 left-0 right-0 z-40">
-            <DateTimeline 
-              dates={dates} 
-              activeDate={activeDate} 
-              onDateClick={handleDateClick}
-            />
-          </div>
+          <VerticalDateScrubber
+            dates={dates}
+            activeDate={activeDate}
+            onSelectDate={handleDateClick}
+          />
         )}
 
         {/* Gallery */}
@@ -1310,7 +1406,7 @@ const EventGallery: React.FC = () => {
           </div>
         ) : isMultiDateView ? (
           // Multi-date view with date headers
-          <div className="space-y-7 pt-12" ref={densityContainerRef}>
+          <div className="space-y-7" ref={densityContainerRef}>
             {visibleDates.map((date) => {
               const datePhotos = photosByDate.get(date) || [];
               const dateObj = new Date(date);
@@ -1334,7 +1430,7 @@ const EventGallery: React.FC = () => {
                   }}
                 >
                   {/* Date header */}
-                  <div className="mb-3 sm:mb-4 flex items-center justify-between sticky top-[6.5rem] z-20 backdrop-blur-sm bg-white/80 dark:bg-gray-900/70 rounded-xl px-3 py-2 border border-gray-200/70 dark:border-gray-700/70">
+                  <div className="mb-3 sm:mb-4 flex items-center justify-between sticky top-16 z-20 backdrop-blur-sm bg-white/80 dark:bg-gray-900/70 rounded-xl px-3 py-2 border border-gray-200/70 dark:border-gray-700/70">
                     <div>
                       <h2 className="text-lg sm:text-xl font-semibold text-gray-900 dark:text-white">
                         {formattedDate}

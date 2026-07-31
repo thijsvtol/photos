@@ -1,6 +1,7 @@
 import type { Env } from './types';
 import { checkFeature } from './features';
 import { sendUploadNotification } from './routes/collaborators';
+import { createLogger } from './logger';
 
 /**
  * Hourly upload-notification job.
@@ -138,6 +139,8 @@ export async function runStaleUploadCleanup(env: Env): Promise<void> {
  * the photos as notified so they are not reported again.
  */
 export async function runUploadNotifications(env: Env): Promise<void> {
+  const log = createLogger(env);
+
   // Fetch photos that still need a notification (collaborator uploads only).
   const { results } = await env.DB.prepare(`
     SELECT p.id, p.event_id, p.uploaded_by, e.name AS event_name, e.slug AS event_slug
@@ -150,6 +153,7 @@ export async function runUploadNotifications(env: Env): Promise<void> {
 
   const rows = results || [];
   if (rows.length === 0) {
+    log.debug('[runUploadNotifications] No un-notified collaborator uploads found');
     return;
   }
 
@@ -157,9 +161,13 @@ export async function runUploadNotifications(env: Env): Promise<void> {
 
   // If email/collaborators are not enabled, still mark the photos as notified so
   // the backlog does not grow unbounded; there is simply nobody to email.
-  const canNotify =
-    checkFeature(env, 'enableCollaborators') && checkFeature(env, 'canSendEmails');
-  if (!canNotify) {
+  const collaboratorsEnabled = checkFeature(env, 'enableCollaborators');
+  const emailsEnabled = checkFeature(env, 'canSendEmails');
+  if (!collaboratorsEnabled || !emailsEnabled) {
+    log.warn(
+      `[runUploadNotifications] Skipping ${photoIds.length} photo(s) notification — feature flag(s) disabled ` +
+      `(enableCollaborators=${collaboratorsEnabled}, canSendEmails=${emailsEnabled}). Marking as notified without emailing anyone.`
+    );
     await markPhotosNotified(env, photoIds);
     return;
   }
@@ -184,7 +192,19 @@ export async function runUploadNotifications(env: Env): Promise<void> {
 
   const notifications = groupUploadNotifications(rows, collaboratorsByEvent, adminEmails);
 
+  let emailsSent = 0;
+  let eventsWithNoRecipients = 0;
   for (const notification of notifications) {
+    if (notification.recipients.length === 0) {
+      eventsWithNoRecipients += 1;
+      log.warn(
+        `[runUploadNotifications] Event "${notification.eventName}" (${notification.eventSlug}) had ` +
+        `${notification.photoCount} new photo(s) but no recipients to notify (no collaborators/admins ` +
+        `configured, or all uploaders were the only collaborators) — marking notified without emailing.`
+      );
+      continue;
+    }
+
     const uploaderLabel =
       notification.uploaders.length === 1
         ? notification.uploaders[0]
@@ -193,17 +213,36 @@ export async function runUploadNotifications(env: Env): Promise<void> {
           : 'A collaborator';
 
     for (const recipient of notification.recipients) {
-      await sendUploadNotification(env, {
-        adminEmail: recipient,
-        adminName: null,
-        uploaderName: uploaderLabel,
-        uploaderEmail: uploaderLabel,
-        eventName: notification.eventName,
-        eventSlug: notification.eventSlug,
-        photoCount: notification.photoCount,
-      });
+      try {
+        await sendUploadNotification(env, {
+          adminEmail: recipient,
+          adminName: null,
+          uploaderName: uploaderLabel,
+          uploaderEmail: uploaderLabel,
+          eventName: notification.eventName,
+          eventSlug: notification.eventSlug,
+          photoCount: notification.photoCount,
+        });
+        emailsSent += 1;
+      } catch (err) {
+        // sendUploadNotification already catches its own Mailgun/fetch errors
+        // internally and logs+returns rather than throwing, but guard here too
+        // so one unexpected failure can't abort the rest of the batch (which
+        // would otherwise also skip markPhotosNotified below, causing these
+        // photos to be re-processed — and re-emailed for recipients already
+        // notified — on every subsequent hourly run).
+        log.error(
+          `[runUploadNotifications] Unexpected error notifying ${recipient} for event "${notification.eventName}":`,
+          err
+        );
+      }
     }
   }
+
+  log.debug(
+    `[runUploadNotifications] Processed ${photoIds.length} photo(s) across ${notifications.length} event(s): ` +
+    `${emailsSent} email(s) sent, ${eventsWithNoRecipients} event(s) with no recipients.`
+  );
 
   // Mark everything we processed as notified (even events with no recipients).
   await markPhotosNotified(env, photoIds);

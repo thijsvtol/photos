@@ -575,4 +575,61 @@ app.post('/bulk-copy', async (c) => {
   }
 });
 
+/**
+ * PATCH /photos/bulk-location
+ * Set/override the GPS location for a specific set of photos, picked by the
+ * caller (e.g. via multi-select in the gallery). Admin-only: every route
+ * under /admin/photos/* is already gated by the `requireAdmin` middleware
+ * mounted in routes/admin.ts (the only exceptions there are `/uploads/` and
+ * per-event `/stats` paths, neither of which apply to this path), so no
+ * additional per-event capability check is needed here — unlike bulk-delete/
+ * bulk-copy, which are reachable by non-admin collaborators with the right
+ * capability and so check that explicitly.
+ *
+ * Distinct from PUT /admin/events/:slug/location (events.ts), which only
+ * back-fills photos that are missing GPS data across an entire event; this
+ * lets an admin target specific photos and always overwrite their location.
+ */
+app.patch('/bulk-location', async (c) => {
+  try {
+    const { photoIds, latitude, longitude } = await c.req.json<{
+      photoIds: string[];
+      latitude: number;
+      longitude: number;
+    }>();
+
+    if (!Array.isArray(photoIds) || photoIds.length === 0) {
+      return c.json({ error: 'photoIds array is required' }, 400);
+    }
+
+    if (photoIds.length > 500) {
+      return c.json({ error: 'Cannot update more than 500 photos at once' }, 400);
+    }
+
+    if (
+      typeof latitude !== 'number' || typeof longitude !== 'number' ||
+      !Number.isFinite(latitude) || !Number.isFinite(longitude) ||
+      latitude < -90 || latitude > 90 || longitude < -180 || longitude > 180
+    ) {
+      return c.json({ error: 'Valid latitude (-90 to 90) and longitude (-180 to 180) are required' }, 400);
+    }
+
+    const uniquePhotoIds = Array.from(new Set(photoIds));
+    const placeholders = uniquePhotoIds.map(() => '?').join(', ');
+
+    const result = await withRetry(
+      () => c.env.DB
+        .prepare(`UPDATE photos SET latitude = ?, longitude = ? WHERE id IN (${placeholders})`)
+        .bind(latitude, longitude, ...uniquePhotoIds)
+        .run(),
+      `DB bulk-update location for ${uniquePhotoIds.length} photos`
+    );
+
+    return c.json({ success: true, updatedCount: result.meta.changes, totalRequested: photoIds.length });
+  } catch (error) {
+    console.error('Error bulk-updating photo location:', error);
+    return c.json({ error: 'Failed to update photo locations' }, 500);
+  }
+});
+
 export default app;
