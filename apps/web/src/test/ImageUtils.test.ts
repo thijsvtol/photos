@@ -45,15 +45,17 @@ describe('processForInstagram', () => {
       onerror: (() => void) | null = null;
 
       constructor() {
-        // Trigger onload asynchronously after src is set
-        const self = this;
+        // Trigger onload asynchronously after src is set. Arrow functions for
+        // get/set keep `this` lexically bound to the instance, so no `self`
+        // alias is needed (regular functions here would rebind `this` to the
+        // property descriptor's context instead).
         let _src = '';
         Object.defineProperty(this, 'src', {
-          get() { return _src; },
-          set(val: string) {
+          get: () => _src,
+          set: (val: string) => {
             _src = val;
             setTimeout(() => {
-              if (self.onload) self.onload();
+              if (this.onload) this.onload();
             }, 0);
           },
         });

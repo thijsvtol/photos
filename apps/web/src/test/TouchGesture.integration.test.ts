@@ -131,7 +131,7 @@ describe('Mobile Browser Touch Scenarios', () => {
     });
 
     it('should block swipe for cooldown period after pinch gesture', () => {
-      let lastPinchTime = 0;
+      let lastPinchTime: number;
       const ZOOM_COOLDOWN = 200;
       const currentTime = 1000;
 
@@ -190,13 +190,12 @@ describe('Mobile Browser Touch Scenarios', () => {
 
   describe('Multi-Step Touch Gesture Sequences', () => {
     it('should handle: pinch zoom -> pan -> attempt swipe', () => {
-      let isPinching = false;
-      let isZoomed = false;
+      let isPinching: boolean;
+      let isZoomed: boolean;
       let touchStartX: number | null = null;
       let touchEndX: number | null = null;
 
-      // Step 1: Pinch to zoom
-      isPinching = true;
+      // Step 1: Pinch to zoom, then release the pinch (zoom state persists)
       isZoomed = true;
       isPinching = false;
 
@@ -263,8 +262,8 @@ describe('Mobile Browser Touch Scenarios', () => {
 
   describe('Race Conditions and Timing Issues', () => {
     it('should handle rapid pinch-release-swipe sequence', () => {
-      let isZoomed = false;
-      let lastPinchEndTime = 0;
+      let isZoomed: boolean;
+      let lastPinchEndTime: number;
       let touchStartX: number | null = null;
       const SAFETY_DELAY = 200;
 

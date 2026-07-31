@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useEffect, useState, useCallback, useRef } from 'react';
-import { uploadManager } from '../services/uploadManager';
+import { uploadManager, type RejectedUploadFile } from '../services/uploadManager';
 import type { UploadQueueItem } from '../types';
 
 interface UploadContextValue {
@@ -7,8 +7,9 @@ interface UploadContextValue {
   queueItems: UploadQueueItem[];
   /** Items for a specific event slug */
   getItemsForSlug: (slug: string) => UploadQueueItem[];
-  /** Add files to the upload queue for an event */
-  addFiles: (slug: string, files: FileList | File[]) => Promise<void>;
+  /** Add files to the upload queue for an event. Resolves with any files that
+   *  were rejected as unsupported types, so callers can surface a toast. */
+  addFiles: (slug: string, files: FileList | File[]) => Promise<{ rejected: RejectedUploadFile[] }>;
   /** Retry a single failed item */
   retryUpload: (itemId: string) => void;
   /** Retry all failed items */
@@ -74,8 +75,14 @@ export const UploadProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   const hasFailedUploads = queueItems.some(i => i.status === 'failed');
   const completedCount = queueItems.filter(i => i.status === 'completed').length;
   const totalCount = queueItems.length;
-  const overallProgress = totalCount > 0
-    ? Math.round(queueItems.reduce((sum, i) => sum + i.progress, 0) / totalCount)
+  // Only average currently in-flight items (uploading/pending) — including
+  // stale completed/failed entries that are still sitting in the list (not
+  // yet cleared) skews the average and can make the bar visibly jump when a
+  // new batch of files is added mid-upload, looking like the upload silently
+  // restarted.
+  const activeItems = queueItems.filter(i => i.status === 'uploading' || i.status === 'pending');
+  const overallProgress = activeItems.length > 0
+    ? Math.round(activeItems.reduce((sum, i) => sum + i.progress, 0) / activeItems.length)
     : 0;
 
   const value: UploadContextValue = {

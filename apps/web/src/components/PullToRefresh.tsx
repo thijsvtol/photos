@@ -1,4 +1,5 @@
 import React from 'react';
+import { useLocation } from 'react-router-dom';
 import { Loader2 } from 'lucide-react';
 import { usePullToRefresh } from '../hooks/usePullToRefresh';
 import { useRefresh } from '../contexts/RefreshContext';
@@ -17,9 +18,16 @@ const PullToRefresh: React.FC<PullToRefreshProps> = ({
   children,
 }) => {
   const { refresh } = useRefresh();
+  const location = useLocation();
+  // PhotoDetail (/p/:slug/:photoId) is a full-screen fullscreen viewer with
+  // its own vertical swipe-based photo navigation gesture (see PhotoDetail.tsx's
+  // touch handlers) — a global pull-to-refresh on top of that fights the same
+  // "drag down from the top" gesture and randomly triggers a page refresh
+  // instead of (or during) the user's swipe, so it's disabled on that route.
+  const isPhotoDetail = location.pathname.startsWith('/p/');
   const { pullDistance, isRefreshing, isActive } = usePullToRefresh({
     onRefresh: refresh,
-    enabled,
+    enabled: enabled && !isPhotoDetail,
     threshold: 80,
   });
 

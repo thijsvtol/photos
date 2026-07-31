@@ -1,6 +1,7 @@
 import { Hono } from 'hono';
 import { cors } from 'hono/cors';
 import type { Env } from '../types';
+import { logger } from '../logger';
 
 const app = new Hono<{ Bindings: Env }>();
 
@@ -34,7 +35,7 @@ app.post('/api/photos/:photoId/favorite', async (c) => {
     
     return c.json({ favorites_count: result?.favorites_count || 0 });
   } catch (error) {
-    console.error('Error incrementing favorites:', error);
+    logger.error('Error incrementing favorites:', error);
     return c.json({ error: 'Failed to favorite photo' }, 500);
   }
 });
@@ -81,7 +82,7 @@ app.get('/api/photos/featured', async (c) => {
     
     return c.json({ photos: photos.results || [] });
   } catch (error) {
-    console.error('Error fetching featured photos:', error);
+    logger.error('Error fetching featured photos:', error);
     return c.json({ error: 'Failed to fetch featured photos' }, 500);
   }
 });
@@ -108,7 +109,7 @@ app.get('/api/photos/most-favorited', async (c) => {
     
     return c.json({ photos: photos.results || [] });
   } catch (error) {
-    console.error('Error fetching most favorited photos:', error);
+    logger.error('Error fetching most favorited photos:', error);
     return c.json({ error: 'Failed to fetch most favorited photos' }, 500);
   }
 });
@@ -125,7 +126,7 @@ app.get('/api/tags', async (c) => {
     
     return c.json({ tags: tags.results || [] });
   } catch (error) {
-    console.error('Error fetching tags:', error);
+    logger.error('Error fetching tags:', error);
     return c.json({ error: 'Failed to fetch tags' }, 500);
   }
 });
@@ -137,7 +138,7 @@ app.get('/api/tags', async (c) => {
 app.get('/api/events/by-tag/:tagSlug', async (c) => {
   try {
     const tagSlug = c.req.param('tagSlug');
-    console.log('Fetching events for tag:', tagSlug);
+    logger.debug('Fetching events for tag:', tagSlug);
     
     // First get events with the tag.
     // This is an anonymous public endpoint, so only expose public-visibility
@@ -160,7 +161,7 @@ app.get('/api/events/by-tag/:tagSlug', async (c) => {
       .bind(tagSlug)
       .all();
     
-    console.log('Events found:', events.results?.length || 0);
+    logger.debug('Events found:', events.results?.length || 0);
     
     const eventsWithDetails = await Promise.all(
       (events.results || []).map(async (event: any) => {
@@ -195,7 +196,7 @@ app.get('/api/events/by-tag/:tagSlug', async (c) => {
     
     return c.json({ events: eventsWithDetails });
   } catch (error) {
-    console.error('Error fetching events by tag:', error);
+    logger.error('Error fetching events by tag:', error);
     return c.json({ error: 'Failed to fetch events' }, 500);
   }
 });

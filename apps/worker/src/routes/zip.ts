@@ -2,6 +2,7 @@ import { Context, Hono } from 'hono';
 import { zipSync } from 'fflate';
 import type { Env, ZipRequest, Photo } from '../types';
 import { checkEventAuth, extractUser, getCollaboratorRoleByEventId } from '../auth';
+import { getStorageExtension } from '../fileTypeUtils';
 
 const app = new Hono<{ Bindings: Env }>();
 
@@ -51,10 +52,10 @@ async function requireZipAccess(
 /**
  * Generate a friendly filename for a photo in a ZIP
  */
-function generatePhotoFilename(slug: string, captureTime: string, photoId: string): string {
+function generatePhotoFilename(slug: string, captureTime: string, photoId: string, extension: string): string {
   // Remove special characters and limit length
   const cleanTime = captureTime.replace(/[:.]/g, '-').replace('T', '_').split('.')[0];
-  return `${slug}_${cleanTime}_${photoId}.jpg`;
+  return `${slug}_${cleanTime}_${photoId}.${extension}`;
 }
 
 /**
@@ -101,7 +102,7 @@ app.post('/api/events/:slug/zip', async (c) => {
     // Get photo metadata, including source info for copied photos
     const placeholders = body.photoIds.map(() => '?').join(',');
     const photos = await c.env.DB
-      .prepare(`SELECT id, original_filename, capture_time, source_photo_id, source_event_slug FROM photos WHERE event_id = ? AND id IN (${placeholders})`)
+      .prepare(`SELECT id, original_filename, capture_time, file_type, source_photo_id, source_event_slug FROM photos WHERE event_id = ? AND id IN (${placeholders})`)
       .bind(event.id, ...body.photoIds)
       .all<Photo>();
     
@@ -117,7 +118,8 @@ app.post('/api/events/:slug/zip', async (c) => {
       // For copied photos, resolve the key to the source event's storage
       const r2Slug = photo.source_event_slug ?? slug;
       const r2PhotoId = photo.source_photo_id ?? photo.id;
-      const key = `original/${r2Slug}/${r2PhotoId}.jpg`;
+      const extension = getStorageExtension(photo.file_type, 'original');
+      const key = `original/${r2Slug}/${r2PhotoId}.${extension}`;
       const object = await c.env.PHOTOS_BUCKET.get(key);
       
       if (!object) {
@@ -127,7 +129,7 @@ app.post('/api/events/:slug/zip', async (c) => {
       }
       
       // Generate a friendly filename
-      const filename = generatePhotoFilename(slug, photo.capture_time, photo.id);
+      const filename = generatePhotoFilename(slug, photo.capture_time, photo.id, extension);
       
       // Read the file data
       const arrayBuffer = await object.arrayBuffer();

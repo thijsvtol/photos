@@ -25,10 +25,10 @@ export interface Photo {
   event_slug?: string; // Added for featured photos
   event_name?: string; // Added for featured photos
   original_filename: string;
-  file_type: string; // MIME type: 'image/jpeg' or 'video/mp4'
+  file_type: string; // MIME type: 'image/jpeg', 'video/mp4', or 'raw/<ext>' (e.g. 'raw/cr2') for camera RAW photos
   capture_time: string;
   uploaded_at: string;
-  uploaded_by: string | null; // User ID who uploaded the photo
+  uploaded_by: string | null; // Uploader's email; use uploader_name for display
   uploader_name?: string | null; // Name of the user who uploaded (joined from users table)
   width: number | null;
   height: number | null;
@@ -46,6 +46,7 @@ export interface Photo {
   blur_placeholder: string | null;
   is_featured: boolean;
     cache_version: number;
+  file_hash?: string | null; // SHA-256 of the original file, used for client-side duplicate detection
 }
 
 export interface CreateEventRequest {
@@ -125,6 +126,11 @@ export interface UploadQueueItem {
   blurPlaceholder?: string;
   retries?: number; // Number of retry attempts (0-3 before marking failed)
   lastRetryTime?: number; // Timestamp of last retry attempt for exponential backoff
+  fileHash?: string; // SHA-256 of the original file (images/RAW only), used for duplicate detection
+  /** Which part of a (potentially multi-step) upload is currently in flight.
+   *  Surfaced in the UI so the two-phase image upload (original, then a
+   *  separate preview upload) never reads as silently restarting. */
+  phase?: 'original' | 'preview';
 }
 
 export type CollaboratorRole = 'viewer' | 'uploader' | 'editor' | 'admin';

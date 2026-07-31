@@ -34,6 +34,13 @@ COPYRIGHT_HOLDER = "Your Name"
 APP_DOMAIN = "localhost:8787"
 CONTACT_EMAIL = "contact@example.com"
 GA_MEASUREMENT_ID = "G-PLACEHOLDER"
+# Optional: set to "debug" (locally, e.g. in .dev.vars) to re-enable verbose
+# per-request debug logging (JWT parsing, permission checks, etc — see
+# apps/worker/src/logger.ts). Left unset here so production/staging only
+# ever log WARN and above (warnings for 4xx responses, errors for 5xx/thrown
+# exceptions and unhandled errors) — see the global request-logging
+# middleware + app.onError in apps/worker/src/index.ts.
+# LOG_LEVEL = "debug"
 
 # Secrets (set via wrangler secret put):
 # - EVENT_COOKIE_SECRET: Secret for signing event session cookies

@@ -1,5 +1,7 @@
 import { X, CheckSquare, Heart, Star, Download, Trash2, Loader2, Copy, Search, Grid3X3, Grid2X2, LayoutGrid, Image, Video, LayoutList } from 'lucide-react';
 import { Capacitor } from '@capacitor/core';
+import CastButton from './CastButton';
+import type { CastMediaMessage } from '../services/castService';
 
 type DensityLevel = 'comfortable' | 'default' | 'dense';
 export type MediaTypeFilter = 'all' | 'photos' | 'videos';
@@ -25,6 +27,9 @@ interface GallerySortFilterProps {
   isCopying?: boolean;
   density?: DensityLevel;
   onDensityChange?: (density: DensityLevel) => void;
+  /** Builds the "cast whole album as a slideshow" message. Omit to hide the
+   *  Cast button entirely (e.g. when there's nothing castable yet). */
+  onGetCastAlbumMedia?: () => CastMediaMessage;
 }
 
 /**
@@ -51,6 +56,7 @@ export function GallerySortFilter({
   isCopying = false,
   density,
   onDensityChange,
+  onGetCastAlbumMedia,
 }: GallerySortFilterProps) {
   const isAndroid = Capacitor.getPlatform() === 'android';
   
@@ -281,6 +287,9 @@ export function GallerySortFilter({
                 <Grid3X3 className="w-4 h-4" />
               </button>
             </div>
+          )}
+          {onGetCastAlbumMedia && (
+            <CastButton variant="labeled" getMedia={onGetCastAlbumMedia} />
           )}
         </div>
       </div>

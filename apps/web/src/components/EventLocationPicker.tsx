@@ -1,8 +1,28 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { MapPin, X } from 'lucide-react';
-import { MapContainer, TileLayer, Marker, useMapEvents } from 'react-leaflet';
+import { MapContainer, TileLayer, Marker, useMap, useMapEvents } from 'react-leaflet';
+import { Icon } from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import ModalOverlay from './ModalOverlay';
+
+// Leaflet's default marker icon resolves its image URLs relative to the page
+// (via document.location), which breaks under Vite/webpack bundling — the
+// icon silently fails to load and no marker is shown at all. Import the
+// marker assets explicitly and build an Icon from them, same fix already
+// used in pages/MapView.tsx.
+import markerIcon from 'leaflet/dist/images/marker-icon.png';
+import markerIcon2x from 'leaflet/dist/images/marker-icon-2x.png';
+import markerShadow from 'leaflet/dist/images/marker-shadow.png';
+
+const defaultIcon = new Icon({
+  iconUrl: markerIcon,
+  iconRetinaUrl: markerIcon2x,
+  shadowUrl: markerShadow,
+  iconSize: [25, 41],
+  iconAnchor: [12, 41],
+  popupAnchor: [1, -34],
+  shadowSize: [41, 41],
+});
 
 interface EventLocationPickerProps {
   isOpen: boolean;
@@ -11,6 +31,21 @@ interface EventLocationPickerProps {
 }
 
 const DEFAULT_MAP_CENTER: [number, number] = [52.6324, 4.7534];
+
+/** Leaflet measures its container's size when the map is created. Since this
+ *  map is rendered inside a modal that's still animating open (slide-in +
+ *  fade), the container can be zero-height/width (or mid-transition) at that
+ *  moment, leaving the map (and any markers) blank until the window happens
+ *  to resize. Re-measuring once the modal's open transition has finished
+ *  fixes the tiles/markers without needing to touch the modal itself. */
+const InvalidateSizeOnMount: React.FC = () => {
+  const map = useMap();
+  useEffect(() => {
+    const timer = setTimeout(() => map.invalidateSize(), 300);
+    return () => clearTimeout(timer);
+  }, [map]);
+  return null;
+};
 
 export default function EventLocationPicker({ isOpen, onClose, onSetLocation }: EventLocationPickerProps) {
   const [selectedLocation, setSelectedLocation] = useState<[number, number] | null>(null);
@@ -23,7 +58,7 @@ export default function EventLocationPicker({ isOpen, onClose, onSetLocation }: 
       },
     });
     
-    return selectedLocation ? <Marker position={selectedLocation} /> : null;
+    return selectedLocation ? <Marker position={selectedLocation} icon={defaultIcon} /> : null;
   };
 
   const handleSetLocation = () => {
@@ -73,6 +108,7 @@ export default function EventLocationPicker({ isOpen, onClose, onSetLocation }: 
               url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
             />
             <LocationMarker />
+            <InvalidateSizeOnMount />
           </MapContainer>
         </div>
         <div className="p-4 sm:p-6 border-t border-gray-200 dark:border-gray-700 flex flex-col sm:flex-row sm:justify-between sm:items-center gap-3 sm:gap-4">

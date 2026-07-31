@@ -2,6 +2,7 @@ import { Hono } from 'hono';
 import { SignJWT } from 'jose';
 import type { Env, User } from '../types';
 import { extractUser } from '../auth';
+import { logger } from '../logger';
 
 type Variables = {
   user: User;
@@ -143,7 +144,7 @@ router.get('/api/mobile-auth', async (c) => {
       isAdmin: isAdmin
     }));
 
-    console.log('Mobile auth successful for:', user.email);
+    logger.debug('Mobile auth successful for:', user.email);
 
     // Return HTML that redirects to deep link
     return c.html(
@@ -204,7 +205,7 @@ router.get('/api/mobile-auth', async (c) => {
       </html>`
     );
   } catch (error) {
-    console.error('Error generating mobile auth token:', error);
+    logger.error('Error generating mobile auth token:', error);
     return c.html(
       `<!DOCTYPE html>
       <html>

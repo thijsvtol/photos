@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useRef } from 'react';
+import React, { useEffect, useState, useRef, useMemo } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { Upload, Settings } from 'lucide-react';
 import Navbar from '../components/Navbar';
@@ -6,7 +6,6 @@ import Footer from '../components/Footer';
 import { GallerySkeleton } from '../components/Skeletons';
 import DateTimeline from '../components/DateTimeline';
 import JustifiedGrid from '../components/JustifiedGrid';
-import DateScrubber from '../components/DateScrubber';
 import { useGridDensity } from '../hooks/useGridDensity';
 import SEO from '../components/SEO';
 import UploadPanel from '../components/UploadPanel';
@@ -64,6 +63,23 @@ const EventGallery: React.FC = () => {
   const canCreateInvite = isAdmin || collaboratorRole === 'editor' || collaboratorRole === 'admin';
   const canFeature = isAdmin || collaboratorRole === 'admin';
   const [showEventSettings, setShowEventSettings] = useState(false);
+  const [duplicateBannerDismissed, setDuplicateBannerDismissed] = useState(false);
+  const [removingDuplicates, setRemovingDuplicates] = useState(false);
+
+  // Group photos by content hash (file_hash) to detect duplicate uploads.
+  // Photos uploaded before the file_hash column existed have it as null/undefined
+  // and are simply excluded from detection (no retroactive backfill).
+  const duplicateGroups = useMemo(() => {
+    const byHash = new Map<string, Photo[]>();
+    for (const photo of photos) {
+      if (!photo.file_hash) continue;
+      const group = byHash.get(photo.file_hash);
+      if (group) group.push(photo);
+      else byHash.set(photo.file_hash, [photo]);
+    }
+    return Array.from(byHash.values()).filter((group) => group.length > 1);
+  }, [photos]);
+  const duplicatePhotoCount = duplicateGroups.reduce((sum, group) => sum + group.length - 1, 0);
 
   // Upload hook for drag-drop
   const { handleDragOver, handleDragLeave, handleDrop, handleFileInput, queueItems } = useUpload(slug);
@@ -122,6 +138,7 @@ const EventGallery: React.FC = () => {
     if (slug) {
       loadEvent();
     }
+    setDuplicateBannerDismissed(false);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [slug]);
 
@@ -423,6 +440,36 @@ const EventGallery: React.FC = () => {
       toast.showError('Failed to delete photos. Please try again.');
     } finally {
       setDeleting(false);
+    }
+  };
+
+  const handleRemoveDuplicates = async () => {
+    if (duplicateGroups.length === 0) return;
+
+    const confirmed = await confirm(
+      'Remove Duplicate Photos',
+      `Found ${duplicateGroups.length} set(s) of duplicate photos (${duplicatePhotoCount} extra cop${duplicatePhotoCount === 1 ? 'y' : 'ies'}). The first photo in each set will be kept and the rest deleted. This cannot be undone!`,
+      { variant: 'danger' }
+    );
+    if (!confirmed) return;
+
+    // Keep the first (e.g. earliest-uploaded) photo in each duplicate group,
+    // delete the rest.
+    const idsToDelete = duplicateGroups.flatMap((group) => group.slice(1).map((p) => p.id));
+
+    try {
+      setRemovingDuplicates(true);
+      const result = await bulkDeletePhotos(idsToDelete);
+      await loadPhotos();
+      await haptics.success();
+      toast.showSuccess(`Removed ${result.deletedCount} duplicate photo(s)`);
+      setDuplicateBannerDismissed(true);
+    } catch (error) {
+      console.error('Error removing duplicate photos:', error);
+      await haptics.error();
+      toast.showError('Failed to remove duplicate photos. Please try again.');
+    } finally {
+      setRemovingDuplicates(false);
     }
   };
 
@@ -792,6 +839,12 @@ const EventGallery: React.FC = () => {
               // confident the layout has settled; 90 attempts (~1.5s) caps how
               // long we keep polling in case the layout never fully stabilizes.
               if (stableFrames >= 6 || attempts >= 90) {
+                // Briefly highlight the restored photo so the user can visually
+                // confirm this is the one they were viewing before navigating back.
+                el.classList.add('ring-4', 'ring-blue-500', 'ring-offset-2', 'dark:ring-offset-gray-900', 'transition-shadow');
+                setTimeout(() => {
+                  el.classList.remove('ring-4', 'ring-blue-500', 'ring-offset-2', 'dark:ring-offset-gray-900', 'transition-shadow');
+                }, 1500);
                 return;
               }
               attempts++;
@@ -875,12 +928,32 @@ const EventGallery: React.FC = () => {
   }, [dates, isMultiDateView, photos, photosByDate, slug, visibleDateCount, visibleSinglePhotoCount]);
 
   // Mobile convenience: tap outside cards/controls to exit selection mode.
+  // Uses 'click' (not 'pointerdown') so a scroll/swipe gesture that merely
+  // *starts* on an empty area between grid tiles never exits selection mode —
+  // mobile browsers only synthesize a 'click' for a genuine tap (pointerdown +
+  // pointerup with negligible movement), never for a drag/scroll. Reading the
+  // latest selection state via refs (instead of listing it in the dependency
+  // array) keeps this listener registered exactly once for the lifetime of
+  // `isMobile`/`supportsHover`, so it can never be torn down and re-attached
+  // mid-gesture when photos are refetched (uploads completing, sort changes,
+  // pull-to-refresh, etc.) — a previous version depended on `clearSelection`
+  // and `selectedPhotos.size`, both of which changed identity/value on every
+  // photo refetch.
+  const selectedPhotosSizeRef = useRef(selectedPhotos.size);
+  selectedPhotosSizeRef.current = selectedPhotos.size;
+  const clearSelectionRef = useRef(clearSelection);
+  clearSelectionRef.current = clearSelection;
+
   useEffect(() => {
-    if (selectedPhotos.size === 0 || supportsHover || !isMobile) {
+    if (supportsHover || !isMobile) {
       return;
     }
 
-    const handlePointerDown = (event: PointerEvent) => {
+    const handleClick = (event: MouseEvent) => {
+      if (selectedPhotosSizeRef.current === 0) {
+        return;
+      }
+
       const target = event.target as HTMLElement | null;
       if (!target) {
         return;
@@ -895,14 +968,39 @@ const EventGallery: React.FC = () => {
         return;
       }
 
-      clearSelection();
+      clearSelectionRef.current();
     };
 
-    document.addEventListener('pointerdown', handlePointerDown);
-    return () => document.removeEventListener('pointerdown', handlePointerDown);
-  }, [clearSelection, isMobile, selectedPhotos.size, supportsHover]);
+    document.addEventListener('click', handleClick);
+    return () => document.removeEventListener('click', handleClick);
+  }, [isMobile, supportsHover]);
 
-  // Keyboard support for power users.
+  // Keyboard support for power users. Latest values are read from a ref
+  // (updated every render) so the listener is registered exactly once instead
+  // of being torn down/re-attached on every photo refetch or selection change.
+  const keyHandlerStateRef = useRef({
+    activeDate,
+    clearSelection,
+    isMultiDateView,
+    photos,
+    photosByDate,
+    selectedPhotos,
+    togglePhotoSelectionBase,
+    visiblePhotosForActions,
+    toggleFavoriteForSelected,
+  });
+  keyHandlerStateRef.current = {
+    activeDate,
+    clearSelection,
+    isMultiDateView,
+    photos,
+    photosByDate,
+    selectedPhotos,
+    togglePhotoSelectionBase,
+    visiblePhotosForActions,
+    toggleFavoriteForSelected,
+  };
+
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
       const target = event.target as HTMLElement | null;
@@ -916,51 +1014,53 @@ const EventGallery: React.FC = () => {
         return;
       }
 
-      if (event.key === 'Escape' && selectedPhotos.size > 0) {
+      const {
+        activeDate: currentActiveDate,
+        clearSelection: currentClearSelection,
+        isMultiDateView: currentIsMultiDateView,
+        photos: currentPhotos,
+        photosByDate: currentPhotosByDate,
+        selectedPhotos: currentSelectedPhotos,
+        togglePhotoSelectionBase: currentTogglePhotoSelectionBase,
+        visiblePhotosForActions: currentVisiblePhotosForActions,
+        toggleFavoriteForSelected: currentToggleFavoriteForSelected,
+      } = keyHandlerStateRef.current;
+
+      if (event.key === 'Escape' && currentSelectedPhotos.size > 0) {
         event.preventDefault();
-        clearSelection();
+        currentClearSelection();
         return;
       }
 
-      if ((event.key === 'a' || event.key === 'A') && photos.length > 0) {
+      if ((event.key === 'a' || event.key === 'A') && currentPhotos.length > 0) {
         event.preventDefault();
 
-        if (isMultiDateView && activeDate) {
-          const activeDatePhotos = photosByDate.get(activeDate) || [];
+        if (currentIsMultiDateView && currentActiveDate) {
+          const activeDatePhotos = currentPhotosByDate.get(currentActiveDate) || [];
           activeDatePhotos.forEach((photo) => {
-            if (!selectedPhotos.has(photo.id)) {
-              togglePhotoSelectionBase(photo.id);
+            if (!currentSelectedPhotos.has(photo.id)) {
+              currentTogglePhotoSelectionBase(photo.id);
             }
           });
         } else {
-          visiblePhotosForActions.forEach((photo) => {
-            if (!selectedPhotos.has(photo.id)) {
-              togglePhotoSelectionBase(photo.id);
+          currentVisiblePhotosForActions.forEach((photo) => {
+            if (!currentSelectedPhotos.has(photo.id)) {
+              currentTogglePhotoSelectionBase(photo.id);
             }
           });
         }
         return;
       }
 
-      if ((event.key === 'f' || event.key === 'F') && selectedPhotos.size > 0) {
+      if ((event.key === 'f' || event.key === 'F') && currentSelectedPhotos.size > 0) {
         event.preventDefault();
-        void toggleFavoriteForSelected();
+        void currentToggleFavoriteForSelected();
       }
     };
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [
-    activeDate,
-    clearSelection,
-    isMultiDateView,
-    photos.length,
-    photosByDate,
-    selectedPhotos,
-    togglePhotoSelectionBase,
-    visiblePhotosForActions,
-  ]);
+  }, []);
 
   if (loading) {
     return (
@@ -1091,7 +1191,7 @@ const EventGallery: React.FC = () => {
                 <label className="inline-flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-full hover:bg-indigo-700 transition-colors text-sm font-medium shadow-sm cursor-pointer">
                   <Upload className="w-4 h-4" />
                   Upload
-                  <input type="file" multiple accept="image/jpeg,video/mp4" onChange={handleFileInput} className="hidden" />
+                  <input type="file" multiple accept="image/jpeg,video/mp4,.cr2,.cr3,.crw,.nef,.nrw,.arw,.srf,.sr2,.dng,.raf,.orf,.rw2,.pef,.ptx,.srw,.raw,.rwl,.erf,.kdc,.dcr,.mrw,.x3f,.3fr,.mef,.mos,.iiq" onChange={handleFileInput} className="hidden" />
                 </label>
               )}
               {isAdmin && (
@@ -1144,7 +1244,43 @@ const EventGallery: React.FC = () => {
           isCopying={copying}
           density={density}
           onDensityChange={changeDensity}
+          onGetCastAlbumMedia={
+            filteredPhotos.length > 0
+              ? () => ({
+                  type: 'album',
+                  items: filteredPhotos.map((p) => ({
+                    url: getPreviewUrl(slug!, p.id, p.file_type, p.cache_version),
+                    type: p.file_type === 'video/mp4' ? 'video' : 'photo',
+                    title: p.original_filename,
+                  })),
+                })
+              : undefined
+          }
         />
+
+        {/* Duplicate photos banner */}
+        {canDelete && duplicateGroups.length > 0 && !duplicateBannerDismissed && (
+          <div className="mb-4 flex flex-col sm:flex-row sm:items-center gap-3 rounded-lg border border-amber-300 bg-amber-50 dark:border-amber-700 dark:bg-amber-900/30 px-4 py-3">
+            <p className="flex-1 text-sm text-amber-800 dark:text-amber-200">
+              Found {duplicatePhotoCount} duplicate photo{duplicatePhotoCount === 1 ? '' : 's'} in {duplicateGroups.length === 1 ? 'this album' : `${duplicateGroups.length} sets`}. Would you like to remove {duplicatePhotoCount === 1 ? 'it' : 'them'}?
+            </p>
+            <div className="flex items-center gap-2 flex-shrink-0">
+              <button
+                onClick={handleRemoveDuplicates}
+                disabled={removingDuplicates}
+                className="px-3 py-1.5 text-sm font-medium bg-amber-600 hover:bg-amber-700 disabled:opacity-60 text-white rounded-full transition-colors"
+              >
+                {removingDuplicates ? 'Removing…' : 'Remove Duplicates'}
+              </button>
+              <button
+                onClick={() => setDuplicateBannerDismissed(true)}
+                className="px-3 py-1.5 text-sm text-amber-800 dark:text-amber-200 hover:underline"
+              >
+                Dismiss
+              </button>
+            </div>
+          </div>
+        )}
 
         {/* Date Timeline - Only show for multi-day events */}
         {isMultiDateView && (
@@ -1221,7 +1357,7 @@ const EventGallery: React.FC = () => {
                     photos={datePhotos}
                     slug={slug!}
                     targetRowHeight={targetRowHeight}
-                    spacing={4}
+                    spacing={8}
                     selectedPhotos={selectedPhotos}
                     forceControlsVisible={selectedPhotos.size > 0}
                     userFavorites={userFavorites}
@@ -1235,14 +1371,6 @@ const EventGallery: React.FC = () => {
                 </div>
               );
             })}
-
-            {/* Date Scrubber */}
-            <DateScrubber
-              dateRefs={dateRefs}
-              dates={dates}
-              activeDate={activeDate}
-              onScrollToDate={handleDateClick}
-            />
           </div>
         ) : (
           // Single-date view (justified grid without date headers)
@@ -1251,7 +1379,7 @@ const EventGallery: React.FC = () => {
               photos={visibleSingleDatePhotos}
               slug={slug!}
               targetRowHeight={targetRowHeight}
-              spacing={4}
+              spacing={8}
               selectedPhotos={selectedPhotos}
               forceControlsVisible={selectedPhotos.size > 0}
               userFavorites={userFavorites}

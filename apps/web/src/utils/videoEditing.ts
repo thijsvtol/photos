@@ -55,7 +55,7 @@ export async function initFFmpeg(): Promise<FFmpeg> {
     console.error('[FFmpeg] Failed to initialize:', error);
     ffmpegReady = false;
     ffmpegInstance = null;
-    throw new Error('Failed to initialize video editor. Could not load FFmpeg core files.');
+    throw new Error('Failed to initialize video editor. Could not load FFmpeg core files.', { cause: error });
   }
 }
 
@@ -108,7 +108,7 @@ export async function trimVideo(
     return outputBlob;
   } catch (error) {
     console.error('Trim failed:', error);
-    throw new Error('Failed to trim video');
+    throw new Error('Failed to trim video', { cause: error });
   }
 }
 
@@ -164,7 +164,7 @@ export async function cropVideo(
     return outputBlob;
   } catch (error) {
     console.error('Crop failed:', error);
-    throw new Error('Failed to crop video');
+    throw new Error('Failed to crop video', { cause: error });
   }
 }
 
@@ -229,7 +229,7 @@ export async function rotateVideo(
     return outputBlob;
   } catch (error) {
     console.error('Rotate failed:', error);
-    throw new Error('Failed to rotate video');
+    throw new Error('Failed to rotate video', { cause: error });
   }
 }
 
@@ -284,7 +284,7 @@ export async function flipVideo(
     return outputBlob;
   } catch (error) {
     console.error('Flip failed:', error);
-    throw new Error('Failed to flip video');
+    throw new Error('Failed to flip video', { cause: error });
   }
 }
 
@@ -342,7 +342,7 @@ export async function adjustVideoSpeed(
     return outputBlob;
   } catch (error) {
     console.error('Speed adjustment failed:', error);
-    throw new Error('Failed to adjust video speed');
+    throw new Error('Failed to adjust video speed', { cause: error });
   }
 }
 
@@ -441,7 +441,7 @@ export async function applyVideoTransformations(
     return outputBlob;
   } catch (error) {
     console.error('Video transformation failed:', error);
-    throw new Error('Failed to apply video transformations');
+    throw new Error('Failed to apply video transformations', { cause: error });
   }
 }
 

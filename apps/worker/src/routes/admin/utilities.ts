@@ -2,6 +2,7 @@ import { Hono } from 'hono';
 import type { Env, User } from '../../types';
 import { requireAdmin, requireEventViewAccess } from '../../auth';
 import { getCityFromCoordinates } from '../../geocoding';
+import { logger } from '../../logger';
 
 type Variables = {
   user: User;
@@ -40,7 +41,7 @@ app.post('/regenerate-thumbnails', async (c) => {
       regenerated: 0 
     });
   } catch (error) {
-    console.error('Error in regenerate-thumbnails:', error);
+    logger.error('Error in regenerate-thumbnails:', error);
     return c.json({ error: 'Failed to regenerate thumbnails' }, 500);
   }
 });
@@ -105,7 +106,7 @@ app.post('/geocode-photos', async (c) => {
         if (distance < 5) {
           // Reuse the same city
           city = lastCity;
-          console.log(`Reusing city "${city}" for photo ${photo.id} (${distance.toFixed(2)}km away)`);
+          logger.debug(`Reusing city "${city}" for photo ${photo.id} (${distance.toFixed(2)}km away)`);
         }
       }
       
@@ -118,7 +119,7 @@ app.post('/geocode-photos', async (c) => {
           lastLat = photo.latitude;
           lastLon = photo.longitude;
           lastCity = city;
-          console.log(`Fetched new city "${city}" for photo ${photo.id}`);
+          logger.debug(`Fetched new city "${city}" for photo ${photo.id}`);
         }
         
         // Rate limit: 1 request per second for Nominatim
@@ -141,7 +142,7 @@ app.post('/geocode-photos', async (c) => {
       total: photos.results.length 
     });
   } catch (error) {
-    console.error('Error geocoding photos:', error);
+    logger.error('Error geocoding photos:', error);
     return c.json({ error: 'Failed to geocode photos' }, 500);
   }
 });
@@ -230,7 +231,7 @@ app.get('/stats', async (c) => {
       cameraModels: cameraModels.results,
     });
   } catch (error) {
-    console.error('Error getting event stats:', error);
+    logger.error('Error getting event stats:', error);
     return c.json({ error: 'Failed to get event stats' }, 500);
   }
 });

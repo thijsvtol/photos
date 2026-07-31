@@ -1,6 +1,7 @@
 import { Context, Hono } from 'hono';
 import type { Env } from '../types';
 import { checkEventAuth, extractUser, getCollaboratorRoleByEventId } from '../auth';
+import { isVideoFileType, getStorageExtension, getStorageContentType } from '../fileTypeUtils';
 
 const app = new Hono<{ Bindings: Env }>();
 
@@ -126,9 +127,16 @@ app.get('/media/:slug/preview/:photoId', async (c) => {
     }
     
     const fileType = photo.file_type || 'image/jpeg';
-    const isVideo = fileType === 'video/mp4';
-    const extension = isVideo ? 'mp4' : 'jpg';
-    const contentType = isVideo ? 'video/mp4' : 'image/jpeg';
+    const isVideo = isVideoFileType(fileType);
+    // Preview is always .jpg for images (including RAW — the client always
+    // generates a real JPEG preview for RAW uploads) and .mp4 for video.
+    const previewExtension = getStorageExtension(fileType, 'preview');
+    // Fallback (when no preview exists yet) serves the ORIGINAL file, which
+    // keeps its real extension for RAW uploads (e.g. .cr2) — that fallback
+    // is only hit within the brief upload-processing window, and RAW/JPEG
+    // originals both still decode fine as their native Content-Type below.
+    const originalExtension = getStorageExtension(fileType, 'original');
+    const contentType = getStorageContentType(fileType, 'preview');
 
     // Resolve R2 key: copies point to source event's storage
     const r2Slug = photo.source_event_slug ?? slug;
@@ -140,12 +148,12 @@ app.get('/media/:slug/preview/:photoId', async (c) => {
     const getOptions = rangeOption ? { range: rangeOption } : undefined;
 
     // Try to get the preview version first, fall back to original
-    let key = `preview/${r2Slug}/${r2PhotoId}.${extension}`;
+    let key = `preview/${r2Slug}/${r2PhotoId}.${previewExtension}`;
     let object = await c.env.PHOTOS_BUCKET.get(key, getOptions);
 
     // Fallback to original if preview doesn't exist
     if (!object) {
-      key = `original/${r2Slug}/${r2PhotoId}.${extension}`;
+      key = `original/${r2Slug}/${r2PhotoId}.${originalExtension}`;
       object = await c.env.PHOTOS_BUCKET.get(key, getOptions);
     }
 
@@ -216,9 +224,9 @@ app.get('/media/:slug/ig/:photoId', async (c) => {
     
     // Get photo metadata for filename, plus source photo info for copies
     const photo = await c.env.DB
-      .prepare('SELECT capture_time, source_photo_id, source_event_slug FROM photos WHERE id = ? AND event_id = ?')
+      .prepare('SELECT capture_time, file_type, source_photo_id, source_event_slug FROM photos WHERE id = ? AND event_id = ?')
       .bind(photoId, event.id)
-      .first<{ capture_time: string; source_photo_id: string | null; source_event_slug: string | null }>();
+      .first<{ capture_time: string; file_type: string; source_photo_id: string | null; source_event_slug: string | null }>();
     
     if (!photo) {
       return c.json({ error: 'Photo not found' }, 404);
@@ -228,13 +236,14 @@ app.get('/media/:slug/ig/:photoId', async (c) => {
     const r2Slug = photo.source_event_slug ?? slug;
     const r2PhotoId = photo.source_photo_id ?? photoId;
     
-    // Try to get the preview (small) version
+    // Try to get the preview (small) version — always .jpg, including RAW.
     let key = `preview/${r2Slug}/${r2PhotoId}.jpg`;
     let object = await c.env.PHOTOS_BUCKET.get(key);
     
-    // If preview version doesn't exist, fall back to original
+    // If preview version doesn't exist, fall back to original (keeps the
+    // real extension for RAW uploads, e.g. .cr2).
     if (!object) {
-      key = `original/${r2Slug}/${r2PhotoId}.jpg`;
+      key = `original/${r2Slug}/${r2PhotoId}.${getStorageExtension(photo.file_type, 'original')}`;
       object = await c.env.PHOTOS_BUCKET.get(key);
     }
     
@@ -268,7 +277,10 @@ app.get('/media/:slug/ig/:photoId', async (c) => {
 app.get('/media/:slug/original/:photoId', async (c) => {
   const slug = c.req.param('slug');
   const photoIdWithExt = c.req.param('photoId');
-  const photoId = photoIdWithExt.replace(/\.(jpg|mp4)$/, '');
+  // Strip whatever extension the client requested with (.jpg, .mp4, or a real
+  // RAW extension like .cr2/.nef/...) — photo IDs are ULIDs and never contain
+  // a dot, so trimming the final dot-segment is always safe.
+  const photoId = photoIdWithExt.replace(/\.[^./]+$/, '');
   
   try {
     // Get event to check if password protected
@@ -294,9 +306,8 @@ app.get('/media/:slug/original/:photoId', async (c) => {
     }
     
     const fileType = photo.file_type || 'image/jpeg';
-    const isVideo = fileType === 'video/mp4';
-    const extension = isVideo ? 'mp4' : 'jpg';
-    const contentType = isVideo ? 'video/mp4' : 'image/jpeg';
+    const extension = getStorageExtension(fileType, 'original');
+    const contentType = getStorageContentType(fileType, 'original');
 
     // Resolve R2 key: copies point to source event's storage
     const r2Slug = photo.source_event_slug ?? slug;

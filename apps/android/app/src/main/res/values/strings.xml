@@ -4,4 +4,10 @@
     <string name="title_activity_main">Photos</string>
     <string name="package_name">nl.thijsvtol.photos</string>
     <string name="custom_url_scheme">nl.thijsvtol.photos</string>
+    <!-- Google Cast custom receiver Application ID. Register a custom
+         receiver at https://cast.google.com/publish pointing to
+         https://<domain>/cast-receiver (see pages/CastReceiver.tsx) to
+         obtain this ID, then replace the placeholder below. Casting is
+         gracefully unavailable (button hidden) until this is a real ID. -->
+    <string name="cast_receiver_app_id" translatable="false">9B6F4221</string>
 </resources>

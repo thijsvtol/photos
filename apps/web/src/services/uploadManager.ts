@@ -12,8 +12,15 @@ import axios from 'axios';
 import { startUpload, uploadPart, completeUpload, cancelUpload as cancelUploadApi } from '../api';
 import { addToQueue, updateQueueItem, getQueueItems, getPendingUploads, removeFromQueue, clearCompletedUploads } from '../uploadQueue';
 import { createPreview } from '../imageUtils';
+import { isRawFile, isRawFileType, getRawFileType, createRawPreview, createRawPlaceholder } from '../rawImageUtils';
 import { extractMp4CreationTime } from '../utils/videoMetadata';
 import type { UploadQueueItem } from '../types';
+
+/** A file the user tried to upload that isn't a supported image/video/RAW type. */
+export interface RejectedUploadFile {
+  name: string;
+  reason: string;
+}
 
 /**
  * HTTP status codes that indicate the request itself is invalid/rejected
@@ -62,7 +69,52 @@ const RETRY_BACKOFF_BASE_MS = 2000;
 // PARALLEL_CHUNKS simultaneous chunk requests — this floods the browser's
 // connection pool and often exhausts memory (each file is fully read for
 // EXIF/preview/video-metadata extraction), causing large batches to fail.
-const MAX_CONCURRENT_UPLOADS = 3;
+//
+// The cap is adaptive: on a fast connection (4g/wifi and no data-saver) more
+// files upload in parallel for better throughput; on a slow/metered
+// connection (2g/3g or Save-Data enabled) it's kept low to avoid flooding a
+// constrained pipe. Falls back to a safe default of 3 when the Network
+// Information API isn't available (e.g. Safari/iOS).
+const MIN_CONCURRENT_UPLOADS = 2;
+const DEFAULT_CONCURRENT_UPLOADS = 3;
+const MAX_CONCURRENT_UPLOADS_FAST = 6;
+
+interface NetworkInformationLike {
+  effectiveType?: '2g' | '3g' | '4g' | 'slow-2g';
+  saveData?: boolean;
+  downlink?: number;
+  addEventListener?: (type: 'change', listener: () => void) => void;
+  removeEventListener?: (type: 'change', listener: () => void) => void;
+}
+
+function getNetworkInformation(): NetworkInformationLike | undefined {
+  const nav = navigator as Navigator & {
+    connection?: NetworkInformationLike;
+    mozConnection?: NetworkInformationLike;
+    webkitConnection?: NetworkInformationLike;
+  };
+  return nav.connection || nav.mozConnection || nav.webkitConnection;
+}
+
+function getAdaptiveConcurrency(): number {
+  const conn = getNetworkInformation();
+  if (!conn) return DEFAULT_CONCURRENT_UPLOADS;
+  if (conn.saveData) return MIN_CONCURRENT_UPLOADS;
+  switch (conn.effectiveType) {
+    case 'slow-2g':
+    case '2g':
+      return MIN_CONCURRENT_UPLOADS;
+    case '3g':
+      return DEFAULT_CONCURRENT_UPLOADS;
+    case '4g':
+      return MAX_CONCURRENT_UPLOADS_FAST;
+    default:
+      // Unknown effectiveType but a numeric downlink estimate is available —
+      // treat a fast reported downlink (>= 10 Mbps) the same as 4g.
+      if (typeof conn.downlink === 'number' && conn.downlink >= 10) return MAX_CONCURRENT_UPLOADS_FAST;
+      return DEFAULT_CONCURRENT_UPLOADS;
+  }
+}
 
 export type UploadManagerListener = (items: UploadQueueItem[]) => void;
 
@@ -146,6 +198,12 @@ class UploadManager {
     document.addEventListener('visibilitychange', () => {
       if (document.visibilityState === 'visible') this.resumeAll();
     });
+
+    // If the connection quality improves mid-upload (e.g. switching from
+    // cellular to wifi), pump the queue so additional queued items can start
+    // taking advantage of the now-higher concurrency cap right away instead
+    // of waiting for the next item to finish.
+    getNetworkInformation()?.addEventListener?.('change', () => this.pumpQueue());
   }
 
   /** Add files and start uploading.
@@ -156,13 +214,25 @@ class UploadManager {
    *  survives app-close (BackgroundTask.beforeExit), and resumes on relaunch.
    *  On web there is no such pipeline, so we process in the foreground and let
    *  the GlobalUploadIndicator render live progress. */
-  async addFiles(slug: string, files: FileList | File[]) {
-    const supportedFiles = Array.from(files).filter(
-      f => f.type === 'image/jpeg' || f.type === 'video/mp4'
-    );
+  async addFiles(slug: string, files: FileList | File[]): Promise<{ rejected: RejectedUploadFile[] }> {
+    const supportedFiles: File[] = [];
+    const rejected: RejectedUploadFile[] = [];
+
+    for (const f of Array.from(files)) {
+      if (f.type === 'image/jpeg' || f.type === 'video/mp4' || isRawFile(f)) {
+        supportedFiles.push(f);
+      } else {
+        rejected.push({
+          name: f.name,
+          reason: f.type
+            ? `Unsupported file type "${f.type}"`
+            : 'Unsupported or unrecognized file type',
+        });
+      }
+    }
 
     // Nothing to do — bail out before touching the queue.
-    if (supportedFiles.length === 0) return;
+    if (supportedFiles.length === 0) return { rejected };
 
     // Enqueue every item immediately with bare-bones metadata so the UI
     // (GlobalUploadIndicator) can show the upload popup right away instead
@@ -175,12 +245,18 @@ class UploadManager {
     for (const file of supportedFiles) {
       const id = ulid();
       const photoId = ulid();
+      // RAW files are identified by extension (not MIME type, which browsers
+      // frequently leave blank/vendor-specific for RAW containers). Tag them
+      // with `raw/<ext>` so the rest of the pipeline can tell the worker to
+      // store the original with its real extension while still generating a
+      // normal JPEG preview.
+      const fileType = isRawFile(file) ? getRawFileType(file) : file.type;
 
       const item: UploadQueueItem = {
         id,
         eventSlug: slug,
         file,
-        fileType: file.type,
+        fileType,
         status: 'pending',
         progress: 0,
         photoId,
@@ -216,7 +292,10 @@ class UploadManager {
     } else {
       for (const item of enqueued) this.enqueueUpload(item);
     }
+
+    return { rejected };
   }
+
 
   /** Retry a single failed upload.
    *
@@ -360,9 +439,9 @@ class UploadManager {
 
   // ── Core upload logic (moved from useUpload hook) ──
 
-  /** Queue an item for processing, respecting MAX_CONCURRENT_UPLOADS. */
+  /** Queue an item for processing, respecting the adaptive concurrency cap. */
   private enqueueUpload(item: UploadQueueItem) {
-    if (this.processing.size < MAX_CONCURRENT_UPLOADS) {
+    if (this.processing.size < getAdaptiveConcurrency()) {
       this.processUpload(item);
     } else {
       this.uploadQueue.push(item);
@@ -371,7 +450,7 @@ class UploadManager {
 
   /** Pull the next queued item(s) into processing once a slot frees up. */
   private pumpQueue() {
-    while (this.uploadQueue.length > 0 && this.processing.size < MAX_CONCURRENT_UPLOADS) {
+    while (this.uploadQueue.length > 0 && this.processing.size < getAdaptiveConcurrency()) {
       const next = this.uploadQueue.shift()!;
       this.processUpload(next);
     }
@@ -392,8 +471,8 @@ class UploadManager {
     let originalDone = false;
 
     try {
-      this.updateItem(item.id, { status: 'uploading' });
-      await updateQueueItem(item.id, { status: 'uploading' });
+      this.updateItem(item.id, { status: 'uploading', phase: 'original' });
+      await updateQueueItem(item.id, { status: 'uploading', phase: 'original' });
 
       // Ensure photoId exists (folder-sync items may not have one)
       const photoId = item.photoId || ulid();
@@ -443,10 +522,29 @@ class UploadManager {
         await updateQueueItem(item.id, exifData);
       }
 
-      const merged = { ...item, photoId, fileType, ...exifData };
+      // Compute a content hash for duplicate detection (images/RAW only —
+      // skipped for video to avoid reading large files fully into memory).
+      // Cached on the item so a retry never re-hashes the same file.
+      let fileHash = item.fileHash;
+      if (!isVideo && !fileHash) {
+        fileHash = await this.computeFileHash(item.file);
+        if (fileHash) {
+          this.updateItem(item.id, { fileHash });
+          await updateQueueItem(item.id, { fileHash });
+        }
+      }
+
+      const merged = { ...item, photoId, fileType, fileHash, ...exifData };
 
       let previewBlob: Blob | null = null;
-      if (!isVideo) previewBlob = await createPreview(item.file);
+      if (!isVideo) {
+        // Browsers/canvas can't decode RAW containers directly, so RAW files
+        // get a dedicated WASM decode path (falls back to a generic
+        // placeholder internally if decoding fails — never throws).
+        previewBlob = isRawFileType(fileType)
+          ? await createRawPreview(item.file).catch(() => createRawPlaceholder())
+          : await createPreview(item.file);
+      }
 
       const chunkSize = isVideo ? VIDEO_CHUNK_SIZE : CHUNK_SIZE;
       const totalParts = Math.ceil(item.file.size / chunkSize);
@@ -458,7 +556,7 @@ class UploadManager {
         merged.aperture, merged.shutterSpeed, merged.focalLength,
         merged.cameraMake, merged.cameraModel, merged.lensModel,
         merged.latitude, merged.longitude, merged.blurPlaceholder,
-        false, fileType,
+        false, fileType, merged.fileHash,
       );
 
       // Once the original file has already fully uploaded (a previous attempt
@@ -557,6 +655,10 @@ class UploadManager {
           this.updateItem(item.id, { progress: 85 });
           await updateQueueItem(item.id, { progress: 85 });
         }
+        // Distinct phase so the UI can label this step ("Uploading preview…")
+        // instead of it looking like the upload silently restarted.
+        this.updateItem(item.id, { phase: 'preview' });
+        await updateQueueItem(item.id, { phase: 'preview' });
         await this.uploadPreview(item.eventSlug, photoId, previewBlob!);
         this.updateItem(item.id, { status: 'completed', progress: 100 });
         await updateQueueItem(item.id, { status: 'completed', progress: 100 });
@@ -764,7 +866,27 @@ class UploadManager {
       };
     } catch { return {}; }
   }
+
+  /** SHA-256 hash (hex) of a file's full contents, used for client-side
+   *  duplicate-photo detection. Capped at MAX_HASHABLE_SIZE and best-effort —
+   *  returns undefined (never throws) if hashing fails or the file is too
+   *  large to hash without risking excessive memory use. */
+  private async computeFileHash(file: File): Promise<string | undefined> {
+    const MAX_HASHABLE_SIZE = 100 * 1024 * 1024; // 100MB
+    if (file.size > MAX_HASHABLE_SIZE) return undefined;
+    try {
+      const buffer = await file.arrayBuffer();
+      const digest = await crypto.subtle.digest('SHA-256', buffer);
+      return Array.from(new Uint8Array(digest))
+        .map((b) => b.toString(16).padStart(2, '0'))
+        .join('');
+    } catch (err) {
+      console.warn('[UploadManager] Failed to compute file hash:', err);
+      return undefined;
+    }
+  }
 }
+
 
 /** Module-level singleton — survives across all React component lifecycles */
 export const uploadManager = new UploadManager();

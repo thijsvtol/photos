@@ -1,5 +1,6 @@
 import { useState, useCallback } from 'react';
 import { useUploadContext } from '../contexts/UploadContext';
+import { useToast } from '../components/Toast';
 import type { UploadQueueItem } from '../types';
 
 /**
@@ -10,6 +11,7 @@ import type { UploadQueueItem } from '../types';
  */
 export function useUpload(slug: string | undefined) {
   const ctx = useUploadContext();
+  const toast = useToast();
   const [isDragging, setIsDragging] = useState(false);
 
   const queueItems = slug ? ctx.getItemsForSlug(slug) : ctx.queueItems;
@@ -20,8 +22,16 @@ export function useUpload(slug: string | undefined) {
 
   const handleFiles = useCallback(async (files: FileList) => {
     if (!slug) return;
-    await ctx.addFiles(slug, files);
-  }, [slug, ctx]);
+    const { rejected } = await ctx.addFiles(slug, files);
+    if (rejected.length > 0) {
+      const names = rejected.map(r => r.name).join(', ');
+      toast.showError(
+        rejected.length === 1
+          ? `Couldn't upload "${names}": unsupported file type. Only JPEG/RAW photos and MP4 videos are supported.`
+          : `Couldn't upload ${rejected.length} files (${names}): unsupported file type. Only JPEG/RAW photos and MP4 videos are supported.`
+      );
+    }
+  }, [slug, ctx, toast]);
 
   const handleDragOver = useCallback((e: React.DragEvent) => {
     e.preventDefault();

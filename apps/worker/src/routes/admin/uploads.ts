@@ -3,6 +3,7 @@ import type { Env, StartUploadRequest, CompleteUploadRequest, User } from '../..
 import { requireUploadPermission, isAdmin } from '../../auth';
 import { logCollaborationAction } from '../collaborators';
 import { checkFeature } from '../../features';
+import { isVideoFileType, getStorageExtension } from '../../fileTypeUtils';
 
 type Variables = {
   user: User;
@@ -37,11 +38,11 @@ app.post('/start', requireUploadPermission, async (c) => {
     
     // Determine file extension based on fileType
     const fileType = body.fileType || 'image/jpeg';
-    const isVideo = fileType === 'video/mp4';
-    const extension = isVideo ? 'mp4' : 'jpg';
+    const isVideo = isVideoFileType(fileType);
     
     // Determine upload path based on isPreview flag
     const folder = body.isPreview ? 'preview' : 'original';
+    const extension = getStorageExtension(fileType, folder);
     const key = `${folder}/${slug}/${body.photoId}.${extension}`;
     
     // Create multipart upload in R2
@@ -57,11 +58,16 @@ app.post('/start', requireUploadPermission, async (c) => {
       // preview-complete; only images start out pending a preview upload.
       const initialPreviewComplete = isVideo ? 1 : 0;
       
-      // Get first name from full name, or use full name if no space
-      let uploaderName = null;
-      if (user?.name) {
-        uploaderName = user.name.split(' ')[0]; // Get first name
-      }
+      // `uploaded_by` stores the uploader's EMAIL (not their display name) —
+      // this is what public.ts's `LEFT JOIN users u ON p.uploaded_by = u.email`
+      // and scheduled.ts's "exclude the uploader from their own new-photo
+      // notification" logic both expect. requireUploadPermission guarantees
+      // `user` (and therefore `user.email`) is always present here.
+      // Previously this stored only the user's first name, which broke both
+      // of those: the join could never match (so "Uploaded by" silently
+      // disappeared whenever `user.name` was unset), and the notification
+      // exclusion compared a first name against an email and never matched.
+      const uploaderEmail = user?.email || null;
       
       // Upload retries (e.g. after a transient network/R2 failure) call /start
       // again with the *same* photoId, since a fresh multipart upload has to
@@ -74,8 +80,8 @@ app.post('/start', requireUploadPermission, async (c) => {
         .prepare(`INSERT INTO photos (
           id, event_id, original_filename, file_type, capture_time, uploaded_by, width, height,
           iso, aperture, shutter_speed, focal_length, camera_make, camera_model, lens_model,
-          latitude, longitude, blur_placeholder, upload_complete, preview_complete
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?)
+          latitude, longitude, blur_placeholder, upload_complete, preview_complete, file_hash
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)
         ON CONFLICT(id) DO UPDATE SET
           event_id = excluded.event_id,
           original_filename = excluded.original_filename,
@@ -93,16 +99,17 @@ app.post('/start', requireUploadPermission, async (c) => {
           lens_model = excluded.lens_model,
           latitude = excluded.latitude,
           longitude = excluded.longitude,
-          blur_placeholder = excluded.blur_placeholder
+          blur_placeholder = excluded.blur_placeholder,
+          file_hash = excluded.file_hash
         WHERE photos.upload_complete = 0`)
         .bind(
           body.photoId, event.id, body.filename, fileType, captureTime, 
-          uploaderName, // Store uploader's first name
+          uploaderEmail, // Store uploader's email (matches the join/notification logic)
           body.width || null, body.height || null,
           body.iso || null, body.aperture || null, body.shutterSpeed || null,
           body.focalLength || null, body.cameraMake || null, body.cameraModel || null,
           body.lensModel || null, body.latitude || null, body.longitude || null,
-          body.blurPlaceholder || null, initialPreviewComplete
+          body.blurPlaceholder || null, initialPreviewComplete, body.fileHash || null
         )
         .run();
       
@@ -153,9 +160,8 @@ app.put('/:photoId/parts/:partNumber', requireUploadPermission, async (c) => {
       return c.json({ error: 'Invalid part number' }, 400);
     }
     
-    const isVideo = fileType === 'video/mp4';
-    const extension = isVideo ? 'mp4' : 'jpg';
     const folder = isPreview ? 'preview' : 'original';
+    const extension = getStorageExtension(fileType, folder);
     const key = `${folder}/${slug}/${photoId}.${extension}`;
     
     // Get the body as ArrayBuffer
@@ -210,21 +216,19 @@ app.post('/:photoId/cancel', requireUploadPermission, async (c) => {
     }
 
     const fileType = body.fileType || photo?.file_type || 'image/jpeg';
-    const isVideo = fileType === 'video/mp4';
-    const extension = isVideo ? 'mp4' : 'jpg';
 
     // Best-effort abort of any in-progress multipart uploads on R2. Aborting
     // an already-completed/nonexistent multipart upload throws — swallow
     // those errors so a stale/missing uploadId never blocks cleanup.
     const abortAttempts: Array<Promise<unknown>> = [];
     if (body.uploadId) {
-      const originalKey = `original/${slug}/${photoId}.${extension}`;
+      const originalKey = `original/${slug}/${photoId}.${getStorageExtension(fileType, 'original')}`;
       abortAttempts.push(
         c.env.PHOTOS_BUCKET.resumeMultipartUpload(originalKey, body.uploadId).abort()
       );
     }
     if (body.previewUploadId) {
-      const previewKey = `preview/${slug}/${photoId}.${extension}`;
+      const previewKey = `preview/${slug}/${photoId}.${getStorageExtension(fileType, 'preview')}`;
       abortAttempts.push(
         c.env.PHOTOS_BUCKET.resumeMultipartUpload(previewKey, body.previewUploadId).abort()
       );
@@ -267,10 +271,9 @@ app.post('/:photoId/complete', requireUploadPermission, async (c) => {
       .first<{ file_type: string }>();
     
     const fileType = photo?.file_type || 'image/jpeg';
-    const isVideo = fileType === 'video/mp4';
-    const extension = isVideo ? 'mp4' : 'jpg';
     
     const folder = isPreview ? 'preview' : 'original';
+    const extension = getStorageExtension(fileType, folder);
     const key = `${folder}/${slug}/${photoId}.${extension}`;
     
     // Complete the multipart upload. R2 enforces the S3 multipart rule that

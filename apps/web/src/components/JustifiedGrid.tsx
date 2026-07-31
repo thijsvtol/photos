@@ -36,11 +36,16 @@ interface AlbumPhoto {
   photo: Photo;
 }
 
+/** Number of leading photos (top of the grid, typically the first row or two) that get
+ *  fetchPriority="high" and skip the near-viewport intersection delay, since the user is
+ *  looking at them the moment the page loads. */
+const PRIORITY_PHOTO_COUNT = 8;
+
 const JustifiedGridInner: React.FC<JustifiedGridProps> = ({
   photos,
   slug,
   targetRowHeight,
-  spacing = 4,
+  spacing = 8,
   selectedPhotos,
   forceControlsVisible,
   userFavorites,
@@ -97,7 +102,7 @@ const JustifiedGridInner: React.FC<JustifiedGridProps> = ({
             </PhotoOverlay>
           );
         },
-        image: (props, { photo: albumPhoto }) => {
+        image: (props, { photo: albumPhoto, index }) => {
           const photo = (albumPhoto as AlbumPhoto).photo;
           const isVideo = photo.file_type === 'video/mp4';
           if (isVideo) {
@@ -116,6 +121,7 @@ const JustifiedGridInner: React.FC<JustifiedGridProps> = ({
               alt={photo.original_filename}
               className="w-full h-full object-cover"
               loading="lazy"
+              priority={index < PRIORITY_PHOTO_COUNT}
             />
           );
         },
@@ -217,7 +223,7 @@ const PhotoOverlayInner: React.FC<PhotoOverlayProps> = ({
     <div
       data-photo-card="true"
       data-photo-id={photo.id}
-      className="relative group overflow-hidden"
+      className="relative group overflow-hidden rounded-lg md:rounded-xl ring-1 ring-black/5 dark:ring-white/5"
       style={style}
     >
       <Link
@@ -307,6 +313,29 @@ const PhotoOverlayInner: React.FC<PhotoOverlayProps> = ({
       {/* Selected overlay tint */}
       {isSelected && (
         <div className="absolute inset-0 bg-blue-600/15 pointer-events-none z-[5]" />
+      )}
+
+      {/* Hover/touch info overlay: capture date + favorite count, bottom gradient */}
+      {(supportsHover || touchControlsVisible || forceControlsVisible) && (photo.capture_time || photo.favorites_count > 0) && (
+        <div
+          className={`absolute inset-x-0 bottom-0 pointer-events-none z-[4] px-2 py-1.5 bg-gradient-to-t from-black/60 via-black/20 to-transparent transition-opacity duration-150 ${
+            supportsHover ? 'opacity-0 group-hover:opacity-100' : touchControlsVisible || forceControlsVisible ? 'opacity-100' : 'opacity-0'
+          }`}
+        >
+          <div className="flex items-center justify-between gap-2 text-white text-[11px] font-medium">
+            {photo.capture_time && (
+              <span className="truncate drop-shadow">
+                {new Date(photo.capture_time).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}
+              </span>
+            )}
+            {photo.favorites_count > 0 && (
+              <span className="flex items-center gap-0.5 flex-shrink-0 drop-shadow">
+                <Heart className="w-3 h-3 fill-red-500 text-red-500" />
+                {photo.favorites_count}
+              </span>
+            )}
+          </div>
+        </div>
       )}
     </div>
   );

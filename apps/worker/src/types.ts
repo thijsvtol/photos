@@ -9,6 +9,9 @@ export interface Env {
   MAILGUN_DOMAIN?: string; // Optional: Mailgun domain for sending emails
   ENVIRONMENT?: string;
   JWT_SECRET?: string; // JWT secret for mobile OAuth tokens
+  /** Optional: set to 'debug' to re-enable verbose per-request debug/info
+   *  logging (see logger.ts). Unset in production so only WARN+ is logged. */
+  LOG_LEVEL?: string;
 }
 
 // Database Models
@@ -27,10 +30,10 @@ export interface Photo {
   id: string;
   event_id: number;
   original_filename: string;
-  file_type: string; // MIME type: 'image/jpeg' or 'video/mp4'
+  file_type: string; // MIME type: 'image/jpeg', 'video/mp4', or 'raw/<ext>' (e.g. 'raw/cr2') for camera RAW photos
   capture_time: string;
   uploaded_at: string;
-  uploaded_by: string | null; // User ID who uploaded the photo
+  uploaded_by: string | null; // Uploader's email (matches users.email for the uploader_name JOIN and notification-exclusion logic)
   width: number | null;
   height: number | null;
   iso: number | null;
@@ -90,6 +93,7 @@ export interface StartUploadRequest {
   latitude?: number;
   longitude?: number;
   blurPlaceholder?: string;
+  fileHash?: string; // SHA-256 of the original file (images/RAW only), for duplicate detection
 }
 
 export interface UploadPartRequest {

@@ -15,6 +15,7 @@ import { useToast } from '../components/Toast';
 import { useConfirm } from '../components/ConfirmDialog';
 import { haptics } from '../utils/haptics';
 import { trackPhotoView, trackPhotoDownload, trackFavorite } from '../services/analytics';
+import CastButton from '../components/CastButton';
 import { Capacitor } from '@capacitor/core';
 import { Share } from '@capacitor/share';
 import { Filesystem, Directory } from '@capacitor/filesystem';
@@ -1827,6 +1828,14 @@ const PhotoDetail: React.FC = () => {
               <Share2 className="w-6 h-6" />
               <span className="text-[10px] font-medium">Share</span>
             </button>
+
+            <CastButton
+              getMedia={() => ({
+                type: photo?.file_type === 'video/mp4' ? 'video' : 'photo',
+                url: photo ? getOriginalUrl(slug!, photo.id, photo.file_type, photo.cache_version) : '',
+                title: photo?.original_filename,
+              })}
+            />
 
             <div className="relative">
               <button

@@ -2,6 +2,7 @@ import { Context, Next } from 'hono';
 import type { Env, User, CloudflareAccessJWT, DBUser, CollaboratorRole } from './types';
 import { jwtVerify } from 'jose';
 import { hasEventSessionAccess } from './cookies';
+import { createLogger, logger } from './logger';
 
 // Extend Hono context to include user
 type Variables = {
@@ -48,31 +49,33 @@ export async function extractUser(c: Context<{ Bindings: Env; Variables: Variabl
     }
     
     if (!jwt) {
-      console.log('No JWT found in headers or cookies.');
-      console.log('Available headers:', Array.from(c.req.raw.headers.keys()).join(', '));
-      console.log('Cookie header:', c.req.header('Cookie')?.substring(0, 100));
-      console.log('Request URL:', c.req.url);
+      const log = createLogger(c.env);
+      log.debug('No JWT found in headers or cookies.');
+      log.debug('Available headers:', Array.from(c.req.raw.headers.keys()).join(', '));
+      log.debug('Cookie header:', c.req.header('Cookie')?.substring(0, 100));
+      log.debug('Request URL:', c.req.url);
       return null;
     }
 
-    console.log('JWT found, parsing...');
-    console.log('JWT preview:', jwt.substring(0, 50) + '...');
+    const log = createLogger(c.env);
+    log.debug('JWT found, parsing...');
+    log.debug('JWT preview:', jwt.substring(0, 50) + '...');
 
     // Decode JWT (Cloudflare Access already validates it at the edge)
     const payload = parseJWT(jwt);
     
     if (!payload || !payload.sub || !payload.email) {
-      console.log('Invalid JWT payload:', payload);
+      log.debug('Invalid JWT payload:', payload);
       return null;
     }
 
     // Verify expiration
     if (payload.exp && Date.now() >= payload.exp * 1000) {
-      console.log('JWT expired');
+      log.debug('JWT expired');
       return null;
     }
 
-    console.log('User authenticated:', payload.email);
+    log.debug('User authenticated:', payload.email);
 
     // Build name from available fields
     // Google login may provide given_name/family_name instead of name
@@ -81,7 +84,7 @@ export async function extractUser(c: Context<{ Bindings: Env; Variables: Variabl
       userName = [payload.given_name, payload.family_name].filter(Boolean).join(' ');
     }
 
-    console.log('User name extracted:', userName || 'No name available');
+    log.debug('User name extracted:', userName || 'No name available');
 
     return {
       id: payload.sub,
@@ -89,7 +92,7 @@ export async function extractUser(c: Context<{ Bindings: Env; Variables: Variabl
       name: userName,
     };
   } catch (error) {
-    console.error('Error extracting user:', error);
+    logger.error('Error extracting user:', error);
     return null;
   }
 }
@@ -107,7 +110,7 @@ function parseJWT(token: string): CloudflareAccessJWT | null {
     const payload = JSON.parse(atob(parts[1]));
     return payload as CloudflareAccessJWT;
   } catch (error) {
-    console.error('Error parsing JWT:', error);
+    logger.error('Error parsing JWT:', error);
     return null;
   }
 }
@@ -118,7 +121,7 @@ function parseJWT(token: string): CloudflareAccessJWT | null {
 export async function verifyBearerToken(env: Env, token: string): Promise<User | null> {
   try {
     if (!env.JWT_SECRET) {
-      console.error('JWT_SECRET not configured');
+      logger.error('JWT_SECRET not configured');
       return null;
     }
 
@@ -126,7 +129,7 @@ export async function verifyBearerToken(env: Env, token: string): Promise<User |
     const { payload } = await jwtVerify(token, secret);
 
     if (payload.type !== 'mobile_oauth') {
-      console.log('Invalid token type:', payload.type);
+      createLogger(env).debug('Invalid token type:', payload.type);
       return null;
     }
 
@@ -136,7 +139,7 @@ export async function verifyBearerToken(env: Env, token: string): Promise<User |
       name: payload.name as string | undefined,
     };
   } catch (error) {
-    console.error('Error verifying bearer token:', error);
+    logger.error('Error verifying bearer token:', error);
     return null;
   }
 }
@@ -149,9 +152,12 @@ export async function requireAuth(c: Context<{ Bindings: Env; Variables: Variabl
   const user = await extractUser(c);
   
   if (!user) {
-    // Log for debugging
-    console.log('Authentication failed - no user found');
-    console.log('Headers:', Object.fromEntries(c.req.raw.headers.entries()));
+    // Log for debugging (suppressed in production — the global
+    // request-logging middleware in index.ts already logs the resulting
+    // 401 at WARN level regardless).
+    const log = createLogger(c.env);
+    log.debug('Authentication failed - no user found');
+    log.debug('Headers:', Object.fromEntries(c.req.raw.headers.entries()));
     return c.json({ error: 'Authentication required' }, 401);
   }
 
@@ -185,7 +191,7 @@ export async function optionalAuth(c: Context<{ Bindings: Env; Variables: Variab
  */
 async function upsertUser(db: D1Database, user: User): Promise<void> {
   try {
-    console.log('Upserting user:', { email: user.email, name: user.name });
+    logger.debug('Upserting user:', { email: user.email, name: user.name });
     
     // First check if user exists
     const existingUser = await db
@@ -195,23 +201,23 @@ async function upsertUser(db: D1Database, user: User): Promise<void> {
     
     if (!existingUser) {
       // User doesn't exist, create with name from JWT (if available)
-      console.log('Creating new user with name from JWT:', user.name);
+      logger.debug('Creating new user with name from JWT:', user.name);
       await db
         .prepare('INSERT INTO users (email, name, last_login) VALUES (?, ?, datetime(\'now\'))')
         .bind(user.email, user.name || null)
         .run();
     } else {
       // User exists - ONLY update last_login, preserve existing name
-      console.log('User exists, updating only last_login. Existing name:', existingUser.name);
+      logger.debug('User exists, updating only last_login. Existing name:', existingUser.name);
       await db
         .prepare('UPDATE users SET last_login = datetime(\'now\') WHERE email = ?')
         .bind(user.email)
         .run();
     }
     
-    console.log('Upsert successful');
+    logger.debug('Upsert successful');
   } catch (error) {
-    console.error('Error upserting user:', error);
+    logger.error('Error upserting user:', error);
   }
 }
 
@@ -286,7 +292,7 @@ export async function getCollaboratorRole(
 
     return result?.role ?? null;
   } catch (error) {
-    console.error('Error getting collaborator role:', error);
+    logger.error('Error getting collaborator role:', error);
     return null;
   }
 }
@@ -306,7 +312,7 @@ export async function getCollaboratorRoleByEventId(
 
     return result?.role ?? null;
   } catch (error) {
-    console.error('Error getting collaborator role by event id:', error);
+    logger.error('Error getting collaborator role by event id:', error);
     return null;
   }
 }
@@ -396,8 +402,9 @@ export async function checkEventAuth(
 export async function requireAdmin(c: Context<{ Bindings: Env; Variables: Variables }>, next: Next) {
   const user = await extractUser(c);
   
+  const log = createLogger(c.env);
   if (!user) {
-    console.log('Admin access denied - no user found');
+    log.debug('Admin access denied - no user found');
     return c.json({ error: 'Authentication required' }, 401);
   }
 
@@ -407,11 +414,11 @@ export async function requireAdmin(c: Context<{ Bindings: Env; Variables: Variab
 
   // Check if user is admin
   if (!isAdmin(c)) {
-    console.log('Admin access denied for user:', user.email);
+    log.debug('Admin access denied for user:', user.email);
     return c.json({ error: 'Admin access required' }, 403);
   }
 
-  console.log('Admin access granted:', user.email);
+  log.debug('Admin access granted:', user.email);
   await next();
 }
 
@@ -462,8 +469,9 @@ export function requireEventCapability(capability: EventCapability, errorMessage
 export async function requireEventViewAccess(c: Context<{ Bindings: Env; Variables: Variables }>, next: Next) {
   const user = await extractUser(c);
 
+  const log = createLogger(c.env);
   if (!user) {
-    console.log('Event view access denied - no user found');
+    log.debug('Event view access denied - no user found');
     return c.json({ error: 'Authentication required' }, 401);
   }
 
@@ -484,7 +492,7 @@ export async function requireEventViewAccess(c: Context<{ Bindings: Env; Variabl
     return;
   }
 
-  console.log('Event view access denied for user:', user.email);
+  log.debug('Event view access denied for user:', user.email);
   return c.json({ error: 'You do not have access to this event.' }, 403);
 }
 
@@ -495,8 +503,9 @@ export async function requireEventViewAccess(c: Context<{ Bindings: Env; Variabl
 export async function requireUploadPermission(c: Context<{ Bindings: Env; Variables: Variables }>, next: Next) {
   const user = await extractUser(c);
   
+  const log = createLogger(c.env);
   if (!user) {
-    console.log('Upload access denied - no user found');
+    log.debug('Upload access denied - no user found');
     return c.json({ error: 'Authentication required' }, 401);
   }
 
@@ -506,7 +515,7 @@ export async function requireUploadPermission(c: Context<{ Bindings: Env; Variab
 
   // Check if user is admin (admins can upload to any event)
   if (isAdmin(c)) {
-    console.log('Upload access granted (admin):', user.email);
+    log.debug('Upload access granted (admin):', user.email);
     await next();
     return;
   }
@@ -514,11 +523,11 @@ export async function requireUploadPermission(c: Context<{ Bindings: Env; Variab
   // Check if user has upload capability on this specific event
   const eventSlug = c.req.param('slug');
   if (eventSlug && await hasEventCapability(c.env.DB, eventSlug, user.email, 'upload')) {
-    console.log('Upload access granted (collaborator):', user.email, 'for event:', eventSlug);
+    log.debug('Upload access granted (collaborator):', user.email, 'for event:', eventSlug);
     await next();
     return;
   }
 
-  console.log('Upload access denied for user:', user.email);
+  log.debug('Upload access denied for user:', user.email);
   return c.json({ error: 'Upload permission required. You must be an admin or have upload access for this event.' }, 403);
 }

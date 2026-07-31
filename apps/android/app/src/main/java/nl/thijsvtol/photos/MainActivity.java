@@ -7,6 +7,7 @@ import com.getcapacitor.Plugin;
 import nl.thijsvtol.photos.plugins.SafDirectoryPlugin;
 import nl.thijsvtol.photos.plugins.ShareHandlerPlugin;
 import nl.thijsvtol.photos.plugins.ProgressNotificationPlugin;
+import nl.thijsvtol.photos.plugins.CastPlugin;
 
 public class MainActivity extends BridgeActivity {
     @Override
@@ -14,6 +15,7 @@ public class MainActivity extends BridgeActivity {
         registerPlugin(SafDirectoryPlugin.class);
         registerPlugin(ShareHandlerPlugin.class);
         registerPlugin(ProgressNotificationPlugin.class);
+        registerPlugin(CastPlugin.class);
         super.onCreate(savedInstanceState);
         
         android.util.Log.d("MainActivity", "onCreate completed, handling intent immediately");
@@ -47,11 +49,26 @@ public class MainActivity extends BridgeActivity {
         if ((Intent.ACTION_SEND.equals(action) || Intent.ACTION_SEND_MULTIPLE.equals(action)) 
                 && type != null 
                 && (type.startsWith("image/") || type.startsWith("video/"))) {
-            
-            // Find ShareHandlerPlugin and delegate intent processing
-            Plugin sharePlugin = getBridge().getPlugin("ShareHandler").getInstance();
+
+            // Find ShareHandlerPlugin and delegate intent processing. Guard every
+            // step — if the bridge isn't ready yet, or the plugin somehow wasn't
+            // registered/instantiated, getPlugin()/getInstance() can return null,
+            // and calling a method on that null silently crashes with an NPE
+            // (swallowing the share with no visible error to the user).
+            if (getBridge() == null) {
+                android.util.Log.e("MainActivity", "handleIntent: bridge is null, cannot deliver share intent");
+                return;
+            }
+            com.getcapacitor.PluginHandle pluginHandle = getBridge().getPlugin("ShareHandler");
+            if (pluginHandle == null) {
+                android.util.Log.e("MainActivity", "handleIntent: ShareHandler plugin handle not found");
+                return;
+            }
+            Plugin sharePlugin = pluginHandle.getInstance();
             if (sharePlugin instanceof ShareHandlerPlugin) {
                 ((ShareHandlerPlugin) sharePlugin).handleShareIntent(intent);
+            } else {
+                android.util.Log.e("MainActivity", "handleIntent: ShareHandler plugin instance missing or wrong type");
             }
         }
     }

@@ -8,6 +8,7 @@ interface ImportMetaEnv {
   readonly VITE_DOMAIN?: string;
   readonly VITE_CONTACT_EMAIL?: string;
   readonly VITE_GA_MEASUREMENT_ID?: string;
+  readonly VITE_CAST_APP_ID?: string;
 }
 
 interface ImportMeta {

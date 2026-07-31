@@ -226,12 +226,9 @@ describe('Touch Gesture Logic', () => {
       let touchStartX: number | null = null;
       let touchEndX: number | null = null;
 
-      // Simulate rapid touches
+      // Simulate rapid touches, each immediately reset (values are never read
+      // between set and reset, so only the reset assignment matters here).
       for (let i = 0; i < 5; i++) {
-        touchStartX = 100 + i * 10;
-        touchEndX = 50 + i * 10;
-        
-        // Reset logic
         touchStartX = null;
         touchEndX = null;
       }
@@ -290,7 +287,9 @@ describe('Touch Gesture Logic', () => {
 
   describe('State Transitions', () => {
     it('should transition from not zoomed to zoomed', () => {
-      let isZoomed = false;
+      // Starts undeclared (no meaningful "not zoomed" value to assert on) —
+      // only the value after the zoom-state check below is under test.
+      let isZoomed: boolean;
       const mockContainer = {
         scrollWidth: 2000,
         clientWidth: 1000,
@@ -306,7 +305,7 @@ describe('Touch Gesture Logic', () => {
     });
 
     it('should transition from zoomed to not zoomed', () => {
-      let isZoomed = true;
+      let isZoomed: boolean;
       const mockContainer = {
         scrollWidth: 1000,
         clientWidth: 1000,
@@ -322,8 +321,8 @@ describe('Touch Gesture Logic', () => {
     });
 
     it('should reset touch coordinates after gesture ends', () => {
-      let touchStartX: number | null = 100;
-      let touchEndX: number | null = 50;
+      let touchStartX: number | null;
+      let touchEndX: number | null;
 
       // Simulate touch end
       touchStartX = null;
@@ -334,7 +333,7 @@ describe('Touch Gesture Logic', () => {
     });
 
     it('should maintain pinching state during multi-finger gesture', () => {
-      let isPinching = false;
+      let isPinching: boolean;
 
       // Touch start with 2 fingers
       isPinching = true;

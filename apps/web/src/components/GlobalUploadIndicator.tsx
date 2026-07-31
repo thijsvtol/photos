@@ -158,6 +158,11 @@ const GlobalUploadIndicator: React.FC = () => {
                         <div className="bg-blue-600 h-1 rounded-full transition-all" style={{ width: `${item.progress}%` }} />
                       </div>
                     )}
+                    {item.status === 'uploading' && (
+                      <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
+                        {item.phase === 'preview' ? 'Uploading preview…' : 'Uploading…'}
+                      </p>
+                    )}
                     {item.status === 'pending' && (
                       <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">Waiting to upload…</p>
                     )}

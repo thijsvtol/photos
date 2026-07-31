@@ -51,7 +51,10 @@ function createFakeEnv(photos: FakePhoto[]): { DB: any; PHOTOS_BUCKET: any } {
             const [id, eventId, originalFilename, file_type] = boundArgs as [
               string, number, string, string
             ];
-            const previewComplete = boundArgs[boundArgs.length - 1] as number;
+            // Bind order (see routes/admin/uploads.ts's INSERT): ... blurPlaceholder,
+            // initialPreviewComplete, fileHash — i.e. previewComplete is
+            // second-to-last, file_hash is last.
+            const previewComplete = boundArgs[boundArgs.length - 2] as number;
             const existing = photos.find(p => p.id === id);
             if (!existing) {
               photos.push({ id, eventId, originalFilename, file_type, upload_complete: 0, preview_complete: previewComplete });

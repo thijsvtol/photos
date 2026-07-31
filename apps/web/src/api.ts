@@ -253,7 +253,8 @@ export const startUpload = async (
   longitude?: number,
   blurPlaceholder?: string,
   isPreview: boolean = false,
-  fileType?: string
+  fileType?: string,
+  fileHash?: string
 ): Promise<{ uploadId: string; key: string }> => {
   const response = await api.post(
     `/admin/events/${slug}/uploads/start`,
@@ -262,7 +263,7 @@ export const startUpload = async (
       iso, aperture, shutterSpeed, focalLength,
       cameraMake, cameraModel, lensModel,
       latitude, longitude, blurPlaceholder,
-      isPreview, fileType
+      isPreview, fileType, fileHash
     },
     { headers: getAdminHeaders() }
   );
@@ -409,7 +410,11 @@ export const getPreviewUrl = (slug: string, photoId: string, fileType?: string, 
 
 export const getOriginalUrl = (slug: string, photoId: string, fileType?: string, cacheVersion?: number): string => {
   const isVideo = fileType === 'video/mp4';
-  const extension = isVideo ? 'mp4' : 'jpg';
+  // RAW originals keep their real extension (e.g. 'raw/cr2' -> 'cr2') — the
+  // worker stores/serves them as-is since browsers can't decode RAW anyway;
+  // only the preview (always .jpg) is meant for in-app display.
+  const isRaw = !!fileType && fileType.startsWith('raw/');
+  const extension = isVideo ? 'mp4' : isRaw ? fileType!.slice('raw/'.length) : 'jpg';
   const relativePath = `/media/${slug}/original/${photoId}.${extension}`;
   let pathWithVersion = cacheVersion !== undefined ? `${relativePath}?v=${cacheVersion}` : relativePath;
   
@@ -682,34 +687,27 @@ export const downloadZip = async (zipBlob: Blob, filename: string): Promise<void
 };
 
 export const setPhotoFeatured = async (photoId: string, isFeatured: boolean): Promise<void> => {
-  const response = await fetch(`/api/admin/photos/${photoId}/featured`, {
-    method: 'PUT',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ isFeatured }),
-    credentials: 'include',
+  await api.put(`/admin/photos/${photoId}/featured`, { isFeatured }, {
+    headers: getAdminHeaders(),
   });
-  if (!response.ok) throw new Error('Failed to update featured status');
 };
 
 export const setEventLocation = async (slug: string, latitude: number, longitude: number): Promise<{ updated_count: number }> => {
-  const response = await fetch(`/api/admin/events/${slug}/location`, {
-    method: 'PUT',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ latitude, longitude }),
-    credentials: 'include',
-  });
-  if (!response.ok) throw new Error('Failed to set event location');
-  return response.json();
+  const response = await api.put<{ updated_count: number }>(
+    `/admin/events/${slug}/location`,
+    { latitude, longitude },
+    { headers: getAdminHeaders() }
+  );
+  return response.data;
 };
 
 export const geocodeEventPhotos = async (slug: string): Promise<{ updated: number; total: number }> => {
-  const response = await fetch(`/api/admin/events/${slug}/geocode-photos`, {
-    method: 'POST',
-    headers: getAdminHeaders(),
-    credentials: 'include',
-  });
-  if (!response.ok) throw new Error('Failed to geocode photos');
-  return response.json();
+  const response = await api.post<{ updated: number; total: number }>(
+    `/admin/events/${slug}/geocode-photos`,
+    undefined,
+    { headers: getAdminHeaders() }
+  );
+  return response.data;
 };
 
 // Admin Stats API

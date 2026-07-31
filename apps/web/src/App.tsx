@@ -29,6 +29,7 @@ const InviteAccept = lazy(() => import('./pages/InviteAccept'));
 const PrivacyPolicy = lazy(() => import('./pages/PrivacyPolicy'));
 const ShareUpload = lazy(() => import('./pages/ShareUpload'));
 const Timeline = lazy(() => import('./pages/Timeline'));
+const CastReceiver = lazy(() => import('./pages/CastReceiver'));
 
 // Loading component
 const LoadingFallback = () => (
@@ -139,36 +140,47 @@ const ShareIntentHandler = () => {
     }
     
     if (isNative) {
-      // Longer delay to ensure everything is ready
-      setTimeout(async () => {
+      // A single fixed delay before checking for a buffered share is a guess:
+      // too short and the native bridge/plugin may not be ready yet on a slow
+      // cold start (share silently missed), too long and a fast device just
+      // wastes time before a share the user is waiting on appears. Instead,
+      // poll at increasing intervals and stop as soon as either a pending
+      // share is found or we've exhausted the attempts — this adapts to
+      // whatever the device's actual boot speed turns out to be.
+      const RETRY_DELAYS_MS = [300, 800, 1500, 3000, 5000];
+      let cancelled = false;
+
+      const checkOnce = async (attempt: number): Promise<void> => {
+        if (cancelled) return;
         try {
           const { registerPlugin } = await import('@capacitor/core');
-          
+
           interface ShareHandlerPlugin {
             debugLog(options: { message: string }): Promise<void>;
             checkPendingShare(): Promise<{ hasPending: boolean; files?: Array<{ name: string; path: string; uri: string; mimeType: string; size: number }> }>;
           }
-          
+
           const ShareHandler = registerPlugin<ShareHandlerPlugin>('ShareHandler');
-          await ShareHandler.debugLog({ message: '[JS] ShareIntentHandler mounted, checking for buffered share...' });
-          
+          await ShareHandler.debugLog({ message: `[JS] ShareIntentHandler checking for buffered share (attempt ${attempt + 1}/${RETRY_DELAYS_MS.length + 1})...` });
+
           const result = await ShareHandler.checkPendingShare();
           await ShareHandler.debugLog({ message: '[JS] checkPendingShare returned, hasPending: ' + result.hasPending });
-          
+
           if (result.hasPending && result.files && result.files.length > 0) {
             await ShareHandler.debugLog({ message: '[JS] Found ' + result.files.length + ' buffered files, navigating to share-upload' });
             // Store in sessionStorage and trigger navigation
             sessionStorage.setItem('pendingShare', JSON.stringify(result.files));
-            
+
             if (location.pathname !== '/share-upload') {
               navigate('/share-upload', {
                 state: { sharedFiles: result.files },
                 replace: true
               });
             }
-          } else {
-            await ShareHandler.debugLog({ message: '[JS] No buffered share data found' });
+            return; // Found it — stop retrying.
           }
+
+          await ShareHandler.debugLog({ message: '[JS] No buffered share data found' });
         } catch (error) {
           console.error('[ShareIntentHandler] Error:', error);
           // Try to log error natively
@@ -183,7 +195,18 @@ const ShareIntentHandler = () => {
             // Silent fail
           }
         }
-      }, 5000); // Wait 5 seconds to ensure WebView fully loads
+
+        // Schedule the next attempt (if any remain and nothing was found).
+        if (attempt < RETRY_DELAYS_MS.length && !cancelled) {
+          setTimeout(() => checkOnce(attempt + 1), RETRY_DELAYS_MS[attempt]);
+        }
+      };
+
+      // Kick off the first (fast) attempt immediately rather than waiting for
+      // the first delay — most of the time the bridge is already ready.
+      checkOnce(0);
+
+      return () => { cancelled = true; };
     }
   }, []); // Run once on mount
 
@@ -251,6 +274,7 @@ function App() {
                       <Route path="/privacy" element={<PrivacyPolicy />} />
                       <Route path="/share-upload" element={<ShareUpload />} />
                       <Route path="/timeline" element={<Timeline />} />
+                      <Route path="/cast-receiver" element={<CastReceiver />} />
                     </Routes>
                     </Suspense>
                   </PullToRefresh>

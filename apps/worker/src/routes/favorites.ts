@@ -2,6 +2,7 @@ import { Hono } from 'hono';
 import type { Env, Photo, UserFavorite } from '../types';
 import { requireAuth, optionalAuth, getUser, isAdmin } from '../auth';
 import { requireFeature } from '../features';
+import { logger } from '../logger';
 
 const app = new Hono<{ Bindings: Env }>();
 
@@ -44,7 +45,7 @@ app.get('/api/favorites', requireAuth, async (c) => {
       count: favorites.results?.length || 0
     });
   } catch (error) {
-    console.error('Error fetching favorites:', error);
+    logger.error('Error fetching favorites:', error);
     return c.json({ error: 'Failed to fetch favorites' }, 500);
   }
 });
@@ -77,7 +78,7 @@ app.get('/api/favorites/ids', requireAuth, async (c) => {
 
     return c.json({ favorites: favoriteIds });
   } catch (error) {
-    console.error('Error fetching favorite IDs:', error);
+    logger.error('Error fetching favorite IDs:', error);
     return c.json({ error: 'Failed to fetch favorites' }, 500);
   }
 });
@@ -129,7 +130,7 @@ app.post('/api/favorites/:photoId', requireAuth, async (c) => {
 
     return c.json({ success: true, message: 'Added to favorites' });
   } catch (error) {
-    console.error('Error adding favorite:', error);
+    logger.error('Error adding favorite:', error);
     return c.json({ error: 'Failed to add favorite' }, 500);
   }
 });
@@ -167,7 +168,7 @@ app.delete('/api/favorites/:photoId', requireAuth, async (c) => {
 
     return c.json({ success: true, message: 'Removed from favorites' });
   } catch (error) {
-    console.error('Error removing favorite:', error);
+    logger.error('Error removing favorite:', error);
     return c.json({ error: 'Failed to remove favorite' }, 500);
   }
 });
@@ -178,16 +179,16 @@ app.delete('/api/favorites/:photoId', requireAuth, async (c) => {
  */
 app.get('/api/user/profile', optionalAuth, async (c) => {
   const user = getUser(c);
-  console.log('[GET /api/user/profile] User from context:', user);
+  logger.debug('[GET /api/user/profile] User from context:', user);
   
   // Return null if not authenticated (don't force login)
   if (!user) {
-    console.log('[GET /api/user/profile] No user in context, returning null');
+    logger.debug('[GET /api/user/profile] No user in context, returning null');
     return c.json({ user: null });
   }
 
   try {
-    console.log('[GET /api/user/profile] Querying DB for user:', user.email);
+    logger.debug('[GET /api/user/profile] Querying DB for user:', user.email);
     
     // First check if user exists
     const userExists = await c.env.DB
@@ -195,7 +196,7 @@ app.get('/api/user/profile', optionalAuth, async (c) => {
       .bind(user.email)
       .first();
     
-    console.log('[GET /api/user/profile] Direct user query result:', userExists);
+    logger.debug('[GET /api/user/profile] Direct user query result:', userExists);
     
     // Get user with favorite count
     const dbUser = await c.env.DB
@@ -214,8 +215,8 @@ app.get('/api/user/profile', optionalAuth, async (c) => {
       .bind(user.email)
       .first();
 
-    console.log('[GET /api/user/profile] Full DB query result:', dbUser);
-    console.log('[GET /api/user/profile] Name from DB:', dbUser?.name);
+    logger.debug('[GET /api/user/profile] Full DB query result:', dbUser);
+    logger.debug('[GET /api/user/profile] Name from DB:', dbUser?.name);
     
     // Always return user info if authenticated, even when no DB row exists yet
     const userResponse = dbUser 
@@ -224,7 +225,7 @@ app.get('/api/user/profile', optionalAuth, async (c) => {
     
     return c.json({ user: userResponse });
   } catch (error) {
-    console.error('[GET /api/user/profile] Error fetching user profile:', error);
+    logger.error('[GET /api/user/profile] Error fetching user profile:', error);
     return c.json({ error: 'Failed to fetch profile' }, 500);
   }
 });
@@ -248,7 +249,7 @@ app.put('/api/user/profile', requireAuth, async (c) => {
 
     const name = body.name.trim();
 
-    console.log('[PUT /api/user/profile] Updating user:', user.email, 'with name:', name);
+    logger.debug('[PUT /api/user/profile] Updating user:', user.email, 'with name:', name);
 
     // First, ensure user exists in database
     const existingUser = await c.env.DB
@@ -256,26 +257,26 @@ app.put('/api/user/profile', requireAuth, async (c) => {
       .bind(user.email)
       .first();
 
-    console.log('[PUT /api/user/profile] Existing user in DB:', existingUser);
+    logger.debug('[PUT /api/user/profile] Existing user in DB:', existingUser);
 
     let updateResult;
     if (!existingUser) {
-      console.log('[PUT /api/user/profile] User does not exist, creating...');
+      logger.debug('[PUT /api/user/profile] User does not exist, creating...');
       // Create user if doesn't exist
       updateResult = await c.env.DB
         .prepare('INSERT INTO users (email, name) VALUES (?, ?)')
         .bind(user.email, name)
         .run();
-      console.log('[PUT /api/user/profile] INSERT result:', updateResult);
+      logger.debug('[PUT /api/user/profile] INSERT result:', updateResult);
     } else {
-      console.log('[PUT /api/user/profile] User exists, updating...');
+      logger.debug('[PUT /api/user/profile] User exists, updating...');
       // Update user name
       updateResult = await c.env.DB
         .prepare('UPDATE users SET name = ? WHERE email = ?')
         .bind(name, user.email)
         .run();
-      console.log('[PUT /api/user/profile] UPDATE result:', updateResult);
-      console.log('[PUT /api/user/profile] Rows affected:', updateResult.meta?.changes);
+      logger.debug('[PUT /api/user/profile] UPDATE result:', updateResult);
+      logger.debug('[PUT /api/user/profile] Rows affected:', updateResult.meta?.changes);
     }
 
     // Verify the update worked
@@ -284,8 +285,8 @@ app.put('/api/user/profile', requireAuth, async (c) => {
       .bind(user.email)
       .first();
     
-    console.log('[PUT /api/user/profile] Verification query result:', verifyUser);
-    console.log('[PUT /api/user/profile] Name after update:', verifyUser?.name);
+    logger.debug('[PUT /api/user/profile] Verification query result:', verifyUser);
+    logger.debug('[PUT /api/user/profile] Name after update:', verifyUser?.name);
 
     // Fetch updated user with favorites count
     const updatedUser = await c.env.DB
@@ -304,14 +305,14 @@ app.put('/api/user/profile', requireAuth, async (c) => {
       .bind(user.email)
       .first();
 
-    console.log('[PUT /api/user/profile] Updated user from DB:', updatedUser);
-    console.log('[PUT /api/user/profile] Name from DB:', updatedUser?.name);
+    logger.debug('[PUT /api/user/profile] Updated user from DB:', updatedUser);
+    logger.debug('[PUT /api/user/profile] Name from DB:', updatedUser?.name);
 
     return c.json({ 
       user: updatedUser ? { ...updatedUser, id: user.id, isAdmin: isAdmin(c) } : null 
     });
   } catch (error) {
-    console.error('Error updating user profile:', error);
+    logger.error('Error updating user profile:', error);
     return c.json({ error: 'Failed to update profile' }, 500);
   }
 });
@@ -327,7 +328,7 @@ app.get('/api/user/collaborations', requireAuth, async (c) => {
   }
 
   try {
-    console.log('[GET /api/user/collaborations] Fetching for user:', user.email);
+    logger.debug('[GET /api/user/collaborations] Fetching for user:', user.email);
     const collaborations = await c.env.DB
       .prepare(`
         SELECT 
@@ -343,7 +344,7 @@ app.get('/api/user/collaborations', requireAuth, async (c) => {
       .bind(user.email)
       .all();
 
-    console.log('[GET /api/user/collaborations] Found', collaborations.results?.length || 0, 'collaborations');
+    logger.debug('[GET /api/user/collaborations] Found', collaborations.results?.length || 0, 'collaborations');
     
     return c.json({ 
       collaborations: (collaborations.results || []).map(collab => ({
@@ -352,7 +353,7 @@ app.get('/api/user/collaborations', requireAuth, async (c) => {
       }))
     });
   } catch (error) {
-    console.error('[GET /api/user/collaborations] Error:', error);
+    logger.error('[GET /api/user/collaborations] Error:', error);
     return c.json({ error: 'Failed to fetch collaborations' }, 500);
   }
 });

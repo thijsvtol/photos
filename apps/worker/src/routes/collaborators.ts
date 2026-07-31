@@ -3,6 +3,7 @@ import type { Env, InviteCollaboratorRequest, CollaboratorWithUser, User, Collab
 import { requireAdmin, extractUser, requireEventCapability, isAdmin, getCollaboratorRole, getCollaboratorRoleByEventId } from '../auth';
 import { requireFeature } from '../features';
 import { getConfig } from '../config';
+import { logger } from '../logger';
 
 type Variables = {
   user: User;
@@ -68,7 +69,7 @@ app.get('/api/events/:slug/collaborators', async (c) => {
     
     return c.json({ collaborators: collaborators.results || [] });
   } catch (error) {
-    console.error('Error fetching collaborators:', error);
+    logger.error('Error fetching collaborators:', error);
     return c.json({ error: 'Failed to fetch collaborators' }, 500);
   }
 });
@@ -79,22 +80,22 @@ app.get('/api/events/:slug/collaborators', async (c) => {
  */
 app.post('/api/events/:slug/collaborators', requireEventCapability('invite_create', 'Invite permission required'), async (c) => {
   const slug = c.req.param('slug')!;
-  console.log('[Invite Collaborator] Starting for event:', slug);
+  logger.debug('[Invite Collaborator] Starting for event:', slug);
   
   const body = await c.req.json<InviteCollaboratorRequest>();
-  console.log('[Invite Collaborator] Request body:', body);
+  logger.debug('[Invite Collaborator] Request body:', body);
   
   if (!body.email || !body.email.includes('@')) {
-    console.log('[Invite Collaborator] Invalid email:', body.email);
+    logger.debug('[Invite Collaborator] Invalid email:', body.email);
     return c.json({ error: 'Valid email is required' }, 400);
   }
   
   const adminUser = await extractUser(c);
   if (!adminUser) {
-    console.log('[Invite Collaborator] No admin user found');
+    logger.debug('[Invite Collaborator] No admin user found');
     return c.json({ error: 'Unauthorized' }, 401);
   }
-  console.log('[Invite Collaborator] Admin user:', adminUser.email);
+  logger.debug('[Invite Collaborator] Admin user:', adminUser.email);
   
   const requestedRole = normalizeRole(body.role) || 'uploader';
 
@@ -113,10 +114,10 @@ app.post('/api/events/:slug/collaborators', requireEventCapability('invite_creat
     ).bind(slug).first<{ id: number; name: string }>();
     
     if (!event) {
-      console.log('[Invite Collaborator] Event not found:', slug);
+      logger.debug('[Invite Collaborator] Event not found:', slug);
       return c.json({ error: 'Event not found' }, 404);
     }
-    console.log('[Invite Collaborator] Event found:', event.id, event.name);
+    logger.debug('[Invite Collaborator] Event found:', event.id, event.name);
     
     // Check if user exists, create if not
     let user = await c.env.DB.prepare(
@@ -124,7 +125,7 @@ app.post('/api/events/:slug/collaborators', requireEventCapability('invite_creat
     ).bind(body.email).first<{ email: string; name: string | null }>();
     
     if (!user) {
-      console.log('[Invite Collaborator] User not found, creating new user');
+      logger.debug('[Invite Collaborator] User not found, creating new user');
       // Normalize to lowercase so this matches the casing extracted from the
       // user's own auth session when they eventually log in (avoids a
       // mismatch that would silently deny them permissions, e.g. a 403 on
@@ -135,11 +136,11 @@ app.post('/api/events/:slug/collaborators', requireEventCapability('invite_creat
       const createResult = await c.env.DB.prepare(
         'INSERT INTO users (email, name) VALUES (?, ?)'
       ).bind(normalizedEmail, null).run();
-      console.log('[Invite Collaborator] User creation result:', createResult.success);
+      logger.debug('[Invite Collaborator] User creation result:', createResult.success);
       
       user = { email: normalizedEmail, name: null };
     } else {
-      console.log('[Invite Collaborator] User exists:', user.email);
+      logger.debug('[Invite Collaborator] User exists:', user.email);
     }
     
     // Check if collaborator relationship already exists
@@ -148,20 +149,20 @@ app.post('/api/events/:slug/collaborators', requireEventCapability('invite_creat
     ).bind(event.id, user.email).first();
     
     if (existing) {
-      console.log('[Invite Collaborator] Collaborator already exists');
+      logger.debug('[Invite Collaborator] Collaborator already exists');
       return c.json({ error: 'User is already a collaborator' }, 400);
     }
     
     // Create collaborator relationship
-    console.log('[Invite Collaborator] Creating collaborator relationship');
+    logger.debug('[Invite Collaborator] Creating collaborator relationship');
     const insertResult = await c.env.DB.prepare(`
       INSERT INTO event_collaborators (event_id, user_email, role)
       VALUES (?, ?, ?)
     `).bind(event.id, user.email, requestedRole).run();
-    console.log('[Invite Collaborator] Insert result:', insertResult.success, insertResult.meta);
+    logger.debug('[Invite Collaborator] Insert result:', insertResult.success, insertResult.meta);
     
     if (!insertResult.success) {
-      console.error('[Invite Collaborator] Failed to insert collaborator');
+      logger.error('[Invite Collaborator] Failed to insert collaborator');
       return c.json({ error: 'Failed to create collaborator relationship' }, 500);
     }
     
@@ -175,7 +176,7 @@ app.post('/api/events/:slug/collaborators', requireEventCapability('invite_creat
     });
     
     // Send invitation email
-    console.log('[Invite Collaborator] Sending invitation email to:', body.email);
+    logger.debug('[Invite Collaborator] Sending invitation email to:', body.email);
     await sendInvitationEmail(c.env, {
       to: body.email,
       eventName: event.name,
@@ -183,7 +184,7 @@ app.post('/api/events/:slug/collaborators', requireEventCapability('invite_creat
       invitedBy: adminUser.name || adminUser.email
     });
     
-    console.log('[Invite Collaborator] Successfully completed');
+    logger.debug('[Invite Collaborator] Successfully completed');
     return c.json({ 
       message: 'Collaborator invited successfully',
       collaborator: {
@@ -194,7 +195,7 @@ app.post('/api/events/:slug/collaborators', requireEventCapability('invite_creat
       }
     });
   } catch (error) {
-    console.error('[Invite Collaborator] Error:', error);
+    logger.error('[Invite Collaborator] Error:', error);
     return c.json({ error: 'Failed to invite collaborator' }, 500);
   }
 });
@@ -249,7 +250,7 @@ app.delete('/api/events/:slug/collaborators/:userEmail', requireEventCapability(
     
     return c.json({ message: 'Collaborator removed successfully' });
   } catch (error) {
-    console.error('Error removing collaborator:', error);
+    logger.error('Error removing collaborator:', error);
     return c.json({ error: 'Failed to remove collaborator' }, 500);
   }
 });
@@ -299,7 +300,7 @@ app.put('/api/events/:slug/collaborators/:userEmail/role', requireEventCapabilit
 
     return c.json({ success: true, role: nextRole });
   } catch (error) {
-    console.error('Error updating collaborator role:', error);
+    logger.error('Error updating collaborator role:', error);
     return c.json({ error: 'Failed to update collaborator role' }, 500);
   }
 });
@@ -330,7 +331,7 @@ app.get('/api/user/collaborations', async (c) => {
     
     return c.json({ events: collaborations.results || [] });
   } catch (error) {
-    console.error('Error fetching collaborations:', error);
+    logger.error('Error fetching collaborations:', error);
     return c.json({ error: 'Failed to fetch collaborations' }, 500);
   }
 });
@@ -357,7 +358,7 @@ app.get('/api/users/search', requireAdmin, async (c) => {
     
     return c.json({ users: users.results || [] });
   } catch (error) {
-    console.error('Error searching users:', error);
+    logger.error('Error searching users:', error);
     return c.json({ error: 'Failed to search users' }, 500);
   }
 });
@@ -409,7 +410,7 @@ app.get('/api/events/:slug/collaboration-history', requireAdmin, async (c) => {
     
     return c.json({ history: parsedHistory });
   } catch (error) {
-    console.error('Error fetching collaboration history:', error);
+    logger.error('Error fetching collaboration history:', error);
     return c.json({ error: 'Failed to fetch history' }, 500);
   }
 });
@@ -439,7 +440,7 @@ export async function logCollaborationAction(
       params.metadata ? JSON.stringify(params.metadata) : null
     ).run();
   } catch (error) {
-    console.error('[Collaboration History] Error logging action:', error);
+    logger.error('[Collaboration History] Error logging action:', error);
     // Don't throw - logging failures shouldn't break the main flow
   }
 }
@@ -455,7 +456,7 @@ async function sendInvitationEmail(env: Env, params: {
 }) {
   // Check if email service is configured
   if (!env.MAILGUN_API_KEY || !env.MAILGUN_DOMAIN) {
-    console.warn('Mailgun not configured (missing MAILGUN_API_KEY or MAILGUN_DOMAIN), skipping invitation email');
+    logger.warn('Mailgun not configured (missing MAILGUN_API_KEY or MAILGUN_DOMAIN), skipping invitation email');
     return;
   }
   
@@ -515,13 +516,13 @@ async function sendInvitationEmail(env: Env, params: {
     
     if (!response.ok) {
       const errorText = await response.text();
-      console.error('[Mailgun] Failed to send email:', response.status, errorText);
+      logger.error('[Mailgun] Failed to send email:', response.status, errorText);
     } else {
       const result: any = await response.json();
-      console.log('[Mailgun] Email sent successfully to:', params.to, 'ID:', result.id);
+      logger.debug('[Mailgun] Email sent successfully to:', params.to, 'ID:', result.id);
     }
   } catch (error: any) {
-    console.error('[Mailgun] Error sending invitation email:', error);
+    logger.error('[Mailgun] Error sending invitation email:', error);
     // Don't fail the request if email fails
   }
 }
@@ -540,7 +541,7 @@ export async function sendUploadNotification(env: Env, params: {
 }) {
   // Check if email service is configured
   if (!env.MAILGUN_API_KEY || !env.MAILGUN_DOMAIN) {
-    console.warn('Mailgun not configured (missing MAILGUN_API_KEY or MAILGUN_DOMAIN), skipping upload notification');
+    logger.warn('Mailgun not configured (missing MAILGUN_API_KEY or MAILGUN_DOMAIN), skipping upload notification');
     return;
   }
   
@@ -605,13 +606,13 @@ export async function sendUploadNotification(env: Env, params: {
     
     if (!response.ok) {
       const errorText = await response.text();
-      console.error('[Mailgun] Failed to send upload notification:', response.status, errorText);
+      logger.error('[Mailgun] Failed to send upload notification:', response.status, errorText);
     } else {
       const result: any = await response.json();
-      console.log('[Mailgun] Upload notification sent to:', params.adminEmail, 'ID:', result.id);
+      logger.debug('[Mailgun] Upload notification sent to:', params.adminEmail, 'ID:', result.id);
     }
   } catch (error: any) {
-    console.error('[Mailgun] Error sending upload notification:', error);
+    logger.error('[Mailgun] Error sending upload notification:', error);
     // Don't fail the request if email fails
   }
 }
@@ -683,7 +684,7 @@ app.post('/api/events/:slug/invite-links', requireEventCapability('invite_create
     
     return c.json({ inviteLink });
   } catch (error) {
-    console.error('Error creating invite link:', error);
+    logger.error('Error creating invite link:', error);
     return c.json({ error: 'Failed to create invite link' }, 500);
   }
 });
@@ -721,7 +722,7 @@ app.get('/api/events/:slug/invite-links', requireEventCapability('invite_create'
     
     return c.json({ inviteLinks: links.results || [] });
   } catch (error) {
-    console.error('Error fetching invite links:', error);
+    logger.error('Error fetching invite links:', error);
     return c.json({ error: 'Failed to fetch invite links' }, 500);
   }
 });
@@ -764,7 +765,7 @@ app.delete('/api/events/:slug/invite-links/:token', requireEventCapability('invi
     
     return c.json({ success: true });
   } catch (error) {
-    console.error('Error revoking invite link:', error);
+    logger.error('Error revoking invite link:', error);
     return c.json({ error: 'Failed to revoke invite link' }, 500);
   }
 });
@@ -838,7 +839,7 @@ app.post('/api/invite/:token/accept', async (c) => {
       eventName: inviteLink.event_name
     });
   } catch (error) {
-    console.error('Error accepting invite:', error);
+    logger.error('Error accepting invite:', error);
     return c.json({ error: 'Failed to accept invite' }, 500);
   }
 });
