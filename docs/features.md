@@ -9,6 +9,7 @@ Comprehensive guide to all features in the photo sharing application.
 Organize photos into discrete events with rich metadata.
 
 **Key Capabilities:**
+
 - Create unlimited events with custom slugs
 - Set event date, location, and description
 - GPS coordinates with automatic reverse geocoding
@@ -17,12 +18,14 @@ Organize photos into discrete events with rich metadata.
 - Tag events for easy discovery
 
 **Admin Dashboard:**
+
 - Create/edit/delete events
 - Bulk photo upload
 - Event analytics
 - Collaborator management
 
 **Use Cases:**
+
 - Wedding photo galleries
 - Birthday party albums
 - Vacation photo collections
@@ -36,6 +39,7 @@ Organize photos into discrete events with rich metadata.
 Advanced photo upload system with automatic processing.
 
 **Upload Features:**
+
 - Drag-and-drop interface
 - Multi-file selection
 - Upload queue with progress tracking
@@ -46,20 +50,24 @@ Advanced photo upload system with automatic processing.
 - Blurhash generation for placeholders
 
 **Image Processing:**
-- **Original**: Full resolution preserved
-- **Preview**: Max 1200px for web viewing
-- **Instagram**: 1080x1080 square crop
-- Automatic format optimization
-- Progressive JPEG encoding
+
+- **Original**: Full resolution preserved (including RAW files, kept in their native format)
+- **Preview**: Client-generated JPEG, max 1920px on the longest side, 85% quality
+- No server-side watermarking, resizing, or Instagram-style square crop is applied — both
+  derivatives above are produced entirely client-side at upload time (see
+  [image-processing.md](./image-processing.md))
 
 **Supported Formats:**
+
 - JPEG (.jpg, .jpeg)
 - PNG (.png)
 - HEIC (.heic) - iOS photos
 - WebP (.webp)
-- Videos (.mp4, .mov) - stored but not transcoded
+- RAW formats (.cr2, .nef, .arw, .dng, and other libraw-supported formats) - decoded client-side via `libraw-wasm` to generate a JPEG preview; the original RAW file is preserved as-is
+- Videos (.mp4, .mov) - stored and served as uploaded; no server-side transcoding
 
 **Metadata Preserved:**
+
 - Camera make/model
 - ISO, aperture, shutter speed
 - Focal length
@@ -69,11 +77,62 @@ Advanced photo upload system with automatic processing.
 
 ---
 
+### ✂️ Image & Video Editing
+
+Edit photos and videos directly in the browser (and in the native Android app) before or after
+upload, without needing external software.
+
+**Image Editing** (powered by `react-filerobot-image-editor` + `react-konva`):
+
+- Crop and rotate
+- Curves and levels adjustments
+- Save back to the event, replacing the original and/or preview in R2
+
+**Video Editing** (powered by `@ffmpeg/ffmpeg`, running fully client-side as WASM):
+
+- Trim start/end
+- Crop and rotate
+- Playback speed adjustment
+- Single-threaded FFmpeg core is used, so no cross-origin isolation (COOP/COEP) headers are required
+
+**Native Considerations:**
+
+- On native Android, media is fetched as a same-origin blob before editing to avoid canvas-tainting
+  issues with cross-origin image loads in the WebView
+- Multipart `FormData` uploads are unreliable in the Android WebView, so the "replace edited photo"
+  endpoint accepts raw `application/octet-stream` bodies on native (with a legacy multipart fallback
+  for web)
+
+---
+
+### 📡 Casting & Offline
+
+**Chromecast:**
+
+- Cast photos and videos from the web app to a Chromecast-enabled TV
+
+**Offline Awareness:**
+
+- Offline banner indicates when the device has no network connectivity
+- Pull-to-refresh gesture across the app (disabled on routes with conflicting gestures, e.g. the
+  photo detail swipe view)
+- Native background upload queue continues syncing when connectivity returns
+
+---
+
+### 🕓 Timeline View
+
+A chronological, infinite-scroll view (`/timeline`) across all events the current user can access,
+mixing photos and videos by capture/upload time rather than browsing event-by-event.
+
+---
+
 ### 🗺️ Location & Geocoding
 
 Automatic location detection from GPS data.
 
 **Features:**
+
 - Extract GPS coordinates from EXIF
 - Reverse geocoding to readable addresses
 - Display location on maps
@@ -81,18 +140,21 @@ Automatic location detection from GPS data.
 - Privacy: optional GPS data removal
 
 **Location Hierarchy:**
+
 - Country
 - State/Province
 - City
 - Custom location name
 
 **Data Source:**
+
 - OpenStreetMap Nominatim API
 - No API key required
 - Respects rate limits
 - Fallback to manual entry
 
 **Manual Override:**
+
 - Edit location after upload
 - Add location to photos without GPS
 - Batch location updates
@@ -104,6 +166,7 @@ Automatic location detection from GPS data.
 Multi-layer security with OAuth and role-based access.
 
 **Authentication Methods:**
+
 - Cloudflare Access (OAuth)
 - Supported providers: Google, GitHub, Microsoft, etc.
 - JWT token for API access
@@ -112,6 +175,7 @@ Multi-layer security with OAuth and role-based access.
 **Permission Levels:**
 
 **Admin:**
+
 - Full access to all features
 - Create/edit/delete events
 - Manage collaborators
@@ -119,21 +183,25 @@ Multi-layer security with OAuth and role-based access.
 - Configure settings
 
 **Collaborator:**
+
 - Upload to assigned events
 - View collaborator-only events
 - Receive notifications
 
 **Authenticated User:**
+
 - View public events
 - Add favorites
 - Access password-protected events with password
 
 **Public (Unauthenticated):**
+
 - View public events only
 - No favorites or uploads
 - Password-protected access with password
 
 **Email-Based Admin:**
+
 - Admin status determined by `ADMIN_EMAILS` env var
 - Comma-separated email list
 - No database management needed
@@ -148,36 +216,40 @@ Invite others to upload photos to your events.
 
 **Invitation Methods:**
 
-**1. Email Invitation**
-- Send invitation to specific email
-- Personalized email with event details
-- One-click acceptance
-- Automatic collaborator status
+1. **Email Invitation**:
+   - Send invitation to specific email
+   - Personalized email with event details
+   - One-click acceptance
+   - Automatic collaborator status
 
-**2. Shareable Invite Links**
-- Generate public invite URL
-- Set expiration date (1-30 days)
-- Limit number of uses
-- Single-use or multi-use
-- Revoke anytime
+2. **Shareable Invite Links**:
+   - Generate public invite URL
+   - Set expiration date (1-30 days)
+   - Limit number of uses
+   - Single-use or multi-use
+   - Revoke anytime
 
 **Collaborator Features:**
+
 - Upload photos to event
 - View event details
 - Receive upload notifications
 - See other collaborators
 
 **Notification System:**
+
 - Email when invited
 - Email when someone uploads (if collaborator)
 - Configurable per-event
 
 **History Tracking:**
+
 - Audit log of collaborator actions
 - Track invitation/acceptance dates
 - Monitor upload activity
 
 **Use Cases:**
+
 - Wedding photographers + family contributions
 - Event attendees sharing photos
 - Team photo collections
@@ -190,6 +262,7 @@ Invite others to upload photos to your events.
 Save favorite photos for quick access.
 
 **Features:**
+
 - One-click favorite/unfavorite
 - Personal favorites (not visible to others)
 - Filter by favorites in gallery
@@ -197,11 +270,13 @@ Save favorite photos for quick access.
 - Cross-event favorites
 
 **Analytics:**
+
 - Most favorited photos (admin)
 - Per-user favorite counts
 - Trending photos
 
 **Implementation:**
+
 - Real-time updates
 - Optimistic UI updates
 - Per-user storage
@@ -213,6 +288,7 @@ Save favorite photos for quick access.
 Flexible photo viewing with advanced controls.
 
 **Grid View:**
+
 - Responsive masonry layout
 - Infinite scroll
 - Lazy loading
@@ -220,6 +296,7 @@ Flexible photo viewing with advanced controls.
 - Hover previews
 
 **Lightbox View:**
+
 - Full-screen photo viewing
 - Keyboard navigation (← →)
 - Swipe gestures (mobile)
@@ -229,6 +306,7 @@ Flexible photo viewing with advanced controls.
 - Download original
 
 **Sorting Options:**
+
 - Date taken (newest/oldest)
 - Upload date
 - Filename
@@ -236,12 +314,14 @@ Flexible photo viewing with advanced controls.
 - Favorites first
 
 **Filtering:**
+
 - By date range
 - By location
 - By uploader
 - Favorites only
 
 **Sharing:**
+
 - Share individual photo URLs
 - Share event URLs
 - Copy image URLs
@@ -256,6 +336,7 @@ Flexible photo viewing with advanced controls.
 Comprehensive insights into usage and engagement.
 
 **Overall Statistics:**
+
 - Total events
 - Total photos
 - Total users
@@ -263,6 +344,7 @@ Comprehensive insights into usage and engagement.
 - Total collaborations
 
 **Per-Event Analytics:**
+
 - Photo count
 - Collaborator count
 - Favorite count
@@ -270,17 +352,20 @@ Comprehensive insights into usage and engagement.
 - Location distribution
 
 **Per-User Analytics:**
+
 - Upload count
 - Favorite count
 - Collaboration count
 - Activity timeline
 
 **Popular Photos:**
+
 - Most favorited
 - Most viewed (if tracking added)
 - Recent activity
 
 **Export Capabilities:**
+
 - CSV export (future)
 - API access to stats
 - Dashboard widgets (future)
@@ -292,6 +377,7 @@ Comprehensive insights into usage and engagement.
 Categorize and discover events with tags.
 
 **Tag Features:**
+
 - Admin-created tags
 - Assign multiple tags per event
 - Filter events by tag
@@ -299,12 +385,14 @@ Categorize and discover events with tags.
 - Tag suggestions
 
 **Common Tags:**
+
 - `wedding`, `birthday`, `vacation`
 - `music`, `sports`, `outdoor`
 - `family`, `friends`, `corporate`
 - `2024`, `summer`, `europe`
 
 **Management:**
+
 - Create/delete tags
 - Bulk tag assignment
 - Tag renaming
@@ -317,22 +405,26 @@ Categorize and discover events with tags.
 **Event Visibility:**
 
 **Public Events:**
+
 - Listed on homepage
 - Visible to anyone with link
 - Indexed by search engines (sitemap)
 
 **Private Events:**
+
 - Not listed publicly
 - Only admins and collaborators see
 - Require direct link
 
 **Password Protected:**
+
 - Additional password layer
 - Session-based access
 - Per-event passwords
 - Optional expiration
 
 **Data Security:**
+
 - HTTPS only
 - JWT token authentication
 - SQL injection prevention
@@ -341,6 +433,7 @@ Categorize and discover events with tags.
 - Cloudflare DDoS protection
 
 **Privacy Controls:**
+
 - Remove GPS data option
 - Hide photos from public
 - Delete photos permanently
@@ -351,19 +444,26 @@ Categorize and discover events with tags.
 ### 📱 Mobile Experience
 
 **Progressive Web App:**
+
 - Responsive design
 - Touch-optimized UI
 - Swipe gestures
-- Offline viewing (future)
+- Offline banner + pull-to-refresh (offline *viewing* of already-cached content depends on the
+  browser cache; there is no dedicated offline-first data store on web)
 
 **Native Android App:**
+
 - Built with Capacitor
 - Native camera integration
-- Background uploads
-- Push notifications (future)
+- Background uploads with persistent, resumable upload queue (survives app kill/restart)
+- Local notifications for upload completion
 - App icon and splash screen
+- Chromecast support
+- No iOS build is currently packaged/released (the underlying web app runs fine in iOS Safari, but
+  there's no Capacitor iOS project checked in)
 
 **Mobile Features:**
+
 - Camera upload
 - Photo library access
 - GPS auto-detection
@@ -371,9 +471,10 @@ Categorize and discover events with tags.
 - Mobile-friendly gallery
 
 **Browser Support:**
+
 - Chrome/Safari/Edge (latest)
-- iOS Safari 12+
-- Android Chrome 80+
+- iOS Safari (recent versions)
+- Android Chrome (recent versions)
 
 ---
 
@@ -382,6 +483,7 @@ Categorize and discover events with tags.
 White-label the application with your brand.
 
 **Configurable Elements:**
+
 - App name
 - Brand name
 - Logo (upload your own)
@@ -391,12 +493,14 @@ White-label the application with your brand.
 - Copyright holder
 
 **Configuration:**
+
 - Environment variables
 - No code changes required
 - Runtime configuration
 - Per-deployment customization
 
 **Example Brands:**
+
 - "Smith Family Photos"
 - "Acme Event Gallery"
 - "Wedding Memories"
@@ -407,6 +511,7 @@ White-label the application with your brand.
 ### 🚀 Performance
 
 **Frontend Optimization:**
+
 - Code splitting
 - Lazy loading
 - Image optimization
@@ -415,6 +520,7 @@ White-label the application with your brand.
 - Vite build optimization
 
 **Backend Optimization:**
+
 - Edge computing (Cloudflare Workers)
 - Global CDN
 - Database indexing
@@ -422,12 +528,14 @@ White-label the application with your brand.
 - Efficient queries
 
 **Load Times:**
+
 - Initial page: <2s
 - Gallery load: <1s
 - Photo view: <500ms
 - Upload start: <100ms
 
 **Scalability:**
+
 - Handles millions of requests
 - Auto-scales with traffic
 - No server management
@@ -438,6 +546,7 @@ White-label the application with your brand.
 ### 🔧 Developer Experience
 
 **Local Development:**
+
 - Hot module replacement (Vite)
 - Local database (Wrangler)
 - TypeScript type safety
@@ -446,6 +555,7 @@ White-label the application with your brand.
 - Playwright e2e tests
 
 **Developer Tools:**
+
 - Extensive logging
 - Error tracking ready
 - API documentation
@@ -453,6 +563,7 @@ White-label the application with your brand.
 - Migration system
 
 **Extensibility:**
+
 - Modular architecture
 - Feature flags
 - Plugin system (future)
@@ -468,18 +579,20 @@ White-label the application with your brand.
 Control optional features with environment variables.
 
 | Feature | Flag | Requirement |
-|---------|------|-------------|
+| --------- | ------ | ------------- |
 | Email Sending | `canSendEmails` | Mailgun API key |
 | Collaborators | `enableCollaborators` | Mailgun API key |
 | Favorites | `enableFavorites` | Always enabled |
 | Geocoding | `enableGeocoding` | Always enabled |
 
 **Automatic Detection:**
+
 - Features auto-enable when dependencies present
 - Graceful degradation when unavailable
 - Clear error messages
 
 **Testing Features:**
+
 ```bash
 # Enable all features
 MAILGUN_API_KEY=your_key
@@ -493,21 +606,27 @@ MAILGUN_DOMAIN=your_domain
 
 ## Feature Roadmap
 
-### Short Term (v1.1)
-- [ ] Video transcoding with Cloudflare Stream
-- [ ] Bulk download (zip)
-- [ ] Advanced search
-- [ ] Photo editing (crop, rotate)
+> Shipped items from earlier versions of this roadmap (bulk ZIP download, photo editing, invite
+> links, video storage, analytics dashboard, collaborator system) have been moved to "Recent
+> Additions" below rather than left as unchecked boxes.
+
+### Short Term
+
+- [ ] Server-side video transcoding / adaptive bitrate streaming (Cloudflare Stream)
+- [ ] Advanced full-text search
 - [ ] QR code event sharing
 
-### Medium Term (v1.2)
+### Medium Term
+
 - [ ] Real-time collaboration (Durable Objects)
 - [ ] Activity feed
 - [ ] Comments on photos
 - [ ] Albums within events
 - [ ] Guest book
+- [ ] iOS app packaging
 
-### Long Term (v2.0)
+### Long Term
+
 - [ ] AI auto-tagging (Workers AI)
 - [ ] Face detection
 - [ ] Duplicate detection
@@ -515,6 +634,7 @@ MAILGUN_DOMAIN=your_domain
 - [ ] Monetization (paid events)
 
 ### Community Requested
+
 - Submit feature requests via GitHub Issues
 - Vote on existing requests
 - Contribute via pull requests
@@ -524,6 +644,7 @@ MAILGUN_DOMAIN=your_domain
 ## Feature Comparison
 
 ### vs. Google Photos
+
 ✅ Self-hosted, privacy-first  
 ✅ Event-based organization  
 ✅ Collaboration system  
@@ -532,6 +653,7 @@ MAILGUN_DOMAIN=your_domain
 ❌ No face recognition  
 
 ### vs. Flickr
+
 ✅ Modern UI/UX  
 ✅ Faster performance  
 ✅ No ads  
@@ -540,6 +662,7 @@ MAILGUN_DOMAIN=your_domain
 ❌ No groups/communities  
 
 ### vs. SmugMug
+
 ✅ Free and open source  
 ✅ Easier setup  
 ✅ API-first architecture  
@@ -551,6 +674,7 @@ MAILGUN_DOMAIN=your_domain
 ## Usage Examples
 
 ### Wedding Photography
+
 1. Create event: "Smith Wedding 2024"
 2. Set password for family access
 3. Invite photographer as collaborator
@@ -559,6 +683,7 @@ MAILGUN_DOMAIN=your_domain
 6. Share gallery with password
 
 ### Family Vacation
+
 1. Create event: "Hawaii 2024"
 2. Add GPS coordinates
 3. Upload photos daily
@@ -567,6 +692,7 @@ MAILGUN_DOMAIN=your_domain
 6. Download all originals
 
 ### Corporate Event
+
 1. Create private event
 2. Invite team as collaborators
 3. Multiple uploaders during event
@@ -575,6 +701,7 @@ MAILGUN_DOMAIN=your_domain
 6. Archive after 30 days
 
 ### Photography Portfolio
+
 1. Create public events per shoot
 2. Showcase best work
 3. Client galleries with passwords
@@ -587,24 +714,28 @@ MAILGUN_DOMAIN=your_domain
 ## Accessibility Features
 
 **Keyboard Navigation:**
+
 - Tab through interface
 - Arrow keys in gallery
 - Escape to close modals
 - Enter to confirm actions
 
 **Screen Reader Support:**
+
 - ARIA labels
 - Alt text on images
 - Semantic HTML
 - Focus management
 
 **Visual Accessibility:**
+
 - High contrast mode support
 - Configurable font sizes
 - Color-blind friendly
 - Clear focus indicators
 
 **Future Improvements:**
+
 - Voice commands
 - Auto-captions for photos
 - High contrast theme
@@ -614,16 +745,18 @@ MAILGUN_DOMAIN=your_domain
 
 ## Feature Support Matrix
 
-| Feature | Web | Mobile | Admin |
-|---------|-----|--------|-------|
+| Feature | Web | Android (Native) | Admin |
+| --------- | ----- | -------- | ------- |
 | View photos | ✅ | ✅ | ✅ |
-| Upload photos | ❌ | ✅ | ✅ |
+| Upload photos | ✅ | ✅ | ✅ |
+| Image/video editing | ✅ | ✅ | ✅ |
 | Favorites | ✅ | ✅ | ✅ |
-| Collaborators | ❌ | ✅ | ✅ |
+| Collaborators (upload as invited user) | ✅ | ✅ | ✅ |
+| Chromecast | ✅ | ❌ | ✅ |
 | Analytics | ❌ | ❌ | ✅ |
 | Event management | ❌ | ❌ | ✅ |
 | Tags | ✅ | ✅ | ✅ |
-| Location | ✅ | ✅ | ✅ |
+| Location / map | ✅ | ✅ | ✅ |
 
 ---
 
@@ -632,19 +765,26 @@ MAILGUN_DOMAIN=your_domain
 We continuously improve based on user feedback. Common requests:
 
 **Most Requested:**
-1. Video support with transcoding ⏳
-2. Bulk photo download ⏳
-3. Comments on photos 🔜
-4. Face detection 📅
-5. Mobile iOS app 📅
+
+1. Server-side video transcoding ⏳
+2. Comments on photos 🔜
+3. Face detection 📅
+4. iOS app 📅
 
 **Recent Additions:**
-- ✅ Invite links (v1.0)
-- ✅ Video storage (v1.0)
-- ✅ Analytics dashboard (v0.9)
-- ✅ Collaborator system (v0.8)
+
+- ✅ RAW photo upload support (client-side decoding via libraw-wasm)
+- ✅ In-browser image editing (crop/rotate/curves/levels)
+- ✅ In-browser video editing (trim/crop/speed)
+- ✅ Chromecast support
+- ✅ Timeline view
+- ✅ Shareable invite links for collaborators
+- ✅ Bulk ZIP download
+- ✅ Analytics dashboard
+- ✅ Collaborator system with roles and history
 
 **Share Your Ideas:**
+
 - GitHub Issues
 - Email: [See configuration.md for contact]
 - Discussions forum
@@ -654,24 +794,28 @@ We continuously improve based on user feedback. Common requests:
 ## Performance Benchmarks
 
 **Upload Performance:**
+
 - 10MB photo: ~5-8 seconds
 - Preview generation: ~1 second
 - Metadata extraction: <100ms
 - Concurrent uploads: 3 parallel
 
 **Gallery Performance:**
+
 - 1000 photos load: <2 seconds
 - Infinite scroll: 50 photos/batch
 - Lightbox open: <100ms
 - Filter/sort: <500ms
 
 **Database Performance:**
+
 - Event list query: <50ms
 - Photo list query: <100ms
 - Analytics query: <200ms
 - Favorites toggle: <50ms
 
 **Optimization Tips:**
+
 - Enable Cloudflare caching
 - Use preview images for thumbnails
 - Lazy load below-fold images
@@ -682,18 +826,20 @@ We continuously improve based on user feedback. Common requests:
 ## Limitations & Known Issues
 
 **Current Limitations:**
-- No video transcoding (stored as-is)
+
+- No server-side video transcoding (videos are stored/served as uploaded; editing is client-side only)
 - Max 5GB per R2 upload (multipart)
 - D1 database: 1GB max size
-- No built-in image editing
-- No mobile iOS app (web only)
+- No packaged iOS app (Android native app only; the web app itself works in iOS Safari)
 
 **Known Issues:**
+
 - HEIC upload on some Android browsers
-- Safari blurhash rendering quirks
+- Safari blur-placeholder rendering quirks
 - Slow geocoding for some locations
 
 **Workarounds:**
+
 - Convert HEIC to JPEG before upload
 - Use Chrome for best compatibility
 - Manually set location if geocoding fails
@@ -731,6 +877,7 @@ A: See CONTRIBUTING.md for guidelines!
 ---
 
 For more information:
+
 - [Configuration Guide](configuration.md)
 - [API Documentation](api-reference.md)
 - [Architecture Overview](architecture.md)

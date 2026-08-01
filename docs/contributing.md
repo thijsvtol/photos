@@ -99,8 +99,6 @@ Create `.dev.vars` in `apps/worker/`:
 ADMIN_EMAILS=your-email@example.com
 JWT_SECRET=local-dev-secret-change-in-production
 EVENT_COOKIE_SECRET=another-local-secret
-ACCESS_TEAM_DOMAIN=your-domain.cloudflare.com
-ACCESS_AUD=your-aud-value
 
 # Optional for testing collaboration features
 MAILGUN_API_KEY=your-mailgun-key
@@ -133,8 +131,8 @@ wrangler d1 create photos-db-local
 
 # Update wrangler.toml with local database_id
 
-# Run migrations
-wrangler d1 migrations apply photos-db-local --local
+# Run migrations (plain numbered SQL files, not Wrangler's migrations-tracking system)
+for file in ../../migrations/*.sql; do wrangler d1 execute photos-db-local --local --file="$file"; done
 ```
 
 ### 5. Set Up R2 Bucket
@@ -162,14 +160,14 @@ npm run dev
 
 ### 7. Verify Setup
 
-- Visit http://localhost:5173
+- Visit <http://localhost:5173>
 - Check browser console for errors
 - Try viewing the gallery (should be empty)
 - Test admin access with your ADMIN_EMAILS
 
 ## Project Structure
 
-```
+```text
 .
 ├── apps/
 │   ├── worker/               # Backend (Cloudflare Worker)
@@ -228,7 +226,7 @@ git checkout -b refactor/extract-upload-logic
 
 Follow [Conventional Commits](https://www.conventionalcommits.org/):
 
-```
+```text
 <type>(<scope>): <description>
 
 [optional body]
@@ -237,6 +235,7 @@ Follow [Conventional Commits](https://www.conventionalcommits.org/):
 ```
 
 **Types:**
+
 - `feat`: New feature
 - `fix`: Bug fix
 - `docs`: Documentation changes
@@ -283,6 +282,7 @@ Part of #789
 ### Pull Request Process
 
 1. **Create Branch**
+
    ```bash
    git checkout -b feature/your-feature
    ```
@@ -293,31 +293,36 @@ Part of #789
    - Update documentation as needed
 
 3. **Test Locally**
+
    ```bash
    # Run tests
    cd apps/web && npm test
    cd apps/worker && npm test
-   
-   # Check types
-   npm run type-check
-   
-   # Lint code
-   npm run lint
+
+   # Check types (there's no dedicated type-check script; build runs tsc)
+   cd apps/web && npx tsc --noEmit
+   cd apps/worker && npx tsc --noEmit
+
+   # Lint code (apps/web only - there's no root or worker lint script)
+   cd apps/web && npm run lint
    ```
 
 4. **Commit Changes**
+
    ```bash
    git add .
    git commit -m "feat: add new feature"
    ```
 
 5. **Keep Branch Updated**
+
    ```bash
    git fetch origin
-   git rebase origin/main
+   git rebase origin/master
    ```
 
 6. **Push to Fork**
+
    ```bash
    git push origin feature/your-feature
    ```
@@ -453,17 +458,20 @@ app.get('/admin/events', async (c) => {
 ### Naming Conventions
 
 **Files:**
+
 - Components: `PascalCase.tsx` (PhotoCard.tsx)
 - Hooks: `camelCase.ts` (usePhotoSelection.ts)
 - Utils: `camelCase.ts` (imageUtils.ts)
 - Routes: `kebab-case.ts` (admin-routes.ts) or `camelCase.ts`
 
 **Variables:**
+
 - Constants: `UPPER_SNAKE_CASE` (MAX_FILE_SIZE)
 - Variables: `camelCase` (photoList)
 - Types: `PascalCase` (PhotoCardProps)
 
 **Functions:**
+
 - Functions: `camelCase` (getEvent, createPhoto)
 - React Components: `PascalCase` (PhotoCard)
 - Hooks: `camelCase` starting with `use` (useAuth)
@@ -616,6 +624,7 @@ npm run lint
 ### Test Coverage
 
 Aim for:
+
 - **Critical paths:** 100% coverage (auth, uploads)
 - **Components:** 80%+ coverage
 - **Utilities:** 90%+ coverage
@@ -771,9 +780,10 @@ If applicable.
 - Node: [e.g. 18.19.0]
 
 ## Error Messages
-```
+
+~~~text
 Paste error logs here
-```
+~~~
 
 ## Additional Context
 Any other relevant information.
@@ -834,6 +844,7 @@ Any other relevant information.
 ## Recognition
 
 Contributors are recognized in:
+
 - README.md contributors section
 - CHANGELOG.md for significant contributions
 - GitHub contributors page
@@ -851,16 +862,16 @@ cd apps/worker && npm install
 cd ../web && npm install
 
 # Development
-npm run dev          # Start dev server
-npm test            # Run tests
-npm run lint        # Check code style
-npm run type-check  # Check types
+npm run dev          # From repo root: starts both worker and web concurrently
+npm test             # Run tests (in apps/web or apps/worker)
+npm run lint         # Check code style (apps/web only)
+npx tsc --noEmit     # Check types (in apps/web or apps/worker)
 
 # Before PR
-npm test            # Tests pass
-npm run lint        # No lint errors
-npm run type-check  # No type errors
-git rebase origin/main  # Up to date
+npm test             # Tests pass (in apps/web and apps/worker)
+npm run lint         # No lint errors (apps/web)
+npx tsc --noEmit     # No type errors (apps/web and apps/worker)
+git rebase origin/master  # Up to date
 
 # Commit
 git add .

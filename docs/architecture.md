@@ -6,13 +6,14 @@ This document provides a technical overview of the photo sharing application arc
 
 ### Frontend (Web App)
 
-- **Framework:** React 18 with TypeScript
-- **Build Tool:** Vite 6.4.1
-- **Routing:** React Router v6
-- **Styling:** Tailwind CSS
+- **Framework:** React 19 with TypeScript
+- **Build Tool:** Vite 8
+- **Routing:** React Router v7
+- **Styling:** Tailwind CSS 4
 - **State Management:** React Context API + Hooks
-- **Mobile:** Capacitor 8 (Android native wrapper)
-- **Image Processing:** Browser-native Canvas API
+- **Mobile:** Capacitor 8 (Android native wrapper; iOS is not currently packaged)
+- **Image Processing:** Browser Canvas API for previews/blur placeholders, `libraw-wasm` for client-side RAW decoding, `react-filerobot-image-editor` + `react-konva` for in-browser image editing
+- **Video Processing:** `@ffmpeg/ffmpeg` (WASM, single-threaded) for client-side trim/crop/speed edits
 - **HTTP Client:** Axios
 
 ### Backend (Worker)
@@ -21,7 +22,7 @@ This document provides a technical overview of the photo sharing application arc
 - **Framework:** Hono (lightweight web framework)
 - **Database:** Cloudflare D1 (SQLite)
 - **Storage:** Cloudflare R2 (S3-compatible)
-- **Authentication:** Cloudflare Access (OAuth)
+- **Authentication:** Cloudflare Access (web) + JWT bearer tokens (mobile)
 - **Email:** Mailgun (optional)
 
 ### Infrastructure
@@ -34,7 +35,7 @@ This document provides a technical overview of the photo sharing application arc
 
 ## System Architecture
 
-```
+```text
 ┌─────────────────────────────────────────────────────────────┐
 │                         End Users                           │
 │              (Web Browsers / Mobile Apps)                   │
@@ -74,7 +75,6 @@ This document provides a technical overview of the photo sharing application arc
                   │ - Collaborators │                          │ Folders:         │
                   └─────────────────┘                          │ - original/      │
                                                                │ - preview/       │
-                                                               │ - ig/            │
                                                                └──────────────────┘
                            │
                            │ Optional
@@ -90,17 +90,21 @@ This document provides a technical overview of the photo sharing application arc
 
 ## Project Structure
 
-```
+```text
 .
 ├── apps/
 │   ├── web/                    # Frontend React application
 │   │   ├── src/
-│   │   │   ├── components/     # Reusable UI components
-│   │   │   ├── contexts/       # React contexts (Auth, etc.)
+│   │   │   ├── components/     # Reusable UI components (ImageEditorModal, VideoEditorModal,
+│   │   │   │                  # CastButton/CastReceiver, PullToRefresh, OfflineBanner, ...)
+│   │   │   ├── contexts/       # React contexts (Auth, Upload, etc.)
 │   │   │   ├── hooks/          # Custom React hooks
-│   │   │   ├── pages/          # Page components (routes)
-│   │   │   ├── services/       # Business logic services
+│   │   │   ├── pages/          # Page components (routes) (Timeline, PhotoUsage, PrivacyPolicy,
+│   │   │   │                  # InviteAccept, ...)
+│   │   │   ├── services/       # Business logic services (uploadManager, backgroundSync, ...)
 │   │   │   ├── utils/          # Utility functions
+│   │   │   ├── rawImageUtils.ts # Client-side RAW (.cr2/.nef/.arw/.dng/...) decoding via libraw-wasm
+│   │   │   ├── imageUtils.ts   # Preview/blur-placeholder generation (Canvas API)
 │   │   │   ├── api.ts          # API client
 │   │   │   ├── config.ts       # Runtime configuration
 │   │   │   └── types.ts        # TypeScript types
@@ -113,19 +117,24 @@ This document provides a technical overview of the photo sharing application arc
 │       │   │   ├── admin/      # Admin-only routes (modular)
 │       │   │   │   ├── events.ts      # Event CRUD
 │       │   │   │   ├── uploads.ts     # Upload handling
-│       │   │   │   ├── photos.ts      # Photo management
+│       │   │   │   ├── photos.ts      # Photo management (incl. featured/replace/bulk ops)
 │       │   │   │   ├── analytics.ts   # Statistics
 │       │   │   │   ├── tags.ts        # Tag CRUD
-│       │   │   │   └── utilities.ts   # Misc utilities
-│       │   │   ├── admin.ts           # Admin router orchestrator
-│       │   │   ├── collaborators.ts   # Collaboration features
-│       │   │   ├── favorites.ts       # Favorites system
+│       │   │   │   └── utilities.ts   # Geocoding, thumbnails, misc utilities
+│       │   │   ├── admin.ts           # Admin router orchestrator (mounted at /api/admin)
+│       │   │   ├── collaborators.ts   # Collaboration features + invite links
+│       │   │   ├── favorites.ts       # Favorites system + user profile
+│       │   │   ├── media.ts           # Serves original/preview images & videos from R2
+│       │   │   ├── zip.ts             # Batch ZIP download
+│       │   │   ├── features.ts        # Public favoriting/featured/tag endpoints
+│       │   │   ├── mobileAuth.ts      # Mobile OAuth login + token issuance
 │       │   │   └── seo.ts             # SEO endpoints
 │       │   ├── auth.ts         # Authentication middleware
 │       │   ├── config.ts       # Configuration management
 │       │   ├── features.ts     # Feature flag system
 │       │   ├── geocoding.ts    # Reverse geocoding
-│       │   ├── imageProcessing.ts  # Image utilities
+│       │   ├── imageProcessing.ts  # Watermark text helpers (currently unused by any route)
+│       │   ├── fileTypeUtils.ts # File-type/extension helpers (images, videos, RAW)
 │       │   ├── index.ts        # Worker entry point
 │       │   ├── types.ts        # TypeScript types
 │       │   └── utils.ts        # Utility functions
@@ -142,9 +151,7 @@ This document provides a technical overview of the photo sharing application arc
 
 ### Frontend Architecture
 
-#### Configuration System (`config.ts`)
-
-Runtime configuration with environment-specific fallbacks:
+#### Frontend Configuration System (`config.ts`)
 
 ```typescript
 // Production: Injected by worker at runtime
@@ -186,7 +193,7 @@ Centralized API communication:
 
 ### Backend Architecture
 
-#### Configuration System (`config.ts`)
+#### Backend Configuration System (`config.ts`)
 
 Environment-aware configuration:
 
@@ -224,6 +231,7 @@ Multi-layer security:
 4. **Upload Permissions** - Collaborator or admin
 
 Middleware functions:
+
 - `requireAuth` - Authenticated users only
 - `requireAdmin` - Admin users only
 - `requireUploadPermission` - Admin or event collaborator
@@ -231,6 +239,7 @@ Middleware functions:
 #### Route Structure
 
 **Admin Routes** (modular):
+
 - `admin/events.ts` - Event CRUD operations
 - `admin/uploads.ts` - Multipart upload handling
 - `admin/photos.ts` - Photo management
@@ -239,15 +248,21 @@ Middleware functions:
 - `admin/utilities.ts` - Geocoding, thumbnails
 
 **Public Routes**:
-- `collaborators.ts` - Collaboration features
-- `favorites.ts` - User favorites
+
+- `public.ts` - Events, photos, timeline, tags (listing/detail)
+- `media.ts` - Serves original/preview image and video bytes from R2 (range-request aware)
+- `zip.ts` - Batch ZIP download
+- `features.ts` - Public featured/most-favorited photos, favoriting, by-tag lookup
+- `collaborators.ts` - Collaboration features + invite links
+- `favorites.ts` - User favorites + profile
+- `mobileAuth.ts` - Mobile OAuth login (`/api/mobile-login`) and token issuance (`/api/mobile-auth`)
 - `seo.ts` - Sitemap, robots.txt
 
 ## Data Flow
 
 ### Photo Upload Flow
 
-```
+```text
 1. User selects photo in browser
    └─> Client reads EXIF, generates blurhash
        └─> Client creates preview (1200px max)
@@ -263,7 +278,7 @@ Middleware functions:
 
 ### Authentication Flow
 
-```
+```text
 1. User visits protected page
    └─> Cloudflare Access challenges user
        └─> User logs in with OAuth (Google, etc.)
@@ -277,7 +292,7 @@ Middleware functions:
 
 ### Feature Flag Flow
 
-```
+```text
 1. Request hits worker
    └─> Middleware checks feature requirement
        └─> getConfig(env) reads environment
@@ -292,33 +307,41 @@ Middleware functions:
 
 ### Core Tables
 
-**events**
+#### events
+
 - Event metadata, passwords, visibility
 - Foreign key parent for photos, collaborators, tags
 
-**photos**
+#### photos
+
 - Photo metadata, EXIF data, GPS coordinates
 - References event, stores uploaded_by name
 
-**users**
+#### users
+
 - OAuth user profiles (email, name, avatar)
 - Admin status determined by env var, not DB
 
-**event_collaborators**
+#### event_collaborators
+
 - Many-to-many: events ↔ users
 - Tracks invitation and acceptance dates
 
-**user_favorites**
+#### user_favorites
+
 - Many-to-many: users ↔ photos
 - Stores favorite relationships
 
-**tags** & **event_tags**
+#### tags & event_tags
+
 - Tag definitions and event associations
 
-**collaboration_history**
+#### collaboration_history
+
 - Audit log of collaborator actions
 
-**invite_links**
+#### invite_links
+
 - Shareable invitation tokens
 - Time-limited, single-use or multi-use
 
@@ -378,6 +401,7 @@ See [migrations/](../migrations/) for complete schema.
 ### Secrets Management
 
 All sensitive values stored as Cloudflare secrets:
+
 - Never in code or version control
 - Encrypted at rest
 - Access-controlled via Cloudflare dashboard
@@ -429,25 +453,26 @@ All sensitive values stored as Cloudflare secrets:
 
 ### Testing
 
-- Frontend: Vitest + React Testing Library
-- E2E: Playwright tests
-- Worker: Wrangler test command (if available)
+- Frontend: Vitest + React Testing Library (`npm test` in `apps/web`)
+- E2E: Playwright tests (`npm run test:e2e` in `apps/web`)
+- Worker: Vitest (`npm test` in `apps/worker`)
 
 ### Deployment
 
 1. **Worker**: `wrangler deploy`
 2. **Frontend**: Build → Deploy to Pages
-3. **Migrations**: `wrangler d1 migrations apply`
+3. **Migrations**: `for file in ./migrations/*.sql; do wrangler d1 execute <db-name> --remote --file="$file"; done` (this project applies plain numbered SQL files directly rather than using Wrangler's migrations-tracking system)
 
 ## Future Enhancements
 
 Potential improvements:
 
 1. **Real-time Features** - Durable Objects for live collaboration
-2. **Video Transcoding** - Cloudflare Stream integration
+2. **Server-Side Video Transcoding** - Cloudflare Stream integration (today, video editing/trimming happens entirely client-side via FFmpeg WASM; there is no server-side transcoding or adaptive bitrate streaming)
 3. **AI Features** - Workers AI for auto-tagging
 4. **Advanced Search** - Full-text search with Vectorize
 5. **CDN Optimization** - Polish for automatic image optimization
+6. **iOS App** - Package the existing Capacitor web app for iOS (currently Android-only)
 
 ## References
 

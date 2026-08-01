@@ -27,7 +27,8 @@ keytool -genkey -v \
 # - Your name, organization, etc.
 ```
 
-**Important**: 
+**Important**:
+
 - Back up this keystore file securely (e.g., password manager, encrypted storage)
 - If you lose it, you cannot update your app on Play Store!
 - Never commit it to git
@@ -130,18 +131,23 @@ Go to your GitHub repository:
 Add these secrets:
 
 ### ANDROID_KEYSTORE_BASE64
+
 The base64-encoded keystore from Step 1
 
 ### ANDROID_KEYSTORE_PASSWORD
+
 The password you used when creating the keystore
 
 ### ANDROID_KEY_ALIAS  
+
 The alias you used (e.g., `photos`)
 
 ### ANDROID_KEY_PASSWORD
+
 The key password (often same as keystore password)
 
 ### GOOGLE_PLAY_SERVICE_ACCOUNT_JSON
+
 The entire contents of the service account JSON file from Step 2.2
 (Open the file and copy-paste all the JSON)
 
@@ -165,6 +171,7 @@ npx cap open android
 ```
 
 In Android Studio:
+
 1. **Build** > **Generate Signed Bundle / APK**
 2. Select **Android App Bundle**
 3. Use your keystore from Step 1
@@ -194,16 +201,19 @@ If successful, check Play Console for the new internal release!
 ## Step 6: Regular Deployment Workflow
 
 ### Deploy to Internal Testing
+
 1. Go to GitHub **Actions** tab
 2. Run workflow with track: **internal**
 3. Test thoroughly
 
 ### Promote to Beta
+
 1. Test in internal track
 2. Run workflow with track: **beta**
 3. Get feedback from beta testers
 
 ### Release to Production
+
 1. Ensure beta testing is complete
 2. Run workflow with track: **production**
 3. App will be reviewed by Google (1-7 days)
@@ -211,9 +221,11 @@ If successful, check Play Console for the new internal release!
 ## Version Management
 
 ### Automatic Version Bumping
+
 When running the workflow, set "Bump version code" to `true` to automatically increment the build number.
 
 ### Manual Version Bumping
+
 ```bash
 cd apps/android/app
 
@@ -233,18 +245,22 @@ cd apps/android/app
 ## Troubleshooting
 
 ### "Package not found" error
+
 - Ensure you've manually uploaded the first version
 - Check that package name matches: `nl.thijsvtol.photos`
 
 ### "Keystore error"
+
 - Verify all keystore secrets are set correctly in GitHub
 - Ensure ANDROID_KEYSTORE_BASE64 is valid base64
 
 ### "Service account does not have permission"
+
 - Check Play Console API access settings
 - Ensure service account has "Release to production" permission
 
 ### Build fails
+
 - Check workflow logs in GitHub Actions
 - Verify Node.js and Java versions
 - Do not hardcode `org.gradle.java.home` to a local absolute path; use CI `setup-java` / `JAVA_HOME`

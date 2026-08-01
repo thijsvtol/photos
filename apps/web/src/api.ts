@@ -493,6 +493,49 @@ export const getCastOriginalUrl = (slug: string, photoId: string, fileType?: str
   return toCastMediaUrl(pathWithVersion, slug);
 };
 
+/**
+ * Fetches a portable event-scoped session token for the *currently*
+ * authenticated caller — via whatever mechanism actually granted access
+ * (Cloudflare Access cookie, collaborator/admin identity, event password, or
+ * public visibility) — and caches it under the same localStorage key
+ * (`event_session_${slug}`) that getCastOriginalUrl/getCastPreviewUrl above
+ * already read from. Must be called before starting a Cast session for
+ * events that aren't password-protected (e.g. private/collaborators-only
+ * events reached via Cloudflare Access login), since otherwise those
+ * helpers have no token to attach and the receiver's media requests 401.
+ * Silently no-ops on failure — Cast media just fails to load, same as
+ * before this endpoint existed.
+ */
+export const ensureCastToken = async (slug: string): Promise<void> => {
+  try {
+    if (Capacitor.isNativePlatform()) {
+      const domain = config.domain.startsWith('http') ? config.domain : `https://${config.domain}`;
+      const headers: Record<string, string> = {};
+      const bearerToken = await MobileAuthService.getToken();
+      if (bearerToken) headers.Authorization = `Bearer ${bearerToken}`;
+      const eventSessionToken = await MobileAuthService.getEventSessionToken(slug);
+      if (eventSessionToken) headers['X-Event-Session'] = eventSessionToken;
+
+      const response = await fetch(`${domain}/media/${encodeURIComponent(slug)}/cast-token`, { headers });
+      if (!response.ok) return;
+      const data = await response.json() as { token?: string };
+      if (data.token) {
+        await MobileAuthService.setEventSessionToken(slug, data.token);
+      }
+      return;
+    }
+
+    const response = await fetch(`/media/${encodeURIComponent(slug)}/cast-token`, { credentials: 'include' });
+    if (!response.ok) return;
+    const data = await response.json() as { token?: string };
+    if (data.token) {
+      localStorage.setItem(`event_session_${slug}`, data.token);
+    }
+  } catch {
+    // Ignore — Cast media will simply fail to load if this doesn't succeed.
+  }
+};
+
 const DEFAULT_DOWNLOAD_PATH = '/storage/emulated/0/Download';
 
 const getMimeTypeFromFilename = (filename: string): string => {

@@ -2,6 +2,7 @@ import { Context, Hono } from 'hono';
 import type { Env } from '../types';
 import { checkEventAuth, extractUser, getCollaboratorRoleByEventId } from '../auth';
 import { isVideoFileType, getStorageExtension, getStorageContentType } from '../fileTypeUtils';
+import { createEventSessionToken } from '../cookies';
 
 const app = new Hono<{ Bindings: Env }>();
 
@@ -92,6 +93,42 @@ async function requireMediaAccess(
   // Private events are only accessible by admins/collaborators (already handled above)
   return c.json({ error: 'Access denied' }, 403);
 }
+
+/**
+ * GET /media/:slug/cast-token
+ *
+ * Mints a portable, event-scoped session token for the currently
+ * authenticated caller — regardless of *how* they authenticated (Cloudflare
+ * Access cookie, collaborator/admin identity, event password cookie, mobile
+ * Bearer token, or plain public visibility).
+ *
+ * This exists for Google Cast: the receiver page (pages/CastReceiver.tsx)
+ * runs in an isolated browser context on the TV with none of the above
+ * cookies/headers available, so it can't authenticate media requests on its
+ * own. The sender (web/native app, already authenticated) fetches this
+ * token once and embeds it as `?est=` in the media URLs it sends to the
+ * receiver, which `requireMediaAccess`/`hasEventSessionAccess` below already
+ * accept as a valid access proof — identical to the existing password-login
+ * flow's `eventSessionToken`, just obtainable without requiring a password.
+ */
+app.get('/media/:slug/cast-token', async (c) => {
+  const slug = c.req.param('slug');
+
+  const event = await c.env.DB
+    .prepare('SELECT id, slug, password_hash, visibility FROM events WHERE slug = ?')
+    .bind(slug)
+    .first<{ id: number; slug: string; password_hash: string | null; visibility: 'public' | 'private' | 'collaborators_only' }>();
+
+  if (!event) {
+    return c.json({ error: 'Event not found' }, 404);
+  }
+
+  const accessError = await requireMediaAccess(c, event);
+  if (accessError) return accessError;
+
+  const token = await createEventSessionToken(slug, c.env.EVENT_COOKIE_SECRET);
+  return c.json({ token });
+});
 
 /**
  * GET /media/:slug/preview/:photoId.(jpg|mp4)

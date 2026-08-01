@@ -35,22 +35,21 @@ wrangler secret put ADMIN_EMAILS
 # Enter: admin1@example.com,admin2@example.com
 
 wrangler secret put JWT_SECRET
-# Enter: A secure random string (min 32 characters)
+# Enter: A secure random string (min 32 characters) - signs mobile OAuth bearer tokens
 
 wrangler secret put EVENT_COOKIE_SECRET
 # Enter: Another secure random string (min 32 characters)
-
-# Required for Cloudflare Access OAuth
-wrangler secret put ACCESS_TEAM_DOMAIN
-# Enter: yourteam.cloudflareaccess.com
-
-wrangler secret put ACCESS_AUD
-# Enter: Your Cloudflare Access Application Audience ID
 
 # Optional: Google Analytics 4
 wrangler secret put GA_MEASUREMENT_ID
 # Enter: Your GA4 Measurement ID (format: G-XXXXXXXXXX)
 ```
+
+> **Note**: Cloudflare Access itself validates the `Cf-Access-Jwt-Assertion` header at the edge
+> before a request ever reaches the worker — the worker just decodes the already-verified JWT to
+> read the user's email, so there's no separate `ACCESS_TEAM_DOMAIN`/`ACCESS_AUD` secret to
+> configure here. Configure your Access application/policy directly in the Cloudflare Zero Trust
+> dashboard (see the Cloudflare Access section further down).
 
 ### Optional Email Features (Mailgun)
 
@@ -108,7 +107,7 @@ bucket_name = "your-photos-bucket"
 Features are automatically enabled based on configuration:
 
 | Feature | Requirement | Auto-Enabled |
-|---------|-------------|--------------|
+| --------- | ------------- | -------------- |
 | Email Sending | Mailgun API key + domain | ✓ |
 | Collaborators | Email sending enabled | ✓ |
 | Favorites | Always available | ✓ |
@@ -120,6 +119,7 @@ Features are automatically enabled based on configuration:
 The application supports Google Analytics 4 (GA4) for tracking user interactions.
 
 **What is tracked:**
+
 - Page views (automatic on route changes)
 - Photo views (when users open detail view)
 - Photo downloads (single and bulk ZIP downloads)
@@ -135,6 +135,7 @@ The application supports Google Analytics 4 (GA4) for tracking user interactions
 
 2. **Configure for Production:**
    Set as a Cloudflare Worker secret:
+
    ```bash
    cd apps/worker
    wrangler secret put GA_MEASUREMENT_ID
@@ -143,11 +144,13 @@ The application supports Google Analytics 4 (GA4) for tracking user interactions
 
 3. **Configure for Development:**
    Add to `apps/web/.env` (you may need to create this file from `.env.example`):
+
    ```bash
    VITE_GA_MEASUREMENT_ID="G-XXXXXXXXXX"
    ```
-   
+
    Or use the placeholder ID for testing:
+
    ```bash
    VITE_GA_MEASUREMENT_ID="G-PLACEHOLDER"
    ```
@@ -158,11 +161,13 @@ The application supports Google Analytics 4 (GA4) for tracking user interactions
    - For development, remove `VITE_GA_MEASUREMENT_ID` from `.env` or set it to `G-PLACEHOLDER`
 
 **Privacy Considerations:**
+
 - IP anonymization is enabled by default
 - No personally identifiable information (PII) is sent to GA4
 - Consider adding a cookie consent banner if required by your jurisdiction (GDPR, CCPA, etc.)
 
 **Verification:**
+
 - After deploying, visit your site and navigate through pages
 - Open Google Analytics → Reports → Realtime
 - You should see your activity appear within ~30 seconds
@@ -179,7 +184,7 @@ The application supports Google Analytics 4 (GA4) for tracking user interactions
 ### Worker Environment Variables
 
 | Variable | Type | Required | Description |
-|----------|------|----------|-------------|
+| ---------- | ------ | ---------- | ------------- |
 | `APP_NAME` | String | Yes | Full application name |
 | `BRAND_NAME` | String | Yes | Brand name for UI |
 | `COPYRIGHT_HOLDER` | String | Yes | Copyright holder name |
@@ -187,20 +192,18 @@ The application supports Google Analytics 4 (GA4) for tracking user interactions
 | `CONTACT_EMAIL` | String | Yes | Contact email address |
 | `ENVIRONMENT` | String | No | `production` or `development` |
 | `ADMIN_EMAILS` | Secret | Yes | Comma-separated admin emails |
-| `JWT_SECRET` | Secret | Yes | JWT signing secret (32+ chars) |
+| `JWT_SECRET` | Secret | Yes | Signs/verifies mobile OAuth bearer tokens (32+ chars) |
 | `EVENT_COOKIE_SECRET` | Secret | Yes | Cookie signing secret (32+ chars) |
-| `ACCESS_TEAM_DOMAIN` | Secret | Yes | Cloudflare Access team domain |
-| `ACCESS_AUD` | Secret | Yes | Cloudflare Access audience ID |
 | `GA_MEASUREMENT_ID` | Secret | No | Google Analytics 4 Measurement ID |
 | `MAILGUN_API_KEY` | Secret | No | Mailgun API key for emails |
 | `MAILGUN_DOMAIN` | Secret | No | Mailgun sending domain |
 
 ### Web App Environment Variables (Development)
 
-| Variable | Type | Required | Description |
-|----------|------|----------|-------------|
-| `VITE_API_URL` | String | Dev only | Worker URL for local development |
-| `VITE_GA_MEASUREMENT_ID` | String | No | Google Analytics 4 Measurement ID |
+| Variable                 | Type   | Required | Description                       |
+|--------------------------|--------|----------|-----------------------------------|
+| `VITE_API_URL`           | String | Dev only | Worker URL for local development  |
+| `VITE_GA_MEASUREMENT_ID` | String | No       | Google Analytics 4 Measurement ID |
 
 ## Quick Start Configuration
 
@@ -231,8 +234,6 @@ cd apps/worker
 wrangler secret put ADMIN_EMAILS
 wrangler secret put JWT_SECRET
 wrangler secret put EVENT_COOKIE_SECRET
-wrangler secret put ACCESS_TEAM_DOMAIN
-wrangler secret put ACCESS_AUD
 ```
 
 ### 4. Create D1 Database
@@ -244,8 +245,11 @@ wrangler d1 create your-photos-db
 
 ### 5. Run Migrations
 
+This project doesn't use Wrangler's built-in migrations-tracking system; each file in
+`migrations/` is a plain, idempotent-by-filename SQL script applied in order:
+
 ```bash
-wrangler d1 migrations apply your-photos-db --remote
+for file in ./migrations/*.sql; do wrangler d1 execute your-photos-db --remote --file="$file"; done
 ```
 
 ### 6. Create R2 Bucket
@@ -290,7 +294,6 @@ After deployment, verify your configuration:
 1. Visit `https://your-domain.com` - should show your brand name
 2. Check footer copyright - should show your copyright holder
 3. Try creating an event (requires admin login)
-4. Check feature availability at worker endpoint `GET /api/features` (if implemented)
 
 ## Troubleshooting
 
@@ -306,9 +309,9 @@ After deployment, verify your configuration:
 
 ### Authentication issues
 
-- Verify `ACCESS_TEAM_DOMAIN` and `ACCESS_AUD` are correct
+- Verify Cloudflare Access is configured correctly for `/admin*` (and `/api/mobile-login` for mobile) in the Zero Trust dashboard
 - Check admin emails are correctly set in `ADMIN_EMAILS`
-- Ensure JWT secrets are properly set
+- Ensure `JWT_SECRET` and `EVENT_COOKIE_SECRET` are properly set
 
 ### Email not sending
 
@@ -327,7 +330,7 @@ After deployment, verify your configuration:
 
 ## Next Steps
 
-- Read [FEATURES.md](./FEATURES.md) to understand available features
-- Review [ARCHITECTURE.md](./ARCHITECTURE.md) for technical details
-- Check [API documentation](./api-reference.md) for API documentation
-- See [CONTRIBUTING.md](./CONTRIBUTING.md) to contribute
+- Read [features.md](./features.md) to understand available features
+- Review [architecture.md](./architecture.md) for technical details
+- Check [api-reference.md](./api-reference.md) for API documentation
+- See [contributing.md](./contributing.md) to contribute

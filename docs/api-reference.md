@@ -1,968 +1,197 @@
 # API Documentation
 
-Complete REST API reference for the photo sharing application.
+Complete REST API reference for the photo sharing application (Cloudflare Worker, `apps/worker`).
 
 ## Base URL
 
-```
+```text
 Production: https://<your-domain>
 Development: http://localhost:8787
 ```
 
+Almost all API routes are mounted under `/api/*`. `/media/*`, `/sitemap.xml`, and `/robots.txt` are
+the only exceptions (they intentionally live outside `/api` since they're not JSON endpoints).
+
 ## Authentication
 
-All admin endpoints require authentication via Cloudflare Access + JWT token.
+There are three independent auth mechanisms, used depending on the route:
 
-### Headers
+1. **Cloudflare Access** (web admin routes): Cloudflare Access sits in front of `/admin*` and issues
+   a `Cf-Access-Jwt-Assertion` header once a user authenticates via your configured identity
+   provider. The worker reads the authenticated user's email from Access-provided headers.
+2. **JWT bearer tokens** (mobile app): after completing the Cloudflare Access flow via
+   `/api/mobile-login`, the mobile app receives a signed JWT (see
+   [mobile-oauth.md](mobile-oauth.md)) and sends it as `Authorization: Bearer <token>` on
+   subsequent requests.
+3. **Per-event session cookie** (public password-protected events): `POST /api/events/:slug/login`
+   verifies the event password and sets an `HttpOnly` session cookie (and returns a portable
+   `eventSessionToken` for native clients that can't rely on cookies).
 
-```http
-Authorization: Bearer <jwt_token>
-Cookie: CF_Authorization=<cloudflare_token>
-```
-
-### Authentication Flow
-
-1. User accesses admin route → Cloudflare Access challenges
-2. User authenticates with OAuth provider
-3. Cloudflare issues `CF_Authorization` cookie
-4. Frontend requests JWT from worker
-5. Worker validates CF token, issues JWT
-6. Frontend includes JWT in Authorization header
+Admin status is derived from the `ADMIN_EMAILS` environment variable (comma-separated email list),
+not a database flag.
 
 ## API Endpoints
 
-### Authentication
+### Auth
 
-#### Check Auth Status
+| Method | Path | Auth | Description |
+| --- | --- | --- | --- |
+| GET | `/api/auth/login` | Cloudflare Access | Triggers Access authentication, then redirects to `return_to` (defaults to `/favorites`) |
+| GET | `/api/auth/logout` | - | Redirects to `/cdn-cgi/access/logout` to clear the Access session |
+| POST | `/api/events/:slug/login` | - | Verifies an event's password; sets a session cookie and returns `{ success, eventSessionToken }` |
+| POST | `/api/admin/logout` | Admin | Clears the admin session |
 
-```http
-GET /auth/me
-```
+### Events & Photos (Public)
 
-Returns current user information and admin status.
+| Method | Path | Auth | Description |
+| --- | --- | --- | --- |
+| GET | `/api/events` | optional | Lists events visible to the caller (public events to everyone; private/collaborators-only events filtered by admin status and `event_collaborators`; password-protected public events require an active session) |
+| GET | `/api/events/:slug` | optional | Event details |
+| GET | `/api/events/:slug/photos` | optional | Lists photos for an event |
+| GET | `/api/events/:slug/photos/:photoId` | optional | Single photo details |
+| GET | `/api/map/photos` | optional | All photos with GPS coordinates, for the map view |
+| GET | `/api/tags` | - | Lists all tags |
+| GET | `/api/timeline` | optional | Chronological, paginated feed of photos/videos across all accessible events |
+| GET | `/api/events/by-tag/:tagSlug` | - | Lists events associated with a tag |
+| GET | `/api/photos/featured` | - | Featured photos for the landing page |
+| GET | `/api/photos/most-favorited` | - | Most-favorited photos |
+| POST | `/api/photos/:photoId/favorite` | - | Public-facing favorite toggle used on the landing page (separate from the authenticated favorites API below) |
 
-**Response 200:**
+**Example - `GET /api/events` (shape, not exhaustive):**
+
 ```json
 {
-  "email": "user@example.com",
-  "name": "John Doe",
-  "avatar": "https://...",
-  "isAdmin": true
-}
-```
-
-**Response 401:**
-```json
-{
-  "error": "Unauthorized"
-}
-```
-
----
-
-### Events
-
-#### List All Events
-
-```http
-GET /events
-```
-
-Returns all events with photo counts. Public events visible to all, private events only to admins/collaborators.
-
-**Response 200:**
-```json
-[
-  {
-    "id": 1,
-    "slug": "summer-festival-2024",
-    "title": "Summer Festival 2024",
-    "date": "2024-07-15",
-    "description": "Annual summer celebration",
-    "location": "Central Park",
-    "country": "United States",
-    "state": "New York",
-    "city": "New York",
-    "gps_latitude": 40.785091,
-    "gps_longitude": -73.968285,
-    "photo_count": 142,
-    "created_at": "2024-01-01T00:00:00Z",
-    "is_password_protected": true,
-    "is_public": true,
-    "has_access": true
-  }
-]
-```
-
-#### Get Event Details
-
-```http
-GET /events/:slug
-```
-
-Returns detailed event information including metadata.
-
-**Parameters:**
-- `slug` (path) - Event slug
-
-**Response 200:**
-```json
-{
-  "id": 1,
-  "slug": "summer-festival-2024",
-  "title": "Summer Festival 2024",
-  "date": "2024-07-15",
-  "description": "Annual summer celebration",
-  "location": "Central Park",
-  "country": "United States",
-  "state": "New York",
-  "city": "New York",
-  "gps_latitude": 40.785091,
-  "gps_longitude": -73.968285,
-  "photo_count": 142,
-  "tags": ["music", "outdoor", "festival"],
-  "created_at": "2024-01-01T00:00:00Z",
-  "is_password_protected": true,
-  "is_public": true
-}
-```
-
-**Response 404:**
-```json
-{
-  "error": "Event not found"
-}
-```
-
-#### Verify Event Password
-
-```http
-POST /events/:slug/verify-password
-```
-
-Verifies password for protected event and issues access cookie.
-
-**Parameters:**
-- `slug` (path) - Event slug
-
-**Request Body:**
-```json
-{
-  "password": "secret123"
-}
-```
-
-**Response 200:**
-```json
-{
-  "success": true
-}
-```
-
-Sets cookie: `event_access_<event_id>=<jwt_token>`
-
-**Response 401:**
-```json
-{
-  "error": "Invalid password"
-}
-```
-
-#### Get Event Photos
-
-```http
-GET /events/:slug/photos
-```
-
-Returns all photos for an event. Requires password if event is protected.
-
-**Parameters:**
-- `slug` (path) - Event slug
-
-**Response 200:**
-```json
-[
-  {
-    "id": 1,
-    "filename": "IMG_1234.jpg",
-    "preview_url": "https://r2.../preview/IMG_1234.jpg",
-    "original_url": "https://r2.../original/IMG_1234.jpg",
-    "instagram_url": "https://r2.../ig/IMG_1234.jpg",
-    "uploaded_at": "2024-07-15T14:23:45Z",
-    "uploaded_by": "John Doe",
-    "blurhash": "LKO2?U%2Tw=w]~RBVZRi};RPxuwH",
-    "width": 4032,
-    "height": 3024,
-    "exif_data": {
-      "make": "Apple",
-      "model": "iPhone 14 Pro",
-      "iso": 64,
-      "aperture": 1.78,
-      "shutter_speed": "1/120",
-      "focal_length": 6.86,
-      "taken_at": "2024-07-15T14:23:40Z"
-    },
-    "gps_latitude": 40.785091,
-    "gps_longitude": -73.968285,
-    "location": "Central Park",
-    "country": "United States",
-    "state": "New York",
-    "city": "New York",
-    "is_favorited": false,
-    "media_type": "photo"
-  }
-]
-```
-
----
-
-### Admin - Events
-
-All admin endpoints require admin authentication.
-
-#### Create Event
-
-```http
-POST /admin/events
-```
-
-Creates a new event.
-
-**Request Body:**
-```json
-{
-  "title": "Summer Festival 2024",
-  "slug": "summer-festival-2024",
-  "date": "2024-07-15",
-  "description": "Annual summer celebration",
-  "location": "Central Park",
-  "country": "United States",
-  "state": "New York",
-  "city": "New York",
-  "gps_latitude": 40.785091,
-  "gps_longitude": -73.968285,
-  "password": "secret123",
-  "is_public": true
-}
-```
-
-**Response 201:**
-```json
-{
-  "id": 1,
-  "slug": "summer-festival-2024",
-  "message": "Event created successfully"
-}
-```
-
-**Response 400:**
-```json
-{
-  "error": "Event with this slug already exists"
-}
-```
-
-#### Update Event
-
-```http
-PUT /admin/events/:slug
-```
-
-Updates an existing event.
-
-**Parameters:**
-- `slug` (path) - Event slug
-
-**Request Body:** (all fields optional)
-```json
-{
-  "title": "Summer Festival 2024 (Updated)",
-  "description": "New description",
-  "location": "New Location",
-  "password": "new_password",
-  "is_public": false
-}
-```
-
-**Response 200:**
-```json
-{
-  "message": "Event updated successfully"
-}
-```
-
-#### Delete Event
-
-```http
-DELETE /admin/events/:slug
-```
-
-Deletes an event and all associated photos.
-
-**Parameters:**
-- `slug` (path) - Event slug
-
-**Query Parameters:**
-- `confirm` (required) - Must be "true"
-
-**Response 200:**
-```json
-{
-  "message": "Event and all photos deleted successfully"
-}
-```
-
-**Response 400:**
-```json
-{
-  "error": "Please confirm deletion by passing confirm=true"
-}
-```
-
----
-
-### Admin - Photos
-
-#### Start Multipart Upload
-
-```http
-POST /admin/events/:slug/uploads/start
-```
-
-Initiates a multipart upload for a photo or video.
-
-**Parameters:**
-- `slug` (path) - Event slug
-
-**Request Body:**
-```json
-{
-  "filename": "IMG_1234.jpg",
-  "contentType": "image/jpeg",
-  "fileSize": 5242880,
-  "uploadType": "original",
-  "blurhash": "LKO2?U%2Tw=w]~RBVZRi};RPxuwH",
-  "width": 4032,
-  "height": 3024,
-  "exifData": {
-    "make": "Apple",
-    "model": "iPhone 14 Pro"
-  },
-  "gpsData": {
-    "latitude": 40.785091,
-    "longitude": -73.968285
-  }
-}
-```
-
-**Response 200:**
-```json
-{
-  "uploadId": "abc123",
-  "photoId": 1,
-  "key": "original/IMG_1234.jpg",
-  "parts": [
+  "events": [
     {
-      "partNumber": 1,
-      "url": "https://r2.../upload-url-part-1"
-    },
-    {
-      "partNumber": 2,
-      "url": "https://r2.../upload-url-part-2"
+      "id": 1,
+      "slug": "summer-festival-2024",
+      "name": "Summer Festival 2024",
+      "inferred_date": "2024-07-15",
+      "created_at": "2024-01-01T00:00:00Z",
+      "visibility": "public",
+      "requires_password": false,
+      "latest_upload": "2024-07-16T09:12:00Z"
     }
   ]
 }
 ```
 
-#### Complete Multipart Upload
+### Media (Password/Access Gated)
 
-```http
-POST /admin/events/:slug/uploads/:photoId/complete
-```
+Served from `apps/worker/src/routes/media.ts`, backed directly by R2. Supports HTTP `Range`
+requests (single range) for video scrubbing.
 
-Completes a multipart upload.
-
-**Parameters:**
-- `slug` (path) - Event slug
-- `photoId` (path) - Photo ID
-
-**Query Parameters:**
-- `preview` (optional) - Set to "true" for preview upload
-
-**Request Body:**
-```json
-{
-  "uploadId": "abc123",
-  "parts": [
-    {
-      "partNumber": 1,
-      "etag": "etag-1"
-    },
-    {
-      "partNumber": 2,
-      "etag": "etag-2"
-    }
-  ]
-}
-```
-
-**Response 200:**
-```json
-{
-  "success": true,
-  "url": "https://r2.../original/IMG_1234.jpg"
-}
-```
-
-#### Update Photo
-
-```http
-PUT /admin/photos/:id
-```
-
-Updates photo metadata.
-
-**Parameters:**
-- `id` (path) - Photo ID
-
-**Request Body:**
-```json
-{
-  "location": "Central Park, New York",
-  "gps_latitude": 40.785091,
-  "gps_longitude": -73.968285
-}
-```
-
-**Response 200:**
-```json
-{
-  "message": "Photo updated successfully"
-}
-```
-
-#### Delete Photo
-
-```http
-DELETE /admin/photos/:id
-```
-
-Deletes a photo and its files from R2.
-
-**Parameters:**
-- `id` (path) - Photo ID
-
-**Response 200:**
-```json
-{
-  "message": "Photo deleted successfully"
-}
-```
+| Method | Path | Description |
+| --- | --- | --- |
+| GET | `/media/:slug/preview/:photoId` | Client-generated preview (max 1920px JPEG for images; original bytes for video) |
+| GET | `/media/:slug/original/:photoId` | Full-resolution / original file |
+| GET | `/media/:slug/ig/:photoId` | Legacy path kept only for backward compatibility with old links; no new files are written here (see [image-processing.md](image-processing.md)) |
 
 ---
 
-### Admin - Analytics
+### Admin - Events, Photos, Analytics & Tags
 
-#### Get Statistics
+All admin endpoints require Cloudflare Access authentication (or a valid mobile JWT bearer token)
+and are mounted under `/api/admin`.
 
-```http
-GET /admin/analytics/stats
-```
+| Method | Path | Description |
+| --- | --- | --- |
+| POST | `/api/admin/events` | Create a new event |
+| PUT | `/api/admin/events/:slug` | Update event (name, description, password, visibility, ...) |
+| DELETE | `/api/admin/events/:slug` | Delete an event and cascade-delete its photos |
+| PUT | `/api/admin/events/:slug/location` | Set/update event GPS location |
+| POST | `/api/admin/events/:slug/tags` | Set the tags assigned to an event |
+| POST | `/api/admin/events/:slug/regenerate-thumbnails` | Re-run thumbnail/preview generation for an event's photos |
+| POST | `/api/admin/events/:slug/geocode-photos` | Reverse-geocode all GPS-tagged photos in an event |
+| GET | `/api/admin/events/:slug/stats` | Event-specific analytics |
+| GET | `/api/admin/stats` | Dashboard-wide statistics |
+| POST | `/api/admin/events/:slug/uploads/start` | Start a multipart upload for a photo or video |
+| PUT | `/api/admin/events/:slug/uploads/:photoId/parts/:partNumber` | Upload one multipart part |
+| POST | `/api/admin/events/:slug/uploads/:photoId/complete` | Finish a multipart upload |
+| POST | `/api/admin/events/:slug/uploads/:photoId/cancel` | Abort an in-progress multipart upload |
+| PUT | `/api/admin/photos/:photoId/featured` | Toggle a photo's featured status |
+| PUT | `/api/admin/photos/:photoId/replace` | Replace a photo's original/preview file (used by the in-app editors) |
+| DELETE | `/api/admin/photos/:photoId` | Delete a single photo |
+| POST | `/api/admin/photos/bulk-delete` | Delete multiple photos at once |
+| POST | `/api/admin/photos/bulk-copy` | Copy photos into another event |
+| PATCH | `/api/admin/photos/bulk-location` | Bulk-update GPS location for multiple photos |
+| POST | `/api/admin/tags` | Create a tag |
+| PUT | `/api/admin/tags/:id` | Update a tag |
+| DELETE | `/api/admin/tags/:id` | Delete a tag |
 
-Returns overall statistics.
-
-**Response 200:**
-```json
-{
-  "totalEvents": 15,
-  "totalPhotos": 3421,
-  "totalUsers": 42,
-  "totalFavorites": 892,
-  "totalCollaborations": 28
-}
-```
-
-#### Get Event Statistics
-
-```http
-GET /admin/analytics/events
-```
-
-Returns per-event statistics.
-
-**Response 200:**
-```json
-[
-  {
-    "slug": "summer-festival-2024",
-    "title": "Summer Festival 2024",
-    "date": "2024-07-15",
-    "photo_count": 142,
-    "collaborator_count": 5,
-    "favorite_count": 38
-  }
-]
-```
-
-#### Get User Statistics
-
-```http
-GET /admin/analytics/users
-```
-
-Returns per-user statistics.
-
-**Response 200:**
-```json
-[
-  {
-    "email": "user@example.com",
-    "name": "John Doe",
-    "favorite_count": 24,
-    "collaboration_count": 3
-  }
-]
-```
-
-#### Get Popular Photos
-
-```http
-GET /admin/analytics/popular-photos
-```
-
-Returns most favorited photos.
-
-**Query Parameters:**
-- `limit` (optional, default: 10) - Number of results
-
-**Response 200:**
-```json
-[
-  {
-    "id": 156,
-    "filename": "IMG_5678.jpg",
-    "preview_url": "https://...",
-    "event_title": "Summer Festival 2024",
-    "event_slug": "summer-festival-2024",
-    "favorite_count": 15
-  }
-]
-```
+**Example - `PUT /api/admin/photos/:photoId/replace`:** accepts either a legacy
+`multipart/form-data` body (fields `original`/`preview`) or, on native platforms where multipart
+uploads are unreliable in the WebView, a raw `application/octet-stream` body with a `?target=preview`
+or `?target=original` query parameter.
 
 ---
 
-### Admin - Tags
+### Collaborators & Invite Links
 
-#### Get All Tags
+**Note:** Email invitations require the `enableCollaborators` feature flag (Mailgun configured);
+shareable invite links work without Mailgun.
 
-```http
-GET /admin/tags
-```
+| Method | Path | Auth | Description |
+| --- | --- | --- | --- |
+| GET | `/api/events/:slug/collaborators` | Admin/collaborator | List collaborators for an event |
+| POST | `/api/events/:slug/collaborators` | `invite_create` capability | Invite a collaborator by email (sends invitation email) |
+| DELETE | `/api/events/:slug/collaborators/:userEmail` | `collaborator_remove` capability | Remove a collaborator |
+| PUT | `/api/events/:slug/collaborators/:userEmail/role` | `role_change` capability | Change a collaborator's role |
+| GET | `/api/events/:slug/collaboration-history` | Admin | Audit log of collaborator/invite actions for an event |
+| GET | `/api/user/collaborations` | Authenticated | Events the current user collaborates on |
+| GET | `/api/users/search` | Admin | Search users (e.g. to invite as a collaborator) |
+| POST | `/api/events/:slug/invite-links` | `invite_create` capability | Create a shareable, expirable invite link |
+| GET | `/api/events/:slug/invite-links` | `invite_create` capability | List active invite links for an event |
+| DELETE | `/api/events/:slug/invite-links/:token` | `invite_revoke` capability | Revoke an invite link |
+| POST | `/api/invite/:token/accept` | Authenticated | Accept an invite link, joining the event as a collaborator |
 
-Returns all tags with usage counts.
-
-**Response 200:**
-```json
-[
-  {
-    "id": 1,
-    "name": "music",
-    "event_count": 8
-  },
-  {
-    "id": 2,
-    "name": "outdoor",
-    "event_count": 12
-  }
-]
-```
-
-#### Create Tag
-
-```http
-POST /admin/tags
-```
-
-Creates a new tag.
-
-**Request Body:**
-```json
-{
-  "name": "music"
-}
-```
-
-**Response 201:**
-```json
-{
-  "id": 1,
-  "message": "Tag created successfully"
-}
-```
-
-#### Delete Tag
-
-```http
-DELETE /admin/tags/:id
-```
-
-Deletes a tag and removes all associations.
-
-**Parameters:**
-- `id` (path) - Tag ID
-
-**Response 200:**
-```json
-{
-  "message": "Tag deleted successfully"
-}
-```
-
-#### Assign Tag to Event
-
-```http
-POST /admin/tags/:tagId/events/:eventId
-```
-
-Associates a tag with an event.
-
-**Parameters:**
-- `tagId` (path) - Tag ID
-- `eventId` (path) - Event ID
-
-**Response 200:**
-```json
-{
-  "message": "Tag assigned to event successfully"
-}
-```
-
-#### Remove Tag from Event
-
-```http
-DELETE /admin/tags/:tagId/events/:eventId
-```
-
-Removes tag association from event.
-
-**Parameters:**
-- `tagId` (path) - Tag ID
-- `eventId` (path) - Event ID
-
-**Response 200:**
-```json
-{
-  "message": "Tag removed from event successfully"
-}
-```
+Collaborator permissions are capability-based (e.g. `invite_create`, `collaborator_remove`,
+`role_change`, `invite_revoke`) rather than a single flat "collaborator" role - see
+`event_collaborators`/`collaboration_history` in the schema and `docs/features.md` for the roles
+model.
 
 ---
 
-### Admin - Utilities
+### Favorites & User Profile
 
-#### Reverse Geocode
+**Note:** Requires the `enableFavorites` feature flag (always enabled by default).
 
-```http
-POST /admin/geocode/reverse
-```
-
-Converts GPS coordinates to location information.
-
-**Request Body:**
-```json
-{
-  "latitude": 40.785091,
-  "longitude": -73.968285
-}
-```
-
-**Response 200:**
-```json
-{
-  "location": "Central Park",
-  "country": "United States",
-  "state": "New York",
-  "city": "New York"
-}
-```
-
-#### Regenerate Thumbnail
-
-```http
-POST /admin/photos/:id/regenerate-thumbnail
-```
-
-Regenerates Instagram-sized thumbnail for a photo.
-
-**Parameters:**
-- `id` (path) - Photo ID
-
-**Response 200:**
-```json
-{
-  "success": true,
-  "url": "https://r2.../ig/IMG_1234.jpg"
-}
-```
+| Method | Path | Auth | Description |
+| --- | --- | --- | --- |
+| GET | `/api/favorites` | Required | List the current user's favorited photos |
+| GET | `/api/favorites/ids` | Required | List just the IDs of favorited photos (cheaper for UI state) |
+| POST | `/api/favorites/:photoId` | Required | Favorite a photo |
+| DELETE | `/api/favorites/:photoId` | Required | Unfavorite a photo |
+| GET | `/api/user/profile` | Optional | Get the current user's profile |
+| PUT | `/api/user/profile` | Required | Update the current user's profile |
 
 ---
 
-### Collaborators
+### Batch Download
 
-**Note:** Requires `enableCollaborators` feature flag (Mailgun configured).
-
-#### Get Event Collaborators
-
-```http
-GET /collaborators/:slug
-```
-
-Returns all collaborators for an event.
-
-**Parameters:**
-- `slug` (path) - Event slug
-
-**Response 200:**
-```json
-[
-  {
-    "email": "user@example.com",
-    "name": "John Doe",
-    "avatar": "https://...",
-    "invited_at": "2024-07-01T10:00:00Z",
-    "accepted_at": "2024-07-02T14:30:00Z",
-    "status": "accepted"
-  }
-]
-```
-
-#### Invite Collaborator
-
-```http
-POST /collaborators/:slug/invite
-```
-
-Sends collaboration invitation email.
-
-**Parameters:**
-- `slug` (path) - Event slug
-
-**Request Body:**
-```json
-{
-  "email": "newuser@example.com"
-}
-```
-
-**Response 200:**
-```json
-{
-  "message": "Invitation sent successfully"
-}
-```
-
-**Response 400:**
-```json
-{
-  "error": "User is already a collaborator"
-}
-```
-
-#### Accept Invitation
-
-```http
-POST /collaborators/:slug/accept
-```
-
-Accepts a collaboration invitation.
-
-**Parameters:**
-- `slug` (path) - Event slug
-
-**Response 200:**
-```json
-{
-  "message": "Invitation accepted successfully"
-}
-```
-
-#### Remove Collaborator
-
-```http
-DELETE /collaborators/:slug/:email
-```
-
-Removes a collaborator from an event.
-
-**Parameters:**
-- `slug` (path) - Event slug
-- `email` (path) - Collaborator email (URL encoded)
-
-**Response 200:**
-```json
-{
-  "message": "Collaborator removed successfully"
-}
-```
-
-#### Create Invite Link
-
-```http
-POST /collaborators/:slug/invite-link
-```
-
-Creates a shareable invitation link.
-
-**Parameters:**
-- `slug` (path) - Event slug
-
-**Request Body:**
-```json
-{
-  "expiresIn": 7,
-  "maxUses": 10
-}
-```
-
-**Response 201:**
-```json
-{
-  "token": "abc123def456",
-  "url": "https://your-domain/events/summer-festival-2024/join/abc123def456",
-  "expiresAt": "2024-07-08T10:00:00Z"
-}
-```
-
-#### Accept Invite Link
-
-```http
-POST /collaborators/:slug/join/:token
-```
-
-Accepts invitation via shareable link.
-
-**Parameters:**
-- `slug` (path) - Event slug
-- `token` (path) - Invite token
-
-**Response 200:**
-```json
-{
-  "message": "Successfully joined event as collaborator"
-}
-```
-
-**Response 400:**
-```json
-{
-  "error": "Invite link has expired"
-}
-```
+| Method | Path                    | Auth                    | Description                                            |
+| ------ | ----------------------- | ----------------------- | ------------------------------------------------------ |
+| POST   | `/api/events/:slug/zip` | Required (event access) | Request a ZIP of selected photos (max 50) for download |
 
 ---
 
-### Favorites
+### Mobile OAuth
 
-**Note:** Requires `enableFavorites` feature flag (always enabled by default).
+See [mobile-oauth.md](mobile-oauth.md) for the full flow and Cloudflare Access configuration.
 
-#### Get User Favorites
-
-```http
-GET /favorites
-```
-
-Returns all photos favorited by current user.
-
-**Response 200:**
-```json
-[
-  {
-    "id": 156,
-    "filename": "IMG_5678.jpg",
-    "preview_url": "https://...",
-    "event_title": "Summer Festival 2024",
-    "event_slug": "summer-festival-2024",
-    "favorited_at": "2024-07-20T15:30:00Z"
-  }
-]
-```
-
-#### Toggle Favorite
-
-```http
-POST /favorites/:photoId/toggle
-```
-
-Adds or removes a photo from favorites.
-
-**Parameters:**
-- `photoId` (path) - Photo ID
-
-**Response 200:**
-```json
-{
-  "favorited": true
-}
-```
-
-#### Get Event Favorites
-
-```http
-GET /events/:slug/favorites
-```
-
-Returns favorite status for all photos in an event (for current user).
-
-**Parameters:**
-- `slug` (path) - Event slug
-
-**Response 200:**
-```json
-{
-  "156": true,
-  "157": false,
-  "158": true
-}
-```
+| Method | Path | Auth | Description |
+| --- | --- | --- | --- |
+| GET | `/api/mobile-login` | Cloudflare Access | Landing page shown in-browser after the mobile app opens a login link; immediately redirects to `/api/mobile-auth` |
+| GET | `/api/mobile-auth` | Cloudflare Access | Reads the Access-authenticated user, issues a signed JWT, and redirects to the `photos://auth/callback` deep link with the token |
 
 ---
 
 ### SEO
 
-#### Get Sitemap
-
-```http
-GET /sitemap.xml
-```
-
-Returns XML sitemap of all public events.
-
-**Response 200:**
-```xml
-<?xml version="1.0" encoding="UTF-8"?>
-<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
-  <url>
-    <loc>https://your-domain/events/summer-festival-2024</loc>
-    <lastmod>2024-07-15</lastmod>
-    <priority>0.8</priority>
-  </url>
-</urlset>
-```
-
-#### Get Robots.txt
-
-```http
-GET /robots.txt
-```
-
-Returns robots.txt file.
-
-**Response 200:**
-```
-User-agent: *
-Allow: /
-Sitemap: https://your-domain/sitemap.xml
-```
+| Method | Path | Description |
+| --- | --- | --- |
+| GET | `/sitemap.xml` | XML sitemap of public events |
+| GET | `/robots.txt` | Robots file |
 
 ---
 
@@ -971,6 +200,7 @@ Sitemap: https://your-domain/sitemap.xml
 All endpoints may return the following error codes:
 
 ### 400 Bad Request
+
 ```json
 {
   "error": "Validation error message"
@@ -978,6 +208,7 @@ All endpoints may return the following error codes:
 ```
 
 ### 401 Unauthorized
+
 ```json
 {
   "error": "Unauthorized"
@@ -985,6 +216,7 @@ All endpoints may return the following error codes:
 ```
 
 ### 403 Forbidden
+
 ```json
 {
   "error": "Insufficient permissions"
@@ -992,6 +224,7 @@ All endpoints may return the following error codes:
 ```
 
 ### 404 Not Found
+
 ```json
 {
   "error": "Resource not found"
@@ -999,6 +232,7 @@ All endpoints may return the following error codes:
 ```
 
 ### 500 Internal Server Error
+
 ```json
 {
   "error": "Internal server error"
@@ -1006,6 +240,7 @@ All endpoints may return the following error codes:
 ```
 
 ### 503 Service Unavailable
+
 ```json
 {
   "error": "Feature not available. This feature requires additional configuration.",
@@ -1025,6 +260,7 @@ Currently no rate limiting is implemented. Consider adding:
 ## CORS
 
 CORS is configured to allow requests from:
+
 - Configured `APP_DOMAIN` in production
 - `localhost:*` in development
 
@@ -1040,27 +276,34 @@ Currently no webhooks are implemented. Potential use cases:
 
 ## TypeScript Types
 
-For TypeScript clients, refer to `types.ts` in both `apps/web/src/` and `apps/worker/src/` for complete type definitions.
-
-Key types:
+For TypeScript clients, refer to `apps/worker/src/types.ts` and `apps/web/src/types.ts` for the
+authoritative, current type definitions - the shapes below are illustrative only and may drift out
+of sync with the code over time.
 
 ```typescript
 interface Event {
   id: number;
   slug: string;
-  title: string;
-  date: string;
+  name: string;
+  visibility: 'public' | 'private' | 'collaborators_only';
   description: string | null;
-  location: string | null;
-  // ... more fields
+  is_archived: boolean;
+  inferred_date: string | null;
+  created_at: string;
 }
 
 interface Photo {
-  id: number;
-  filename: string;
-  preview_url: string;
-  original_url: string;
-  // ... more fields
+  id: string; // ULID
+  event_id: number;
+  original_filename: string;
+  media_type: 'photo' | 'video';
+  capture_time: string | null;
+  uploaded_at: string;
+  width: number | null;
+  height: number | null;
+  is_featured: boolean;
+  favorites_count: number;
+  // ... EXIF/GPS fields, see apps/worker/src/types.ts
 }
 
 interface User {
@@ -1079,29 +322,29 @@ import axios from 'axios';
 const api = axios.create({
   baseURL: 'https://your-domain',
   headers: {
-    'Authorization': `Bearer ${getToken()}`
-  }
+    Authorization: `Bearer ${getToken()}`, // mobile app only; web relies on Cloudflare Access + cookies
+  },
 });
 
-// Get events
-const events = await api.get('/events');
+// List events
+const { data: events } = await api.get('/api/events');
 
-// Upload photo
-const { data } = await api.post(`/admin/events/${slug}/uploads/start`, {
+// Upload a photo (multipart upload flow)
+const { data } = await api.post(`/api/admin/events/${slug}/uploads/start`, {
   filename: 'IMG_1234.jpg',
   contentType: 'image/jpeg',
-  fileSize: 5242880
+  fileSize: 5242880,
 });
 
-// Upload parts to R2
+// Upload parts directly to R2 via the presigned URLs
 for (const part of data.parts) {
   await axios.put(part.url, filePart);
 }
 
-// Complete upload
-await api.post(`/admin/events/${slug}/uploads/${data.photoId}/complete`, {
+// Complete the upload
+await api.post(`/api/admin/events/${slug}/uploads/${data.photoId}/complete`, {
   uploadId: data.uploadId,
-  parts: completedParts
+  parts: completedParts,
 });
 ```
 

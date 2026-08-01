@@ -1,74 +1,72 @@
 # Contact Form Setup
 
-The Landing page includes a contact form that needs to be configured with a form backend service.
+The landing page (`apps/web/src/pages/Landing.tsx`) already includes a working contact form
+(`apps/web/src/components/ContactForm.tsx`) built on [Formspree](https://formspree.io/) via the
+`@formspree/react` package's `useForm` hook - there's no backend endpoint to build, just a Formspree
+form ID to configure.
 
-## Option 1: Formspree (Recommended - Free & Easy)
+## Configuring Your Own Formspree Form ID
 
-1. Go to [formspree.io](https://formspree.io/)
-2. Sign up for a free account
-3. Create a new form
-4. Copy your form endpoint (looks like `https://formspree.io/f/xyzabc123`)
-5. Update the form action in `apps/web/src/pages/Landing.tsx`:
+1. Go to [formspree.io](https://formspree.io/) and sign up for a free account
+2. Create a new form
+3. Copy your form ID (the part after `/f/` in your form endpoint, e.g. `https://formspree.io/f/xyzabc123` -> `xyzabc123`)
+4. Update the `formId` prop passed to `<ContactForm />` in `apps/web/src/pages/Landing.tsx`:
+
    ```tsx
-   <form
-     action="https://formspree.io/f/YOUR-FORM-ID"
-     method="POST"
-     ...
+   <ContactForm formId="YOUR-FORM-ID" />
    ```
 
-## Option 2: MailChannels Worker Endpoint
+The `formId` is currently hardcoded in `Landing.tsx` rather than read from an environment variable,
+so self-hosters need to edit this line directly (or wire it up to a `VITE_*` env var if you'd
+prefer it configurable at build/runtime).
 
-Alternatively, you can implement a serverless email endpoint using MailChannels (free on Cloudflare Workers):
+## Displayed Contact Email
 
-1. Add to `apps/worker/src/routes/public.ts`:
+Separately from the form itself, the contact email shown elsewhere in the UI (footer, privacy
+policy) comes from the `contactEmail` runtime config (`apps/web/src/config.ts`), which reads
+`VITE_CONTACT_EMAIL` in development or the worker-injected runtime config in production - see
+[configuration.md](./configuration.md) for how to set `CONTACT_EMAIL`.
+
+## Alternative: Worker-Based Contact Endpoint
+
+If you'd rather not depend on Formspree, you can replace `ContactForm.tsx` with a plain form that
+posts to a custom worker route instead. There's no such route in `apps/worker/src/routes/` today,
+but a minimal example using [MailChannels](https://www.mailchannels.com/) (usable for free from
+Cloudflare Workers, subject to their current terms) would look like this:
 
 ```typescript
 import { Hono } from 'hono';
+import type { Env } from '../types';
 
-export const publicRoutes = new Hono<{ Bindings: Env }>();
+const app = new Hono<{ Bindings: Env }>();
 
-// ... existing routes ...
-
-publicRoutes.post('/contact', async (c) => {
+app.post('/api/contact', async (c) => {
   try {
-    const { name, email, message } = await c.req.json();
-    
-    // Validate inputs
+    const { name, email, message } = await c.req.json<{ name?: string; email?: string; message?: string }>();
+
     if (!name || !email || !message) {
       return c.json({ error: 'Missing required fields' }, 400);
     }
 
-    // Send email using MailChannels
-    await fetch('https://api.mailchannels.net/tx/v1/send', {
+    const response = await fetch('https://api.mailchannels.net/tx/v1/send', {
       method: 'POST',
-      headers: {
-        'content-type': 'application/json',
-      },
+      headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
-        personalizations: [
-          {
-            to: [{ email: 'your-email@example.com', name: 'Your Name' }],
-          },
-        ],
-        from: {
-          email: 'noreply@photos.yourdomain.com',
-          name: 'Photo Gallery Contact Form',
-        },
+        personalizations: [{ to: [{ email: c.env.CONTACT_EMAIL }] }],
+        from: { email: 'noreply@yourdomain.com', name: 'Contact Form' },
         subject: `Contact Form: Message from ${name}`,
         content: [
           {
             type: 'text/plain',
-            value: `
-Name: ${name}
-Email: ${email}
-
-Message:
-${message}
-            `.trim(),
+            value: `Name: ${name}\nEmail: ${email}\n\nMessage:\n${message}`,
           },
         ],
       }),
     });
+
+    if (!response.ok) {
+      return c.json({ error: 'Failed to send message' }, 502);
+    }
 
     return c.json({ success: true });
   } catch (error) {
@@ -76,45 +74,9 @@ ${message}
     return c.json({ error: 'Failed to send message' }, 500);
   }
 });
+
+export const contactRoutes = app;
 ```
 
-2. Update the form in `Landing.tsx` to use async submit:
-
-```typescript
-const [formState, setFormState] = useState<'idle' | 'sending' | 'success' | 'error'>('idle');
-
-const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
-  e.preventDefault();
-  setFormState('sending');
-  
-  const formData = new FormData(e.currentTarget);
-  const data = {
-    name: formData.get('name'),
-    email: formData.get('email'),
-    message: formData.get('message'),
-  };
-  
-  try {
-    const response = await fetch('/api/contact', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(data),
-    });
-    
-    if (response.ok) {
-      setFormState('success');
-      e.currentTarget.reset();
-    } else {
-      setFormState('error');
-    }
-  } catch (error) {
-    setFormState('error');
-  }
-};
-```
-
-## Current Email
-
-The contact email displayed on the page is: **vantol.thijs@gmail.com**
-
-Update this in `Landing.tsx` if needed.
+You would also need to mount this route in `apps/worker/src/index.ts` and update `ContactForm.tsx`
+to submit to `/api/contact` instead of using the Formspree hook.

@@ -1,6 +1,7 @@
 import React, { useEffect, useState, useCallback } from 'react';
 import { Cast } from 'lucide-react';
 import { castService, type CastMediaMessage } from '../services/castService';
+import { ensureCastToken } from '../api';
 import { useToast } from './Toast';
 import { useConfirm } from './ConfirmDialog';
 
@@ -8,6 +9,10 @@ interface CastButtonProps {
   /** Builds the message to send once a cast session is (or becomes) active.
    *  Called lazily so the current photo/album can be resolved at click time. */
   getMedia: () => CastMediaMessage;
+  /** Event slug the media belongs to. Used to fetch an event-scoped auth
+   *  token before starting a session, so the receiver (running unauthenticated
+   *  on the TV) can load protected media for private/password-protected events. */
+  slug: string;
   className?: string;
   /** Compact icon-only rendering (e.g. inside the PhotoDetail action bar) vs.
    *  a labeled button (e.g. in the gallery toolbar). */
@@ -21,7 +26,7 @@ interface CastButtonProps {
  * Application ID is configured (see castService.init/VITE_CAST_APP_ID) so it
  * never dead-ends the user in an environment where casting can't work.
  */
-export const CastButton: React.FC<CastButtonProps> = ({ getMedia, className = '', variant = 'icon' }) => {
+export const CastButton: React.FC<CastButtonProps> = ({ getMedia, slug, className = '', variant = 'icon' }) => {
   const [available, setAvailable] = useState(false);
   const [connected, setConnected] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -57,6 +62,10 @@ export const CastButton: React.FC<CastButtonProps> = ({ getMedia, className = ''
 
     setBusy(true);
     try {
+      // Ensure we have a valid auth token cached for this event *before* the
+      // receiver launches — it runs in an unauthenticated browser context on
+      // the TV, so it can't rely on our cookies/headers itself.
+      await ensureCastToken(slug);
       await castService.requestSession();
       await castService.loadMedia(getMedia());
     } catch (err) {
@@ -65,7 +74,7 @@ export const CastButton: React.FC<CastButtonProps> = ({ getMedia, className = ''
     } finally {
       setBusy(false);
     }
-  }, [getMedia, toast, confirm]);
+  }, [getMedia, slug, toast, confirm]);
 
   if (!available) return null;
 

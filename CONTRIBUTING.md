@@ -11,6 +11,7 @@ For setup instructions, development workflow, and contribution guidelines, pleas
 ## TL;DR
 
 1. **Setup:**
+
    ```bash
    npm install
    cd apps/worker && npm install
@@ -18,6 +19,7 @@ For setup instructions, development workflow, and contribution guidelines, pleas
    ```
 
 2. **Development:**
+
    ```bash
    # Terminal 1: Worker
    cd apps/worker && npm run dev
@@ -27,6 +29,7 @@ For setup instructions, development workflow, and contribution guidelines, pleas
    ```
 
 3. **Testing:**
+
    ```bash
    npm test
    npm run test:e2e
@@ -40,7 +43,7 @@ For setup instructions, development workflow, and contribution guidelines, pleas
 
 ## Project Structure
 
-```
+```text
 .
 ├── apps/
 │   ├── web/        # React frontend

@@ -21,8 +21,6 @@ This directory contains all documentation for the Photo Sharing Application.
 - **[Android Deployment](android-deployment.md)** - Android-specific deployment instructions
 - **[Contact Form](contact-form.md)** - Configuring the contact form
 
-
-
 ## Quick Links
 
 - **Frontend**: `apps/web/` (React + Vite)

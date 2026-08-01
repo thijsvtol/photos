@@ -1262,6 +1262,7 @@ const EventGallery: React.FC = () => {
               <div className="flex items-center gap-2 flex-shrink-0">
                 {filteredPhotos.length > 0 && (
                   <CastButton
+                    slug={slug!}
                     variant="labeled"
                     getMedia={() => ({
                       type: 'album',

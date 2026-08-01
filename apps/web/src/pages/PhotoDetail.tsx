@@ -1922,6 +1922,7 @@ const PhotoDetail: React.FC = () => {
             </button>
 
             <CastButton
+              slug={slug!}
               getMedia={() => ({
                 type: photo?.file_type === 'video/mp4' ? 'video' : 'photo',
                 url: photo ? getCastOriginalUrl(slug!, photo.id, photo.file_type, photo.cache_version) : '',
