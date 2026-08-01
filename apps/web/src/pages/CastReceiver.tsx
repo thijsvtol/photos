@@ -30,6 +30,13 @@ const PRELOAD_AHEAD_COUNT = 2;
 
 type DisplayItem = { url: string; type: 'photo' | 'video'; title?: string };
 
+// If a video hasn't started playing within this long, assume the initial
+// fetch/buffering stalled (large videos over a slow/congested Wi-Fi network
+// are the main culprit) and force a fresh reload rather than leaving the
+// screen stuck black indefinitely.
+const VIDEO_STALL_TIMEOUT_MS = 15000;
+const VIDEO_MAX_AUTO_RETRIES = 2;
+
 export default function CastReceiver() {
   const [media, setMedia] = useState<CastMediaMessage | null>(null);
   const [albumIndex, setAlbumIndex] = useState(0);
@@ -38,6 +45,17 @@ export default function CastReceiver() {
   // the previous photo/video stays visible — instead of a black gap — while
   // the next one loads in the background.
   const [displayedItem, setDisplayedItem] = useState<DisplayItem | null>(null);
+  // Whether the current video has started rendering frames yet. Shown as a
+  // spinner overlay instead of a bare black screen while a large video
+  // buffers its first frame.
+  const [videoBuffering, setVideoBuffering] = useState(false);
+  const [videoError, setVideoError] = useState(false);
+  // Bumped to force the <video> element to remount (and thus re-fetch from
+  // scratch) when the stall watchdog below fires.
+  const [videoRetryToken, setVideoRetryToken] = useState(0);
+  const videoRetryCountRef = useRef(0);
+  const videoStallTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const videoStartedRef = useRef(false);
   const slideshowTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const preloadCacheRef = useRef<Map<string, HTMLImageElement>>(new Map());
 
@@ -172,6 +190,48 @@ export default function CastReceiver() {
     }
   }, [media, albumIndex]);
 
+  // Reset buffering/error/retry state whenever a new video is displayed, and
+  // arm a watchdog: if it hasn't started playing within VIDEO_STALL_TIMEOUT_MS
+  // (large videos over a slow/congested network are the main cause of a
+  // stalled fetch), force the <video> element to remount and refetch rather
+  // than leaving the screen stuck black indefinitely. The watchdog disarms
+  // itself permanently once playback actually starts (see onPlaying below) —
+  // it only guards against the *initial* load stalling.
+  useEffect(() => {
+    if (videoStallTimerRef.current) {
+      clearTimeout(videoStallTimerRef.current);
+      videoStallTimerRef.current = null;
+    }
+
+    if (displayedItem?.type !== 'video') return;
+
+    setVideoBuffering(true);
+    setVideoError(false);
+    videoRetryCountRef.current = 0;
+    videoStartedRef.current = false;
+
+    const armTimer = () => {
+      videoStallTimerRef.current = setTimeout(() => {
+        if (videoStartedRef.current) return;
+
+        if (videoRetryCountRef.current < VIDEO_MAX_AUTO_RETRIES) {
+          videoRetryCountRef.current += 1;
+          setVideoRetryToken((prev) => prev + 1);
+          armTimer();
+        } else {
+          setVideoBuffering(false);
+          setVideoError(true);
+        }
+      }, VIDEO_STALL_TIMEOUT_MS);
+    };
+    armTimer();
+
+    return () => {
+      if (videoStallTimerRef.current) clearTimeout(videoStallTimerRef.current);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [displayedItem?.url, displayedItem?.type]);
+
   if (!displayedItem) {
     return (
       <div className="fixed inset-0 bg-black flex items-center justify-center">
@@ -184,11 +244,30 @@ export default function CastReceiver() {
     <div className="fixed inset-0 bg-black flex items-center justify-center">
       {displayedItem.type === 'video' ? (
         <video
-          key={displayedItem.url}
+          key={`${displayedItem.url}#${videoRetryToken}`}
           src={displayedItem.url}
           autoPlay
           controls={false}
+          preload="auto"
           className="max-w-full max-h-full object-contain animate-fadeIn"
+          onPlaying={() => {
+            videoStartedRef.current = true;
+            if (videoStallTimerRef.current) {
+              clearTimeout(videoStallTimerRef.current);
+              videoStallTimerRef.current = null;
+            }
+            setVideoBuffering(false);
+          }}
+          onWaiting={() => setVideoBuffering(true)}
+          onCanPlay={() => setVideoBuffering(false)}
+          onError={() => {
+            if (videoStallTimerRef.current) {
+              clearTimeout(videoStallTimerRef.current);
+              videoStallTimerRef.current = null;
+            }
+            setVideoBuffering(false);
+            setVideoError(true);
+          }}
           onEnded={() => {
             if (media?.type === 'album' && media.items) {
               setAlbumIndex((prev) => (prev + 1) % media.items!.length);
@@ -202,6 +281,18 @@ export default function CastReceiver() {
           alt={displayedItem.title || ''}
           className="max-w-full max-h-full object-contain animate-fadeIn"
         />
+      )}
+      {/* Buffering spinner — shown while a (usually large) video hasn't
+          rendered its first frame yet, instead of a bare black screen. */}
+      {displayedItem.type === 'video' && videoBuffering && !videoError && (
+        <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+          <div className="w-16 h-16 border-4 border-white/30 border-t-white rounded-full animate-spin" />
+        </div>
+      )}
+      {displayedItem.type === 'video' && videoError && (
+        <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 text-white/80">
+          <p className="text-lg font-light">This video couldn't be loaded</p>
+        </div>
       )}
       {displayedItem.title && (
         <div className="absolute bottom-8 left-0 right-0 text-center text-white/80 text-lg font-light drop-shadow">
