@@ -2,7 +2,7 @@ import { Context, Hono } from 'hono';
 import type { Env } from '../types';
 import { checkEventAuth, extractUser, getCollaboratorRoleByEventId } from '../auth';
 import { isVideoFileType, getStorageExtension, getStorageContentType } from '../fileTypeUtils';
-import { createEventSessionToken } from '../cookies';
+import { createEventSessionToken, hasEventSessionAccess } from '../cookies';
 
 const app = new Hono<{ Bindings: Env }>();
 
@@ -71,6 +71,19 @@ async function requireMediaAccess(
     if (role) {
       return null;
     }
+  }
+
+  // Signed event-session token (cookie, header, or ?est= query param) — this
+  // is the same token issued by both the password-login flow and
+  // GET /media/:slug/cast-token (minted for whoever was already authorized
+  // above, so it can be embedded in Cast media URLs for the receiver, which
+  // runs with none of the caller's cookies/headers). Checked unconditionally
+  // — i.e. even for password-less private/collaborators-only events — since
+  // its mere existence already proves the holder passed this same access
+  // check once before.
+  const hasSessionAccess = await hasEventSessionAccess(c.req.raw, event.slug, c.env.EVENT_COOKIE_SECRET);
+  if (hasSessionAccess) {
+    return null;
   }
 
   // Password gate for non-collaborator users
