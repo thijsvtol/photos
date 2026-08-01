@@ -231,7 +231,6 @@ export default function CastReceiver() {
     return () => {
       if (videoStallTimerRef.current) clearTimeout(videoStallTimerRef.current);
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [displayedItem?.url, displayedItem?.type]);
 
   if (!displayedItem) {
