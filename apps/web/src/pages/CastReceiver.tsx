@@ -50,6 +50,10 @@ export default function CastReceiver() {
   // buffers its first frame.
   const [videoBuffering, setVideoBuffering] = useState(false);
   const [videoError, setVideoError] = useState(false);
+  // Raw MediaError detail (code + browser message) shown on screen so a
+  // real playback failure can be diagnosed remotely, without needing to
+  // plug the Cast device into a computer for devtools/remote debugging.
+  const [videoErrorDetail, setVideoErrorDetail] = useState<string | null>(null);
   // Bumped to force the <video> element to remount (and thus re-fetch from
   // scratch) when the stall watchdog below fires.
   const [videoRetryToken, setVideoRetryToken] = useState(0);
@@ -204,6 +208,7 @@ export default function CastReceiver() {
 
     setVideoBuffering(true);
     setVideoError(false);
+    setVideoErrorDetail(null);
     videoRetryCountRef.current = 0;
     videoStartedRef.current = false;
 
@@ -257,13 +262,20 @@ export default function CastReceiver() {
           }}
           onWaiting={() => setVideoBuffering(true)}
           onCanPlay={() => setVideoBuffering(false)}
-          onError={() => {
+          onError={(e) => {
             if (videoStallTimerRef.current) {
               clearTimeout(videoStallTimerRef.current);
               videoStallTimerRef.current = null;
             }
+            const mediaError = e.currentTarget.error;
+            // MediaError.code: 1=ABORTED 2=NETWORK 3=DECODE 4=SRC_NOT_SUPPORTED
+            const detail = mediaError
+              ? `code ${mediaError.code}${mediaError.message ? `: ${mediaError.message}` : ''}`
+              : 'unknown error';
+            console.error('[CastReceiver] Video error:', detail, displayedItem.url);
             setVideoBuffering(false);
             setVideoError(true);
+            setVideoErrorDetail(detail);
           }}
           onEnded={() => {
             if (media?.type === 'album' && media.items) {
@@ -289,6 +301,9 @@ export default function CastReceiver() {
       {displayedItem.type === 'video' && videoError && (
         <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 text-white/80">
           <p className="text-lg font-light">This video couldn't be loaded</p>
+          {videoErrorDetail && (
+            <p className="text-xs text-white/40 font-mono">{videoErrorDetail}</p>
+          )}
         </div>
       )}
       {displayedItem.title && (
