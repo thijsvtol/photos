@@ -1558,7 +1558,7 @@ const PhotoDetail: React.FC = () => {
                 autoPlay
                 muted={videoMuted}
                 playsInline
-                loop
+                loop={!isSlideshow}
                 preload="metadata"
                 poster={photo?.blur_placeholder || undefined}
                 className="max-w-full max-h-full object-contain"
@@ -1579,6 +1579,19 @@ const PhotoDetail: React.FC = () => {
                 onPause={() => {
                   setVideoPaused(true);
                   setShowOverlay(true);
+                }}
+                onEnded={() => {
+                  // Slideshow mode: the shared advance-timer effect never
+                  // fires for videos (it gates on `imageLoaded`, which only
+                  // ever gets set true by the <img> branch's onLoad below),
+                  // so without this, a looping video (see `loop` above)
+                  // would just repeat forever and never let the slideshow
+                  // continue to the next photo/video — including on a
+                  // connected Cast receiver, which mirrors whatever photo is
+                  // currently displayed here.
+                  if (isSlideshow) {
+                    navigateNextRef.current?.();
+                  }
                 }}
                 onError={handleVideoError}
               />
