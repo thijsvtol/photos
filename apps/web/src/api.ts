@@ -194,8 +194,16 @@ export const getEvent = async (slug: string): Promise<Event> => {
 export const loginToEvent = async (slug: string, password: string): Promise<void> => {
   const response = await api.post<{ success: boolean; eventSessionToken?: string }>(`/events/${slug}/login`, { password });
 
-  if (Capacitor.isNativePlatform() && response.data.eventSessionToken) {
-    await MobileAuthService.setEventSessionToken(slug, response.data.eventSessionToken);
+  if (response.data.eventSessionToken) {
+    if (Capacitor.isNativePlatform()) {
+      await MobileAuthService.setEventSessionToken(slug, response.data.eventSessionToken);
+    } else {
+      // Stored so Cast (Chromecast) media requests — which run in a separate
+      // browser context on the TV with no session cookie — can still
+      // authenticate via the ?est= query param fallback (see
+      // getCastOriginalUrl/getCastPreviewUrl below).
+      localStorage.setItem(`event_session_${slug}`, response.data.eventSessionToken);
+    }
   }
 };
 
@@ -438,6 +446,51 @@ export const getOriginalUrl = (slug: string, photoId: string, fileType?: string,
   }
   
   return pathWithVersion;
+};
+
+/**
+ * Appends the event session token (?est=) and/or mobile bearer token
+ * (?token=) as query params, and resolves to an absolute URL. Used
+ * exclusively for Cast (Chromecast) media URLs: the receiver runs in its own
+ * browser context on the TV with no session cookie, so it can't rely on the
+ * `ev_${slug}` cookie normal browser image requests use — see
+ * requireMediaAccess/hasEventSessionAccess in the worker for the matching
+ * server-side fallback.
+ */
+const toCastMediaUrl = (relativePath: string, slug: string): string => {
+  let url = relativePath;
+
+  const eventSessionToken = localStorage.getItem(`event_session_${slug}`);
+  if (eventSessionToken) {
+    const separator = url.includes('?') ? '&' : '?';
+    url = `${url}${separator}est=${encodeURIComponent(eventSessionToken)}`;
+  }
+
+  const bearerToken = localStorage.getItem('mobile_bearer_token');
+  if (bearerToken) {
+    const separator = url.includes('?') ? '&' : '?';
+    url = `${url}${separator}token=${encodeURIComponent(bearerToken)}`;
+  }
+
+  const domain = config.domain.startsWith('http') ? config.domain : `https://${config.domain}`;
+  return `${domain}${url}`;
+};
+
+export const getCastPreviewUrl = (slug: string, photoId: string, fileType?: string, cacheVersion?: number): string => {
+  const isVideo = fileType === 'video/mp4';
+  const extension = isVideo ? 'mp4' : 'jpg';
+  const relativePath = `/media/${slug}/preview/${photoId}.${extension}`;
+  const pathWithVersion = cacheVersion !== undefined ? `${relativePath}?v=${cacheVersion}` : relativePath;
+  return toCastMediaUrl(pathWithVersion, slug);
+};
+
+export const getCastOriginalUrl = (slug: string, photoId: string, fileType?: string, cacheVersion?: number): string => {
+  const isVideo = fileType === 'video/mp4';
+  const isRaw = !!fileType && fileType.startsWith('raw/');
+  const extension = isVideo ? 'mp4' : isRaw ? fileType!.slice('raw/'.length) : 'jpg';
+  const relativePath = `/media/${slug}/original/${photoId}.${extension}`;
+  const pathWithVersion = cacheVersion !== undefined ? `${relativePath}?v=${cacheVersion}` : relativePath;
+  return toCastMediaUrl(pathWithVersion, slug);
 };
 
 const DEFAULT_DOWNLOAD_PATH = '/storage/emulated/0/Download';

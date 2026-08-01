@@ -18,7 +18,7 @@ import CastButton from '../components/CastButton';
 import AlbumPicker from '../components/AlbumPicker';
 import EventLocationPicker from '../components/EventLocationPicker';
 import { useUpload } from '../hooks/useUpload';
-import { getEvent, getPhotos, loginToEvent, getPreviewUrl, requestZip, downloadZip, setPhotoFeatured, getUserFavoriteIds, toggleFavorite as toggleFavoriteAPI, bulkDeletePhotos, bulkCopyPhotos, bulkUpdatePhotoLocation, getCollaborators } from '../api';
+import { getEvent, getPhotos, loginToEvent, getPreviewUrl, getCastPreviewUrl, requestZip, downloadZip, setPhotoFeatured, getUserFavoriteIds, toggleFavorite as toggleFavoriteAPI, bulkDeletePhotos, bulkCopyPhotos, bulkUpdatePhotoLocation, getCollaborators } from '../api';
 import type { Event, Photo, Collaborator } from '../types';
 import { CollaboratorAvatars } from '../components/CollaboratorAvatars';
 import { useAuth } from '../contexts/AuthContext';
@@ -1266,7 +1266,7 @@ const EventGallery: React.FC = () => {
                     getMedia={() => ({
                       type: 'album',
                       items: filteredPhotos.map((p) => ({
-                        url: getPreviewUrl(slug!, p.id, p.file_type, p.cache_version),
+                        url: getCastPreviewUrl(slug!, p.id, p.file_type, p.cache_version),
                         type: p.file_type === 'video/mp4' ? 'video' : 'photo',
                         title: p.original_filename,
                       })),

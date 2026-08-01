@@ -13,7 +13,14 @@ export const AndroidAppPrompt: React.FC = () => {
     if (Capacitor.isNativePlatform()) {
       return;
     }
-    
+
+    // Don't show on the Cast receiver page — it runs full-screen on the TV
+    // itself (Android TV/Google TV report "Android" in their user agent) and
+    // this modal would otherwise cover the cast photo/video entirely.
+    if (window.location.pathname === '/cast-receiver') {
+      return;
+    }
+
     // Check if user is on Android
     const isAndroid = /Android/i.test(navigator.userAgent);
     

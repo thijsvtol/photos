@@ -2,6 +2,7 @@ import React, { useEffect, useState, useCallback } from 'react';
 import { Cast } from 'lucide-react';
 import { castService, type CastMediaMessage } from '../services/castService';
 import { useToast } from './Toast';
+import { useConfirm } from './ConfirmDialog';
 
 interface CastButtonProps {
   /** Builds the message to send once a cast session is (or becomes) active.
@@ -25,6 +26,7 @@ export const CastButton: React.FC<CastButtonProps> = ({ getMedia, className = ''
   const [connected, setConnected] = useState(false);
   const [busy, setBusy] = useState(false);
   const toast = useToast();
+  const { confirm, ConfirmDialog } = useConfirm();
 
   useEffect(() => {
     castService.init().catch((err) => console.error('[CastButton] init failed:', err));
@@ -34,11 +36,28 @@ export const CastButton: React.FC<CastButtonProps> = ({ getMedia, className = ''
   }, []);
 
   const handleClick = useCallback(async () => {
+    if (castService.isConnected()) {
+      const ok = await confirm('Stop casting?', 'This will disconnect from the cast device.', {
+        confirmText: 'Stop casting',
+        variant: 'danger',
+      });
+      if (!ok) return;
+
+      setBusy(true);
+      try {
+        await castService.endSession();
+      } catch (err) {
+        console.error('[CastButton] Failed to stop casting:', err);
+        toast.showError('Failed to stop casting.');
+      } finally {
+        setBusy(false);
+      }
+      return;
+    }
+
     setBusy(true);
     try {
-      if (!castService.isConnected()) {
-        await castService.requestSession();
-      }
+      await castService.requestSession();
       await castService.loadMedia(getMedia());
     } catch (err) {
       console.error('[CastButton] Cast action failed:', err);
@@ -46,12 +65,13 @@ export const CastButton: React.FC<CastButtonProps> = ({ getMedia, className = ''
     } finally {
       setBusy(false);
     }
-  }, [getMedia, toast]);
+  }, [getMedia, toast, confirm]);
 
   if (!available) return null;
 
   if (variant === 'labeled') {
     return (
+      <>
       <button
         onClick={handleClick}
         disabled={busy}
@@ -62,14 +82,17 @@ export const CastButton: React.FC<CastButtonProps> = ({ getMedia, className = ''
         <Cast className="w-4 h-4" />
         {connected ? 'Casting' : 'Cast'}
       </button>
+      {ConfirmDialog}
+      </>
     );
   }
 
   return (
+    <>
     <button
       onClick={handleClick}
       disabled={busy}
-      title={connected ? 'Casting to device' : 'Cast to device'}
+      title={connected ? 'Stop casting' : 'Cast to device'}
       className={`flex flex-col items-center gap-1 p-2 rounded-xl transition active:scale-95 disabled:opacity-60 ${
         connected ? 'text-blue-400' : 'text-white/90 hover:bg-white/10'
       } ${className}`}
@@ -77,6 +100,8 @@ export const CastButton: React.FC<CastButtonProps> = ({ getMedia, className = ''
       <Cast className="w-6 h-6" />
       <span className="text-[10px] font-medium">{connected ? 'Casting' : 'Cast'}</span>
     </button>
+    {ConfirmDialog}
+    </>
   );
 };
 

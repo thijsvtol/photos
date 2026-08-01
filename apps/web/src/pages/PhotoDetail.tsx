@@ -6,7 +6,7 @@ import SEO from '../components/SEO';
 import EditorErrorBoundary from '../components/EditorErrorBoundary';
 const ImageEditorModal = lazy(() => import('../components/ImageEditorModal'));
 const VideoEditorModal = lazy(() => import('../components/VideoEditorModal'));
-import { getEvent, getPhoto, getPhotos, loginToEvent, getPreviewUrl, getOriginalUrl, downloadOriginal, downloadSmall, downloadInstagram, replacePhoto, toggleFavorite as toggleFavoriteAPI, getUserFavoriteIds, setPhotoFeatured, deletePhoto, getCollaborators } from '../api';
+import { getEvent, getPhoto, getPhotos, loginToEvent, getPreviewUrl, getOriginalUrl, getCastOriginalUrl, downloadOriginal, downloadSmall, downloadInstagram, replacePhoto, toggleFavorite as toggleFavoriteAPI, getUserFavoriteIds, setPhotoFeatured, deletePhoto, getCollaborators } from '../api';
 import { createPreview } from '../imageUtils';
 import type { Event, Photo } from '../types';
 import { useAuth } from '../contexts/AuthContext';
@@ -16,6 +16,7 @@ import { useConfirm } from '../components/ConfirmDialog';
 import { haptics } from '../utils/haptics';
 import { trackPhotoView, trackPhotoDownload, trackFavorite } from '../services/analytics';
 import CastButton from '../components/CastButton';
+import { castService } from '../services/castService';
 import { Capacitor } from '@capacitor/core';
 import { Share } from '@capacitor/share';
 import { Filesystem, Directory } from '@capacitor/filesystem';
@@ -380,6 +381,21 @@ const PhotoDetail: React.FC = () => {
       }
     };
   }, [isSlideshow, currentIndex, slideshowSpeed, imageLoaded]);
+
+  // Keep an active Cast session in sync with the currently viewed photo —
+  // whether the user swipes/navigates manually or the slideshow above
+  // auto-advances — instead of only casting whatever photo was on screen
+  // when casting started.
+  useEffect(() => {
+    if (!photo || !slug) return;
+    if (!castService.isConnected()) return;
+
+    castService.loadMedia({
+      type: photo.file_type === 'video/mp4' ? 'video' : 'photo',
+      url: getCastOriginalUrl(slug, photo.id, photo.file_type, photo.cache_version),
+      title: photo.original_filename,
+    }).catch((err) => console.error('[PhotoDetail] Failed to update cast media:', err));
+  }, [photo, slug]);
 
   // Keyboard navigation - using refs for stable event handlers
   useEffect(() => {
@@ -1908,7 +1924,7 @@ const PhotoDetail: React.FC = () => {
             <CastButton
               getMedia={() => ({
                 type: photo?.file_type === 'video/mp4' ? 'video' : 'photo',
-                url: photo ? getOriginalUrl(slug!, photo.id, photo.file_type, photo.cache_version) : '',
+                url: photo ? getCastOriginalUrl(slug!, photo.id, photo.file_type, photo.cache_version) : '',
                 title: photo?.original_filename,
               })}
             />
