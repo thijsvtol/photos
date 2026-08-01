@@ -67,7 +67,30 @@ export default function CastReceiver() {
           setMedia(event.data);
         });
 
-        context.start();
+        // This receiver never uses the standard Cast media session
+        // (PlayerManager) — it's driven entirely by our own custom JSON
+        // messages above, rendering plain <img>/<video> tags directly.
+        // Without this option, CastReceiverContext auto-closes the app once
+        // it decides there's no active media session, which — since
+        // there's never any further activity/messages while a single photo
+        // or a long video just sits on screen — was cutting casting short,
+        // most noticeably during video playback.
+        const options = new (window as any).cast.framework.CastReceiverOptions();
+        options.disableIdleTimeout = true;
+        // CastReceiverOptions.mediaElement defaults to "the first media
+        // element found in the page" — meaning CastReceiverContext was
+        // auto-attaching its own PlayerManager/media-session machinery to
+        // our plain <video> tag the moment one appeared, even though we
+        // never issue an actual framework LOAD request for it. That's what
+        // was cutting the cast session short shortly after a video's
+        // 'ended' event fired (reproducible even with very short clips,
+        // since the auto-managed "idle" state is reached almost
+        // immediately once such a short video finishes). Skipping the
+        // player library load entirely prevents PlayerManager from ever
+        // attaching to/managing our video element, leaving playback fully
+        // under our own control.
+        options.skipPlayersLoad = true;
+        context.start(options);
       })
       .catch((err) => console.error('[CastReceiver] Failed to initialize:', err));
 

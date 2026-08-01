@@ -128,8 +128,15 @@ class CastService {
           cast.framework.CastContextEventType.SESSION_STATE_CHANGED,
           (event: { sessionState: string }) => {
             const session = cast.framework.CastContext.getInstance().getCurrentSession();
-            this.setConnected(!!session && event.sessionState === cast.framework.SessionState.SESSION_STARTED
-              || event.sessionState === cast.framework.SessionState.SESSION_RESUMED);
+            // Parenthesized explicitly — without it, `||` has lower
+            // precedence than `&&`, so this used to evaluate as
+            // `(!!session && STARTED) || RESUMED`, meaning a RESUMED event
+            // set connected=true even with no session, and a null session
+            // during a STARTED event fell through unintentionally.
+            this.setConnected(!!session && (
+              event.sessionState === cast.framework.SessionState.SESSION_STARTED
+              || event.sessionState === cast.framework.SessionState.SESSION_RESUMED
+            ));
           }
         );
       } catch (err) {
