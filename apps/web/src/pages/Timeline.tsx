@@ -247,7 +247,6 @@ const Timeline: React.FC = () => {
 
     observer.observe(loadMoreRef.current);
     return () => observer.disconnect();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [nextCursor, loadingMore]);
 
   // Track active date on scroll (throttled to avoid excessive re-renders)
