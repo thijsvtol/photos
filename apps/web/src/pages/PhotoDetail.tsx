@@ -6,7 +6,7 @@ import SEO from '../components/SEO';
 import EditorErrorBoundary from '../components/EditorErrorBoundary';
 const ImageEditorModal = lazy(() => import('../components/ImageEditorModal'));
 const VideoEditorModal = lazy(() => import('../components/VideoEditorModal'));
-import { getEvent, getPhoto, getPhotos, loginToEvent, getPreviewUrl, getOriginalUrl, getCastOriginalUrl, downloadOriginal, downloadSmall, downloadInstagram, replacePhoto, toggleFavorite as toggleFavoriteAPI, getUserFavoriteIds, setPhotoFeatured, deletePhoto, getCollaborators } from '../api';
+import { getEvent, getPhoto, getPhotos, loginToEvent, getPreviewUrl, getOriginalUrl, getCastPreviewUrl, downloadOriginal, downloadSmall, downloadInstagram, replacePhoto, toggleFavorite as toggleFavoriteAPI, getUserFavoriteIds, setPhotoFeatured, deletePhoto, getCollaborators } from '../api';
 import { createPreview } from '../imageUtils';
 import type { Event, Photo } from '../types';
 import { useAuth } from '../contexts/AuthContext';
@@ -385,14 +385,18 @@ const PhotoDetail: React.FC = () => {
   // Keep an active Cast session in sync with the currently viewed photo —
   // whether the user swipes/navigates manually or the slideshow above
   // auto-advances — instead of only casting whatever photo was on screen
-  // when casting started.
+  // when casting started. Uses the (much smaller/faster-loading) preview
+  // rather than the full original — same as album casting — since a TV
+  // display doesn't benefit from full original resolution and the original
+  // (especially RAW/high-res camera files) was causing slow loads/long
+  // black gaps between photos.
   useEffect(() => {
     if (!photo || !slug) return;
     if (!castService.isConnected()) return;
 
     castService.loadMedia({
       type: photo.file_type === 'video/mp4' ? 'video' : 'photo',
-      url: getCastOriginalUrl(slug, photo.id, photo.file_type, photo.cache_version),
+      url: getCastPreviewUrl(slug, photo.id, photo.file_type, photo.cache_version),
       title: photo.original_filename,
     }).catch((err) => console.error('[PhotoDetail] Failed to update cast media:', err));
   }, [photo, slug]);
@@ -1925,7 +1929,7 @@ const PhotoDetail: React.FC = () => {
               slug={slug!}
               getMedia={() => ({
                 type: photo?.file_type === 'video/mp4' ? 'video' : 'photo',
-                url: photo ? getCastOriginalUrl(slug!, photo.id, photo.file_type, photo.cache_version) : '',
+                url: photo ? getCastPreviewUrl(slug!, photo.id, photo.file_type, photo.cache_version) : '',
                 title: photo?.original_filename,
               })}
             />

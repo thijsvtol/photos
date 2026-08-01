@@ -23,11 +23,23 @@ import { CAST_NAMESPACE, type CastMediaMessage } from '../services/castService';
 const CAST_RECEIVER_SDK_URL = 'https://www.gstatic.com/cast/sdk/libs/caf_receiver/v3/cast_receiver_framework.js';
 
 const SLIDESHOW_INTERVAL_MS = 6000;
+// How many upcoming album items to fetch into the browser cache ahead of
+// time, so advancing the slideshow can swap instantly instead of waiting on
+// the network for each new photo.
+const PRELOAD_AHEAD_COUNT = 2;
+
+type DisplayItem = { url: string; type: 'photo' | 'video'; title?: string };
 
 export default function CastReceiver() {
   const [media, setMedia] = useState<CastMediaMessage | null>(null);
   const [albumIndex, setAlbumIndex] = useState(0);
+  // The item currently rendered on screen. Deliberately kept separate from
+  // the "target" item (whatever media/albumIndex say should show next) so
+  // the previous photo/video stays visible — instead of a black gap — while
+  // the next one loads in the background.
+  const [displayedItem, setDisplayedItem] = useState<DisplayItem | null>(null);
   const slideshowTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const preloadCacheRef = useRef<Map<string, HTMLImageElement>>(new Map());
 
   useEffect(() => {
     let cancelled = false;
@@ -79,7 +91,65 @@ export default function CastReceiver() {
     };
   }, [media]);
 
-  if (!media) {
+  const targetItem: DisplayItem | null =
+    media?.type === 'album'
+      ? media.items?.[albumIndex]
+        ? { ...media.items[albumIndex] }
+        : null
+      : media?.url
+        ? { url: media.url, type: media.type, title: media.title }
+        : null;
+
+  // Only swap what's on screen once the target item has actually finished
+  // loading (images: decoded via a background Image(); videos: shown
+  // immediately since they buffer progressively via the <video> element
+  // itself and can't be meaningfully "preloaded" the same way).
+  useEffect(() => {
+    if (!targetItem) {
+      setDisplayedItem(null);
+      return;
+    }
+
+    if (targetItem.type === 'video') {
+      setDisplayedItem(targetItem);
+      return;
+    }
+
+    let cancelled = false;
+    const cache = preloadCacheRef.current;
+    const cached = cache.get(targetItem.url);
+    if (cached && cached.complete) {
+      setDisplayedItem(targetItem);
+      return;
+    }
+
+    const img = cached || new Image();
+    img.src = targetItem.url;
+    cache.set(targetItem.url, img);
+    img.onload = () => { if (!cancelled) setDisplayedItem(targetItem); };
+    // Show it anyway on error rather than getting stuck on the previous
+    // photo forever — the <img> below will render its own broken-image icon.
+    img.onerror = () => { if (!cancelled) setDisplayedItem(targetItem); };
+
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [targetItem?.url, targetItem?.type, targetItem?.title]);
+
+  // Prefetch the next few album photos into the browser cache so that by
+  // the time the slideshow timer advances to them, they display instantly.
+  useEffect(() => {
+    if (media?.type !== 'album' || !media.items || media.items.length === 0) return;
+    const cache = preloadCacheRef.current;
+    for (let i = 1; i <= PRELOAD_AHEAD_COUNT; i++) {
+      const item = media.items[(albumIndex + i) % media.items.length];
+      if (!item || item.type === 'video' || cache.has(item.url)) continue;
+      const img = new Image();
+      img.src = item.url;
+      cache.set(item.url, img);
+    }
+  }, [media, albumIndex]);
+
+  if (!displayedItem) {
     return (
       <div className="fixed inset-0 bg-black flex items-center justify-center">
         <p className="text-white/60 text-2xl font-light">Ready to cast</p>
@@ -87,39 +157,32 @@ export default function CastReceiver() {
     );
   }
 
-  const currentItem =
-    media.type === 'album'
-      ? media.items?.[albumIndex]
-      : { url: media.url!, type: media.type, title: media.title };
-
-  if (!currentItem) return null;
-
   return (
     <div className="fixed inset-0 bg-black flex items-center justify-center">
-      {currentItem.type === 'video' ? (
+      {displayedItem.type === 'video' ? (
         <video
-          key={currentItem.url}
-          src={currentItem.url}
+          key={displayedItem.url}
+          src={displayedItem.url}
           autoPlay
           controls={false}
-          className="max-w-full max-h-full object-contain"
+          className="max-w-full max-h-full object-contain animate-fadeIn"
           onEnded={() => {
-            if (media.type === 'album' && media.items) {
+            if (media?.type === 'album' && media.items) {
               setAlbumIndex((prev) => (prev + 1) % media.items!.length);
             }
           }}
         />
       ) : (
         <img
-          key={currentItem.url}
-          src={currentItem.url}
-          alt={currentItem.title || ''}
-          className="max-w-full max-h-full object-contain"
+          key={displayedItem.url}
+          src={displayedItem.url}
+          alt={displayedItem.title || ''}
+          className="max-w-full max-h-full object-contain animate-fadeIn"
         />
       )}
-      {currentItem.title && (
+      {displayedItem.title && (
         <div className="absolute bottom-8 left-0 right-0 text-center text-white/80 text-lg font-light drop-shadow">
-          {currentItem.title}
+          {displayedItem.title}
         </div>
       )}
     </div>
