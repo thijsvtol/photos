@@ -88,26 +88,23 @@ export default function CastReceiver() {
         // This receiver never uses the standard Cast media session
         // (PlayerManager) — it's driven entirely by our own custom JSON
         // messages above, rendering plain <img>/<video> tags directly.
-        // Without this option, CastReceiverContext auto-closes the app once
-        // it decides there's no active media session, which — since
-        // there's never any further activity/messages while a single photo
-        // or a long video just sits on screen — was cutting casting short,
-        // most noticeably during video playback.
+        // `disableIdleTimeout` is the officially documented flag for exactly
+        // this scenario ("prevents the receiver from being closed when it
+        // becomes idle after active playback stops... for non-media apps")
+        // — without it, CastReceiverContext auto-closes the app once it
+        // decides playback/activity has stopped, which was cutting casting
+        // short right after a video finished.
+        //
+        // NOTE: we previously also set `options.skipPlayersLoad = true`,
+        // reasoning that our plain <video> tag didn't need the CAF player
+        // libraries. That turned out to be wrong: skipping them prevented
+        // the Chromecast hardware's video decode/render pipeline from
+        // attaching at all, so videos failed to play outright (a real
+        // `error` event on the <video> element, previously invisible since
+        // there was no error handling — it just showed as a black screen).
+        // Do NOT re-add skipPlayersLoad.
         const options = new (window as any).cast.framework.CastReceiverOptions();
         options.disableIdleTimeout = true;
-        // CastReceiverOptions.mediaElement defaults to "the first media
-        // element found in the page" — meaning CastReceiverContext was
-        // auto-attaching its own PlayerManager/media-session machinery to
-        // our plain <video> tag the moment one appeared, even though we
-        // never issue an actual framework LOAD request for it. That's what
-        // was cutting the cast session short shortly after a video's
-        // 'ended' event fired (reproducible even with very short clips,
-        // since the auto-managed "idle" state is reached almost
-        // immediately once such a short video finishes). Skipping the
-        // player library load entirely prevents PlayerManager from ever
-        // attaching to/managing our video element, leaving playback fully
-        // under our own control.
-        options.skipPlayersLoad = true;
         context.start(options);
       })
       .catch((err) => console.error('[CastReceiver] Failed to initialize:', err));
