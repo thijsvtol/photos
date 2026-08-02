@@ -500,6 +500,34 @@ export const mergePeople = async (targetPersonId: number, sourcePersonIds: numbe
   await api.post('/admin/people/merge', { targetPersonId, sourcePersonIds }, { headers: getAdminHeaders() });
 };
 
+export interface MergeSuggestion {
+  clusterAId: number;
+  clusterBId: number;
+  similarity: number;
+}
+
+export interface MergeSuggestionCursor {
+  sourceId: number;
+  candidateId: number;
+}
+
+export interface MergeSuggestionsPage {
+  suggestions: MergeSuggestion[];
+  nextCursor: MergeSuggestionCursor | null;
+  totalClusters: number;
+}
+
+/** One bounded step of a resumable full pairwise scan for likely-duplicate person clusters
+ *  clustering itself never got to compare (see worker's GET /admin/people/merge-suggestions for
+ *  why). Pass the previous page's `nextCursor` to resume; omit to start a fresh scan. */
+export const getMergeSuggestions = async (cursor?: MergeSuggestionCursor | null): Promise<MergeSuggestionsPage> => {
+  const response = await api.get<MergeSuggestionsPage>('/admin/people/merge-suggestions', {
+    params: cursor ? { sourceId: cursor.sourceId, candidateId: cursor.candidateId } : undefined,
+    headers: getAdminHeaders(),
+  });
+  return response.data;
+};
+
 export const deletePerson = async (personId: number): Promise<void> => {
   await api.delete(`/admin/people/${personId}`, { headers: getAdminHeaders() });
 };

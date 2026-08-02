@@ -29,8 +29,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   re-ranking.
 - **People**: faces are detected and embedded client-side (`@vladmandic/human`) and grouped into
   named people (`/admin/people`) by an hourly clustering job. Includes a "Scan Library for Faces"
-  backfill action for photos uploaded before this feature existed, and a "Cluster Now" button to
-  immediately run the clustering pass instead of waiting for the next hourly cron tick.
+  backfill action for photos uploaded before this feature existed, a "Cluster Now" button to
+  immediately run the clustering pass instead of waiting for the next hourly cron tick, and a
+  "Find Merge Suggestions" button that runs a separate, complete pairwise scan across every
+  person to catch likely-duplicate groups clustering's CPU-safe top-N comparison never got a
+  chance to notice, surfacing them for one-click merge or dismiss.
 - New migrations `023_photos_organization_and_ai.sql`, `024_faces_processed_at.sql`, and
   `025_person_linked_account.sql`.
 
@@ -45,14 +48,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Faces" backfill (e.g. thousands of photos) could leave the People page showing "No people
   detected yet" for hours or days even though detection itself had already succeeded. Added a
   "Cluster Now" button so an admin can trigger clustering immediately instead of waiting for the
-  next hourly cron tick — this button repeatedly calls the clustering endpoint client-side, since
-  Cloudflare's Workers Free plan caps CPU time at 10ms per request/cron trigger (not wall-clock
-  time), which rules out looping server-side to drain a large backlog in one call. The batch
-  size itself is now adaptive (shrinks as the number of recognized people grows) instead of a
-  fixed 200, since the O(faces × people) vector comparison cost otherwise risks exceeding that
-  10ms budget and getting hard-killed with a `503`/Error 1102 "Worker exceeded resource limits"
-  (this was hit once in production while fixing this very batch-size issue, and corrected before
-  release).
+  next hourly cron tick.
+- Face clustering could 503 with Cloudflare's `Error 1102: Worker exceeded resource limits`,
+  even after the fix above and again after a first (still-too-optimistic) attempt at fixing it.
+  Root cause: comparing one face against an existing person costs `O(embedding dimensions)`
+  (1024 floating-point operations), not `O(1)` — so the real CPU cost of a clustering pass is
+  `faces × comparedPeople × 1024`, which grows unbounded as more distinct people get recognized
+  (it 503'd instantly once the library reached ~870 recognized people). Cloudflare's Workers
+  Free plan hard-caps CPU time at 10ms per request/cron trigger (not wall-clock time — a
+  fundamentally different, much more generous budget for HTTP requests). Fixed with two
+  independent safety nets: (1) each face is now only ever compared against the (at most 300)
+  *most-established* existing people (highest photo count), never the entire library, so cost
+  can never grow unbounded regardless of how many people have been recognized; and (2) a real
+  wall-clock guard between faces inside the comparison loop that halts the batch the instant a
+  conservative time budget is reached, which works as a genuine backstop because it's already
+  smaller than the real CPU limit.
 - The People page could still say "No people detected yet" even after clustering had already
   grouped photos, because groups with only a single photo so far are hidden by default (right
   after a big backfill, most newly-created groups start out as singles until a second photo of

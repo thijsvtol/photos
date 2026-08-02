@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { runFaceClustering, countUnclusteredFaces, humanDistance, humanSimilarity, SAME_PERSON_THRESHOLD } from '../faceClustering';
+import { runFaceClustering, countUnclusteredFaces, findMergeSuggestions, humanDistance, humanSimilarity, SAME_PERSON_THRESHOLD } from '../faceClustering';
+import type { MergeSuggestionCursor } from '../faceClustering';
 import type { Env } from '../types';
 
 /**
@@ -45,12 +46,24 @@ class FakeFaceClusteringDb {
             .map((f) => ({ id: f.id, photo_id: f.photo_id, embedding: f.embedding }));
           return { results: results as T[] };
         }
-        if (query.includes('FROM person_clusters') && !query.includes('WHERE')) {
-          const results = db.clusters.map((c) => ({
+        if (query.includes('FROM person_clusters') && query.includes('ORDER BY face_count DESC')) {
+          // Mirrors the real query's "top N by face_count" candidate cap (see
+          // MAX_CLUSTERS_CONSIDERED in faceClustering.ts) so tests can verify
+          // clusters ranked outside that cap are genuinely never compared against.
+          const limit = Number(boundArgs[0]);
+          const sorted = [...db.clusters].sort((a, b) => b.face_count - a.face_count);
+          const results = sorted.slice(0, limit).map((c) => ({
             id: c.id,
             centroid_embedding: c.centroid_embedding,
             face_count: c.face_count,
           }));
+          return { results: results as T[] };
+        }
+        if (query.includes('FROM person_clusters') && query.includes('ORDER BY id ASC')) {
+          // findMergeSuggestions() fetches every cluster, unbounded (see its doc comment on
+          // why it's deliberately NOT limited to a top-N subset the way clustering is).
+          const sorted = [...db.clusters].sort((a, b) => a.id - b.id);
+          const results = sorted.map((c) => ({ id: c.id, centroid_embedding: c.centroid_embedding }));
           return { results: results as T[] };
         }
         return { results: [] as T[] };
@@ -209,15 +222,15 @@ describe('runFaceClustering', () => {
     expect(db.faces.filter((f) => f.person_id === null)).toHaveLength(10);
   });
 
-  it('shrinks the batch size as the number of existing clusters grows, to stay within the CPU budget', async () => {
+  it('shrinks the batch size to 1 once the number of existing clusters hits the MAX_CLUSTERS_CONSIDERED cap (300), to stay within the CPU budget', async () => {
     const db = new FakeFaceClusteringDb();
-    // 400 pre-existing, well-separated clusters (far from the new faces below,
-    // so none of them accidentally match) — with MAX_COMPARISONS_PER_INVOCATION
-    // = 4000, this should shrink the batch size to floor(4000/400) = 10.
+    // 400 pre-existing, well-separated clusters (far from the new faces below, so none of
+    // them accidentally match) — comfortably past the 300-cluster candidate cap, so
+    // computeBatchSize() bottoms out at MIN_BATCH_SIZE (1) regardless of the exact count.
     db.clusters = Array.from({ length: 400 }, (_, i) => ({
       id: i + 1,
       centroid_embedding: embeddingOf(1000 + i, 1000 + i, 1000 + i),
-      face_count: 5,
+      face_count: 400 - i, // distinct, descending — irrelevant to this test but keeps ordering deterministic
     }));
     db.faces = Array.from({ length: 15 }, (_, i) => ({
       id: 1000 + i,
@@ -228,8 +241,39 @@ describe('runFaceClustering', () => {
 
     const result = await runFaceClustering(makeEnv(db));
 
-    expect(result.processed).toBe(10);
-    expect(db.faces.filter((f) => f.person_id === null)).toHaveLength(5);
+    expect(result.processed).toBe(1);
+    expect(db.faces.filter((f) => f.person_id === null)).toHaveLength(14);
+  });
+
+  it('never matches a face against a cluster ranked outside the top MAX_CLUSTERS_CONSIDERED (300) by face_count', async () => {
+    const db = new FakeFaceClusteringDb();
+    // 305 clusters: 304 far-away "noise" clusters with high face_count (ranks 1..304, always
+    // in the top-300 window), plus ONE cluster with the lowest face_count of all (guaranteed
+    // to be ranked 305th, i.e. excluded from the top-300 window) whose centroid is IDENTICAL
+    // to the incoming face below. If the candidate cap works correctly, this identical-looking
+    // face must NOT merge into that excluded cluster (it's never even compared against it) —
+    // it should form a brand new cluster instead.
+    const excludedClusterId = 305;
+    db.clusters = [
+      ...Array.from({ length: 304 }, (_, i) => ({
+        id: i + 1,
+        centroid_embedding: embeddingOf(1000 + i, 1000 + i, 1000 + i),
+        face_count: 304 - i + 1, // 305, 304, ..., 2 — all comfortably rank ahead of the excluded one
+      })),
+      { id: excludedClusterId, centroid_embedding: embeddingOf(5, 5, 5), face_count: 1 }, // lowest — rank 305, excluded
+    ];
+    db.faces = [
+      { id: 9001, photo_id: 'photo-target', embedding: embeddingOf(5, 5, 5), person_id: null }, // identical to the excluded cluster
+    ];
+
+    await runFaceClustering(makeEnv(db));
+
+    const targetFace = db.faces.find((f) => f.id === 9001)!;
+    expect(targetFace.person_id).not.toBeNull();
+    expect(targetFace.person_id).not.toBe(excludedClusterId); // must NOT have merged into the excluded cluster
+    const excludedCluster = db.clusters.find((c) => c.id === excludedClusterId)!;
+    expect(excludedCluster.face_count).toBe(1); // untouched
+    expect(db.clusters).toHaveLength(306); // a brand new cluster was created instead
   });
 
   it('returns processed: 0 when there is nothing to cluster', async () => {
@@ -258,5 +302,88 @@ describe('countUnclusteredFaces', () => {
     await runFaceClustering(makeEnv(db));
 
     expect(await countUnclusteredFaces(makeEnv(db))).toBe(0);
+  });
+});
+
+describe('findMergeSuggestions', () => {
+  it('suggests a pair of clusters whose centroids are near-identical, but not a far-apart third cluster', async () => {
+    const db = new FakeFaceClusteringDb();
+    db.clusters = [
+      { id: 1, centroid_embedding: embeddingOf(1, 1, 1), face_count: 1 },
+      { id: 2, centroid_embedding: embeddingOf(1.01, 1.01, 1.01), face_count: 1 },
+      { id: 3, centroid_embedding: embeddingOf(50, 50, 50), face_count: 1 },
+    ];
+
+    const result = await findMergeSuggestions(makeEnv(db), null);
+
+    expect(result.nextCursor).toBeNull();
+    expect(result.totalClusters).toBe(3);
+    expect(result.suggestions).toHaveLength(1);
+    expect(result.suggestions[0]).toMatchObject({ clusterAId: 1, clusterBId: 2 });
+    expect(result.suggestions[0].similarity).toBeGreaterThanOrEqual(SAME_PERSON_THRESHOLD);
+  });
+
+  it('only ever reports a pair once, in (lower id, higher id) order', async () => {
+    const db = new FakeFaceClusteringDb();
+    db.clusters = [
+      { id: 1, centroid_embedding: embeddingOf(1, 1, 1), face_count: 1 },
+      { id: 2, centroid_embedding: embeddingOf(1.01, 1.01, 1.01), face_count: 1 },
+    ];
+
+    const result = await findMergeSuggestions(makeEnv(db), null);
+
+    expect(result.suggestions).toHaveLength(1);
+    expect(result.suggestions.filter((s) => s.clusterAId === 2 && s.clusterBId === 1)).toHaveLength(0);
+  });
+
+  it('returns an empty result for an empty library', async () => {
+    const db = new FakeFaceClusteringDb();
+    const result = await findMergeSuggestions(makeEnv(db), null);
+    expect(result).toEqual({ suggestions: [], nextCursor: null, totalClusters: 0 });
+  });
+
+  it('resumes from a cursor without re-scanning the pair it points past', async () => {
+    const db = new FakeFaceClusteringDb();
+    // Clusters 1 and 2 are near-identical (a "should-suggest" pair) specifically so we can
+    // prove the cursor causes it to be SKIPPED rather than re-scanned; 3 and 4 are far from
+    // everything (including each other) so no other suggestions should appear.
+    db.clusters = [
+      { id: 1, centroid_embedding: embeddingOf(1, 1, 1), face_count: 1 },
+      { id: 2, centroid_embedding: embeddingOf(1.01, 1.01, 1.01), face_count: 1 },
+      { id: 3, centroid_embedding: embeddingOf(500, 500, 500), face_count: 1 },
+      { id: 4, centroid_embedding: embeddingOf(1000, 1000, 1000), face_count: 1 },
+    ];
+
+    const cursor: MergeSuggestionCursor = { sourceId: 1, candidateId: 3 }; // resume AT (1,3), skipping (1,2)
+    const result = await findMergeSuggestions(makeEnv(db), cursor);
+
+    expect(result.nextCursor).toBeNull();
+    expect(result.suggestions).toEqual([]);
+  });
+
+  it("falls back gracefully when the cursor's source cluster no longer exists (e.g. merged away)", async () => {
+    const db = new FakeFaceClusteringDb();
+    db.clusters = [
+      { id: 1, centroid_embedding: embeddingOf(1, 1, 1), face_count: 1 },
+      { id: 3, centroid_embedding: embeddingOf(1.01, 1.01, 1.01), face_count: 1 },
+    ];
+    // cursor references id=2, which no longer exists (merged/deleted between calls) — should
+    // fall forward to the next existing cluster (id=3) and continue from there without throwing.
+    const cursor: MergeSuggestionCursor = { sourceId: 2, candidateId: 2 };
+
+    const result = await findMergeSuggestions(makeEnv(db), cursor);
+
+    expect(result.suggestions).toEqual([]);
+    expect(result.nextCursor).toBeNull();
+  });
+
+  it('returns an empty result when the cursor is entirely past the end of the cluster list', async () => {
+    const db = new FakeFaceClusteringDb();
+    db.clusters = [{ id: 1, centroid_embedding: embeddingOf(1, 1, 1), face_count: 1 }];
+    const cursor: MergeSuggestionCursor = { sourceId: 999, candidateId: 999 };
+
+    const result = await findMergeSuggestions(makeEnv(db), cursor);
+
+    expect(result).toEqual({ suggestions: [], nextCursor: null, totalClusters: 1 });
   });
 });

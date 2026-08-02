@@ -1,9 +1,9 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { Users, ScanFace, Loader2, Sparkles, Eye, EyeOff } from 'lucide-react';
+import { Users, ScanFace, Loader2, Sparkles, Eye, EyeOff, GitMerge, X, Check } from 'lucide-react';
 import Navbar from '../components/Navbar';
-import { getPeople, getPreviewUrl, clusterPeopleNow } from '../api';
-import type { Person } from '../api';
+import { getPeople, getPreviewUrl, clusterPeopleNow, getMergeSuggestions, mergePeople } from '../api';
+import type { Person, MergeSuggestion, MergeSuggestionCursor } from '../api';
 import { runBackfillScan } from '../faceBackfill';
 import type { BackfillProgress } from '../faceBackfill';
 
@@ -24,6 +24,11 @@ const AdminPeople: React.FC = () => {
   const [clustering, setClustering] = useState(false);
   const [clusterRemaining, setClusterRemaining] = useState<number | null>(null);
   const clusterCancelRef = useRef(false);
+  const [findingMerges, setFindingMerges] = useState(false);
+  const [mergeSuggestions, setMergeSuggestions] = useState<MergeSuggestion[]>([]);
+  const [mergeScanTotal, setMergeScanTotal] = useState<number | null>(null);
+  const mergeCancelRef = useRef(false);
+  const [mergingKey, setMergingKey] = useState<string | null>(null);
 
   const multiPhotoPeople = allPeople.filter((p) => p.face_count >= 2);
   const singlesCount = allPeople.length - multiPhotoPeople.length;
@@ -96,6 +101,81 @@ const AdminPeople: React.FC = () => {
     clusterCancelRef.current = true;
   };
 
+  // Person clusters are looked up from `allPeople` (already fetched with includeSingles=true)
+  // rather than re-fetched per-suggestion, since the worker's scan only ever returns bare
+  // cluster ids + a similarity score (see faceClustering.ts's MergeSuggestion doc comment for
+  // why the scan itself stays minimal/CPU-cheap).
+  const personById = (id: number): Person | undefined => allPeople.find((p) => p.id === id);
+  const suggestionKey = (s: MergeSuggestion) => `${s.clusterAId}-${s.clusterBId}`;
+
+  const handleFindMergeSuggestions = async () => {
+    setFindingMerges(true);
+    setMergeSuggestions([]);
+    setMergeScanTotal(null);
+    mergeCancelRef.current = false;
+    try {
+      // Refresh allPeople first so cover photos/names/face_counts used to render suggestions
+      // below are current, then loop the scan (each call is a small, CPU-bounded step server-
+      // side, see faceClustering.ts's findMergeSuggestions) until it reports no more pages.
+      await loadData();
+      const seen = new Set<string>();
+      const collected: MergeSuggestion[] = [];
+      let cursor: MergeSuggestionCursor | null = null;
+      for (;;) {
+        const page = await getMergeSuggestions(cursor);
+        setMergeScanTotal(page.totalClusters);
+        for (const s of page.suggestions) {
+          const key = suggestionKey(s);
+          if (!seen.has(key)) {
+            seen.add(key);
+            collected.push(s);
+          }
+        }
+        setMergeSuggestions([...collected]);
+        cursor = page.nextCursor;
+        if (!cursor || mergeCancelRef.current) break;
+      }
+    } catch (err) {
+      setError('Finding merge suggestions failed');
+      console.error(err);
+    } finally {
+      setFindingMerges(false);
+    }
+  };
+
+  const handleCancelFindMerges = () => {
+    mergeCancelRef.current = true;
+  };
+
+  const handleMergeSuggestion = async (suggestion: MergeSuggestion) => {
+    const personA = personById(suggestion.clusterAId);
+    const personB = personById(suggestion.clusterBId);
+    if (!personA || !personB) {
+      // One side was already merged/deleted elsewhere since the scan ran — just drop it.
+      setMergeSuggestions((prev) => prev.filter((s) => suggestionKey(s) !== suggestionKey(suggestion)));
+      return;
+    }
+    // Merge into whichever cluster already has more photos, so the surviving cover photo/name
+    // (if named) is the more established one.
+    const [target, source] = personA.face_count >= personB.face_count ? [personA, personB] : [personB, personA];
+    const key = suggestionKey(suggestion);
+    try {
+      setMergingKey(key);
+      await mergePeople(target.id, [source.id]);
+      setMergeSuggestions((prev) => prev.filter((s) => suggestionKey(s) !== key));
+      await loadData();
+    } catch (err) {
+      setError('Failed to merge');
+      console.error(err);
+    } finally {
+      setMergingKey(null);
+    }
+  };
+
+  const handleDismissSuggestion = (suggestion: MergeSuggestion) => {
+    setMergeSuggestions((prev) => prev.filter((s) => suggestionKey(s) !== suggestionKey(suggestion)));
+  };
+
   return (
     <div className="min-h-screen bg-gray-50 dark:bg-gray-900">
       <Navbar />
@@ -148,6 +228,22 @@ const AdminPeople: React.FC = () => {
                   {showSingles ? 'Hide' : 'Show'} {singlesCount} single-photo group{singlesCount === 1 ? '' : 's'}
                 </button>
               )}
+              {findingMerges ? (
+                <button
+                  onClick={handleCancelFindMerges}
+                  className="px-4 py-2 bg-gray-300 text-gray-700 rounded-lg hover:bg-gray-400 transition flex items-center gap-2"
+                >
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                  {mergeScanTotal !== null ? `Scanning ${mergeScanTotal} groups… Stop` : 'Starting…'}
+                </button>
+              ) : (
+                <button
+                  onClick={handleFindMergeSuggestions}
+                  className="px-4 py-2 bg-gray-200 dark:bg-gray-700 text-gray-800 dark:text-gray-200 rounded-lg hover:bg-gray-300 dark:hover:bg-gray-600 transition flex items-center gap-2"
+                >
+                  <GitMerge className="w-4 h-4" /> Find Merge Suggestions
+                </button>
+              )}
             </div>
           )}
         </div>
@@ -159,13 +255,88 @@ const AdminPeople: React.FC = () => {
           same person just hasn't been matched to another photo of them YET — clustering improves
           as more of their photos get grouped). Detected faces are grouped into named people by a
           background job that normally runs hourly — use "Cluster Now" to run it immediately
-          instead of waiting (useful right after a large scan; it may take several clicks/minutes
-          for a very large backlog since each pass only processes a small batch).
+          instead of waiting (useful right after a large scan). One click keeps stepping through
+          the whole backlog automatically, but each step stays deliberately tiny to avoid hitting
+          the hosting platform's per-request limits, so a very large backlog — especially once a
+          lot of different people have already been recognized — can take a while to fully drain.
+          Keep this tab open until it's done (or click Stop and resume anytime). Because
+          "Cluster Now" only ever compares a new photo against your most-established people (to
+          stay CPU-safe), two groups can sometimes turn out to be the same person without ever
+          being compared — use "Find Merge Suggestions" to sweep the whole library for likely
+          duplicates and merge them with one click.
         </p>
 
         {error && (
           <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded mb-4">
             {error}
+          </div>
+        )}
+
+        {mergeSuggestions.length > 0 && (
+          <div className="mb-8 bg-white dark:bg-gray-800 rounded-lg shadow p-4">
+            <h2 className="text-lg font-semibold text-gray-900 dark:text-white mb-1 flex items-center gap-2">
+              <GitMerge className="w-5 h-5" /> Merge suggestions ({mergeSuggestions.length})
+            </h2>
+            <p className="text-sm text-gray-500 dark:text-gray-400 mb-4">
+              These pairs look like the same person but were never automatically merged. Review each
+              one and merge if they match, or dismiss if not.
+            </p>
+            <div className="space-y-3">
+              {mergeSuggestions.map((suggestion) => {
+                const personA = personById(suggestion.clusterAId);
+                const personB = personById(suggestion.clusterBId);
+                if (!personA || !personB) return null;
+                const key = suggestionKey(suggestion);
+                return (
+                  <div
+                    key={key}
+                    className="flex items-center justify-between gap-3 flex-wrap p-3 border border-gray-200 dark:border-gray-700 rounded-lg"
+                  >
+                    <div className="flex items-center gap-4">
+                      {[personA, personB].map((person) => (
+                        <div key={person.id} className="flex items-center gap-2">
+                          <div className="w-12 h-12 rounded-full overflow-hidden bg-gray-200 dark:bg-gray-700 shrink-0">
+                            {person.cover_event_slug && person.cover_photo_id && person.cover_file_type ? (
+                              <img
+                                src={getPreviewUrl(person.cover_event_slug, person.cover_photo_id, person.cover_file_type, person.cover_cache_version || undefined)}
+                                alt={person.name || 'Unnamed person'}
+                                className="w-full h-full object-cover"
+                                loading="lazy"
+                              />
+                            ) : (
+                              <Users className="w-6 h-6 text-gray-400 m-auto mt-3" />
+                            )}
+                          </div>
+                          <div className="text-sm">
+                            <p className="font-medium text-gray-900 dark:text-white">{person.name || 'Unnamed'}</p>
+                            <p className="text-xs text-gray-500">{person.face_count} photo{person.face_count === 1 ? '' : 's'}</p>
+                          </div>
+                        </div>
+                      ))}
+                      <span className="text-xs text-gray-500 dark:text-gray-400">
+                        {Math.round(suggestion.similarity * 100)}% match
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <button
+                        onClick={() => handleMergeSuggestion(suggestion)}
+                        disabled={mergingKey === key}
+                        className="px-3 py-1.5 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition flex items-center gap-1.5 disabled:opacity-50"
+                      >
+                        <Check className="w-4 h-4" /> Merge
+                      </button>
+                      <button
+                        onClick={() => handleDismissSuggestion(suggestion)}
+                        disabled={mergingKey === key}
+                        className="px-3 py-1.5 text-sm bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-200 rounded-lg hover:bg-gray-300 dark:hover:bg-gray-600 transition flex items-center gap-1.5 disabled:opacity-50"
+                      >
+                        <X className="w-4 h-4" /> Not the same
+                      </button>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
           </div>
         )}
 

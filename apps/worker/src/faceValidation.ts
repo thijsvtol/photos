@@ -17,7 +17,9 @@ export interface RawFaceInput {
 // @vladmandic/human's FaceRes description model always produces a 1024-dim
 // descriptor (see vladmandic/human wiki: "each descriptor is 1024-member
 // array"). Was 128 when this app used face-api.js's FaceRecognitionNet.
-const EXPECTED_EMBEDDING_LENGTH = 1024;
+// Exported so faceClustering.ts can size its CPU-budget calculations off
+// the SAME constant instead of duplicating the magic number 1024.
+export const EXPECTED_EMBEDDING_LENGTH = 1024;
 
 export function isValidFaceInput(face: unknown): face is RawFaceInput {
   if (!face || typeof face !== 'object') return false;

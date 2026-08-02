@@ -22,10 +22,12 @@ vi.mock('../auth', async (importOriginal) => {
 
 const runFaceClusteringMock = vi.fn();
 const countUnclusteredFacesMock = vi.fn();
+const findMergeSuggestionsMock = vi.fn();
 
 vi.mock('../faceClustering', () => ({
   runFaceClustering: (...args: unknown[]) => runFaceClusteringMock(...args),
   countUnclusteredFaces: (...args: unknown[]) => countUnclusteredFacesMock(...args),
+  findMergeSuggestions: (...args: unknown[]) => findMergeSuggestionsMock(...args),
 }));
 
 import peopleRouter from '../routes/admin/people';
@@ -39,6 +41,7 @@ beforeEach(() => {
   currentIsAdmin = true;
   runFaceClusteringMock.mockReset();
   countUnclusteredFacesMock.mockReset();
+  findMergeSuggestionsMock.mockReset();
 });
 
 describe('POST /admin/people/cluster-now', () => {
@@ -78,6 +81,59 @@ describe('POST /admin/people/cluster-now', () => {
     runFaceClusteringMock.mockRejectedValue(new Error('D1 boom'));
 
     const res = await peopleRouter.request('http://localhost/cluster-now', { method: 'POST' }, makeEnv());
+
+    expect(res.status).toBe(500);
+  });
+});
+
+describe('GET /admin/people/merge-suggestions', () => {
+  it('starts a fresh scan when no cursor query params are given', async () => {
+    findMergeSuggestionsMock.mockResolvedValue({ suggestions: [], nextCursor: null, totalClusters: 5 });
+
+    const res = await peopleRouter.request('http://localhost/merge-suggestions', {}, makeEnv());
+    const body = await res.json() as any;
+
+    expect(res.status).toBe(200);
+    expect(body).toEqual({ suggestions: [], nextCursor: null, totalClusters: 5 });
+    expect(findMergeSuggestionsMock).toHaveBeenCalledWith(expect.anything(), null);
+  });
+
+  it('passes sourceId/candidateId query params through as a cursor', async () => {
+    findMergeSuggestionsMock.mockResolvedValue({
+      suggestions: [{ clusterAId: 1, clusterBId: 2, similarity: 0.9 }],
+      nextCursor: { sourceId: 3, candidateId: 4 },
+      totalClusters: 10,
+    });
+
+    const res = await peopleRouter.request('http://localhost/merge-suggestions?sourceId=1&candidateId=2', {}, makeEnv());
+    const body = await res.json() as any;
+
+    expect(res.status).toBe(200);
+    expect(body.nextCursor).toEqual({ sourceId: 3, candidateId: 4 });
+    expect(findMergeSuggestionsMock).toHaveBeenCalledWith(expect.anything(), { sourceId: 1, candidateId: 2 });
+  });
+
+  it('treats non-numeric cursor query params as no cursor', async () => {
+    findMergeSuggestionsMock.mockResolvedValue({ suggestions: [], nextCursor: null, totalClusters: 0 });
+
+    await peopleRouter.request('http://localhost/merge-suggestions?sourceId=abc&candidateId=def', {}, makeEnv());
+
+    expect(findMergeSuggestionsMock).toHaveBeenCalledWith(expect.anything(), null);
+  });
+
+  it('rejects non-admin requests without running the scan', async () => {
+    currentIsAdmin = false;
+
+    const res = await peopleRouter.request('http://localhost/merge-suggestions', {}, makeEnv());
+
+    expect(res.status).toBe(403);
+    expect(findMergeSuggestionsMock).not.toHaveBeenCalled();
+  });
+
+  it('returns 500 if the scan throws', async () => {
+    findMergeSuggestionsMock.mockRejectedValue(new Error('D1 boom'));
+
+    const res = await peopleRouter.request('http://localhost/merge-suggestions', {}, makeEnv());
 
     expect(res.status).toBe(500);
   });

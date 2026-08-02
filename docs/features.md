@@ -422,14 +422,23 @@ Categorize and discover events with tags.
   from "found groups, they're just all single-photo right now". Photos uploaded before this
   feature existed can be backfilled via a "Scan Library for Faces" action on the same page —
   detection has to run in the browser, so this is a client-driven scan (with progress/cancel)
-  rather than a server cron. Each clustering run
-  processes a small, CPU-budget-adaptive batch of faces — Cloudflare's Workers Free plan hard-caps
-  CPU time at 10ms per request/cron trigger (not wall-clock time), and the O(faces × existing
-  people) vector comparison cost grows as the library recognizes more distinct people, so the
-  batch size automatically shrinks to stay within that budget rather than risking a hard "Worker
-  exceeded resource limits" kill. A "Cluster Now" button on the same page lets an admin trigger
-  this immediately and repeatedly (looping many small calls to `POST /admin/people/cluster-now`
-  client-side until the backlog is drained) instead of waiting for the next hourly cron tick
+  rather than a server cron. Each clustering run processes a small, CPU-budget-adaptive batch of
+  faces — Cloudflare's Workers Free plan hard-caps CPU time at 10ms per request/cron trigger (not
+  wall-clock time), and one similarity comparison costs `O(embedding dimensions)` (1024 floating-
+  point ops, not O(1)), so a face is only ever compared against the (at most 300) most-
+  established existing people — never the whole library — with a real wall-clock guard between
+  faces as a backstop, so cost can never grow unbounded no matter how many distinct people have
+  been recognized. A "Cluster Now" button on the same page lets an admin trigger this immediately
+  and repeatedly (looping many small calls to `POST /admin/people/cluster-now` client-side until
+  the backlog is drained) instead of waiting for the next hourly cron tick
+- **Merge suggestions**: because clustering only ever compares a new face against the top 300
+  most-established people (see above), two clusters can genuinely be the same person without
+  clustering ever getting the chance to notice. A "Find Merge Suggestions" button on
+  `/admin/people` runs a separate, complete `O(clusterCount²)` pairwise scan across every person
+  (not limited to a top-N subset, since here the goal is thoroughness rather than a fast
+  per-upload decision) via `GET /admin/people/merge-suggestions`, resumable via a cursor across
+  many small CPU-safe steps the same way clustering itself is. Matches are shown side-by-side
+  with a similarity score for one-click merge (or dismiss)
 - **Linking a person to an account**: on a person's detail page (`/admin/people/:id`), an admin
   can search for and link an existing user account (by email) to that person cluster — at most
   one account per person (enforced with a partial unique index on

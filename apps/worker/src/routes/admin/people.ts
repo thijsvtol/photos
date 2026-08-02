@@ -1,7 +1,8 @@
 import { Hono } from 'hono';
 import type { Env, User } from '../../types';
 import { requireAdmin } from '../../auth';
-import { runFaceClustering, countUnclusteredFaces } from '../../faceClustering';
+import { runFaceClustering, countUnclusteredFaces, findMergeSuggestions } from '../../faceClustering';
+import type { MergeSuggestionCursor } from '../../faceClustering';
 
 type Variables = {
   user: User;
@@ -36,6 +37,39 @@ app.post('/cluster-now', async (c) => {
   } catch (error) {
     console.error('Error running face clustering:', error);
     return c.json({ error: 'Failed to run face clustering' }, 500);
+  }
+});
+
+/**
+ * GET /people/merge-suggestions
+ *
+ * One bounded step of a resumable, full pairwise scan across every person cluster, looking for
+ * pairs that likely represent the same real person but were never merged by clustering itself
+ * (see findMergeSuggestions()'s doc comment in faceClustering.ts for why that can happen even
+ * though clustering is working correctly). Pass `sourceId`/`candidateId` (both from a previous
+ * response's `nextCursor`) to resume a scan in progress; omit both to start a fresh scan from
+ * the beginning. The client-side "Find Merge Suggestions" button in AdminPeople.tsx loops this
+ * the same way "Cluster Now" loops POST /cluster-now, accumulating suggestions until
+ * `nextCursor` comes back null.
+ */
+app.get('/merge-suggestions', async (c) => {
+  try {
+    const sourceIdParam = c.req.query('sourceId');
+    const candidateIdParam = c.req.query('candidateId');
+    let cursor: MergeSuggestionCursor | null = null;
+    if (sourceIdParam !== undefined && candidateIdParam !== undefined) {
+      const sourceId = parseInt(sourceIdParam, 10);
+      const candidateId = parseInt(candidateIdParam, 10);
+      if (Number.isFinite(sourceId) && Number.isFinite(candidateId)) {
+        cursor = { sourceId, candidateId };
+      }
+    }
+
+    const result = await findMergeSuggestions(c.env, cursor);
+    return c.json(result);
+  } catch (error) {
+    console.error('Error finding merge suggestions:', error);
+    return c.json({ error: 'Failed to find merge suggestions' }, 500);
   }
 });
 
