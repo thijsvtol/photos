@@ -416,9 +416,13 @@ Categorize and discover events with tags.
   since Workers AI has no face-embedding model), then grouped into person clusters by an hourly
   server-side clustering job (pure vector math, no AI calls — using Human's own documented
   distance/similarity formula). Admins can name, merge, and delete people groups at
-  `/admin/people`. Photos uploaded before this feature existed can be backfilled via a "Scan
-  Library for Faces" action on the same page — detection has to run in the browser, so this is a
-  client-driven scan (with progress/cancel) rather than a server cron. Each clustering run
+  `/admin/people`. Groups with only a single photo so far are hidden from the default view (often
+  just a person who hasn't had a second photo clustered to them yet); a "Show N single-photo
+  groups" toggle reveals them on demand, and the empty state distinguishes "nothing detected yet"
+  from "found groups, they're just all single-photo right now". Photos uploaded before this
+  feature existed can be backfilled via a "Scan Library for Faces" action on the same page —
+  detection has to run in the browser, so this is a client-driven scan (with progress/cancel)
+  rather than a server cron. Each clustering run
   processes a small, CPU-budget-adaptive batch of faces — Cloudflare's Workers Free plan hard-caps
   CPU time at 10ms per request/cron trigger (not wall-clock time), and the O(faces × existing
   people) vector comparison cost grows as the library recognizes more distinct people, so the

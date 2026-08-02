@@ -53,6 +53,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   10ms budget and getting hard-killed with a `503`/Error 1102 "Worker exceeded resource limits"
   (this was hit once in production while fixing this very batch-size issue, and corrected before
   release).
+- The People page could still say "No people detected yet" even after clustering had already
+  grouped photos, because groups with only a single photo so far are hidden by default (right
+  after a big backfill, most newly-created groups start out as singles until a second photo of
+  the same person is processed) — the empty state didn't distinguish "truly nothing detected"
+  from "found groups, but they're all currently single-photo and hidden". The page now fetches
+  all groups once, shows a clearer message + count when only single-photo groups exist, and adds
+  a "Show N single-photo groups" toggle to reveal them on demand.
 
 ### Changed
 - Android app release bumped to build 48 (versionName 2.0.0).

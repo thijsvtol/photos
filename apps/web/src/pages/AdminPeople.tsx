@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { Users, ScanFace, Loader2, Sparkles } from 'lucide-react';
+import { Users, ScanFace, Loader2, Sparkles, Eye, EyeOff } from 'lucide-react';
 import Navbar from '../components/Navbar';
 import { getPeople, getPreviewUrl, clusterPeopleNow } from '../api';
 import type { Person } from '../api';
@@ -8,7 +8,14 @@ import { runBackfillScan } from '../faceBackfill';
 import type { BackfillProgress } from '../faceBackfill';
 
 const AdminPeople: React.FC = () => {
-  const [people, setPeople] = useState<Person[]>([]);
+  // Holds EVERY cluster (including single-photo ones) so the UI can tell the
+  // difference between "clustering hasn't found anyone yet" and "clustering
+  // found groups, they're just all single-photo so far and hidden by
+  // default" — fetching once with includeSingles=true and filtering
+  // client-side avoids a confusing second round-trip just to answer that
+  // question, and keeps the toggle below instant (no re-fetch).
+  const [allPeople, setAllPeople] = useState<Person[]>([]);
+  const [showSingles, setShowSingles] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [scanning, setScanning] = useState(false);
@@ -18,6 +25,10 @@ const AdminPeople: React.FC = () => {
   const [clusterRemaining, setClusterRemaining] = useState<number | null>(null);
   const clusterCancelRef = useRef(false);
 
+  const multiPhotoPeople = allPeople.filter((p) => p.face_count >= 2);
+  const singlesCount = allPeople.length - multiPhotoPeople.length;
+  const people = showSingles ? allPeople : multiPhotoPeople;
+
   useEffect(() => {
     loadData();
   }, []);
@@ -25,8 +36,8 @@ const AdminPeople: React.FC = () => {
   const loadData = async () => {
     try {
       setLoading(true);
-      const data = await getPeople();
-      setPeople(data);
+      const data = await getPeople(true);
+      setAllPeople(data);
       setError(null);
     } catch (err) {
       setError('Failed to load people');
@@ -128,6 +139,15 @@ const AdminPeople: React.FC = () => {
                   <Sparkles className="w-4 h-4" /> Cluster Now
                 </button>
               )}
+              {singlesCount > 0 && (
+                <button
+                  onClick={() => setShowSingles((v) => !v)}
+                  className="px-4 py-2 bg-gray-200 dark:bg-gray-700 text-gray-800 dark:text-gray-200 rounded-lg hover:bg-gray-300 dark:hover:bg-gray-600 transition flex items-center gap-2"
+                >
+                  {showSingles ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                  {showSingles ? 'Hide' : 'Show'} {singlesCount} single-photo group{singlesCount === 1 ? '' : 's'}
+                </button>
+              )}
             </div>
           )}
         </div>
@@ -135,9 +155,12 @@ const AdminPeople: React.FC = () => {
           Faces are detected client-side (in your browser) as photos are uploaded. Photos uploaded
           before this feature existed aren't processed automatically — use "Scan Library for Faces"
           to backfill them (this runs in your browser and may take a while for large libraries; you
-          can stop and resume anytime). Groups with only one photo are hidden. Detected faces are
-          grouped into named people by a background job that normally runs hourly — use "Cluster
-          Now" to run it immediately instead of waiting (useful right after a large scan).
+          can stop and resume anytime). Groups with only one photo are hidden by default (often the
+          same person just hasn't been matched to another photo of them YET — clustering improves
+          as more of their photos get grouped). Detected faces are grouped into named people by a
+          background job that normally runs hourly — use "Cluster Now" to run it immediately
+          instead of waiting (useful right after a large scan; it may take several clicks/minutes
+          for a very large backlog since each pass only processes a small batch).
         </p>
 
         {error && (
@@ -150,11 +173,21 @@ const AdminPeople: React.FC = () => {
           <div className="text-center py-12">
             <div className="inline-block animate-spin rounded-full h-12 w-12 border-b-2 border-gray-900"></div>
           </div>
-        ) : people.length === 0 ? (
+        ) : allPeople.length === 0 ? (
           <div className="text-center py-12 bg-white dark:bg-gray-800 rounded-lg shadow">
             <p className="text-gray-600 dark:text-gray-400">
               No people detected yet. New uploads are processed automatically — for existing
               photos, click "Scan Library for Faces" above to process them.
+            </p>
+          </div>
+        ) : people.length === 0 ? (
+          <div className="text-center py-12 bg-white dark:bg-gray-800 rounded-lg shadow">
+            <p className="text-gray-600 dark:text-gray-400">
+              Found {allPeople.length} face group{allPeople.length === 1 ? '' : 's'} so far, but each
+              only has a single photo — these are hidden by default since they're often not yet
+              matched to the rest of that person's photos. Click "Show {singlesCount} single-photo
+              group{singlesCount === 1 ? '' : 's'}" above to see them anyway, or run "Cluster Now"
+              again in a bit as more matches accumulate.
             </p>
           </div>
         ) : (
