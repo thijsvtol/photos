@@ -12,6 +12,18 @@ const app = new Hono<{ Bindings: Env; Variables: Variables }>();
 const RETRY_ATTEMPTS = 3;
 const RETRY_BASE_DELAY_MS = 120;
 
+// D1 caps bound parameters at 100 per statement. Keep IN (...) chunks well
+// under that so bulk operations on large selections don't 500.
+const MAX_SQL_IN_CHUNK = 90;
+
+function chunkArray<T>(items: T[], size: number): T[][] {
+  const chunks: T[][] = [];
+  for (let i = 0; i < items.length; i += size) {
+    chunks.push(items.slice(i, i + size));
+  }
+  return chunks;
+}
+
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 async function withRetry<T>(
@@ -316,21 +328,25 @@ app.post('/bulk-delete', async (c) => {
     
     // De-duplicate incoming IDs so we don't do repeated work
     const uniquePhotoIds = Array.from(new Set(photoIds));
-    const placeholders = uniquePhotoIds.map(() => '?').join(', ');
     const errors: { photoId: string; error: string }[] = [];
 
-    // One query to fetch all existing photos and their event slugs
-    const photoRows = await c.env.DB
-      .prepare(`
-        SELECT p.id, p.event_id, p.source_photo_id, e.slug
-        FROM photos p
-        JOIN events e ON p.event_id = e.id
-        WHERE p.id IN (${placeholders})
-      `)
-      .bind(...uniquePhotoIds)
-      .all<{ id: string; event_id: number; source_photo_id: string | null; slug: string }>();
+    // Fetch all existing photos and their event slugs, chunked to stay under
+    // D1's 100 bound-parameter-per-query limit for large selections.
+    const photoSelectStatements = chunkArray(uniquePhotoIds, MAX_SQL_IN_CHUNK).map((chunk) => {
+      const chunkPlaceholders = chunk.map(() => '?').join(', ');
+      return c.env.DB
+        .prepare(`
+          SELECT p.id, p.event_id, p.source_photo_id, e.slug
+          FROM photos p
+          JOIN events e ON p.event_id = e.id
+          WHERE p.id IN (${chunkPlaceholders})
+        `)
+        .bind(...chunk);
+    });
 
-    const existingPhotos = photoRows.results || [];
+    const photoRowBatches = await c.env.DB.batch<{ id: string; event_id: number; source_photo_id: string | null; slug: string }>(photoSelectStatements);
+
+    const existingPhotos = photoRowBatches.flatMap((batch) => batch.results || []);
     const existingPhotoIds = new Set(existingPhotos.map((p) => p.id));
 
     if (!isGlobalAdmin && existingPhotos.length > 0) {
@@ -388,15 +404,19 @@ app.post('/bulk-delete', async (c) => {
       });
     }
 
-    // One query to delete all found photos from the database
+    // Delete all found photos from the database, chunked for the same reason
+    // as the SELECT above.
     let deletedCount = 0;
     if (existingPhotos.length > 0) {
-      const deletePlaceholders = existingPhotos.map(() => '?').join(', ');
+      const deleteStatements = chunkArray(existingPhotos.map((p) => p.id), MAX_SQL_IN_CHUNK).map((chunk) => {
+        const chunkPlaceholders = chunk.map(() => '?').join(', ');
+        return c.env.DB
+          .prepare(`DELETE FROM photos WHERE id IN (${chunkPlaceholders})`)
+          .bind(...chunk);
+      });
+
       await withRetry(
-        () => c.env.DB
-          .prepare(`DELETE FROM photos WHERE id IN (${deletePlaceholders})`)
-          .bind(...existingPhotos.map((p) => p.id))
-          .run(),
+        () => c.env.DB.batch(deleteStatements),
         `DB bulk delete ${existingPhotos.length} photos`
       );
 
@@ -467,35 +487,39 @@ app.post('/bulk-copy', async (c) => {
     }
 
     const uniquePhotoIds = Array.from(new Set(photoIds));
-    const placeholders = uniquePhotoIds.map(() => '?').join(', ');
 
-    // Fetch source photos. If a source photo is itself a copy, resolve to the
-    // root source so we don't create chains of references.
-    const photoRows = await c.env.DB
-      .prepare(`
-        SELECT p.id, p.event_id, p.original_filename, p.file_type, p.capture_time,
-               p.width, p.height, p.iso, p.aperture, p.shutter_speed, p.focal_length,
-               p.camera_make, p.camera_model, p.lens_model, p.latitude, p.longitude,
-               p.city, p.blur_placeholder,
-               p.source_photo_id, p.source_event_slug,
-               e.slug as event_slug
-        FROM photos p
-        JOIN events e ON p.event_id = e.id
-        WHERE p.id IN (${placeholders})
-      `)
-      .bind(...uniquePhotoIds)
-      .all<{
-        id: string; event_id: number; original_filename: string; file_type: string;
-        capture_time: string; width: number | null; height: number | null;
-        iso: number | null; aperture: string | null; shutter_speed: string | null;
-        focal_length: string | null; camera_make: string | null; camera_model: string | null;
-        lens_model: string | null; latitude: number | null; longitude: number | null;
-        city: string | null; blur_placeholder: string | null;
-        source_photo_id: string | null; source_event_slug: string | null;
-        event_slug: string;
-      }>();
+    // Fetch source photos, chunked to stay under D1's 100 bound-parameter-per-
+    // query limit for large selections. If a source photo is itself a copy,
+    // resolve to the root source so we don't create chains of references.
+    const photoSelectStatements = chunkArray(uniquePhotoIds, MAX_SQL_IN_CHUNK).map((chunk) => {
+      const chunkPlaceholders = chunk.map(() => '?').join(', ');
+      return c.env.DB
+        .prepare(`
+          SELECT p.id, p.event_id, p.original_filename, p.file_type, p.capture_time,
+                 p.width, p.height, p.iso, p.aperture, p.shutter_speed, p.focal_length,
+                 p.camera_make, p.camera_model, p.lens_model, p.latitude, p.longitude,
+                 p.city, p.blur_placeholder,
+                 p.source_photo_id, p.source_event_slug,
+                 e.slug as event_slug
+          FROM photos p
+          JOIN events e ON p.event_id = e.id
+          WHERE p.id IN (${chunkPlaceholders})
+        `)
+        .bind(...chunk);
+    });
 
-    const sourcePhotos = photoRows.results || [];
+    const photoRowBatches = await c.env.DB.batch<{
+      id: string; event_id: number; original_filename: string; file_type: string;
+      capture_time: string; width: number | null; height: number | null;
+      iso: number | null; aperture: string | null; shutter_speed: string | null;
+      focal_length: string | null; camera_make: string | null; camera_model: string | null;
+      lens_model: string | null; latitude: number | null; longitude: number | null;
+      city: string | null; blur_placeholder: string | null;
+      source_photo_id: string | null; source_event_slug: string | null;
+      event_slug: string;
+    }>(photoSelectStatements);
+
+    const sourcePhotos = photoRowBatches.flatMap((batch) => batch.results || []);
 
     if (sourcePhotos.length === 0) {
       return c.json({ error: 'No valid photos found' }, 404);
@@ -615,17 +639,27 @@ app.patch('/bulk-location', async (c) => {
     }
 
     const uniquePhotoIds = Array.from(new Set(photoIds));
-    const placeholders = uniquePhotoIds.map(() => '?').join(', ');
 
-    const result = await withRetry(
-      () => c.env.DB
-        .prepare(`UPDATE photos SET latitude = ?, longitude = ? WHERE id IN (${placeholders})`)
-        .bind(latitude, longitude, ...uniquePhotoIds)
-        .run(),
+    // D1 caps bound parameters at 100 per statement, so a single UPDATE with
+    // up to 500 IDs (+ 2 for lat/lng) would exceed the limit and 500 the
+    // request once a selection got past ~98 photos. Chunk into a batch of
+    // statements instead — D1 runs a batch as one implicit transaction, so
+    // this stays atomic while keeping each statement under the limit.
+    const statements = chunkArray(uniquePhotoIds, MAX_SQL_IN_CHUNK).map((chunk) => {
+      const chunkPlaceholders = chunk.map(() => '?').join(', ');
+      return c.env.DB
+        .prepare(`UPDATE photos SET latitude = ?, longitude = ? WHERE id IN (${chunkPlaceholders})`)
+        .bind(latitude, longitude, ...chunk);
+    });
+
+    const results = await withRetry(
+      () => c.env.DB.batch(statements),
       `DB bulk-update location for ${uniquePhotoIds.length} photos`
     );
 
-    return c.json({ success: true, updatedCount: result.meta.changes, totalRequested: photoIds.length });
+    const updatedCount = results.reduce((sum, result) => sum + (result.meta?.changes ?? 0), 0);
+
+    return c.json({ success: true, updatedCount, totalRequested: photoIds.length });
   } catch (error) {
     console.error('Error bulk-updating photo location:', error);
     return c.json({ error: 'Failed to update photo locations' }, 500);
