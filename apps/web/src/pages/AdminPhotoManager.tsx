@@ -1,9 +1,10 @@
 import React, { useEffect, useState } from 'react';
 import { useParams, Link } from 'react-router-dom';
-import { Star } from 'lucide-react';
+import { Star, Archive, ArchiveRestore, Trash2, Wand2, Loader2 } from 'lucide-react';
 import Navbar from '../components/Navbar';
-import { getEvent, getPhotos, deletePhoto, setPhotoFeatured, getPreviewUrl } from '../api';
+import { getEvent, getPhotos, deletePhoto, setPhotoFeatured, setPhotoArchived, getPreviewUrl, getOriginalUrl, replacePhoto } from '../api';
 import type { Event, Photo } from '../types';
+import { autoEnhanceImage, resizeBlobToJpeg } from '../autoEnhance';
 
 const AdminPhotoManager: React.FC = () => {
   const { slug } = useParams<{ slug: string }>();
@@ -14,6 +15,7 @@ const AdminPhotoManager: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
   const [deletingPhoto, setDeletingPhoto] = useState<Photo | null>(null);
+  const [enhancingPhotoId, setEnhancingPhotoId] = useState<string | null>(null);
 
   useEffect(() => {
     if (slug) {
@@ -64,6 +66,39 @@ const AdminPhotoManager: React.FC = () => {
     }
   };
 
+  const toggleArchived = async (photoId: string, currentStatus: boolean) => {
+    try {
+      await setPhotoArchived(photoId, !currentStatus);
+      setPhotos(photos.map(p =>
+        p.id === photoId ? { ...p, archived_at: currentStatus ? null : new Date().toISOString() } : p
+      ));
+      setSuccess(currentStatus ? 'Removed from archive' : 'Archived (hidden from Timeline)');
+      setTimeout(() => setSuccess(null), 3000);
+    } catch (err) {
+      setError('Failed to update archived status');
+      console.error(err);
+    }
+  };
+
+  const handleAutoEnhance = async (photo: Photo) => {
+    if (photo.file_type === 'video/mp4') return;
+    setEnhancingPhotoId(photo.id);
+    try {
+      const originalUrl = getOriginalUrl(slug!, photo.id, photo.file_type, photo.cache_version);
+      const enhancedOriginal = await autoEnhanceImage(originalUrl);
+      const enhancedPreview = await resizeBlobToJpeg(enhancedOriginal, 1920);
+      await replacePhoto(slug!, photo.id, enhancedOriginal, enhancedPreview);
+      await loadData();
+      setSuccess('Photo auto-enhanced');
+      setTimeout(() => setSuccess(null), 3000);
+    } catch (err) {
+      setError('Failed to auto-enhance photo');
+      console.error(err);
+    } finally {
+      setEnhancingPhotoId(null);
+    }
+  };
+
   const selectAll = () => {
     setSelectedPhotos(new Set(photos.map(p => p.id)));
   };
@@ -75,7 +110,7 @@ const AdminPhotoManager: React.FC = () => {
   const handleDeletePhoto = async (photoId: string) => {
     try {
       await deletePhoto(photoId);
-      setSuccess('Photo deleted successfully!');
+      setSuccess('Photo moved to Trash');
       setDeletingPhoto(null);
       await loadData();
       setTimeout(() => setSuccess(null), 3000);
@@ -88,7 +123,7 @@ const AdminPhotoManager: React.FC = () => {
   const handleBulkDelete = async () => {
     if (selectedPhotos.size === 0) return;
     
-    const confirm = window.confirm(`Delete ${selectedPhotos.size} selected photos? This cannot be undone!`);
+    const confirm = window.confirm(`Move ${selectedPhotos.size} selected photos to Trash?`);
     if (!confirm) return;
 
     try {
@@ -133,6 +168,11 @@ const AdminPhotoManager: React.FC = () => {
               📷 Upload Photos
             </Link>
           </div>
+          <div className="mt-3">
+            <Link to="/admin/trash" className="text-sm text-gray-600 hover:text-gray-900 inline-flex items-center gap-1">
+              <Trash2 className="w-4 h-4" /> View Trash
+            </Link>
+          </div>
         </div>
 
         {success && (
@@ -164,7 +204,7 @@ const AdminPhotoManager: React.FC = () => {
                 onClick={handleBulkDelete}
                 className="px-3 py-1 bg-red-600 text-white rounded hover:bg-red-700 transition text-sm"
               >
-                🗑️ Delete Selected
+                🗑️ Move to Trash
               </button>
             </div>
           </div>
@@ -240,8 +280,15 @@ const AdminPhotoManager: React.FC = () => {
                   </div>
                 )}
 
+                {/* Archived badge */}
+                {!!photo.archived_at && (
+                  <div className="absolute top-2 right-2 mt-8 bg-gray-700 text-white px-2 py-1 rounded text-xs font-bold" style={{ top: photo.is_featured ? '2.25rem' : '0.5rem' }}>
+                    Archived
+                  </div>
+                )}
+
                 {/* Actions overlay */}
-                <div className="absolute inset-0 bg-black bg-opacity-0 group-hover:bg-opacity-50 transition-all flex items-center justify-center gap-2 opacity-0 group-hover:opacity-100">
+                <div className="absolute inset-0 bg-black bg-opacity-0 group-hover:bg-opacity-50 transition-all flex items-center justify-center gap-2 opacity-0 group-hover:opacity-100 flex-wrap">
                   <button
                     onClick={(e) => {
                       e.stopPropagation();
@@ -260,11 +307,36 @@ const AdminPhotoManager: React.FC = () => {
                   <button
                     onClick={(e) => {
                       e.stopPropagation();
+                      toggleArchived(photo.id, !!photo.archived_at);
+                    }}
+                    className="px-3 py-2 rounded transition text-sm flex items-center gap-1 bg-gray-700 text-white hover:bg-gray-600"
+                    title={photo.archived_at ? 'Unarchive' : 'Archive (hide from Timeline)'}
+                  >
+                    {photo.archived_at ? <ArchiveRestore className="w-4 h-4" /> : <Archive className="w-4 h-4" />}
+                    {photo.archived_at ? 'Unarchive' : 'Archive'}
+                  </button>
+                  {photo.file_type !== 'video/mp4' && (
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleAutoEnhance(photo);
+                      }}
+                      disabled={enhancingPhotoId === photo.id}
+                      className="px-3 py-2 rounded transition text-sm flex items-center gap-1 bg-purple-600 text-white hover:bg-purple-700 disabled:opacity-50"
+                      title="Auto Enhance (white balance + contrast)"
+                    >
+                      {enhancingPhotoId === photo.id ? <Loader2 className="w-4 h-4 animate-spin" /> : <Wand2 className="w-4 h-4" />}
+                      Enhance
+                    </button>
+                  )}
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
                       setDeletingPhoto(photo);
                     }}
                     className="px-3 py-2 bg-red-600 text-white rounded hover:bg-red-700 transition text-sm"
                   >
-                    🗑️ Delete
+                    🗑️ Trash
                   </button>
                 </div>
 
@@ -285,7 +357,7 @@ const AdminPhotoManager: React.FC = () => {
           <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
             <div className="bg-white rounded-lg shadow-xl max-w-lg w-full">
               <div className="p-6">
-                <h2 className="text-2xl font-bold mb-4 text-red-600">⚠️ Delete Photo</h2>
+                <h2 className="text-2xl font-bold mb-4 text-red-600">🗑️ Move to Trash</h2>
                 <div className="mb-4">
                   <img
                     src={getPreviewUrl(slug!, deletingPhoto.id, deletingPhoto.file_type, deletingPhoto.cache_version)}
@@ -294,14 +366,15 @@ const AdminPhotoManager: React.FC = () => {
                   />
                 </div>
                 <p className="mb-4 text-gray-700">
-                  Delete <strong>{deletingPhoto.original_filename}</strong>? This action cannot be undone!
+                  Move <strong>{deletingPhoto.original_filename}</strong> to Trash? It can be restored
+                  from the Trash within 30 days, after which it is permanently deleted.
                 </p>
                 <div className="flex gap-3">
                   <button
                     onClick={() => handleDeletePhoto(deletingPhoto.id)}
                     className="flex-1 px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition"
                   >
-                    Delete Permanently
+                    Move to Trash
                   </button>
                   <button
                     onClick={() => setDeletingPhoto(null)}

@@ -7,6 +7,7 @@ import './index.css';
 import { backgroundSyncService } from './services/backgroundSync';
 import { folderSyncService } from './services/folderSync';
 import { MobileAuthService } from './services/mobileAuth';
+import { startFaceDetectionQueue } from './faceDetectionQueue';
 
 // CRITICAL: Log immediately to verify JavaScript executes
 console.log('[MAIN.TSX] ===== JavaScript bundle executing =====');
@@ -141,6 +142,11 @@ if ('serviceWorker' in navigator) {
     console.warn('[SW] Registration failed:', err);
   });
 }
+
+// Client-side face detection for the People feature (runs on both web and
+// native — see faceDetectionQueue.ts for why this is a decoupled listener
+// rather than part of uploadManager.ts itself).
+startFaceDetectionQueue();
 
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>

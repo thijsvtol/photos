@@ -387,6 +387,107 @@ export const getTimeline = async (limit: number = 200, cursor?: string): Promise
   return response.data;
 };
 
+export interface MemoryYear {
+  year: number;
+  photos: Array<Photo & { event_slug: string; event_name: string }>;
+}
+
+/** "On this day" — photos captured on today's month/day in previous years. */
+export const getMemories = async (perYear: number = 6): Promise<MemoryYear[]> => {
+  const response = await api.get<{ years: MemoryYear[] }>(`/memories?perYear=${perYear}`);
+  return response.data.years;
+};
+
+export interface SearchResultPhoto extends Photo {
+  event_slug: string;
+  event_name: string;
+  ai_caption?: string | null;
+}
+
+/** Unified search across all accessible events — filename/city/AI caption text, semantically re-ranked when possible. */
+export const searchPhotos = async (query: string, limit: number = 60): Promise<SearchResultPhoto[]> => {
+  const response = await api.get<{ photos: SearchResultPhoto[] }>('/search', { params: { q: query, limit } });
+  return response.data.photos;
+};
+
+// Faces / People API
+export interface DetectedFaceInput {
+  embedding: number[];
+  bbox: { x: number; y: number; width: number; height: number };
+}
+
+/** Reports client-detected faces for a photo (see faceDetectionQueue.ts). Uses upload permission, not admin-only. */
+export const saveFaces = async (eventSlug: string, photoId: string, faces: DetectedFaceInput[]): Promise<void> => {
+  await api.post(`/admin/events/${eventSlug}/uploads/${photoId}/faces`, { faces }, { headers: getAdminHeaders() });
+};
+
+export interface FacesPendingPhoto {
+  id: string;
+  file_type: string;
+  cache_version: number;
+  event_slug: string;
+}
+
+/** Batch of photos not yet checked for faces, for the People backfill scan (admin only). */
+export const getFacesPendingPhotos = async (limit: number = 10): Promise<{ photos: FacesPendingPhoto[]; remaining: number }> => {
+  const response = await api.get<{ photos: FacesPendingPhoto[]; remaining: number }>('/admin/photos/faces-pending', {
+    params: { limit },
+    headers: getAdminHeaders(),
+  });
+  return response.data;
+};
+
+/** Admin-triggered counterpart to saveFaces(), used for backfilling photos uploaded before the People feature existed. */
+export const saveBackfilledFaces = async (photoId: string, faces: DetectedFaceInput[]): Promise<void> => {
+  await api.post(`/admin/photos/${photoId}/faces`, { faces }, { headers: getAdminHeaders() });
+};
+
+export interface Person {
+  id: number;
+  name: string | null;
+  face_count: number;
+  cover_photo_id?: string | null;
+  cover_file_type?: string | null;
+  cover_cache_version?: number | null;
+  cover_event_slug?: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface PersonPhoto extends Photo {
+  event_slug: string;
+  event_name: string;
+}
+
+export const getPeople = async (includeSingles = false): Promise<Person[]> => {
+  const response = await api.get<{ people: Person[] }>('/admin/people', {
+    params: includeSingles ? { includeSingles: 1 } : undefined,
+    headers: getAdminHeaders(),
+  });
+  return response.data.people;
+};
+
+export const getPerson = async (personId: number): Promise<{ person: Person; photos: PersonPhoto[] }> => {
+  const response = await api.get<{ person: Person; photos: PersonPhoto[] }>(`/admin/people/${personId}`, {
+    headers: getAdminHeaders(),
+  });
+  return response.data;
+};
+
+export const updatePerson = async (personId: number, data: { name?: string | null; coverPhotoId?: string | null }): Promise<void> => {
+  await api.put(`/admin/people/${personId}`, data, { headers: getAdminHeaders() });
+};
+
+export const mergePeople = async (targetPersonId: number, sourcePersonIds: number[]): Promise<void> => {
+  await api.post('/admin/people/merge', { targetPersonId, sourcePersonIds }, { headers: getAdminHeaders() });
+};
+
+export const deletePerson = async (personId: number): Promise<void> => {
+  await api.delete(`/admin/people/${personId}`, { headers: getAdminHeaders() });
+};
+
+
+
 // Helper functions
 export const getPreviewUrl = (slug: string, photoId: string, fileType?: string, cacheVersion?: number): string => {
   const isVideo = fileType === 'video/mp4';
@@ -835,6 +936,27 @@ export const getEventStats = async (slug: string): Promise<EventStats> => {
   return response.data;
 };
 
+export interface ActivityEntry {
+  id: number;
+  event_id: number | null;
+  event_name: string | null;
+  event_slug: string | null;
+  actor_email: string;
+  action: 'photo_favorite' | 'event_create' | 'album_create' | 'photo_trash';
+  target_type: string | null;
+  target_id: string | null;
+  metadata: string | null;
+  created_at: string;
+}
+
+/** Recent site-wide activity feed (polling-based, admin only). */
+export const getActivityFeed = async (limit: number = 50): Promise<ActivityEntry[]> => {
+  const response = await api.get<{ activity: ActivityEntry[] }>(`/admin/stats/activity?limit=${limit}`, {
+    headers: getAdminHeaders(),
+  });
+  return response.data.activity;
+};
+
 // Event Management API
 export const updateEvent = async (slug: string, data: UpdateEventRequest): Promise<void> => {
   await api.put(`/admin/events/${slug}`, data, {
@@ -854,6 +976,132 @@ export const deletePhoto = async (photoId: string): Promise<void> => {
   await api.delete(`/admin/photos/${photoId}`, {
     headers: getAdminHeaders(),
   });
+};
+
+/** Restore a photo out of Trash. */
+export const restorePhoto = async (photoId: string): Promise<void> => {
+  await api.put(`/admin/photos/${photoId}/restore`, undefined, {
+    headers: getAdminHeaders(),
+  });
+};
+
+/** Permanently delete a single (already-trashed) photo right away. */
+export const permanentlyDeletePhoto = async (photoId: string): Promise<void> => {
+  await api.delete(`/admin/photos/${photoId}/permanent`, {
+    headers: getAdminHeaders(),
+  });
+};
+
+/** Toggle a photo's archived status (hidden from Timeline, still in its event gallery). */
+export const setPhotoArchived = async (photoId: string, isArchived: boolean): Promise<void> => {
+  await api.put(`/admin/photos/${photoId}/archive`, { isArchived }, {
+    headers: getAdminHeaders(),
+  });
+};
+
+export interface TrashPhoto extends Photo {
+  event_slug: string;
+  event_name: string;
+}
+
+/** List every currently-trashed photo (admin only). */
+export const getTrash = async (): Promise<{ photos: TrashPhoto[]; retentionDays: number }> => {
+  const response = await api.get<{ photos: TrashPhoto[]; retentionDays: number }>('/admin/photos/trash', {
+    headers: getAdminHeaders(),
+  });
+  return response.data;
+};
+
+/** Permanently delete every currently-trashed photo right away (admin only). */
+export const emptyTrash = async (): Promise<{ deletedCount: number }> => {
+  const response = await api.post<{ deletedCount: number }>('/admin/photos/trash/empty', undefined, {
+    headers: getAdminHeaders(),
+  });
+  return response.data;
+};
+
+export interface DuplicatePhoto extends Photo {
+  event_slug: string;
+  event_name: string;
+}
+
+export interface DuplicateGroup {
+  fileHash: string;
+  photos: DuplicatePhoto[];
+}
+
+/** Groups of exact-content duplicate photos (by file_hash), across all events (admin only). */
+export const getDuplicatePhotos = async (): Promise<DuplicateGroup[]> => {
+  const response = await api.get<{ groups: DuplicateGroup[] }>('/admin/photos/duplicates', {
+    headers: getAdminHeaders(),
+  });
+  return response.data.groups;
+};
+
+// Albums API (cross-event collections, admin-only)
+export interface Album {
+  id: number;
+  name: string;
+  description: string | null;
+  cover_photo_id: string | null;
+  cover_file_type?: string | null;
+  cover_cache_version?: number | null;
+  cover_event_slug?: string | null;
+  created_by: string;
+  created_at: string;
+  updated_at: string;
+  photo_count?: number;
+}
+
+export interface AlbumPhoto extends Photo {
+  event_slug: string;
+  event_name: string;
+  position: number;
+}
+
+export const getAlbums = async (): Promise<Album[]> => {
+  const response = await api.get<{ albums: Album[] }>('/admin/albums', { headers: getAdminHeaders() });
+  return response.data.albums;
+};
+
+export const getAlbum = async (albumId: number): Promise<{ album: Album; photos: AlbumPhoto[] }> => {
+  const response = await api.get<{ album: Album; photos: AlbumPhoto[] }>(`/admin/albums/${albumId}`, {
+    headers: getAdminHeaders(),
+  });
+  return response.data;
+};
+
+export const createAlbum = async (name: string, description?: string): Promise<Album> => {
+  const response = await api.post<{ album: Album }>(
+    '/admin/albums',
+    { name, description },
+    { headers: getAdminHeaders() }
+  );
+  return response.data.album;
+};
+
+export const updateAlbum = async (
+  albumId: number,
+  data: { name?: string; description?: string; coverPhotoId?: string | null }
+): Promise<void> => {
+  await api.put(`/admin/albums/${albumId}`, data, { headers: getAdminHeaders() });
+};
+
+export const deleteAlbum = async (albumId: number): Promise<void> => {
+  await api.delete(`/admin/albums/${albumId}`, { headers: getAdminHeaders() });
+};
+
+export const addPhotosToAlbum = async (albumId: number, photoIds: string[]): Promise<{ addedCount: number }> => {
+  const response = await api.post<{ addedCount: number }>(
+    `/admin/albums/${albumId}/photos`,
+    { photoIds },
+    { headers: getAdminHeaders() }
+  );
+  return response.data;
+};
+
+export const removePhotoFromAlbum = async (albumId: number, photoId: string): Promise<void> => {
+  await api.delete(`/admin/albums/${albumId}/photos/${photoId}`, { headers: getAdminHeaders() });
 };
 
 export const bulkDeletePhotos = async (photoIds: string[]): Promise<{ deletedCount: number; totalRequested: number }> => {

@@ -2,6 +2,7 @@ import { Hono } from 'hono';
 import type { Env, CreateEventRequest, User } from '../../types';
 import { generateSalt, hashPassword, generateUniqueSlug } from '../../utils';
 import { requireAdmin } from '../../auth';
+import { logActivity } from '../../activityLog';
 
 type Variables = {
   user: User;
@@ -57,8 +58,20 @@ app.post('/', async (c) => {
     const event = await c.env.DB
       .prepare('SELECT id, slug, name, inferred_date, created_at FROM events WHERE slug = ?')
       .bind(slug)
-      .first();
-    
+      .first<{ id: number; slug: string; name: string }>();
+
+    if (event) {
+      const user = c.get('user');
+      await logActivity(c.env, {
+        eventId: event.id,
+        actorEmail: user?.email || 'unknown',
+        action: 'event_create',
+        targetType: 'event',
+        targetId: event.slug,
+        metadata: { name: event.name },
+      });
+    }
+
     return c.json({ event }, 201);
   } catch (error) {
     console.error('Error creating event:', error);

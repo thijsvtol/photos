@@ -3,6 +3,7 @@ import { cors } from 'hono/cors';
 import type { Env, Event, Photo } from '../types';
 import { hasEventSessionAccess } from '../cookies';
 import { optionalAuth, getUser, isAdmin, getCollaboratorRoleByEventId } from '../auth';
+import { cosineSimilarity, embedSearchQuery } from '../aiEnrichment';
 
 const app = new Hono<{ Bindings: Env }>();
 
@@ -105,7 +106,7 @@ app.get('/api/events', optionalAuth, async (c) => {
           SELECT id, event_id, 
             ROW_NUMBER() OVER (PARTITION BY event_id ORDER BY is_featured DESC, capture_time ASC) as rn
           FROM photos
-          WHERE event_id IN (${placeholders})
+          WHERE event_id IN (${placeholders}) AND deleted_at IS NULL
         ) WHERE rn = 1
       `)
       .bind(...eventIds)
@@ -115,7 +116,7 @@ app.get('/api/events', optionalAuth, async (c) => {
     const citiesResult = await c.env.DB
       .prepare(`
         SELECT event_id, city FROM photos 
-        WHERE event_id IN (${placeholders}) AND city IS NOT NULL 
+        WHERE event_id IN (${placeholders}) AND city IS NOT NULL AND deleted_at IS NULL
         GROUP BY event_id, city ORDER BY city ASC
       `)
       .bind(...eventIds)
@@ -312,7 +313,7 @@ app.get('/api/events/:slug/photos', optionalAuth, async (c) => {
       ) as uploader_name
       FROM photos p
       LEFT JOIN users u ON p.uploaded_by = u.email
-      WHERE p.event_id = ? AND p.upload_complete = 1 AND ${PREVIEW_READY_CLAUSE}
+      WHERE p.event_id = ? AND p.upload_complete = 1 AND p.deleted_at IS NULL AND ${PREVIEW_READY_CLAUSE}
       ORDER BY ${orderBy}
     `;
     
@@ -395,7 +396,7 @@ app.get('/api/events/:slug/photos/:photoId', optionalAuth, async (c) => {
         ) as uploader_name
         FROM photos p
         LEFT JOIN users u ON p.uploaded_by = u.email
-        WHERE p.id = ? AND p.event_id = ? AND p.upload_complete = 1 AND ${PREVIEW_READY_CLAUSE}
+        WHERE p.id = ? AND p.event_id = ? AND p.upload_complete = 1 AND p.deleted_at IS NULL AND ${PREVIEW_READY_CLAUSE}
       `)
       .bind(photoId, event.id)
       .first<Photo>();
@@ -443,6 +444,7 @@ app.get('/api/map/photos', optionalAuth, async (c) => {
         LEFT JOIN event_collaborators ec ON e.id = ec.event_id AND ec.user_email = ?
         WHERE p.latitude IS NOT NULL 
           AND p.longitude IS NOT NULL
+          AND p.deleted_at IS NULL
           AND LOWER(e.name) NOT LIKE '[prive]%'
           AND LOWER(e.name) NOT LIKE '[hidden]%'
           AND (
@@ -542,6 +544,8 @@ app.get('/api/timeline', optionalAuth, async (c) => {
         FROM photos p
         WHERE p.event_id IN (${placeholders})
           AND p.upload_complete = 1
+          AND p.deleted_at IS NULL
+          AND p.archived_at IS NULL
           AND ${PREVIEW_READY_CLAUSE}
           AND p.capture_time < ?
         ORDER BY p.capture_time DESC
@@ -557,6 +561,8 @@ app.get('/api/timeline', optionalAuth, async (c) => {
         FROM photos p
         WHERE p.event_id IN (${placeholders})
           AND p.upload_complete = 1
+          AND p.deleted_at IS NULL
+          AND p.archived_at IS NULL
           AND ${PREVIEW_READY_CLAUSE}
         ORDER BY p.capture_time DESC
         LIMIT ?
@@ -584,6 +590,204 @@ app.get('/api/timeline', optionalAuth, async (c) => {
   } catch (error) {
     console.error('Error fetching timeline:', error);
     return c.json({ error: 'Failed to fetch timeline' }, 500);
+  }
+});
+
+/**
+ * GET /api/memories
+ * "On this day" — photos captured on today's month/day in a previous year,
+ * across every event the caller can access (same access-control pattern as
+ * /api/timeline). Grouped by year, most recent past year first. Trashed and
+ * archived photos are excluded. Pure SQL (strftime), no AI/ML involved.
+ */
+app.get('/api/memories', optionalAuth, async (c) => {
+  try {
+    const user = getUser(c);
+    const userIsAdmin = isAdmin(c);
+    const userEmail = user?.email || '';
+    const maxPerYear = Math.min(parseInt(c.req.query('perYear') || '6', 10), 20);
+
+    const eventsQuery = `
+      SELECT DISTINCT e.id, e.slug, e.name
+      FROM events e
+      LEFT JOIN event_collaborators ec ON e.id = ec.event_id AND ec.user_email = ?
+      WHERE
+        e.visibility = 'public'
+        OR (? = 1)
+        OR (e.visibility = 'collaborators_only' AND ec.user_email IS NOT NULL)
+    `;
+    const events = await c.env.DB
+      .prepare(eventsQuery)
+      .bind(userEmail, userIsAdmin ? 1 : 0)
+      .all<{ id: number; slug: string; name: string }>();
+
+    if (!events.results || events.results.length === 0) {
+      return c.json({ years: [] });
+    }
+
+    const eventIds = events.results.map(e => e.id);
+    const placeholders = eventIds.map(() => '?').join(',');
+    const eventMap = new Map<number, { slug: string; name: string }>();
+    for (const e of events.results) {
+      eventMap.set(e.id, { slug: e.slug, name: e.name });
+    }
+
+    const result = await c.env.DB
+      .prepare(`
+        SELECT p.id, p.event_id, p.original_filename, p.file_type, p.capture_time,
+               p.width, p.height, p.blur_placeholder, p.cache_version,
+               CAST(strftime('%Y', p.capture_time) AS INTEGER) as capture_year
+        FROM photos p
+        WHERE p.event_id IN (${placeholders})
+          AND p.upload_complete = 1
+          AND p.deleted_at IS NULL
+          AND p.archived_at IS NULL
+          AND ${PREVIEW_READY_CLAUSE}
+          AND strftime('%m-%d', p.capture_time) = strftime('%m-%d', 'now')
+          AND strftime('%Y', p.capture_time) < strftime('%Y', 'now')
+        ORDER BY p.capture_time DESC
+      `)
+      .bind(...eventIds)
+      .all<Photo & { event_id: number; capture_year: number }>();
+
+    const byYear = new Map<number, Array<Photo & { event_slug: string; event_name: string }>>();
+    for (const photo of (result.results || [])) {
+      const list = byYear.get(photo.capture_year) || [];
+      if (list.length < maxPerYear) {
+        list.push({
+          ...photo,
+          event_slug: eventMap.get(photo.event_id)?.slug || '',
+          event_name: eventMap.get(photo.event_id)?.name || '',
+        });
+        byYear.set(photo.capture_year, list);
+      }
+    }
+
+    const years = Array.from(byYear.entries())
+      .sort((a, b) => b[0] - a[0])
+      .map(([year, photos]) => ({ year, photos }));
+
+    return c.json({ years });
+  } catch (error) {
+    console.error('Error fetching memories:', error);
+    return c.json({ error: 'Failed to fetch memories' }, 500);
+  }
+});
+
+/**
+ * GET /api/search?q=...
+ * Unified search across every event the caller can access: matches
+ * filename/city (FTS5, instant, always available) plus AI-generated
+ * caption/tags text (also indexed in the same FTS5 table). If a Workers AI
+ * binding is configured and the query is long enough to be meaningful as a
+ * sentence, results are re-ranked by cosine similarity between the query's
+ * embedding and each candidate photo's stored embedding — a lightweight
+ * "semantic search" layer with no extra infrastructure (brute-force
+ * similarity over a modest FTS-prefiltered candidate set, fine at
+ * personal/family-gallery scale — see repo cost-governance notes for why
+ * this avoids Vectorize/paid vector DBs).
+ */
+app.get('/api/search', optionalAuth, async (c) => {
+  try {
+    const query = (c.req.query('q') || '').trim();
+    if (!query) {
+      return c.json({ photos: [] });
+    }
+
+    const user = getUser(c);
+    const userIsAdmin = isAdmin(c);
+    const userEmail = user?.email || '';
+    const limit = Math.min(parseInt(c.req.query('limit') || '60', 10), 200);
+
+    const eventsQuery = `
+      SELECT DISTINCT e.id, e.slug, e.name
+      FROM events e
+      LEFT JOIN event_collaborators ec ON e.id = ec.event_id AND ec.user_email = ?
+      WHERE
+        e.visibility = 'public'
+        OR (? = 1)
+        OR (e.visibility = 'collaborators_only' AND ec.user_email IS NOT NULL)
+    `;
+    const events = await c.env.DB
+      .prepare(eventsQuery)
+      .bind(userEmail, userIsAdmin ? 1 : 0)
+      .all<{ id: number; slug: string; name: string }>();
+
+    if (!events.results || events.results.length === 0) {
+      return c.json({ photos: [] });
+    }
+
+    const eventIds = events.results.map(e => e.id);
+    const placeholders = eventIds.map(() => '?').join(',');
+    const eventMap = new Map<number, { slug: string; name: string }>();
+    for (const e of events.results) {
+      eventMap.set(e.id, { slug: e.slug, name: e.name });
+    }
+
+    // FTS5 full-text match against filename/caption/tags/city. Each term is
+    // wrapped in double quotes (with any embedded quotes stripped first) so
+    // it is always treated as a literal phrase/prefix token, never parsed as
+    // FTS5 query syntax (AND/OR/NOT, "column:value" filters, parentheses,
+    // NEAR, etc.) — a bound parameter to MATCH is still parsed as an FTS5
+    // query expression by SQLite, so an unescaped user query could otherwise
+    // throw a syntax error (turning into a 500) or behave in unintended ways.
+    const ftsQuery = query
+      .split(/\s+/)
+      .filter(Boolean)
+      .map((term) => `"${term.replace(/"/g, '')}"*`)
+      .join(' ');
+
+    let candidateRows: (Photo & { event_id: number; embedding: ArrayBuffer | null })[] = [];
+    if (ftsQuery) {
+      const result = await c.env.DB
+        .prepare(`
+          SELECT p.id, p.event_id, p.original_filename, p.file_type, p.capture_time,
+                 p.width, p.height, p.blur_placeholder, p.cache_version, p.ai_caption,
+                 p.embedding
+          FROM photos_fts f
+          JOIN photos p ON p.rowid = f.rowid
+          WHERE photos_fts MATCH ?
+            AND p.event_id IN (${placeholders})
+            AND p.upload_complete = 1
+            AND p.deleted_at IS NULL
+          ORDER BY p.capture_time DESC
+          LIMIT 300
+        `)
+        .bind(ftsQuery, ...eventIds)
+        .all<Photo & { event_id: number; embedding: ArrayBuffer | null }>();
+      candidateRows = result.results || [];
+    }
+
+    // Optional semantic re-rank: only meaningful for longer, sentence-like
+    // queries (a single short keyword is already well served by FTS above),
+    // and only when there's at least one FTS candidate to actually re-rank —
+    // this endpoint is public/unauthenticated, and each embedding call costs
+    // Workers AI neurons (free allocation: 10,000/day), so it must never be
+    // called for queries that produced zero matches (e.g. abusive/garbage
+    // input designed to burn through the daily budget).
+    const queryEmbedding = candidateRows.length > 0 && query.split(/\s+/).length >= 2
+      ? await embedSearchQuery(c.env, query)
+      : null;
+
+    let ranked = candidateRows;
+    if (queryEmbedding) {
+      ranked = [...candidateRows].sort((a, b) => {
+        const simA = a.embedding ? cosineSimilarity(queryEmbedding, new Float32Array(a.embedding as ArrayBuffer)) : -1;
+        const simB = b.embedding ? cosineSimilarity(queryEmbedding, new Float32Array(b.embedding as ArrayBuffer)) : -1;
+        return simB - simA;
+      });
+    }
+
+    const photos = ranked.slice(0, limit).map(({ embedding: _embedding, ...photo }) => ({
+      ...photo,
+      event_slug: eventMap.get(photo.event_id)?.slug || '',
+      event_name: eventMap.get(photo.event_id)?.name || '',
+    }));
+
+    return c.json({ photos });
+  } catch (error) {
+    console.error('Error searching photos:', error);
+    return c.json({ error: 'Failed to search photos' }, 500);
   }
 });
 

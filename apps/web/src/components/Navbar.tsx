@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { Link, useLocation } from 'react-router-dom';
-import { Heart, MapPin, LayoutGrid, Settings, LogOut, User, LogIn, ChevronDown, Clock, Upload } from 'lucide-react';
+import { Heart, MapPin, LayoutGrid, Settings, LogOut, User, LogIn, ChevronDown, Clock, Upload, ShieldCheck, Search } from 'lucide-react';
 import { Capacitor } from '@capacitor/core';
 import { useAuth } from '../contexts/AuthContext';
 import { config } from '../config';
@@ -97,6 +97,12 @@ const Navbar: React.FC = () => {
               <span className="hidden sm:inline">Timeline</span>
               <span className="sr-only sm:hidden">Timeline</span>
             </Link>
+
+            <Link to="/search" className={linkClass('/search')}>
+              <Search className="w-4 h-4 sm:mr-0" aria-hidden="true" />
+              <span className="hidden sm:inline">Search</span>
+              <span className="sr-only sm:hidden">Search</span>
+            </Link>
             
             {/* User Menu */}
             <div className="relative ml-2" ref={menuRef}>
@@ -139,6 +145,16 @@ const Navbar: React.FC = () => {
                         <Settings className="w-4 h-4" />
                         Settings
                       </button>
+                      {user?.isAdmin && (
+                        <Link
+                          to="/admin"
+                          onClick={() => setShowUserMenu(false)}
+                          className="w-full text-left px-4 py-2 text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700 flex items-center gap-2"
+                        >
+                          <ShieldCheck className="w-4 h-4" />
+                          Admin Dashboard
+                        </Link>
+                      )}
                       <button
                         onClick={handleLogout}
                         className="w-full text-left px-4 py-2 text-sm text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 flex items-center gap-2"

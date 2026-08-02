@@ -2,6 +2,8 @@ import type { Env } from './types';
 import { checkFeature } from './features';
 import { sendUploadNotification } from './routes/collaborators';
 import { createLogger } from './logger';
+import { permanentlyDeletePhotos } from './photoDeletion';
+import { TRASH_RETENTION_DAYS } from './routes/admin/photos';
 
 /**
  * Hourly upload-notification job.
@@ -131,6 +133,34 @@ export async function runStaleUploadCleanup(env: Env): Promise<void> {
     .prepare(`DELETE FROM photos WHERE upload_complete = 0 AND uploaded_at < ?`)
     .bind(cutoff)
     .run();
+}
+
+/**
+ * Hard-deletes (R2 + DB row) any photo that has been sitting in Trash longer
+ * than TRASH_RETENTION_DAYS (see routes/admin/photos.ts for the soft-delete
+ * side of this — DELETE /photos/:photoId just sets `deleted_at`). Mirrors
+ * the same permanentlyDeletePhotos() helper used by the admin "delete
+ * forever"/"empty trash" endpoints, so both paths behave identically.
+ */
+export async function runTrashPurge(env: Env): Promise<void> {
+  const log = createLogger(env);
+  const cutoff = new Date(Date.now() - TRASH_RETENTION_DAYS * 24 * 60 * 60 * 1000).toISOString();
+
+  const { results } = await env.DB.prepare(`
+    SELECT p.id, p.source_photo_id, e.slug
+    FROM photos p
+    JOIN events e ON p.event_id = e.id
+    WHERE p.deleted_at IS NOT NULL AND p.deleted_at < ?
+  `).bind(cutoff).all<{ id: string; source_photo_id: string | null; slug: string }>();
+
+  const toPurge = results || [];
+  if (toPurge.length === 0) {
+    log.debug('[runTrashPurge] No photos past the trash retention window');
+    return;
+  }
+
+  log.info(`[runTrashPurge] Purging ${toPurge.length} photo(s) past the ${TRASH_RETENTION_DAYS}-day trash retention window`);
+  await permanentlyDeletePhotos(env, toPurge);
 }
 
 /**

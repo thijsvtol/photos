@@ -5,6 +5,35 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.0.0] - 2026-08-02
+
+### Added
+- **Trash & Archive**: photo deletion is now a soft delete (30-day retention, restorable) instead
+  of permanent; a nightly job hard-deletes photos past retention. Archive hides a photo from the
+  Timeline without removing it from its event gallery. New `/admin/trash` page.
+- **Memories**: "On this day" carousel on the Timeline page surfaces photos from previous years.
+- **Duplicate detection**: `/admin/duplicates` groups photos with identical file content across
+  events.
+- **Albums**: cross-event photo collections (`/admin/albums`), independent of the event structure.
+- **Activity feed**: polling-based log of favorites, event/album creation, and photo trashing
+  (`/admin/activity`).
+- **Auto Enhance**: one-tap client-side white balance + contrast fix for photos.
+- **Unified/semantic search** (`/search`): full-text search across filenames, locations, and
+  AI-generated photo captions (Cloudflare Workers AI, free tier), with optional embedding-based
+  re-ranking.
+- **People**: faces are detected and embedded client-side (`@vladmandic/human`) and grouped into
+  named people (`/admin/people`) by an hourly clustering job. Includes a "Scan Library for Faces"
+  backfill action for photos uploaded before this feature existed.
+- New migrations `023_photos_organization_and_ai.sql` and `024_faces_processed_at.sql`.
+
+### Fixed
+- Admin dashboard, Photo Manager, and Tag Manager pages had no registered routes in the web app
+  and were unreachable — added routes and an Admin Dashboard link in the navbar.
+
+### Changed
+- Android app release bumped to build 48 (versionName 2.0.0).
+- Project package versions synchronized to 2.0.0.
+
 ## [1.8.0] - 2026-07-24
 
 ### Changed

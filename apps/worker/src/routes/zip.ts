@@ -102,7 +102,7 @@ app.post('/api/events/:slug/zip', async (c) => {
     // Get photo metadata, including source info for copied photos
     const placeholders = body.photoIds.map(() => '?').join(',');
     const photos = await c.env.DB
-      .prepare(`SELECT id, original_filename, capture_time, file_type, source_photo_id, source_event_slug FROM photos WHERE event_id = ? AND id IN (${placeholders})`)
+      .prepare(`SELECT id, original_filename, capture_time, file_type, source_photo_id, source_event_slug FROM photos WHERE event_id = ? AND deleted_at IS NULL AND id IN (${placeholders})`)
       .bind(event.id, ...body.photoIds)
       .all<Photo>();
     

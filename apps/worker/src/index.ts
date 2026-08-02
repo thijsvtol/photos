@@ -13,7 +13,9 @@ import favoritesRoutes from './routes/favorites';
 import collaboratorsRoutes from './routes/collaborators';
 import mobileAuthRoutes from './routes/mobileAuth';
 import { seo } from './routes/seo';
-import { runUploadNotifications, runStaleUploadCleanup } from './scheduled';
+import { runUploadNotifications, runStaleUploadCleanup, runTrashPurge } from './scheduled';
+import { runAiEnrichment } from './aiEnrichment';
+import { runFaceClustering } from './faceClustering';
 
 const app = new Hono<{ Bindings: Env }>();
 
@@ -122,6 +124,15 @@ export default {
     );
     ctx.waitUntil(
       runStaleUploadCleanup(env).catch((err) => log.error('Scheduled runStaleUploadCleanup failed:', err))
+    );
+    ctx.waitUntil(
+      runTrashPurge(env).catch((err) => log.error('Scheduled runTrashPurge failed:', err))
+    );
+    ctx.waitUntil(
+      runAiEnrichment(env).catch((err) => log.error('Scheduled runAiEnrichment failed:', err))
+    );
+    ctx.waitUntil(
+      runFaceClustering(env).catch((err) => log.error('Scheduled runFaceClustering failed:', err))
     );
   },
 };

@@ -2,6 +2,13 @@ import { Hono, Context } from 'hono';
 import { ulid } from 'ulid';
 import type { Env, User } from '../../types';
 import { extractUser, hasEventCapabilityByEventId, isUserAdmin } from '../../auth';
+import { permanentlyDeletePhotos } from '../../photoDeletion';
+import { logActivity } from '../../activityLog';
+import { isValidFaceInput } from '../../faceValidation';
+
+// Soft-deleted photos are kept this long before the nightly purge cron
+// (see scheduled.ts runTrashPurge) hard-deletes them from R2 + D1.
+export const TRASH_RETENTION_DAYS = 30;
 
 type Variables = {
   user: User;
@@ -76,6 +83,156 @@ async function requireEventCapabilityById(
 
   return null;
 }
+
+/**
+ * GET /photos/faces-pending
+ * Returns a batch of photos that have not yet been checked for faces
+ * (`faces_processed_at IS NULL`). Used to gradually BACKFILL the People
+ * feature onto photos uploaded before it existed — face detection itself
+ * must run client-side (Workers AI has no face-embedding model), so this
+ * endpoint only enumerates work; the actual detection happens in the
+ * browser (see apps/web/src/faceBackfill.ts) which then POSTs results to
+ * POST /photos/:photoId/faces below. Admin-only, since it scans across
+ * every event (unlike the per-event upload-time faces endpoint in
+ * routes/admin/uploads.ts).
+ */
+app.get('/faces-pending', async (c) => {
+  try {
+    const limit = Math.min(parseInt(c.req.query('limit') || '10', 10), 50);
+
+    const rows = await c.env.DB
+      .prepare(`
+        SELECT p.id, p.file_type, p.cache_version, e.slug as event_slug
+        FROM photos p
+        JOIN events e ON p.event_id = e.id
+        WHERE p.faces_processed_at IS NULL
+          AND p.upload_complete = 1
+          AND p.deleted_at IS NULL
+          AND p.file_type != 'video/mp4'
+          AND p.file_type NOT LIKE 'raw/%'
+        ORDER BY p.uploaded_at ASC
+        LIMIT ?
+      `)
+      .bind(limit)
+      .all<{ id: string; file_type: string; cache_version: number; event_slug: string }>();
+
+    const remainingRow = await c.env.DB
+      .prepare(`
+        SELECT COUNT(*) as count FROM photos
+        WHERE faces_processed_at IS NULL AND upload_complete = 1 AND deleted_at IS NULL
+          AND file_type != 'video/mp4' AND file_type NOT LIKE 'raw/%'
+      `)
+      .first<{ count: number }>();
+
+    return c.json({ photos: rows.results || [], remaining: remainingRow?.count || 0 });
+  } catch (error) {
+    console.error('Error fetching faces-pending photos:', error);
+    return c.json({ error: 'Failed to fetch faces-pending photos' }, 500);
+  }
+});
+
+/**
+ * POST /photos/:photoId/faces
+ * Admin-triggered counterpart to POST /admin/events/:slug/uploads/:photoId/faces
+ * (routes/admin/uploads.ts), used specifically for BACKFILLING photos that
+ * predate the People feature (see GET /photos/faces-pending above). Stores
+ * client-detected faces and marks the photo as checked either way.
+ */
+app.post('/:photoId/faces', async (c) => {
+  const photoId = c.req.param('photoId');
+
+  try {
+    const photo = await c.env.DB.prepare('SELECT id FROM photos WHERE id = ?').bind(photoId).first<{ id: string }>();
+    if (!photo) {
+      return c.json({ error: 'Photo not found' }, 404);
+    }
+
+    const { faces } = await c.req.json<{
+      faces: Array<{ embedding: number[]; bbox: { x: number; y: number; width: number; height: number } }>;
+    }>();
+
+    if (!Array.isArray(faces)) {
+      return c.json({ error: 'faces array is required' }, 400);
+    }
+    if (faces.length > 50) {
+      return c.json({ error: 'Cannot report more than 50 faces per photo' }, 400);
+    }
+    if (!faces.every(isValidFaceInput)) {
+      return c.json({ error: 'Each face requires a 128-number embedding and a numeric bbox' }, 400);
+    }
+
+    await c.env.DB.prepare('DELETE FROM photo_faces WHERE photo_id = ?').bind(photoId).run();
+
+    if (faces.length > 0) {
+      const statements = faces.map((face) => {
+        const embeddingBlob = new Float32Array(face.embedding).buffer;
+        return c.env.DB
+          .prepare(`
+            INSERT INTO photo_faces (photo_id, embedding, bbox_x, bbox_y, bbox_width, bbox_height)
+            VALUES (?, ?, ?, ?, ?, ?)
+          `)
+          .bind(photoId, embeddingBlob, face.bbox.x, face.bbox.y, face.bbox.width, face.bbox.height);
+      });
+      await c.env.DB.batch(statements);
+    }
+
+    await c.env.DB.prepare("UPDATE photos SET faces_processed_at = datetime('now') WHERE id = ?").bind(photoId).run();
+
+    return c.json({ success: true, count: faces.length });
+  } catch (error) {
+    console.error('Error saving backfilled photo faces:', error);
+    return c.json({ error: 'Failed to save photo faces' }, 500);
+  }
+});
+
+/**
+ * GET /photos/duplicates
+ * Groups all non-trashed photos that share the same file_hash (exact-content
+ * duplicates, computed client-side at upload time — see uploadManager.ts's
+ * computeFileHash — and stored per-photo regardless of which event they were
+ * uploaded to). Only groups with more than one photo are returned. Admin-only
+ * (this route sits under /api/admin/photos, gated by requireAdmin).
+ */
+app.get('/duplicates', async (c) => {
+  try {
+    const rows = await c.env.DB
+      .prepare(`
+        SELECT p.id, p.file_hash, p.original_filename, p.file_type, p.capture_time,
+               p.blur_placeholder, p.cache_version, p.width, p.height,
+               e.slug as event_slug, e.name as event_name
+        FROM photos p
+        JOIN events e ON p.event_id = e.id
+        WHERE p.deleted_at IS NULL
+          AND p.file_hash IS NOT NULL
+          AND p.file_hash IN (
+            SELECT file_hash FROM photos
+            WHERE deleted_at IS NULL AND file_hash IS NOT NULL
+            GROUP BY file_hash
+            HAVING COUNT(*) > 1
+          )
+        ORDER BY p.file_hash, p.capture_time ASC
+      `)
+      .all<{
+        id: string; file_hash: string; original_filename: string; file_type: string;
+        capture_time: string; blur_placeholder: string | null; cache_version: number;
+        width: number | null; height: number | null; event_slug: string; event_name: string;
+      }>();
+
+    const groupsByHash = new Map<string, typeof rows.results>();
+    for (const row of (rows.results || [])) {
+      const list = groupsByHash.get(row.file_hash) || [];
+      list.push(row);
+      groupsByHash.set(row.file_hash, list);
+    }
+
+    const groups = Array.from(groupsByHash.entries()).map(([fileHash, photos]) => ({ fileHash, photos }));
+
+    return c.json({ groups });
+  } catch (error) {
+    console.error('Error fetching duplicate photos:', error);
+    return c.json({ error: 'Failed to fetch duplicate photos' }, 500);
+  }
+});
 
 /**
  * PUT /photos/:photoId/featured
@@ -229,23 +386,21 @@ app.put('/:photoId/replace', async (c) => {
 
 /**
  * DELETE /photos/:photoId
- * Delete a photo
+ * Move a photo to Trash (soft delete). The photo is hidden from all normal
+ * views immediately but its R2 files + DB row are kept until either an
+ * admin empties the trash (POST /photos/trash/empty or DELETE
+ * /photos/:photoId/permanent) or the nightly purge cron removes it after
+ * TRASH_RETENTION_DAYS (see scheduled.ts runTrashPurge).
  */
 app.delete('/:photoId', async (c) => {
   const photoId = c.req.param('photoId');
-  
+
   try {
-    // Get photo and event slug for R2 cleanup
     const photo = await c.env.DB
-      .prepare(`
-        SELECT p.id, p.event_id, p.source_photo_id, e.slug
-        FROM photos p
-        JOIN events e ON p.event_id = e.id
-        WHERE p.id = ?
-      `)
+      .prepare('SELECT id, event_id, deleted_at FROM photos WHERE id = ?')
       .bind(photoId)
-      .first<{ id: string; event_id: number; source_photo_id: string | null; slug: string }>();
-    
+      .first<{ id: string; event_id: number; deleted_at: string | null }>();
+
     if (!photo) {
       return c.json({ error: 'Photo not found' }, 404);
     }
@@ -258,42 +413,25 @@ app.delete('/:photoId', async (c) => {
     );
     if (permissionError) return permissionError;
 
-    // Only delete from R2 if this is not a copied photo (copies share R2 files)
-    if (!photo.source_photo_id) {
-      try {
-        await Promise.all([
-          withRetry(
-            () => c.env.PHOTOS_BUCKET.delete(`original/${photo.slug}/${photo.id}.jpg`),
-            `R2 delete original jpg for photo ${photo.id}`
-          ),
-          withRetry(
-            () => c.env.PHOTOS_BUCKET.delete(`original/${photo.slug}/${photo.id}.mp4`),
-            `R2 delete original mp4 for photo ${photo.id}`
-          ),
-          withRetry(
-            () => c.env.PHOTOS_BUCKET.delete(`preview/${photo.slug}/${photo.id}.jpg`),
-            `R2 delete preview for photo ${photo.id}`
-          ),
-          withRetry(
-            () => c.env.PHOTOS_BUCKET.delete(`ig/${photo.slug}/${photo.id}.jpg`),
-            `R2 delete instagram for photo ${photo.id}`
-          ),
-        ]);
-      } catch (err) {
-        console.error('Failed to delete photo from R2:', err);
-        // Continue to delete from database even if R2 fails
-      }
+    if (!photo.deleted_at) {
+      await withRetry(
+        () => c.env.DB
+          .prepare("UPDATE photos SET deleted_at = datetime('now') WHERE id = ?")
+          .bind(photoId)
+          .run(),
+        `DB soft-delete photo ${photoId}`
+      );
+
+      const user = c.get('user');
+      await logActivity(c.env, {
+        eventId: photo.event_id,
+        actorEmail: user?.email || 'unknown',
+        action: 'photo_trash',
+        targetType: 'photo',
+        targetId: photoId,
+      });
     }
-    
-    // Delete from database
-    await withRetry(
-      () => c.env.DB
-        .prepare('DELETE FROM photos WHERE id = ?')
-        .bind(photoId)
-        .run(),
-      `DB delete photo ${photoId}`
-    );
-    
+
     return c.json({ success: true });
   } catch (error) {
     console.error('Error deleting photo:', error);
@@ -302,8 +440,176 @@ app.delete('/:photoId', async (c) => {
 });
 
 /**
+ * PUT /photos/:photoId/restore
+ * Restore a photo out of Trash.
+ */
+app.put('/:photoId/restore', async (c) => {
+  const photoId = c.req.param('photoId');
+
+  try {
+    const photo = await c.env.DB
+      .prepare('SELECT id, event_id FROM photos WHERE id = ?')
+      .bind(photoId)
+      .first<{ id: string; event_id: number }>();
+
+    if (!photo) {
+      return c.json({ error: 'Photo not found' }, 404);
+    }
+
+    const permissionError = await requireEventCapabilityById(
+      c,
+      photo.event_id,
+      'photo_delete',
+      'Delete permission required for this event'
+    );
+    if (permissionError) return permissionError;
+
+    await c.env.DB
+      .prepare('UPDATE photos SET deleted_at = NULL WHERE id = ?')
+      .bind(photoId)
+      .run();
+
+    return c.json({ success: true });
+  } catch (error) {
+    console.error('Error restoring photo:', error);
+    return c.json({ error: 'Failed to restore photo' }, 500);
+  }
+});
+
+/**
+ * DELETE /photos/:photoId/permanent
+ * Permanently delete a single (already-trashed) photo right away, instead
+ * of waiting for the retention window — R2 files + DB row are removed.
+ */
+app.delete('/:photoId/permanent', async (c) => {
+  const photoId = c.req.param('photoId');
+
+  try {
+    const photo = await c.env.DB
+      .prepare(`
+        SELECT p.id, p.event_id, p.source_photo_id, e.slug
+        FROM photos p
+        JOIN events e ON p.event_id = e.id
+        WHERE p.id = ?
+      `)
+      .bind(photoId)
+      .first<{ id: string; event_id: number; source_photo_id: string | null; slug: string }>();
+
+    if (!photo) {
+      return c.json({ error: 'Photo not found' }, 404);
+    }
+
+    const permissionError = await requireEventCapabilityById(
+      c,
+      photo.event_id,
+      'photo_delete',
+      'Delete permission required for this event'
+    );
+    if (permissionError) return permissionError;
+
+    await permanentlyDeletePhotos(c.env, [photo]);
+
+    return c.json({ success: true });
+  } catch (error) {
+    console.error('Error permanently deleting photo:', error);
+    return c.json({ error: 'Failed to permanently delete photo' }, 500);
+  }
+});
+
+/**
+ * PUT /photos/:photoId/archive
+ * Toggle archived status: archived photos are hidden from the Timeline
+ * (main library feed) but remain visible in their event's gallery, same as
+ * Google Photos' "Archive" (vs. Trash, which hides everywhere).
+ */
+app.put('/:photoId/archive', async (c) => {
+  try {
+    const photoId = c.req.param('photoId');
+    const { isArchived } = await c.req.json<{ isArchived: boolean }>();
+
+    const photo = await c.env.DB
+      .prepare('SELECT event_id FROM photos WHERE id = ?')
+      .bind(photoId)
+      .first<{ event_id: number }>();
+
+    if (!photo) {
+      return c.json({ error: 'Photo not found' }, 404);
+    }
+
+    const permissionError = await requireEventCapabilityById(
+      c,
+      photo.event_id,
+      'photo_delete',
+      'Delete permission required for this event'
+    );
+    if (permissionError) return permissionError;
+
+    await c.env.DB
+      .prepare("UPDATE photos SET archived_at = CASE WHEN ? THEN datetime('now') ELSE NULL END WHERE id = ?")
+      .bind(isArchived ? 1 : 0, photoId)
+      .run();
+
+    return c.json({ success: true, is_archived: isArchived });
+  } catch (error) {
+    console.error('Error updating archived status:', error);
+    return c.json({ error: 'Failed to update archived status' }, 500);
+  }
+});
+
+/**
+ * GET /photos/trash
+ * List all soft-deleted photos (admin-only — this route sits under
+ * /api/admin/photos which requireAdmin already gates, see routes/admin.ts).
+ */
+app.get('/trash', async (c) => {
+  try {
+    const photos = await c.env.DB
+      .prepare(`
+        SELECT p.id, p.event_id, p.original_filename, p.file_type, p.capture_time,
+               p.blur_placeholder, p.cache_version, p.deleted_at,
+               e.slug as event_slug, e.name as event_name
+        FROM photos p
+        JOIN events e ON p.event_id = e.id
+        WHERE p.deleted_at IS NOT NULL
+        ORDER BY p.deleted_at DESC
+      `)
+      .all();
+
+    return c.json({ photos: photos.results || [], retentionDays: TRASH_RETENTION_DAYS });
+  } catch (error) {
+    console.error('Error fetching trash:', error);
+    return c.json({ error: 'Failed to fetch trash' }, 500);
+  }
+});
+
+/**
+ * POST /photos/trash/empty
+ * Permanently delete every currently-trashed photo right away (admin-only).
+ */
+app.post('/trash/empty', async (c) => {
+  try {
+    const photos = await c.env.DB
+      .prepare(`
+        SELECT p.id, p.source_photo_id, e.slug
+        FROM photos p
+        JOIN events e ON p.event_id = e.id
+        WHERE p.deleted_at IS NOT NULL
+      `)
+      .all<{ id: string; source_photo_id: string | null; slug: string }>();
+
+    const toDelete = photos.results || [];
+    await permanentlyDeletePhotos(c.env, toDelete);
+
+    return c.json({ success: true, deletedCount: toDelete.length });
+  } catch (error) {
+    console.error('Error emptying trash:', error);
+    return c.json({ error: 'Failed to empty trash' }, 500);
+  }
+});
+
+/**
  * POST /photos/bulk-delete
- * Bulk delete multiple photos
+ * Bulk move multiple photos to Trash (soft delete — see DELETE /:photoId).
  */
 app.post('/bulk-delete', async (c) => {
   try {
@@ -330,21 +636,20 @@ app.post('/bulk-delete', async (c) => {
     const uniquePhotoIds = Array.from(new Set(photoIds));
     const errors: { photoId: string; error: string }[] = [];
 
-    // Fetch all existing photos and their event slugs, chunked to stay under
+    // Fetch all existing (not already trashed) photos, chunked to stay under
     // D1's 100 bound-parameter-per-query limit for large selections.
     const photoSelectStatements = chunkArray(uniquePhotoIds, MAX_SQL_IN_CHUNK).map((chunk) => {
       const chunkPlaceholders = chunk.map(() => '?').join(', ');
       return c.env.DB
         .prepare(`
-          SELECT p.id, p.event_id, p.source_photo_id, e.slug
+          SELECT p.id, p.event_id
           FROM photos p
-          JOIN events e ON p.event_id = e.id
-          WHERE p.id IN (${chunkPlaceholders})
+          WHERE p.id IN (${chunkPlaceholders}) AND p.deleted_at IS NULL
         `)
         .bind(...chunk);
     });
 
-    const photoRowBatches = await c.env.DB.batch<{ id: string; event_id: number; source_photo_id: string | null; slug: string }>(photoSelectStatements);
+    const photoRowBatches = await c.env.DB.batch<{ id: string; event_id: number }>(photoSelectStatements);
 
     const existingPhotos = photoRowBatches.flatMap((batch) => batch.results || []);
     const existingPhotoIds = new Set(existingPhotos.map((p) => p.id));
@@ -360,64 +665,26 @@ app.post('/bulk-delete', async (c) => {
       }
     }
 
-    // Record IDs that don't exist
+    // Record IDs that don't exist (or are already trashed)
     for (const photoId of uniquePhotoIds) {
       if (!existingPhotoIds.has(photoId)) {
         errors.push({ photoId, error: 'Photo not found' });
       }
     }
 
-    // Only delete R2 blobs for non-copied photos (copies share files with the source)
-    const originalPhotos = existingPhotos.filter((p) => !p.source_photo_id);
-    const R2_DELETE_BATCH_SIZE = 25;
-    for (let i = 0; i < originalPhotos.length; i += R2_DELETE_BATCH_SIZE) {
-      const batch = originalPhotos.slice(i, i + R2_DELETE_BATCH_SIZE);
-      const batchResults = await Promise.allSettled(
-        batch.map(async (photo) => {
-          await Promise.all([
-            withRetry(
-              () => c.env.PHOTOS_BUCKET.delete(`original/${photo.slug}/${photo.id}.jpg`),
-              `R2 delete original jpg for photo ${photo.id}`
-            ),
-            withRetry(
-              () => c.env.PHOTOS_BUCKET.delete(`original/${photo.slug}/${photo.id}.mp4`),
-              `R2 delete original mp4 for photo ${photo.id}`
-            ),
-            withRetry(
-              () => c.env.PHOTOS_BUCKET.delete(`preview/${photo.slug}/${photo.id}.jpg`),
-              `R2 delete preview for photo ${photo.id}`
-            ),
-            withRetry(
-              () => c.env.PHOTOS_BUCKET.delete(`ig/${photo.slug}/${photo.id}.jpg`),
-              `R2 delete instagram for photo ${photo.id}`
-            ),
-          ]);
-        })
-      );
-
-      batchResults.forEach((result, index) => {
-        if (result.status === 'rejected') {
-          const photo = batch[index];
-          console.error(`Failed to delete photo ${photo.id} from R2:`, result.reason);
-          // Continue to delete from database even if R2 fails
-        }
-      });
-    }
-
-    // Delete all found photos from the database, chunked for the same reason
-    // as the SELECT above.
+    // Soft-delete all found photos, chunked for the same reason as the SELECT above.
     let deletedCount = 0;
     if (existingPhotos.length > 0) {
-      const deleteStatements = chunkArray(existingPhotos.map((p) => p.id), MAX_SQL_IN_CHUNK).map((chunk) => {
+      const updateStatements = chunkArray(existingPhotos.map((p) => p.id), MAX_SQL_IN_CHUNK).map((chunk) => {
         const chunkPlaceholders = chunk.map(() => '?').join(', ');
         return c.env.DB
-          .prepare(`DELETE FROM photos WHERE id IN (${chunkPlaceholders})`)
+          .prepare(`UPDATE photos SET deleted_at = datetime('now') WHERE id IN (${chunkPlaceholders})`)
           .bind(...chunk);
       });
 
       await withRetry(
-        () => c.env.DB.batch(deleteStatements),
-        `DB bulk delete ${existingPhotos.length} photos`
+        () => c.env.DB.batch(updateStatements),
+        `DB bulk soft-delete ${existingPhotos.length} photos`
       );
 
       deletedCount = existingPhotos.length;

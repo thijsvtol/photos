@@ -3,6 +3,7 @@ import type { Env, Photo, UserFavorite } from '../types';
 import { requireAuth, optionalAuth, getUser, isAdmin } from '../auth';
 import { requireFeature } from '../features';
 import { logger } from '../logger';
+import { logActivity } from '../activityLog';
 
 const app = new Hono<{ Bindings: Env }>();
 
@@ -127,6 +128,14 @@ app.post('/api/favorites/:photoId', requireAuth, async (c) => {
       `)
       .bind(photoId, photoId)
       .run();
+
+    await logActivity(c.env, {
+      eventId: photo.event_id,
+      actorEmail: user.email,
+      action: 'photo_favorite',
+      targetType: 'photo',
+      targetId: photoId,
+    });
 
     return c.json({ success: true, message: 'Added to favorites' });
   } catch (error) {

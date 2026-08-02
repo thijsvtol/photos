@@ -30,6 +30,17 @@ const PrivacyPolicy = lazy(() => import('./pages/PrivacyPolicy'));
 const ShareUpload = lazy(() => import('./pages/ShareUpload'));
 const Timeline = lazy(() => import('./pages/Timeline'));
 const CastReceiver = lazy(() => import('./pages/CastReceiver'));
+const SearchPage = lazy(() => import('./pages/SearchPage'));
+const AdminPeople = lazy(() => import('./pages/AdminPeople'));
+const AdminPersonDetail = lazy(() => import('./pages/AdminPersonDetail'));
+const AdminDashboard = lazy(() => import('./pages/AdminDashboard'));
+const AdminPhotoManager = lazy(() => import('./pages/AdminPhotoManager'));
+const AdminTagManager = lazy(() => import('./pages/AdminTagManager'));
+const AdminTrash = lazy(() => import('./pages/AdminTrash'));
+const AdminDuplicates = lazy(() => import('./pages/AdminDuplicates'));
+const AdminAlbums = lazy(() => import('./pages/AdminAlbums'));
+const AdminAlbumDetail = lazy(() => import('./pages/AdminAlbumDetail'));
+const AdminActivity = lazy(() => import('./pages/AdminActivity'));
 
 // Loading component
 const LoadingFallback = () => (
@@ -275,6 +286,17 @@ function App() {
                       <Route path="/share-upload" element={<ShareUpload />} />
                       <Route path="/timeline" element={<Timeline />} />
                       <Route path="/cast-receiver" element={<CastReceiver />} />
+                      <Route path="/search" element={<SearchPage />} />
+                      <Route path="/admin/people" element={<AdminPeople />} />
+                      <Route path="/admin/people/:personId" element={<AdminPersonDetail />} />
+                      <Route path="/admin" element={<AdminDashboard />} />
+                      <Route path="/admin/tags" element={<AdminTagManager />} />
+                      <Route path="/admin/trash" element={<AdminTrash />} />
+                      <Route path="/admin/duplicates" element={<AdminDuplicates />} />
+                      <Route path="/admin/albums" element={<AdminAlbums />} />
+                      <Route path="/admin/albums/:albumId" element={<AdminAlbumDetail />} />
+                      <Route path="/admin/activity" element={<AdminActivity />} />
+                      <Route path="/admin/events/:slug/photos" element={<AdminPhotoManager />} />
                     </Routes>
                     </Suspense>
                   </PullToRefresh>

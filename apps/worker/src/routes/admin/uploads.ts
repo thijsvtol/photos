@@ -4,6 +4,7 @@ import { requireUploadPermission, isAdmin } from '../../auth';
 import { logCollaborationAction } from '../collaborators';
 import { checkFeature } from '../../features';
 import { isVideoFileType, getStorageExtension } from '../../fileTypeUtils';
+import { isValidFaceInput } from '../../faceValidation';
 
 type Variables = {
   user: User;
@@ -367,6 +368,81 @@ app.post('/:photoId/complete', requireUploadPermission, async (c) => {
   } catch (error) {
     console.error('[UPLOAD] Error completing upload:', error);
     return c.json({ error: 'Failed to complete upload' }, 500);
+  }
+});
+
+/**
+ * POST /:photoId/faces
+ * Stores client-detected faces (bounding box + 1024-dim @vladmandic/human
+ * descriptor) for a photo, computed entirely in the browser at upload time
+ * (see apps/web/src/faceDetection.ts + faceDetectionQueue.ts — Workers AI
+ * has no face-embedding model, so this runs client-side, same pattern as
+ * the existing client-side EXIF/blur-placeholder/RAW-decode processing).
+ * Mounted under the uploads router (exempted from the admin-only gate in
+ * routes/admin.ts) so any collaborator with upload permission for this
+ * event — not just admins — can report faces for photos they uploaded.
+ * Clustering into named people happens separately (see scheduled.ts
+ * runFaceClustering), this endpoint only stores raw detections.
+ */
+app.post('/:photoId/faces', requireUploadPermission, async (c) => {
+  const slug = c.req.param('slug')!;
+  const photoId = c.req.param('photoId');
+
+  try {
+    const photo = await c.env.DB
+      .prepare('SELECT p.id FROM photos p JOIN events e ON p.event_id = e.id WHERE p.id = ? AND e.slug = ?')
+      .bind(photoId, slug)
+      .first<{ id: string }>();
+
+    if (!photo) {
+      return c.json({ error: 'Photo not found' }, 404);
+    }
+
+    const { faces } = await c.req.json<{
+      faces: Array<{ embedding: number[]; bbox: { x: number; y: number; width: number; height: number } }>;
+    }>();
+
+    if (!Array.isArray(faces)) {
+      return c.json({ error: 'faces array is required' }, 400);
+    }
+    if (faces.length > 50) {
+      return c.json({ error: 'Cannot report more than 50 faces per photo' }, 400);
+    }
+    // @vladmandic/human's FaceRes description model always produces a
+    // 1024-dim descriptor. Validate shape/bounds before trusting client-supplied data — this is a
+    // defense-in-depth check (the caller already has upload permission for
+    // this event) against a buggy client sending malformed/oversized
+    // payloads that would otherwise bloat the DB or corrupt clustering.
+    if (!faces.every(isValidFaceInput)) {
+      return c.json({ error: 'Each face requires a 128-number embedding and a numeric bbox' }, 400);
+    }
+
+    // Replace any previous detections for this photo (e.g. a re-run after an edit).
+    await c.env.DB.prepare('DELETE FROM photo_faces WHERE photo_id = ?').bind(photoId).run();
+
+    if (faces.length > 0) {
+      const statements = faces.map((face) => {
+        const embeddingBlob = new Float32Array(face.embedding).buffer;
+        return c.env.DB
+          .prepare(`
+            INSERT INTO photo_faces (photo_id, embedding, bbox_x, bbox_y, bbox_width, bbox_height)
+            VALUES (?, ?, ?, ?, ?, ?)
+          `)
+          .bind(photoId, embeddingBlob, face.bbox.x, face.bbox.y, face.bbox.width, face.bbox.height);
+      });
+      await c.env.DB.batch(statements);
+    }
+
+    // Mark as checked regardless of whether any faces were found — a photo
+    // with zero faces (no people in the shot) is still "processed", and
+    // without this the backfill scan (which enumerates faces_processed_at
+    // IS NULL) would rescan it forever.
+    await c.env.DB.prepare("UPDATE photos SET faces_processed_at = datetime('now') WHERE id = ?").bind(photoId).run();
+
+    return c.json({ success: true, count: faces.length });
+  } catch (error) {
+    console.error('Error saving photo faces:', error);
+    return c.json({ error: 'Failed to save photo faces' }, 500);
   }
 });
 

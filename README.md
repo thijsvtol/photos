@@ -107,13 +107,29 @@ A full-stack, white-label photo gallery application built with React + Vite + Ta
 - 🎯 **Grid View**: Visual overview of all event photos
 - ☑️ **Bulk Selection**: Checkbox selection with Select All/Deselect All
 - ⭐ **Featured Toggle**: Mark photos as featured (shows on landing page)
-- 🗑️ **Bulk Delete**: Delete multiple selected photos at once
+- 🗑️ **Trash**: Move photos to Trash (30-day retention, restorable) instead of deleting outright
+- 📦 **Archive**: Hide a photo from the Timeline without deleting it
+- ✨ **Auto Enhance**: One-tap client-side white balance + contrast fix
 - 👁️ **Preview Modal**: Preview photo before deleting
 - 🏷️ **Featured Badge**: Visual indicator for featured photos
 - 💝 **Favorite Count**: See how many users favorited each photo
 - ✂️ **Image Editing**: Crop, rotate, and adjust curves/levels in-browser (Filerobot-based editor); native Android uses the same editor with same-origin blob fetching to avoid canvas tainting
 - 🎬 **Video Editing**: Trim, crop, and adjust playback speed client-side via FFmpeg WASM
 - 📤 **Replace Original/Preview**: Save edits back to R2 without re-uploading from scratch
+
+#### Organization, Search & AI (`/admin/trash`, `/admin/duplicates`, `/admin/albums`, `/admin/people`, `/admin/activity`, `/search`)
+
+- 🗑️ **Trash**: View, restore, or permanently delete trashed photos; empty the whole trash at once
+- 🔁 **Duplicate Detection**: Groups photos with byte-identical content (SHA-256), even across events
+- 📁 **Albums**: Cross-event photo collections, independent of the event structure
+- 🧑‍🤝‍🧑 **People**: Faces are detected client-side at upload (`@vladmandic/human`) and grouped into
+  named people via an hourly server-side clustering job — no Workers AI face model needed
+- 🔍 **Unified Search**: Full-text search (filenames, location, AI captions) with optional semantic
+  re-ranking, powered by Cloudflare Workers AI's free daily allocation (captions + embeddings)
+- 🕰️ **Memories**: "On this day" carousel on the Timeline page (pure SQL, no AI)
+- 📜 **Activity Feed**: Polling-based log of favorites, event/album creation, and photo trashing
+- 📲 **Android Auto-Backup**: Pick a device folder to automatically back up new photos/videos to
+  an event in the background (Storage Access Framework)
 
 #### Tag Manager (`/admin/tags`)
 

@@ -2,6 +2,12 @@
 export interface Env {
   DB: D1Database;
   PHOTOS_BUCKET: R2Bucket;
+  // Workers AI binding — used only by the batch-limited enrichment cron
+  // (runAiEnrichment in scheduled.ts), never per-request, to stay within the
+  // free 10,000-neurons/day allocation. See aiEnrichment.ts. Optional in the
+  // type (always present at runtime via wrangler.toml's [ai] binding) so
+  // existing test Env mocks don't all need updating.
+  AI?: Ai;
   EVENT_COOKIE_SECRET: string;
   ADMIN_SHARED_SECRET?: string;
   ADMIN_EMAILS?: string; // Comma-separated list of admin emails

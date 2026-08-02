@@ -1,6 +1,6 @@
 {
   "name": "photos-web",
-  "version": "1.9.1",
+  "version": "2.0.0",
   "description": "React frontend for photo sharing application",
   "type": "module",
   "scripts": {
@@ -38,6 +38,7 @@
     "@ffmpeg/util": "^0.12.1",
     "@formspree/react": "^3.0.0",
     "@types/leaflet": "^1.9.21",
+    "@vladmandic/human": "^3.3.6",
     "axios": "^1.18.1",
     "dexie": "^4.4.1",
     "exifreader": "^4.39.0",

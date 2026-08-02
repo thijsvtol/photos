@@ -7,6 +7,8 @@ import photosRouter from './admin/photos';
 import analyticsRouter from './admin/analytics';
 import tagsRouter from './admin/tags';
 import utilitiesRouter from './admin/utilities';
+import albumsRouter from './admin/albums';
+import peopleRouter from './admin/people';
 
 type Variables = {
   user: User;
@@ -34,5 +36,7 @@ app.route('/photos', photosRouter);
 app.route('/stats', analyticsRouter);
 app.route('/tags', tagsRouter);
 app.route('/events/:slug', utilitiesRouter);
+app.route('/albums', albumsRouter);
+app.route('/people', peopleRouter);
 
 export default app;

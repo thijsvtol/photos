@@ -47,6 +47,11 @@ export interface Photo {
   is_featured: boolean;
     cache_version: number;
   file_hash?: string | null; // SHA-256 of the original file, used for client-side duplicate detection
+  phash?: string | null; // perceptual dHash (hex), used for near-duplicate detection
+  deleted_at?: string | null; // non-null = in Trash
+  archived_at?: string | null; // non-null = archived (hidden from Timeline, still in event gallery)
+  event_slug_trash?: string; // present only on Trash listing rows
+  event_name_trash?: string; // present only on Trash listing rows
 }
 
 export interface CreateEventRequest {

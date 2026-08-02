@@ -187,13 +187,46 @@ const AdminDashboard: React.FC = () => {
               <h1 className="text-3xl sm:text-4xl font-bold text-gray-900 dark:text-white">Admin Dashboard</h1>
               <p className="text-gray-600 dark:text-gray-400 mt-2 text-sm sm:text-base">Manage events and view statistics</p>
             </div>
-            <Link
-              to="/admin/tags"
-              className="px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition text-sm flex items-center gap-2 shadow-sm hover:shadow"
-            >
-              <Tag className="w-4 h-4" />
-              <span>Manage Tags</span>
-            </Link>
+            <div className="flex gap-2">
+              <Link
+                to="/admin/people"
+                className="px-4 py-2 bg-pink-600 text-white rounded-lg hover:bg-pink-700 transition text-sm flex items-center gap-2 shadow-sm hover:shadow"
+              >
+                <span>People</span>
+              </Link>
+              <Link
+                to="/admin/activity"
+                className="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition text-sm flex items-center gap-2 shadow-sm hover:shadow"
+              >
+                <span>Activity</span>
+              </Link>
+              <Link
+                to="/admin/albums"
+                className="px-4 py-2 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 transition text-sm flex items-center gap-2 shadow-sm hover:shadow"
+              >
+                <span>Albums</span>
+              </Link>
+              <Link
+                to="/admin/duplicates"
+                className="px-4 py-2 bg-teal-600 text-white rounded-lg hover:bg-teal-700 transition text-sm flex items-center gap-2 shadow-sm hover:shadow"
+              >
+                <span>Duplicates</span>
+              </Link>
+              <Link
+                to="/admin/trash"
+                className="px-4 py-2 bg-gray-600 text-white rounded-lg hover:bg-gray-700 transition text-sm flex items-center gap-2 shadow-sm hover:shadow"
+              >
+                <Trash2 className="w-4 h-4" />
+                <span>Trash</span>
+              </Link>
+              <Link
+                to="/admin/tags"
+                className="px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition text-sm flex items-center gap-2 shadow-sm hover:shadow"
+              >
+                <Tag className="w-4 h-4" />
+                <span>Manage Tags</span>
+              </Link>
+            </div>
           </div>
         </div>
 
@@ -397,11 +430,18 @@ const AdminDashboard: React.FC = () => {
                 )}
                 <div className="flex flex-col gap-2">
                   <Link
-                    to={`/admin/events/${event.slug}/upload`}
+                    to={`/events/${event.slug}`}
                     className="inline-flex items-center justify-center gap-2 w-full text-center px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition text-sm shadow-sm hover:shadow"
                   >
                     <Upload className="w-4 h-4" />
                     Upload Photos
+                  </Link>
+                  <Link
+                    to={`/admin/events/${event.slug}/photos`}
+                    className="inline-flex items-center justify-center gap-2 w-full text-center px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition text-sm shadow-sm hover:shadow"
+                  >
+                    <Camera className="w-4 h-4" />
+                    Manage Photos
                   </Link>
                   <Link
                     to={`/events/${event.slug}`}

@@ -58,7 +58,7 @@ app.get('/api/photos/featured', async (c) => {
         SELECT p.*, e.slug as event_slug, e.name as event_name
         FROM photos p
         JOIN events e ON p.event_id = e.id
-        WHERE p.is_featured = 1 AND e.visibility = 'public' AND e.password_hash IS NULL
+        WHERE p.is_featured = 1 AND p.deleted_at IS NULL AND e.visibility = 'public' AND e.password_hash IS NULL
         ORDER BY p.capture_time DESC
         LIMIT ?
       `)
@@ -72,7 +72,7 @@ app.get('/api/photos/featured', async (c) => {
           SELECT p.*, e.slug as event_slug, e.name as event_name
           FROM photos p
           JOIN events e ON p.event_id = e.id
-          WHERE e.visibility = 'public' AND e.password_hash IS NULL
+          WHERE e.visibility = 'public' AND e.password_hash IS NULL AND p.deleted_at IS NULL
           ORDER BY p.capture_time DESC
           LIMIT ?
         `)
@@ -100,7 +100,7 @@ app.get('/api/photos/most-favorited', async (c) => {
         SELECT p.*, e.slug as event_slug, e.name as event_name
         FROM photos p
         JOIN events e ON p.event_id = e.id
-        WHERE e.visibility = 'public' AND e.password_hash IS NULL
+        WHERE e.visibility = 'public' AND e.password_hash IS NULL AND p.deleted_at IS NULL
         ORDER BY p.favorites_count DESC, p.capture_time DESC
         LIMIT ?
       `)

@@ -167,31 +167,31 @@ app.get('/stats', async (c) => {
     
     // Get photo count
     const photoCount = await c.env.DB
-      .prepare('SELECT COUNT(*) as count FROM photos WHERE event_id = ?')
+      .prepare('SELECT COUNT(*) as count FROM photos WHERE event_id = ? AND deleted_at IS NULL')
       .bind(event.id)
       .first<{ count: number }>();
     
     // Get photos with GPS
     const photosWithGPS = await c.env.DB
-      .prepare('SELECT COUNT(*) as count FROM photos WHERE event_id = ? AND latitude IS NOT NULL AND longitude IS NOT NULL')
+      .prepare('SELECT COUNT(*) as count FROM photos WHERE event_id = ? AND deleted_at IS NULL AND latitude IS NOT NULL AND longitude IS NOT NULL')
       .bind(event.id)
       .first<{ count: number }>();
     
     // Get photos without GPS
     const photosWithoutGPS = await c.env.DB
-      .prepare('SELECT COUNT(*) as count FROM photos WHERE event_id = ? AND (latitude IS NULL OR longitude IS NULL)')
+      .prepare('SELECT COUNT(*) as count FROM photos WHERE event_id = ? AND deleted_at IS NULL AND (latitude IS NULL OR longitude IS NULL)')
       .bind(event.id)
       .first<{ count: number }>();
     
     // Get featured photos count
     const featuredCount = await c.env.DB
-      .prepare('SELECT COUNT(*) as count FROM photos WHERE event_id = ? AND is_featured = 1')
+      .prepare('SELECT COUNT(*) as count FROM photos WHERE event_id = ? AND deleted_at IS NULL AND is_featured = 1')
       .bind(event.id)
       .first<{ count: number }>();
     
     // Get total favorites for this event
     const favoritesCount = await c.env.DB
-      .prepare('SELECT SUM(favorites_count) as total FROM photos WHERE event_id = ?')
+      .prepare('SELECT SUM(favorites_count) as total FROM photos WHERE event_id = ? AND deleted_at IS NULL')
       .bind(event.id)
       .first<{ total: number | null }>();
     
@@ -200,7 +200,7 @@ app.get('/stats', async (c) => {
       .prepare(`
         SELECT id, original_filename, favorites_count
         FROM photos
-        WHERE event_id = ? AND favorites_count > 0
+        WHERE event_id = ? AND deleted_at IS NULL AND favorites_count > 0
         ORDER BY favorites_count DESC
         LIMIT 10
       `)
@@ -214,7 +214,7 @@ app.get('/stats', async (c) => {
           camera_model,
           COUNT(*) as count
         FROM photos
-        WHERE event_id = ? AND camera_model IS NOT NULL
+        WHERE event_id = ? AND deleted_at IS NULL AND camera_model IS NOT NULL
         GROUP BY camera_model
         ORDER BY count DESC
       `)

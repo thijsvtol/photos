@@ -400,6 +400,82 @@ Categorize and discover events with tags.
 
 ---
 
+### 🧠 AI-Powered Search & Organization
+
+**Status:** Free-tier only (Cloudflare Workers AI, ~10,000 neurons/day at no cost)
+
+- **Unified search** (`/search`): matches filename, city/location, and AI-generated photo
+  captions via SQLite FTS5, optionally re-ranked by semantic similarity (cosine similarity between
+  the search query's embedding and each photo's stored embedding)
+- **AI captions**: a Workers AI vision model (`@cf/llava-hf/llava-1.5-7b-hf`) generates a short
+  description for each photo, generated gradually by a batch-limited hourly cron job (never a
+  per-upload call, to stay within the free daily allocation)
+- **People**: faces are detected and embedded entirely client-side at upload time
+  (`@vladmandic/human` — MediaPipe BlazeFace detector + FaceRes description model, chosen over
+  face-api.js for better recall on the angled/action-shot faces common in sports photography,
+  since Workers AI has no face-embedding model), then grouped into person clusters by an hourly
+  server-side clustering job (pure vector math, no AI calls — using Human's own documented
+  distance/similarity formula). Admins can name, merge, and delete people groups at
+  `/admin/people`. Photos uploaded before this feature existed can be backfilled via a "Scan
+  Library for Faces" action on the same page — detection has to run in the browser, so this is a
+  client-driven scan (with progress/cancel) rather than a server cron
+
+---
+
+### 🗑️ Trash & Archive
+
+- **Trash**: deleted photos are kept for 30 days (restorable) before being permanently purged by a
+  nightly job; admins can also empty the trash or permanently delete a single photo immediately
+- **Archive**: hide a photo from the Timeline without deleting it — it still appears in its
+  event's gallery
+
+---
+
+### 🕰️ Memories
+
+An "on this day" carousel on the Timeline page surfaces photos captured on today's date in
+previous years, grouped by year — pure SQL, no AI involved.
+
+---
+
+### 📁 Albums
+
+Cross-event photo collections (`/admin/albums`), independent of the event structure — useful for
+curating a "best of" collection spanning multiple events.
+
+---
+
+### 🔁 Duplicate Detection
+
+Photos with byte-identical content (same SHA-256 file hash, computed client-side at upload) are
+grouped at `/admin/duplicates`, even if uploaded to different events, so admins can clean up
+accidental re-uploads.
+
+---
+
+### 📜 Activity Feed
+
+A polling-based (not realtime — avoids requiring Cloudflare's paid Workers plan/Durable Objects)
+activity log at `/admin/activity` showing recent favorites, event/album creation, and photo
+trashing across the whole site.
+
+---
+
+### ✨ Auto Enhance
+
+One-tap client-side auto white balance + contrast stretch for a photo, available from the Photo
+Manager — no server round-trip beyond saving the result.
+
+---
+
+### 📤 Auto-Backup (Android)
+
+On the native Android app, pick a device folder (e.g. your camera roll) to automatically sync new
+photos/videos to a specific event in the background, using Android's Storage Access Framework —
+configured per-event from the event edit modal.
+
+---
+
 ### 🔒 Privacy & Security
 
 **Event Visibility:**
@@ -613,23 +689,18 @@ MAILGUN_DOMAIN=your_domain
 ### Short Term
 
 - [ ] Server-side video transcoding / adaptive bitrate streaming (Cloudflare Stream)
-- [ ] Advanced full-text search
 - [ ] QR code event sharing
 
 ### Medium Term
 
 - [ ] Real-time collaboration (Durable Objects)
-- [ ] Activity feed
 - [ ] Comments on photos
-- [ ] Albums within events
 - [ ] Guest book
 - [ ] iOS app packaging
+- [ ] Auto-generated trip albums (GPS + date clustering)
 
 ### Long Term
 
-- [ ] AI auto-tagging (Workers AI)
-- [ ] Face detection
-- [ ] Duplicate detection
 - [ ] Photo contests/voting
 - [ ] Monetization (paid events)
 
@@ -645,21 +716,18 @@ MAILGUN_DOMAIN=your_domain
 
 ### vs. Google Photos
 
-✅ Self-hosted, privacy-first  
-✅ Event-based organization  
-✅ Collaboration system  
-✅ White-label branding  
-❌ No AI features (yet)  
-❌ No face recognition  
-
-### vs. Flickr
-
-✅ Modern UI/UX  
-✅ Faster performance  
-✅ No ads  
-✅ Unlimited storage (R2-based)  
-❌ No public social features  
-❌ No groups/communities  
+✅ Self-hosted, privacy-first
+✅ Event-based organization
+✅ Collaboration system
+✅ White-label branding
+✅ AI-powered semantic search (Workers AI captions + embeddings)
+✅ Face grouping / People
+✅ Trash with restore + Archive
+✅ Duplicate detection
+✅ Memories ("on this day")
+✅ Albums (cross-event collections)
+✅ Auto-backup (folder sync on Android)
+❌ No auto-generated trip albums (yet)
 
 ### vs. SmugMug
 
@@ -749,10 +817,18 @@ MAILGUN_DOMAIN=your_domain
 | --------- | ----- | -------- | ------- |
 | View photos | ✅ | ✅ | ✅ |
 | Upload photos | ✅ | ✅ | ✅ |
+| Auto-backup (folder sync) | ❌ | ✅ | ✅ |
 | Image/video editing | ✅ | ✅ | ✅ |
+| Auto Enhance | ✅ | ✅ | ✅ |
 | Favorites | ✅ | ✅ | ✅ |
 | Collaborators (upload as invited user) | ✅ | ✅ | ✅ |
 | Chromecast | ✅ | ❌ | ✅ |
+| Search (unified/semantic) | ✅ | ✅ | ✅ |
+| People | ❌ | ❌ | ✅ |
+| Albums | ❌ | ❌ | ✅ |
+| Trash / Archive | ❌ | ❌ | ✅ |
+| Duplicate detection | ❌ | ❌ | ✅ |
+| Activity feed | ❌ | ❌ | ✅ |
 | Analytics | ❌ | ❌ | ✅ |
 | Event management | ❌ | ❌ | ✅ |
 | Tags | ✅ | ✅ | ✅ |
@@ -768,8 +844,7 @@ We continuously improve based on user feedback. Common requests:
 
 1. Server-side video transcoding ⏳
 2. Comments on photos 🔜
-3. Face detection 📅
-4. iOS app 📅
+3. iOS app 📅
 
 **Recent Additions:**
 
@@ -781,6 +856,15 @@ We continuously improve based on user feedback. Common requests:
 - ✅ Shareable invite links for collaborators
 - ✅ Bulk ZIP download
 - ✅ Analytics dashboard
+- ✅ Trash with restore + Archive
+- ✅ Memories ("on this day")
+- ✅ Duplicate detection (exact-content)
+- ✅ Albums (cross-event collections)
+- ✅ Activity feed
+- ✅ One-tap Auto Enhance
+- ✅ AI-powered unified/semantic search (Workers AI)
+- ✅ People (face detection + grouping)
+- ✅ Android auto-backup (folder sync)
 - ✅ Collaborator system with roles and history
 
 **Share Your Ideas:**

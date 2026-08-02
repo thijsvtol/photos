@@ -6,6 +6,7 @@ import { TimelineSkeleton } from '../components/Skeletons';
 import SEO from '../components/SEO';
 import JustifiedGrid from '../components/JustifiedGrid';
 import VerticalDateScrubber from '../components/VerticalDateScrubber';
+import MemoriesCarousel from '../components/MemoriesCarousel';
 import { useGridDensity } from '../hooks/useGridDensity';
 import { usePhotoSelection } from '../hooks/usePhotoSelection';
 import { getTimeline, getUserFavoriteIds, toggleFavorite as toggleFavoriteAPI, requestZip, downloadZip } from '../api';
@@ -304,6 +305,8 @@ const Timeline: React.FC = () => {
             All photos across events, sorted by date
           </p>
         </div>
+
+        <MemoriesCarousel />
 
         {loading ? (
           <TimelineSkeleton />
