@@ -66,6 +66,9 @@ class FakeFaceClusteringDb {
           const count = db.faces.filter((f) => f.person_id === null).length;
           return { count } as T;
         }
+        if (query.includes('SELECT COUNT(*) as count FROM person_clusters')) {
+          return { count: db.clusters.length } as T;
+        }
         return null;
       },
       async run() {
@@ -185,13 +188,15 @@ describe('runFaceClustering', () => {
     expect(db.clusters).toHaveLength(0);
   });
 
-  it('loops across multiple internal batches to clear a backlog bigger than one batch (200)', async () => {
+  it('caps a single invocation at the max batch size (40) when there are no existing clusters yet', async () => {
     const db = new FakeFaceClusteringDb();
-    // 250 near-identical faces — more than the 200-per-batch limit, so a single
-    // runFaceClustering() call must loop internally (see faceClustering.ts's
-    // TIME_BUDGET_MS loop) to fully drain them in one invocation, rather than
-    // leaving 50 behind for the next hourly cron tick (the bug being fixed).
-    db.faces = Array.from({ length: 250 }, (_, i) => ({
+    // 50 unclustered faces, no pre-existing person_clusters — computeBatchSize()
+    // returns MAX_BATCH_SIZE (40) in this case, so one call must process
+    // exactly 40 and leave 10 for the next invocation (this is now a SINGLE,
+    // CPU-cheap batch per call — see faceClustering.ts's doc comment on why
+    // an earlier wall-clock multi-batch-looping version got hard-killed with
+    // Cloudflare Error 1102 "Worker exceeded resource limits").
+    db.faces = Array.from({ length: 50 }, (_, i) => ({
       id: i + 1,
       photo_id: `photo-${i}`,
       embedding: embeddingOf(1 + i * 0.0001, 1, 1),
@@ -200,10 +205,31 @@ describe('runFaceClustering', () => {
 
     const result = await runFaceClustering(makeEnv(db));
 
-    expect(result.processed).toBe(250);
-    expect(db.faces.every((f) => f.person_id !== null)).toBe(true);
-    expect(db.clusters).toHaveLength(1);
-    expect(db.clusters[0].face_count).toBe(250);
+    expect(result.processed).toBe(40);
+    expect(db.faces.filter((f) => f.person_id === null)).toHaveLength(10);
+  });
+
+  it('shrinks the batch size as the number of existing clusters grows, to stay within the CPU budget', async () => {
+    const db = new FakeFaceClusteringDb();
+    // 400 pre-existing, well-separated clusters (far from the new faces below,
+    // so none of them accidentally match) — with MAX_COMPARISONS_PER_INVOCATION
+    // = 4000, this should shrink the batch size to floor(4000/400) = 10.
+    db.clusters = Array.from({ length: 400 }, (_, i) => ({
+      id: i + 1,
+      centroid_embedding: embeddingOf(1000 + i, 1000 + i, 1000 + i),
+      face_count: 5,
+    }));
+    db.faces = Array.from({ length: 15 }, (_, i) => ({
+      id: 1000 + i,
+      photo_id: `photo-${i}`,
+      embedding: embeddingOf(1 + i * 0.0001, 1, 1),
+      person_id: null,
+    }));
+
+    const result = await runFaceClustering(makeEnv(db));
+
+    expect(result.processed).toBe(10);
+    expect(db.faces.filter((f) => f.person_id === null)).toHaveLength(5);
   });
 
   it('returns processed: 0 when there is nothing to cluster', async () => {

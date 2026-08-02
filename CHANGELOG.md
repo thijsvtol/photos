@@ -43,10 +43,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   immediately on tap.
 - Face clustering only processed 200 faces per hourly cron run, so a large "Scan Library for
   Faces" backfill (e.g. thousands of photos) could leave the People page showing "No people
-  detected yet" for hours or days even though detection itself had already succeeded. The
-  clustering job now loops through multiple batches per run (bounded by a 20-second wall-clock
-  budget rather than a single fixed batch), and a new "Cluster Now" button lets an admin trigger
-  it immediately instead of waiting.
+  detected yet" for hours or days even though detection itself had already succeeded. Added a
+  "Cluster Now" button so an admin can trigger clustering immediately instead of waiting for the
+  next hourly cron tick — this button repeatedly calls the clustering endpoint client-side, since
+  Cloudflare's Workers Free plan caps CPU time at 10ms per request/cron trigger (not wall-clock
+  time), which rules out looping server-side to drain a large backlog in one call. The batch
+  size itself is now adaptive (shrinks as the number of recognized people grows) instead of a
+  fixed 200, since the O(faces × people) vector comparison cost otherwise risks exceeding that
+  10ms budget and getting hard-killed with a `503`/Error 1102 "Worker exceeded resource limits"
+  (this was hit once in production while fixing this very batch-size issue, and corrected before
+  release).
 
 ### Changed
 - Android app release bumped to build 48 (versionName 2.0.0).

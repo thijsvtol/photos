@@ -18,16 +18,15 @@ app.use('/*', requireAdmin);
 /**
  * POST /people/cluster-now
  *
- * Manually runs the same clustering pass the hourly cron does, right away.
- * Exists because right after a large "Scan Library for Faces" backfill (see
- * faceBackfill.ts), the backlog of unclustered faces can be much bigger than
- * a single hourly batch clears quickly — without this, newly-detected faces
- * would only trickle into visible person clusters over many hours, making
- * the People page look empty/broken immediately after a big backfill even
- * though detection itself succeeded. Bounded by the same wall-clock time
- * budget as the cron (see faceClustering.ts), so the client-side "Cluster
- * Now" button (AdminPeople.tsx) polls this repeatedly (like the backfill
- * scan's own progress loop) until `remaining` reaches 0.
+ * Manually runs one CPU-cheap clustering batch right away instead of waiting for the hourly
+ * cron. Exists because right after a large "Scan Library for Faces" backfill (see
+ * faceBackfill.ts), the backlog of unclustered faces can be much bigger than one batch clears
+ * — without this, newly-detected faces would only trickle into visible person clusters over
+ * many hours, making the People page look empty/broken even though detection itself already
+ * succeeded. Each call processes only a small, CPU-budget-adaptive batch (see faceClustering.ts
+ * — Cloudflare's Workers Free plan hard-caps CPU time at 10ms per request, so this endpoint
+ * canNOT just loop internally until the backlog is drained; the client-side "Cluster Now"
+ * button in AdminPeople.tsx is what loops, calling this repeatedly until `remaining` reaches 0).
  */
 app.post('/cluster-now', async (c) => {
   try {
