@@ -29,7 +29,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   re-ranking.
 - **People**: faces are detected and embedded client-side (`@vladmandic/human`) and grouped into
   named people (`/admin/people`) by an hourly clustering job. Includes a "Scan Library for Faces"
-  backfill action for photos uploaded before this feature existed.
+  backfill action for photos uploaded before this feature existed, and a "Cluster Now" button to
+  immediately run the clustering pass instead of waiting for the next hourly cron tick.
 - New migrations `023_photos_organization_and_ai.sql`, `024_faces_processed_at.sql`, and
   `025_person_linked_account.sql`.
 
@@ -40,6 +41,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (`Theme.SplashScreen`-based, for the cold-start splash) was never switched back to the app's
   real AppCompat theme, so the native "Cast to" device picker (an AppCompat dialog) threw
   immediately on tap.
+- Face clustering only processed 200 faces per hourly cron run, so a large "Scan Library for
+  Faces" backfill (e.g. thousands of photos) could leave the People page showing "No people
+  detected yet" for hours or days even though detection itself had already succeeded. The
+  clustering job now loops through multiple batches per run (bounded by a 20-second wall-clock
+  budget rather than a single fixed batch), and a new "Cluster Now" button lets an admin trigger
+  it immediately instead of waiting.
 
 ### Changed
 - Android app release bumped to build 48 (versionName 2.0.0).

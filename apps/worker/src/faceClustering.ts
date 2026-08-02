@@ -26,6 +26,15 @@ import { createLogger } from './logger';
 
 const BATCH_SIZE = 200;
 
+// Wall-clock budget for how long a single runFaceClustering() invocation may
+// keep looping over batches (see below) — NOT a CPU-time budget, since the
+// awaited D1 calls are I/O, not CPU. 20s comfortably fits within both the
+// hourly cron trigger and an admin-initiated HTTP request's execution window
+// without risking a timeout, while still letting one run clear a backlog of
+// several thousand faces (each batch is one D1 read + a handful of cheap
+// vector-math comparisons + a couple of small D1 writes per face).
+const TIME_BUDGET_MS = 20_000;
+
 // Human's default similarity() options: order=2 (Euclidean), multiplier=25,
 // normalize the resulting root-distance into a 0..1 "similarity" using a
 // [min, max] = [0.2, 0.8] window before clamping. See vladmandic/human's
@@ -65,9 +74,37 @@ export function humanSimilarity(a: Float32Array, b: Float32Array): number {
   return Math.round(100 * Math.max(Math.min(norm, 1), 0)) / 100;
 }
 
-export async function runFaceClustering(env: Env): Promise<void> {
+export async function runFaceClustering(env: Env): Promise<{ processed: number }> {
   const log = createLogger(env);
 
+  // Loop batches within a single invocation (instead of a single fixed-size
+  // batch) so that a large backfill (e.g. an admin bulk-scanning thousands of
+  // pre-existing photos for faces, see faceBackfill.ts) doesn't take DAYS to
+  // fully cluster at 200 faces/hour. D1 reads/writes are I/O (awaited, not
+  // CPU), so a wall-clock time budget here is safe against Workers CPU-time
+  // limits — the only real CPU cost is the O(batch * clusters) similarity
+  // math, which is cheap even at a few hundred clusters. Stops early once a
+  // batch comes back smaller than BATCH_SIZE (queue drained) so small/typical
+  // runs behave exactly as before (single batch, same as when this was a
+  // fixed one-shot function — existing tests rely on this).
+  const startedAt = Date.now();
+  let totalProcessed = 0;
+
+  while (Date.now() - startedAt < TIME_BUDGET_MS) {
+    const processedThisBatch = await runClusterBatch(env, log);
+    totalProcessed += processedThisBatch;
+    if (processedThisBatch < BATCH_SIZE) break; // Queue drained.
+  }
+
+  return { processed: totalProcessed };
+}
+
+/**
+ * Clusters up to BATCH_SIZE currently-unclustered faces. Returns the number
+ * of faces it attempted to process (NOT necessarily the number successfully
+ * assigned — a per-face failure is logged and skipped, same as before).
+ */
+async function runClusterBatch(env: Env, log: ReturnType<typeof createLogger>): Promise<number> {
   const { results: faceRows } = await env.DB.prepare(`
     SELECT f.id, f.photo_id, f.embedding
     FROM photo_faces f
@@ -79,7 +116,7 @@ export async function runFaceClustering(env: Env): Promise<void> {
   const faces = faceRows || [];
   if (faces.length === 0) {
     log.debug('[runFaceClustering] No unclustered faces pending');
-    return;
+    return 0;
   }
 
   const { results: clusterRows } = await env.DB.prepare(`
@@ -143,4 +180,14 @@ export async function runFaceClustering(env: Env): Promise<void> {
   }
 
   log.debug(`[runFaceClustering] Processed ${faces.length} face(s) across ${clusters.length} cluster(s)`);
+  return faces.length;
+}
+
+/** Count of faces still awaiting clustering — used by the admin "Cluster now"
+ *  endpoint to report progress (see routes/admin/people.ts). */
+export async function countUnclusteredFaces(env: Env): Promise<number> {
+  const row = await env.DB
+    .prepare('SELECT COUNT(*) as count FROM photo_faces WHERE person_id IS NULL')
+    .first<{ count: number }>();
+  return row?.count ?? 0;
 }

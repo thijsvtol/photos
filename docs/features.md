@@ -418,7 +418,12 @@ Categorize and discover events with tags.
   distance/similarity formula). Admins can name, merge, and delete people groups at
   `/admin/people`. Photos uploaded before this feature existed can be backfilled via a "Scan
   Library for Faces" action on the same page — detection has to run in the browser, so this is a
-  client-driven scan (with progress/cancel) rather than a server cron
+  client-driven scan (with progress/cancel) rather than a server cron. The clustering job itself
+  loops through multiple batches within a single run (bounded by a 20s wall-clock budget, not a
+  fixed one-shot batch of 200) so a large backfill's faces don't take days to trickle into visible
+  people at 200/hour; a "Cluster Now" button on the same page also lets an admin trigger this
+  immediately (looping calls to `POST /admin/people/cluster-now` until the backlog is drained)
+  instead of waiting for the next hourly cron tick
 - **Linking a person to an account**: on a person's detail page (`/admin/people/:id`), an admin
   can search for and link an existing user account (by email) to that person cluster — at most
   one account per person (enforced with a partial unique index on

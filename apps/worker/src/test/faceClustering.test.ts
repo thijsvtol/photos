@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { runFaceClustering, humanDistance, humanSimilarity, SAME_PERSON_THRESHOLD } from '../faceClustering';
+import { runFaceClustering, countUnclusteredFaces, humanDistance, humanSimilarity, SAME_PERSON_THRESHOLD } from '../faceClustering';
 import type { Env } from '../types';
 
 /**
@@ -61,6 +61,10 @@ class FakeFaceClusteringDb {
           const id = db.nextClusterId++;
           db.clusters.push({ id, centroid_embedding: centroidEmbedding, face_count: faceCount });
           return { id } as T;
+        }
+        if (query.includes('SELECT COUNT(*) as count FROM photo_faces WHERE person_id IS NULL')) {
+          const count = db.faces.filter((f) => f.person_id === null).length;
+          return { count } as T;
         }
         return null;
       },
@@ -179,5 +183,54 @@ describe('runFaceClustering', () => {
     const db = new FakeFaceClusteringDb();
     await runFaceClustering(makeEnv(db));
     expect(db.clusters).toHaveLength(0);
+  });
+
+  it('loops across multiple internal batches to clear a backlog bigger than one batch (200)', async () => {
+    const db = new FakeFaceClusteringDb();
+    // 250 near-identical faces — more than the 200-per-batch limit, so a single
+    // runFaceClustering() call must loop internally (see faceClustering.ts's
+    // TIME_BUDGET_MS loop) to fully drain them in one invocation, rather than
+    // leaving 50 behind for the next hourly cron tick (the bug being fixed).
+    db.faces = Array.from({ length: 250 }, (_, i) => ({
+      id: i + 1,
+      photo_id: `photo-${i}`,
+      embedding: embeddingOf(1 + i * 0.0001, 1, 1),
+      person_id: null,
+    }));
+
+    const result = await runFaceClustering(makeEnv(db));
+
+    expect(result.processed).toBe(250);
+    expect(db.faces.every((f) => f.person_id !== null)).toBe(true);
+    expect(db.clusters).toHaveLength(1);
+    expect(db.clusters[0].face_count).toBe(250);
+  });
+
+  it('returns processed: 0 when there is nothing to cluster', async () => {
+    const db = new FakeFaceClusteringDb();
+    const result = await runFaceClustering(makeEnv(db));
+    expect(result.processed).toBe(0);
+  });
+});
+
+describe('countUnclusteredFaces', () => {
+  it('counts only faces with person_id IS NULL', async () => {
+    const db = new FakeFaceClusteringDb();
+    db.faces = [
+      { id: 1, photo_id: 'photo-a', embedding: embeddingOf(1, 1, 1), person_id: null },
+      { id: 2, photo_id: 'photo-b', embedding: embeddingOf(2, 2, 2), person_id: 5 },
+      { id: 3, photo_id: 'photo-c', embedding: embeddingOf(3, 3, 3), person_id: null },
+    ];
+
+    expect(await countUnclusteredFaces(makeEnv(db))).toBe(2);
+  });
+
+  it('returns 0 once everything has been clustered', async () => {
+    const db = new FakeFaceClusteringDb();
+    db.faces = [{ id: 1, photo_id: 'photo-a', embedding: embeddingOf(1, 1, 1), person_id: null }];
+
+    await runFaceClustering(makeEnv(db));
+
+    expect(await countUnclusteredFaces(makeEnv(db))).toBe(0);
   });
 });

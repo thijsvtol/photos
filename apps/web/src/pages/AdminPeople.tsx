@@ -1,8 +1,8 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { Users, ScanFace, Loader2 } from 'lucide-react';
+import { Users, ScanFace, Loader2, Sparkles } from 'lucide-react';
 import Navbar from '../components/Navbar';
-import { getPeople, getPreviewUrl } from '../api';
+import { getPeople, getPreviewUrl, clusterPeopleNow } from '../api';
 import type { Person } from '../api';
 import { runBackfillScan } from '../faceBackfill';
 import type { BackfillProgress } from '../faceBackfill';
@@ -14,6 +14,9 @@ const AdminPeople: React.FC = () => {
   const [scanning, setScanning] = useState(false);
   const [scanProgress, setScanProgress] = useState<BackfillProgress | null>(null);
   const cancelRef = useRef(false);
+  const [clustering, setClustering] = useState(false);
+  const [clusterRemaining, setClusterRemaining] = useState<number | null>(null);
+  const clusterCancelRef = useRef(false);
 
   useEffect(() => {
     loadData();
@@ -55,6 +58,33 @@ const AdminPeople: React.FC = () => {
     cancelRef.current = true;
   };
 
+  const handleClusterNow = async () => {
+    setClustering(true);
+    setClusterRemaining(null);
+    clusterCancelRef.current = false;
+    try {
+      // Loop the manual clustering pass (each call is itself internally
+      // time-budgeted server-side, see faceClustering.ts) until the backlog
+      // is fully drained, so a big backfill doesn't have to wait for the
+      // hourly cron to trickle through it 200 faces at a time.
+      for (;;) {
+        const { processed, remaining } = await clusterPeopleNow();
+        setClusterRemaining(remaining);
+        if (remaining === 0 || processed === 0 || clusterCancelRef.current) break;
+      }
+      await loadData();
+    } catch (err) {
+      setError('Clustering failed');
+      console.error(err);
+    } finally {
+      setClustering(false);
+    }
+  };
+
+  const handleCancelCluster = () => {
+    clusterCancelRef.current = true;
+  };
+
   return (
     <div className="min-h-screen bg-gray-50 dark:bg-gray-900">
       <Navbar />
@@ -75,20 +105,39 @@ const AdminPeople: React.FC = () => {
               {scanProgress ? `Scanned ${scanProgress.processed} (${scanProgress.remaining} left) — Stop` : 'Starting scan…'}
             </button>
           ) : (
-            <button
-              onClick={handleScanLibrary}
-              className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition flex items-center gap-2"
-            >
-              <ScanFace className="w-4 h-4" /> Scan Library for Faces
-            </button>
+            <div className="flex flex-wrap gap-2">
+              <button
+                onClick={handleScanLibrary}
+                className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition flex items-center gap-2"
+              >
+                <ScanFace className="w-4 h-4" /> Scan Library for Faces
+              </button>
+              {clustering ? (
+                <button
+                  onClick={handleCancelCluster}
+                  className="px-4 py-2 bg-gray-300 text-gray-700 rounded-lg hover:bg-gray-400 transition flex items-center gap-2"
+                >
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                  {clusterRemaining !== null ? `Grouping… ${clusterRemaining} left — Stop` : 'Starting…'}
+                </button>
+              ) : (
+                <button
+                  onClick={handleClusterNow}
+                  className="px-4 py-2 bg-gray-200 dark:bg-gray-700 text-gray-800 dark:text-gray-200 rounded-lg hover:bg-gray-300 dark:hover:bg-gray-600 transition flex items-center gap-2"
+                >
+                  <Sparkles className="w-4 h-4" /> Cluster Now
+                </button>
+              )}
+            </div>
           )}
         </div>
         <p className="text-gray-600 dark:text-gray-400 mb-8">
           Faces are detected client-side (in your browser) as photos are uploaded. Photos uploaded
           before this feature existed aren't processed automatically — use "Scan Library for Faces"
           to backfill them (this runs in your browser and may take a while for large libraries; you
-          can stop and resume anytime). Groups with only one photo are hidden. Naming and merging
-          happens gradually as more photos are clustered (hourly).
+          can stop and resume anytime). Groups with only one photo are hidden. Detected faces are
+          grouped into named people by a background job that normally runs hourly — use "Cluster
+          Now" to run it immediately instead of waiting (useful right after a large scan).
         </p>
 
         {error && (

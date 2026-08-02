@@ -469,6 +469,19 @@ export const getPeople = async (includeSingles = false): Promise<Person[]> => {
   return response.data.people;
 };
 
+/** Manually runs a clustering pass right now instead of waiting for the hourly cron — see
+ *  worker's POST /admin/people/cluster-now for why this exists (mainly: right after a big
+ *  "Scan Library for Faces" backfill). Returns how many faces were processed this call and
+ *  how many still remain unclustered, so callers can loop until `remaining` is 0. */
+export const clusterPeopleNow = async (): Promise<{ processed: number; remaining: number }> => {
+  const response = await api.post<{ processed: number; remaining: number }>(
+    '/admin/people/cluster-now',
+    {},
+    { headers: getAdminHeaders() }
+  );
+  return response.data;
+};
+
 export const getPerson = async (personId: number): Promise<{ person: Person; photos: PersonPhoto[] }> => {
   const response = await api.get<{ person: Person; photos: PersonPhoto[] }>(`/admin/people/${personId}`, {
     headers: getAdminHeaders(),
