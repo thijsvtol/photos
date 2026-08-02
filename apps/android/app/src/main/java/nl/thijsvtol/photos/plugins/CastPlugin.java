@@ -160,31 +160,44 @@ public class CastPlugin extends Plugin {
             return;
         }
 
-        CastSession session = castContext.getSessionManager().getCurrentCastSession();
-        if (session == null || !session.isConnected()) {
-            call.reject("No active Cast session");
-            return;
-        }
+        // Capacitor plugin methods run on a background "CapacitorPlugins" HandlerThread by
+        // default (NOT the main/UI thread) — but every CastContext/SessionManager call is
+        // documented by Google to require the main thread, and enforces it with a hard
+        // Preconditions.checkMainThread() that throws IllegalStateException otherwise. This
+        // was previously missing here (unlike startDiscovery() above, which already wraps its
+        // body in runOnUiThread()), so tapping Cast crashed instantly with "Must be called from
+        // the main thread" the moment loadMedia() touched getSessionManager().
+        getActivity().runOnUiThread(() -> {
+            CastSession session = castContext.getSessionManager().getCurrentCastSession();
+            if (session == null || !session.isConnected()) {
+                call.reject("No active Cast session");
+                return;
+            }
 
-        try {
-            session.sendMessage(nl.thijsvtol.photos.plugins.CastConstants.NAMESPACE, message)
-                .setResultCallback(status -> {
-                    if (status.isSuccess()) {
-                        call.resolve();
-                    } else {
-                        call.reject("Failed to send message to receiver: " + status.getStatusMessage());
-                    }
-                });
-        } catch (Exception e) {
-            call.reject("Failed to send message: " + e.getMessage());
-        }
+            try {
+                session.sendMessage(nl.thijsvtol.photos.plugins.CastConstants.NAMESPACE, message)
+                    .setResultCallback(status -> {
+                        if (status.isSuccess()) {
+                            call.resolve();
+                        } else {
+                            call.reject("Failed to send message to receiver: " + status.getStatusMessage());
+                        }
+                    });
+            } catch (Exception e) {
+                call.reject("Failed to send message: " + e.getMessage());
+            }
+        });
     }
 
     @PluginMethod
     public void endSession(PluginCall call) {
-        if (castContext != null) {
-            castContext.getSessionManager().endCurrentSession(true);
-        }
-        call.resolve();
+        // Same main-thread requirement as loadMedia() above — getSessionManager() throws off
+        // the background plugin thread.
+        getActivity().runOnUiThread(() -> {
+            if (castContext != null) {
+                castContext.getSessionManager().endCurrentSession(true);
+            }
+            call.resolve();
+        });
     }
 }

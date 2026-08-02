@@ -44,6 +44,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (`Theme.SplashScreen`-based, for the cold-start splash) was never switched back to the app's
   real AppCompat theme, so the native "Cast to" device picker (an AppCompat dialog) threw
   immediately on tap.
+- Android app still crashed the moment media actually started casting (after the fix above),
+  with `IllegalStateException: Must be called from the main thread`. Capacitor plugin methods
+  run on a background thread by default, but `CastPlugin.loadMedia()`/`endSession()` called
+  Google Cast's `CastContext.getSessionManager()`, which Google's SDK hard-requires to run on
+  the main/UI thread — unlike `startDiscovery()` (the device picker), which already correctly
+  wrapped its body in `runOnUiThread()`. Both methods now do the same.
 - Face clustering only processed 200 faces per hourly cron run, so a large "Scan Library for
   Faces" backfill (e.g. thousands of photos) could leave the People page showing "No people
   detected yet" for hours or days even though detection itself had already succeeded. Added a
