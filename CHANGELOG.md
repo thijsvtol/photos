@@ -76,6 +76,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   from "found groups, but they're all currently single-photo and hidden". The page now fetches
   all groups once, shows a clearer message + count when only single-photo groups exist, and adds
   a "Show N single-photo groups" toggle to reveal them on demand.
+- "Find Merge Suggestions" also 503'd with the same Cloudflare `Error 1102`. Its scan loop tried
+  to reuse the same "wall-clock guard" pattern as clustering, but that loop has no D1 calls
+  inside it at all (pure in-memory vector comparisons) — and Cloudflare Workers deliberately
+  freezes `Date.now()` during synchronous code execution as a Spectre-timing mitigation (it only
+  advances at the next real I/O boundary), so a wall-clock check inside a loop with no I/O never
+  fires and the full `O(clusterCount²)` scan ran unbounded. Replaced with a deterministic
+  comparison-count budget instead (using the same "cost per comparison" math as clustering's
+  candidate cap), which doesn't depend on the clock at all.
 
 ### Changed
 - Android app release bumped to build 48 (versionName 2.0.0).

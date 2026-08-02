@@ -271,70 +271,82 @@ export interface MergeSuggestionsResult {
   totalClusters: number;
 }
 
-// Checking Date.now() on every single comparison would itself add measurable overhead relative
-// to how cheap one comparison is, so the CPU-time guard below is only checked every N
-// comparisons — a small, bounded amount of "overshoot" work (at most this many extra
-// comparisons past the guard) in exchange for much less timer-check overhead.
-const MERGE_SCAN_CHECK_INTERVAL = 20;
+// A wall-clock guard (like CPU_TIME_GUARD_MS used in runFaceClustering() above) is a NO-OP here
+// and must NOT be used for this loop. Cloudflare's own docs are explicit: "Date.now() returns
+// the time of the last I/O. It does not advance during code execution" (Spectre-timing
+// mitigation — see developers.cloudflare.com/workers/reference/security-model/). This is
+// harmless in runFaceClustering()'s loop because EVERY iteration there awaits a real D1 write,
+// which counts as I/O and lets the clock tick forward between iterations. This merge-suggestion
+// scan's inner comparison loop has NO awaits at all (pure synchronous vector math) — so
+// Date.now() is frozen for its entire duration and a wall-clock check inside it can never fire,
+// letting the full O(clusterCount²) scan run to completion regardless of size. This was tried
+// in production and 503'd instantly with Cloudflare's Error 1102 ("Worker exceeded resource
+// limits") once the library reached ~870 people (~379,000 pairs). The fix is a DETERMINISTIC
+// comparison-count budget instead — using the exact same per-comparison cost model
+// (O(embedding dimensions), see the big comment above computeBatchSize()) that's already
+// established as CPU-safe elsewhere in this file, rather than a timer that can't be trusted in
+// a loop with no I/O to force the clock forward.
+const MAX_MERGE_COMPARISONS_PER_INVOCATION = Math.floor(MAX_DIMENSION_OPS_PER_INVOCATION / EMBEDDING_DIM); // ~341
 
 /**
  * Resumable, CPU-safe full O(clusterCount²) similarity scan across ALL person clusters — see
  * the MergeSuggestion doc comment above for why this exists and why it's NOT limited to a
  * top-N subset the way runFaceClustering() is.
  *
- * Like runFaceClustering(), a single call only ever does a small, bounded amount of work (here:
- * comparisons checked every MERGE_SCAN_CHECK_INTERVAL against CPU_TIME_GUARD_MS of elapsed wall
- * time — the same "wall time is always >= CPU time, and the guard is already smaller than the
- * real CPU limit" reasoning as runFaceClustering()'s guard) and returns a `nextCursor` for the
- * caller to pass back in to resume exactly where it left off — see the client-side loop in
- * AdminPeople.tsx's "Find Merge Suggestions" button.
+ * A single call only ever performs MAX_MERGE_COMPARISONS_PER_INVOCATION comparisons (see that
+ * constant's doc comment for why a wall-clock guard can't be used here) and returns a
+ * `nextCursor` for the caller to pass back in to resume exactly where it left off — see the
+ * client-side loop in AdminPeople.tsx's "Find Merge Suggestions" button.
  *
- * Every cluster is refetched from D1 on every call rather than cached between calls — Workers
- * are stateless between invocations with no built-in server-side session storage available
- * here (would need a Durable Object/KV for that), and the D1 read itself is I/O, not CPU, so
- * re-reading a few thousand rows on each call doesn't threaten the CPU budget this function is
- * actually protecting.
+ * Only clusters with `id >= cursor.sourceId` are fetched from D1 (rather than the whole table
+ * on every call) — clusters before that id have already been fully compared against everything
+ * in earlier calls and can never contribute a new pair, so re-fetching (and re-transferring)
+ * their embeddings on every subsequent call would be pure waste, growing linearly with however
+ * many calls a full scan ends up taking. `totalClusters` (for the client's progress display) is
+ * a separate, cheap `COUNT(*)` unaffected by that filter.
  */
 export async function findMergeSuggestions(env: Env, cursor: MergeSuggestionCursor | null): Promise<MergeSuggestionsResult> {
+  const totalClustersRow = await env.DB
+    .prepare('SELECT COUNT(*) as count FROM person_clusters')
+    .first<{ count: number }>();
+  const totalClusters = totalClustersRow?.count ?? 0;
+
   const { results: clusterRows } = await env.DB
-    .prepare('SELECT id, centroid_embedding FROM person_clusters ORDER BY id ASC')
+    .prepare('SELECT id, centroid_embedding FROM person_clusters WHERE id >= ? ORDER BY id ASC')
+    .bind(cursor?.sourceId ?? 0)
     .all<{ id: number; centroid_embedding: ArrayBuffer }>();
 
   const clusters = (clusterRows || []).map((c) => ({ id: c.id, centroid: new Float32Array(c.centroid_embedding) }));
 
-  // Resume position: find the source cluster to continue FROM, falling back to the next
-  // higher id if the exact cursor cluster no longer exists (e.g. merged/deleted since the
-  // previous call) rather than erroring out.
-  let sourceIndex = 0;
-  let candidateIndex: number | null = null;
-  if (cursor) {
-    sourceIndex = clusters.findIndex((c) => c.id >= cursor.sourceId);
-    if (sourceIndex === -1) {
-      // Every remaining cluster from the cursor onward is gone — scan is effectively done.
-      return { suggestions: [], nextCursor: null, totalClusters: clusters.length };
-    }
-    if (clusters[sourceIndex].id === cursor.sourceId) {
-      const foundCandidateIndex = clusters.findIndex((c, idx) => idx > sourceIndex && c.id >= cursor.candidateId);
-      candidateIndex = foundCandidateIndex === -1 ? clusters.length : foundCandidateIndex;
-    }
+  if (clusters.length === 0) {
+    // Either there are no clusters at all, or every remaining cluster from the cursor onward is
+    // gone (e.g. all merged away since the previous call) — scan is effectively done either way.
+    return { suggestions: [], nextCursor: null, totalClusters };
+  }
+
+  // Since the query already filtered to id >= cursor.sourceId, the source cluster to resume
+  // FROM (if it still exists) is always clusters[0] — only the CANDIDATE resume position needs
+  // locating. If the exact cursor source cluster no longer exists (merged/deleted since the
+  // previous call), clusters[0] is simply whatever comes next, and comparisons for it start
+  // fresh (no candidate to skip past) rather than guessing a resume point that may no longer
+  // make sense.
+  let candidateIndexForFirstSource: number | null = null;
+  if (cursor && clusters[0].id === cursor.sourceId) {
+    const found = clusters.findIndex((c, idx) => idx > 0 && c.id >= cursor.candidateId);
+    candidateIndexForFirstSource = found === -1 ? clusters.length : found;
   }
 
   const suggestions: MergeSuggestion[] = [];
-  const loopStartedAt = Date.now();
-  let comparisonsSinceCheck = 0;
+  let comparisons = 0;
 
-  for (let i = sourceIndex; i < clusters.length; i++) {
-    const jStart = candidateIndex !== null && i === sourceIndex ? candidateIndex : i + 1;
-    candidateIndex = null; // Only applies to resuming the very first source in this call.
+  for (let i = 0; i < clusters.length; i++) {
+    const jStart = i === 0 && candidateIndexForFirstSource !== null ? candidateIndexForFirstSource : i + 1;
 
     for (let j = jStart; j < clusters.length; j++) {
-      comparisonsSinceCheck++;
-      if (comparisonsSinceCheck >= MERGE_SCAN_CHECK_INTERVAL) {
-        comparisonsSinceCheck = 0;
-        if (Date.now() - loopStartedAt > CPU_TIME_GUARD_MS) {
-          return { suggestions, nextCursor: { sourceId: clusters[i].id, candidateId: clusters[j].id }, totalClusters: clusters.length };
-        }
+      if (comparisons >= MAX_MERGE_COMPARISONS_PER_INVOCATION) {
+        return { suggestions, nextCursor: { sourceId: clusters[i].id, candidateId: clusters[j].id }, totalClusters };
       }
+      comparisons++;
 
       const similarity = humanSimilarity(clusters[i].centroid, clusters[j].centroid);
       if (similarity >= SAME_PERSON_THRESHOLD) {
@@ -343,8 +355,8 @@ export async function findMergeSuggestions(env: Env, cursor: MergeSuggestionCurs
     }
   }
 
-  // Reached the end of every cluster without hitting the time budget — scan is complete.
-  return { suggestions, nextCursor: null, totalClusters: clusters.length };
+  // Reached the end of every cluster without hitting the comparison budget — scan is complete.
+  return { suggestions, nextCursor: null, totalClusters };
 }
 
 /** Count of faces still awaiting clustering — used by the admin "Cluster now"

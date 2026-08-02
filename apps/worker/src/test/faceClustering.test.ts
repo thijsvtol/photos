@@ -59,10 +59,11 @@ class FakeFaceClusteringDb {
           }));
           return { results: results as T[] };
         }
-        if (query.includes('FROM person_clusters') && query.includes('ORDER BY id ASC')) {
-          // findMergeSuggestions() fetches every cluster, unbounded (see its doc comment on
-          // why it's deliberately NOT limited to a top-N subset the way clustering is).
-          const sorted = [...db.clusters].sort((a, b) => a.id - b.id);
+        if (query.includes('FROM person_clusters') && query.includes('WHERE id >= ?')) {
+          // findMergeSuggestions() only fetches clusters at/after the cursor's source id (see
+          // its doc comment on why re-fetching already-scanned clusters would be pure waste).
+          const minId = Number(boundArgs[0] ?? 0);
+          const sorted = [...db.clusters].filter((c) => c.id >= minId).sort((a, b) => a.id - b.id);
           const results = sorted.map((c) => ({ id: c.id, centroid_embedding: c.centroid_embedding }));
           return { results: results as T[] };
         }
@@ -385,5 +386,31 @@ describe('findMergeSuggestions', () => {
     const result = await findMergeSuggestions(makeEnv(db), cursor);
 
     expect(result).toEqual({ suggestions: [], nextCursor: null, totalClusters: 1 });
+  });
+
+  it('stops after a deterministic comparison budget (NOT a wall-clock guard) when the pair count exceeds it, and resuming eventually completes the full scan', async () => {
+    // A DETERMINISTIC comparison-count cutoff is used here specifically because a wall-clock
+    // guard is provably useless for this loop on real Cloudflare Workers — Date.now() is frozen
+    // during synchronous execution there (see the doc comment above MAX_MERGE_COMPARISONS_PER_INVOCATION
+    // in faceClustering.ts) — but Node's test runtime does NOT freeze Date.now(), so a
+    // wall-clock-based version of this test would have passed locally while still 503ing in
+    // production (exactly what happened). Asserting on the exact deterministic cutoff count
+    // instead is what actually catches a regression back to a wall-clock guard.
+    const db = new FakeFaceClusteringDb();
+    // 27 clusters, all pairwise far apart (no two ever look like a match) => 27*26/2 = 351
+    // total possible pairs, comfortably more than the ~341 comparison budget for one call.
+    db.clusters = Array.from({ length: 27 }, (_, i) => ({
+      id: i + 1,
+      centroid_embedding: embeddingOf(i * 1000, i * 1000, i * 1000),
+      face_count: 1,
+    }));
+
+    const firstCall = await findMergeSuggestions(makeEnv(db), null);
+    expect(firstCall.nextCursor).not.toBeNull(); // Budget hit before the full 351-pair scan finished.
+    expect(firstCall.suggestions).toEqual([]); // Nothing actually matches.
+
+    const secondCall = await findMergeSuggestions(makeEnv(db), firstCall.nextCursor);
+    expect(secondCall.nextCursor).toBeNull(); // Remaining ~10 pairs easily finish in one more call.
+    expect(secondCall.suggestions).toEqual([]);
   });
 });
