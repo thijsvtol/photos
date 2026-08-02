@@ -12,6 +12,20 @@ import nl.thijsvtol.photos.plugins.CastPlugin;
 public class MainActivity extends BridgeActivity {
     @Override
     public void onCreate(Bundle savedInstanceState) {
+        // The manifest sets this Activity's theme to AppTheme.NoActionBarLaunch
+        // (parent: Theme.SplashScreen) purely so Android draws the splash
+        // background instantly at cold start, before onCreate runs. That theme
+        // is NOT an AppCompat theme, so it must be swapped back to the app's
+        // real AppCompat-based theme here — BEFORE super.onCreate() — otherwise
+        // ANY AppCompat-based native UI (e.g. androidx.mediarouter's
+        // MediaRouteChooserDialog, used by CastPlugin.startDiscovery() for the
+        // "Cast to" device picker) throws immediately with "You need to use a
+        // Theme.AppCompat theme (or descendant) with this activity" and crashes
+        // the app the instant the Cast button is tapped. This is the standard,
+        // documented pattern for combining a splash-screen theme with a normal
+        // AppCompat theme for the activity's actual runtime lifetime.
+        setTheme(R.style.AppTheme);
+
         registerPlugin(SafDirectoryPlugin.class);
         registerPlugin(ShareHandlerPlugin.class);
         registerPlugin(ProgressNotificationPlugin.class);

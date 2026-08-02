@@ -28,12 +28,14 @@ app.get('/', async (c) => {
     const people = await c.env.DB
       .prepare(`
         SELECT pc.id, pc.name, pc.face_count, pc.created_at, pc.updated_at,
-               pc.cover_photo_id,
+               pc.cover_photo_id, pc.linked_user_email,
+               u.name as linked_user_name,
                p.file_type as cover_file_type, p.cache_version as cover_cache_version,
                e.slug as cover_event_slug
         FROM person_clusters pc
         LEFT JOIN photos p ON pc.cover_photo_id = p.id
         LEFT JOIN events e ON p.event_id = e.id
+        LEFT JOIN users u ON pc.linked_user_email = u.email
         WHERE pc.face_count >= ?
         ORDER BY (pc.name IS NULL), pc.face_count DESC
       `)
@@ -58,7 +60,15 @@ app.get('/:personId', async (c) => {
       return c.json({ error: 'Invalid person ID' }, 400);
     }
 
-    const person = await c.env.DB.prepare('SELECT * FROM person_clusters WHERE id = ?').bind(personId).first();
+    const person = await c.env.DB
+      .prepare(`
+        SELECT pc.*, u.name as linked_user_name
+        FROM person_clusters pc
+        LEFT JOIN users u ON pc.linked_user_email = u.email
+        WHERE pc.id = ?
+      `)
+      .bind(personId)
+      .first();
     if (!person) {
       return c.json({ error: 'Person not found' }, 404);
     }
@@ -85,7 +95,12 @@ app.get('/:personId', async (c) => {
 
 /**
  * PUT /people/:personId
- * Rename a person / set their cover photo.
+ * Rename a person / set their cover photo / link (or unlink) a user account.
+ *
+ * linkedUserEmail is handled separately from name/coverPhotoId (which use COALESCE to mean
+ * "leave unchanged when omitted") because linking needs to distinguish three states: omitted
+ * (leave as-is), a real email (link), and explicit null (unlink) — COALESCE can't represent
+ * that last one, since COALESCE(null, existing) just keeps the existing value.
  */
 app.put('/:personId', async (c) => {
   try {
@@ -94,23 +109,65 @@ app.put('/:personId', async (c) => {
       return c.json({ error: 'Invalid person ID' }, 400);
     }
 
-    const { name, coverPhotoId } = await c.req.json<{ name?: string | null; coverPhotoId?: string | null }>();
+    const body = await c.req.json<{ name?: string | null; coverPhotoId?: string | null; linkedUserEmail?: string | null }>();
+    const { name, coverPhotoId } = body;
 
     const existing = await c.env.DB.prepare('SELECT id FROM person_clusters WHERE id = ?').bind(personId).first();
     if (!existing) {
       return c.json({ error: 'Person not found' }, 404);
     }
 
-    await c.env.DB
-      .prepare(`
-        UPDATE person_clusters SET
-          name = COALESCE(?, name),
-          cover_photo_id = COALESCE(?, cover_photo_id),
-          updated_at = datetime('now')
-        WHERE id = ?
-      `)
-      .bind(name ?? null, coverPhotoId ?? null, personId)
-      .run();
+    let linkedUserEmail: string | null | undefined = undefined;
+    if ('linkedUserEmail' in body) {
+      const raw = body.linkedUserEmail;
+      if (!raw) {
+        linkedUserEmail = null; // Explicit unlink (null, undefined, or empty string).
+      } else {
+        const candidate = raw.trim();
+        const user = await c.env.DB
+          .prepare('SELECT email FROM users WHERE LOWER(email) = LOWER(?)')
+          .bind(candidate)
+          .first<{ email: string }>();
+        if (!user) {
+          return c.json({ error: 'No account found with that email' }, 400);
+        }
+
+        const alreadyLinked = await c.env.DB
+          .prepare('SELECT id FROM person_clusters WHERE LOWER(linked_user_email) = LOWER(?) AND id != ?')
+          .bind(user.email, personId)
+          .first();
+        if (alreadyLinked) {
+          return c.json({ error: 'That account is already linked to another person' }, 409);
+        }
+
+        linkedUserEmail = user.email; // Canonical casing from the users table.
+      }
+    }
+
+    if (linkedUserEmail !== undefined) {
+      await c.env.DB
+        .prepare(`
+          UPDATE person_clusters SET
+            name = COALESCE(?, name),
+            cover_photo_id = COALESCE(?, cover_photo_id),
+            linked_user_email = ?,
+            updated_at = datetime('now')
+          WHERE id = ?
+        `)
+        .bind(name ?? null, coverPhotoId ?? null, linkedUserEmail, personId)
+        .run();
+    } else {
+      await c.env.DB
+        .prepare(`
+          UPDATE person_clusters SET
+            name = COALESCE(?, name),
+            cover_photo_id = COALESCE(?, cover_photo_id),
+            updated_at = datetime('now')
+          WHERE id = ?
+        `)
+        .bind(name ?? null, coverPhotoId ?? null, personId)
+        .run();
+    }
 
     return c.json({ success: true });
   } catch (error) {

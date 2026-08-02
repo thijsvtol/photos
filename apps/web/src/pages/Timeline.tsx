@@ -9,7 +9,7 @@ import VerticalDateScrubber from '../components/VerticalDateScrubber';
 import MemoriesCarousel from '../components/MemoriesCarousel';
 import { useGridDensity } from '../hooks/useGridDensity';
 import { usePhotoSelection } from '../hooks/usePhotoSelection';
-import { getTimeline, getUserFavoriteIds, toggleFavorite as toggleFavoriteAPI, requestZip, downloadZip } from '../api';
+import { getTimeline, getUserFavoriteIds, toggleFavorite as toggleFavoriteAPI, requestZip, downloadZip, getMyPhotos } from '../api';
 import { getCachedTimelinePhotos, cacheTimelinePhotos } from '../services/timelineCache';
 import type { Photo } from '../types';
 import { config } from '../config';
@@ -103,6 +103,12 @@ const Timeline: React.FC = () => {
   const [activeDate, setActiveDate] = useState<string | null>(null);
   const [supportsHover, setSupportsHover] = useState(true);
   const [userFavorites, setUserFavorites] = useState<Set<string>>(new Set());
+  // Set of photo IDs containing this account's linked person's face, or null if the account
+  // isn't linked to a person at all (see AdminPersonDetail's "Linked account" section) — used
+  // to show/hide the "Just me" filter toggle below and to filter the grid when it's active.
+  const [myPhotoIds, setMyPhotoIds] = useState<Set<string> | null>(null);
+  const [myDisplayName, setMyDisplayName] = useState<string | null>(null);
+  const [filterMode, setFilterMode] = useState<'all' | 'me'>('all');
   const dateRefs = useRef<Map<string, HTMLDivElement>>(new Map());
   const loadMoreRef = useRef<HTMLDivElement | null>(null);
   const { targetRowHeight, containerRef: densityContainerRef } = useGridDensity();
@@ -211,6 +217,14 @@ const Timeline: React.FC = () => {
             const favIds = await getUserFavoriteIds();
             if (!cancelled) setUserFavorites(new Set(favIds.map(f => f.photoId)));
           } catch { /* ignore */ }
+
+          try {
+            const mine = await getMyPhotos();
+            if (!cancelled && mine.linked) {
+              setMyPhotoIds(new Set((mine.photos || []).map((p) => p.id)));
+              setMyDisplayName(mine.person?.displayName ?? null);
+            }
+          } catch { /* ignore — the "Just me" toggle simply stays hidden */ }
         }
       } catch (err) {
         console.error('Failed to load timeline:', err);
@@ -278,7 +292,12 @@ const Timeline: React.FC = () => {
     return () => window.removeEventListener('scroll', handleScroll);
   }, []);
 
-  const { dates, groups } = useMemo(() => groupByDate(photos), [photos]);
+  const filteredPhotos = useMemo(() => {
+    if (filterMode !== 'me' || !myPhotoIds) return photos;
+    return photos.filter((p) => myPhotoIds.has(p.id));
+  }, [photos, filterMode, myPhotoIds]);
+
+  const { dates, groups } = useMemo(() => groupByDate(filteredPhotos), [filteredPhotos]);
 
   const scrollToDate = (date: string) => {
     const el = dateRefs.current.get(date);
@@ -296,23 +315,52 @@ const Timeline: React.FC = () => {
       />
       <Navbar />
       <div className="max-w-[1600px] mx-auto px-3 sm:px-4 lg:px-8 py-4 sm:py-8 flex-grow w-full">
-        <div className="mb-6">
-          <h1 className="text-3xl sm:text-4xl font-bold text-gray-900 dark:text-white flex items-center gap-3">
-            <Clock className="w-8 h-8 text-blue-600 dark:text-blue-400" />
-            Timeline
-          </h1>
-          <p className="text-gray-600 dark:text-gray-400 mt-2 text-sm sm:text-base">
-            All photos across events, sorted by date
-          </p>
+        <div className="mb-6 flex flex-wrap items-start justify-between gap-4">
+          <div>
+            <h1 className="text-3xl sm:text-4xl font-bold text-gray-900 dark:text-white flex items-center gap-3">
+              <Clock className="w-8 h-8 text-blue-600 dark:text-blue-400" />
+              Timeline
+            </h1>
+            <p className="text-gray-600 dark:text-gray-400 mt-2 text-sm sm:text-base">
+              All photos across events, sorted by date
+            </p>
+          </div>
+
+          {myPhotoIds && (
+            <div className="inline-flex rounded-lg border border-gray-300 dark:border-gray-600 overflow-hidden self-start">
+              <button
+                onClick={() => setFilterMode('all')}
+                className={`px-3 py-1.5 text-sm font-medium transition ${
+                  filterMode === 'all'
+                    ? 'bg-blue-600 text-white'
+                    : 'bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700'
+                }`}
+              >
+                All
+              </button>
+              <button
+                onClick={() => setFilterMode('me')}
+                className={`px-3 py-1.5 text-sm font-medium transition ${
+                  filterMode === 'me'
+                    ? 'bg-blue-600 text-white'
+                    : 'bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700'
+                }`}
+              >
+                Just {myDisplayName || 'me'}
+              </button>
+            </div>
+          )}
         </div>
 
         <MemoriesCarousel />
 
         {loading ? (
           <TimelineSkeleton />
-        ) : photos.length === 0 ? (
+        ) : filteredPhotos.length === 0 ? (
           <div className="text-center py-16">
-            <p className="text-gray-600 dark:text-gray-400">No photos found.</p>
+            <p className="text-gray-600 dark:text-gray-400">
+              {filterMode === 'me' ? 'No photos of you found yet.' : 'No photos found.'}
+            </p>
           </div>
         ) : (
           <div className="space-y-7" ref={densityContainerRef}>

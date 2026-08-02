@@ -73,3 +73,19 @@ export async function generateUniqueSlug(
   // If we've exhausted attempts, throw an error
   throw new Error(`Unable to generate unique slug after ${maxAttempts} attempts`);
 }
+
+/**
+ * Extracts just the first name from a person's full name (e.g. "Jane Doe" -> "Jane").
+ *
+ * Used to only expose a person cluster's FIRST name (see person_clusters.name and
+ * routes/me.ts) to the account holder's own non-admin view (the Timeline's "Just me" filter
+ * toggle) — the full name an admin enters (e.g. "Jane Doe") stays admin-only (see
+ * routes/admin/people.ts), same as how the rest of the app treats a person's admin-entered
+ * display data as internal.
+ */
+export function firstNameOf(fullName: string | null | undefined): string | null {
+  if (!fullName) return null;
+  const trimmed = fullName.trim();
+  if (!trimmed) return null;
+  return trimmed.split(/\s+/)[0];
+}

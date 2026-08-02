@@ -419,6 +419,14 @@ Categorize and discover events with tags.
   `/admin/people`. Photos uploaded before this feature existed can be backfilled via a "Scan
   Library for Faces" action on the same page — detection has to run in the browser, so this is a
   client-driven scan (with progress/cancel) rather than a server cron
+- **Linking a person to an account**: on a person's detail page (`/admin/people/:id`), an admin
+  can search for and link an existing user account (by email) to that person cluster — at most
+  one account per person (enforced with a partial unique index on
+  `person_clusters.linked_user_email`). Once linked, that account sees a "Just me" filter toggle
+  next to the Timeline heading (`GET /api/me/photos`), which filters the grid down to only photos
+  containing their face. The full name an admin gives a person is admin-only — the toggle label
+  and its filtered view only ever use their first name (see `utils.ts`'s `firstNameOf()`), never
+  the full name
 
 ---
 

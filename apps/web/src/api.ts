@@ -450,6 +450,8 @@ export interface Person {
   cover_file_type?: string | null;
   cover_cache_version?: number | null;
   cover_event_slug?: string | null;
+  linked_user_email?: string | null;
+  linked_user_name?: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -474,7 +476,10 @@ export const getPerson = async (personId: number): Promise<{ person: Person; pho
   return response.data;
 };
 
-export const updatePerson = async (personId: number, data: { name?: string | null; coverPhotoId?: string | null }): Promise<void> => {
+export const updatePerson = async (
+  personId: number,
+  data: { name?: string | null; coverPhotoId?: string | null; linkedUserEmail?: string | null }
+): Promise<void> => {
   await api.put(`/admin/people/${personId}`, data, { headers: getAdminHeaders() });
 };
 
@@ -484,6 +489,20 @@ export const mergePeople = async (targetPersonId: number, sourcePersonIds: numbe
 
 export const deletePerson = async (personId: number): Promise<void> => {
   await api.delete(`/admin/people/${personId}`, { headers: getAdminHeaders() });
+};
+
+export interface MyPhotosResponse {
+  linked: boolean;
+  person?: { id: number; displayName: string | null; faceCount: number };
+  photos?: PersonPhoto[];
+}
+
+/** Backs the Timeline's "Just me" filter toggle — only returns results if an admin has linked
+ *  the current account to a person cluster (see PUT /admin/people/:id's linkedUserEmail). Only
+ *  the person's FIRST name is ever returned here (full name stays admin-only). */
+export const getMyPhotos = async (): Promise<MyPhotosResponse> => {
+  const response = await api.get<MyPhotosResponse>('/me/photos');
+  return response.data;
 };
 
 

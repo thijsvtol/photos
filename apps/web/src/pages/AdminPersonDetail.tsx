@@ -1,8 +1,8 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
-import { Users, Pencil, Trash2, Check, X } from 'lucide-react';
+import { Users, Pencil, Trash2, Check, X, UserPlus } from 'lucide-react';
 import Navbar from '../components/Navbar';
-import { getPerson, updatePerson, deletePerson, getPreviewUrl } from '../api';
+import { getPerson, updatePerson, deletePerson, getPreviewUrl, searchUsers } from '../api';
 import type { Person, PersonPhoto } from '../api';
 
 const AdminPersonDetail: React.FC = () => {
@@ -15,6 +15,11 @@ const AdminPersonDetail: React.FC = () => {
   const [editingName, setEditingName] = useState(false);
   const [nameInput, setNameInput] = useState('');
   const [confirmingDelete, setConfirmingDelete] = useState(false);
+  const [linkEmailInput, setLinkEmailInput] = useState('');
+  const [linkSuggestions, setLinkSuggestions] = useState<Array<{ email: string; name: string | null }>>([]);
+  const [linkError, setLinkError] = useState<string | null>(null);
+  const [linking, setLinking] = useState(false);
+  const linkSearchTimeout = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
 
   useEffect(() => {
     if (personId) loadData();
@@ -70,6 +75,56 @@ const AdminPersonDetail: React.FC = () => {
     }
   };
 
+  const handleLinkEmailChange = (value: string) => {
+    setLinkEmailInput(value);
+    setLinkError(null);
+    if (linkSearchTimeout.current) clearTimeout(linkSearchTimeout.current);
+    if (value.trim().length < 2) {
+      setLinkSuggestions([]);
+      return;
+    }
+    linkSearchTimeout.current = setTimeout(async () => {
+      try {
+        setLinkSuggestions(await searchUsers(value));
+      } catch (err) {
+        console.error('Failed to search users:', err);
+      }
+    }, 300);
+  };
+
+  const handleLinkAccount = async (email: string) => {
+    if (!person) return;
+    try {
+      setLinking(true);
+      setLinkError(null);
+      await updatePerson(person.id, { linkedUserEmail: email });
+      const data = await getPerson(person.id);
+      setPerson(data.person);
+      setLinkEmailInput('');
+      setLinkSuggestions([]);
+    } catch (err: any) {
+      setLinkError(err.response?.data?.error || 'Failed to link account');
+      console.error(err);
+    } finally {
+      setLinking(false);
+    }
+  };
+
+  const handleUnlinkAccount = async () => {
+    if (!person) return;
+    try {
+      setLinking(true);
+      setLinkError(null);
+      await updatePerson(person.id, { linkedUserEmail: null });
+      setPerson({ ...person, linked_user_email: null, linked_user_name: null });
+    } catch (err) {
+      setLinkError('Failed to unlink account');
+      console.error(err);
+    } finally {
+      setLinking(false);
+    }
+  };
+
   if (loading) {
     return (
       <div className="min-h-screen bg-gray-50 dark:bg-gray-900">
@@ -103,7 +158,7 @@ const AdminPersonDetail: React.FC = () => {
                     type="text"
                     value={nameInput}
                     onChange={(e) => setNameInput(e.target.value)}
-                    placeholder="Enter a name"
+                    placeholder="Full name (e.g. Jane Doe)"
                     className="text-2xl font-bold px-2 py-1 border rounded-lg"
                     autoFocus
                     onKeyDown={(e) => e.key === 'Enter' && handleSaveName()}
@@ -132,6 +187,65 @@ const AdminPersonDetail: React.FC = () => {
             </button>
           </div>
         )}
+        <p className="text-sm text-gray-500 mb-2">
+          Full name is admin-only — if this person's account is linked below, they'll only ever
+          see their first name on the Timeline's "Just me" filter toggle.
+        </p>
+
+        {person && (
+          <div className="mb-6 p-4 bg-white dark:bg-gray-800 rounded-lg shadow">
+            <h2 className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2 flex items-center gap-2">
+              <UserPlus className="w-4 h-4" /> Linked account
+            </h2>
+            {person.linked_user_email ? (
+              <div className="flex items-center justify-between flex-wrap gap-2">
+                <p className="text-sm text-gray-600 dark:text-gray-400">
+                  Linked to <strong>{person.linked_user_name || person.linked_user_email}</strong>{' '}
+                  ({person.linked_user_email}) — a "Just me" filter toggle now appears for them
+                  on the Timeline.
+                </p>
+                <button
+                  onClick={handleUnlinkAccount}
+                  disabled={linking}
+                  className="px-3 py-1.5 text-sm bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300 transition disabled:opacity-50"
+                >
+                  Unlink
+                </button>
+              </div>
+            ) : (
+              <div className="relative">
+                <p className="text-sm text-gray-600 dark:text-gray-400 mb-2">
+                  Link this person to an existing account so they get a "Just me" filter toggle
+                  on the Timeline.
+                </p>
+                <input
+                  type="text"
+                  value={linkEmailInput}
+                  onChange={(e) => handleLinkEmailChange(e.target.value)}
+                  placeholder="Search by email…"
+                  disabled={linking}
+                  className="w-full max-w-sm px-3 py-2 border rounded-lg text-sm"
+                />
+                {linkSuggestions.length > 0 && (
+                  <ul className="absolute z-10 mt-1 w-full max-w-sm bg-white dark:bg-gray-700 border rounded-lg shadow-lg">
+                    {linkSuggestions.map((u) => (
+                      <li key={u.email}>
+                        <button
+                          onClick={() => handleLinkAccount(u.email)}
+                          className="w-full text-left px-3 py-2 text-sm hover:bg-gray-100 dark:hover:bg-gray-600"
+                        >
+                          {u.name ? `${u.name} — ${u.email}` : u.email}
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+                {linkError && <p className="text-sm text-red-600 mt-2">{linkError}</p>}
+              </div>
+            )}
+          </div>
+        )}
+
         <p className="text-sm text-gray-500 mb-6">{photos.length} photo{photos.length === 1 ? '' : 's'}</p>
 
         {photos.length === 0 ? (

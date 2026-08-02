@@ -12,6 +12,7 @@ import featuresRoutes from './routes/features';
 import favoritesRoutes from './routes/favorites';
 import collaboratorsRoutes from './routes/collaborators';
 import mobileAuthRoutes from './routes/mobileAuth';
+import meRoutes from './routes/me';
 import { seo } from './routes/seo';
 import { runUploadNotifications, runStaleUploadCleanup, runTrashPurge } from './scheduled';
 import { runAiEnrichment } from './aiEnrichment';
@@ -85,6 +86,7 @@ app.route('/', featuresRoutes);
 app.route('/', favoritesRoutes);
 app.route('/', collaboratorsRoutes);
 app.route('/', mobileAuthRoutes);
+app.route('/', meRoutes);
 app.route('/', seo);
 
 // Health check endpoint
