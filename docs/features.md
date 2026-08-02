@@ -437,8 +437,18 @@ Categorize and discover events with tags.
   `/admin/people` runs a separate, complete `O(clusterCount²)` pairwise scan across every person
   (not limited to a top-N subset, since here the goal is thoroughness rather than a fast
   per-upload decision) via `GET /admin/people/merge-suggestions`, resumable via a cursor across
-  many small CPU-safe steps the same way clustering itself is. Matches are shown side-by-side
-  with a similarity score for one-click merge (or dismiss)
+  many small CPU-safe steps the same way clustering itself is — bounded by a *deterministic
+  dimension-operation* budget rather than a wall-clock timer, since this scan's comparison loop
+  has no I/O in it and Cloudflare Workers deliberately freezes `Date.now()` during synchronous
+  execution (a Spectre-timing mitigation), which would make a timer-based guard a silent no-op
+  here. Each comparison also exits early the instant it's mathematically certain a pair can't
+  match, letting one call examine far more pairs than a naive always-check-all-1024-dimensions
+  approach could. Suggestions use a deliberately *lower* similarity bar than automatic
+  clustering (since every suggestion is manually reviewed before merging, unlike auto-clustering)
+  — and if that still finds nothing, the search automatically retries once with an even broader
+  threshold before giving up, since this app's action-sports photos (helmets/goggles/odd angles)
+  can legitimately score below even a normal "same person" bar for genuinely matching faces.
+  Matches are shown side-by-side with a similarity score for one-click merge (or dismiss)
 - **Linking a person to an account**: on a person's detail page (`/admin/people/:id`), an admin
   can search for and link an existing user account (by email) to that person cluster — at most
   one account per person (enforced with a partial unique index on

@@ -95,7 +95,7 @@ describe('GET /admin/people/merge-suggestions', () => {
 
     expect(res.status).toBe(200);
     expect(body).toEqual({ suggestions: [], nextCursor: null, totalClusters: 5 });
-    expect(findMergeSuggestionsMock).toHaveBeenCalledWith(expect.anything(), null);
+    expect(findMergeSuggestionsMock).toHaveBeenCalledWith(expect.anything(), null, undefined);
   });
 
   it('passes sourceId/candidateId query params through as a cursor', async () => {
@@ -110,7 +110,23 @@ describe('GET /admin/people/merge-suggestions', () => {
 
     expect(res.status).toBe(200);
     expect(body.nextCursor).toEqual({ sourceId: 3, candidateId: 4 });
-    expect(findMergeSuggestionsMock).toHaveBeenCalledWith(expect.anything(), { sourceId: 1, candidateId: 2 });
+    expect(findMergeSuggestionsMock).toHaveBeenCalledWith(expect.anything(), { sourceId: 1, candidateId: 2 }, undefined);
+  });
+
+  it('passes a valid minSimilarity query param through unchanged', async () => {
+    findMergeSuggestionsMock.mockResolvedValue({ suggestions: [], nextCursor: null, totalClusters: 5 });
+
+    await peopleRouter.request('http://localhost/merge-suggestions?minSimilarity=0.2', {}, makeEnv());
+
+    expect(findMergeSuggestionsMock).toHaveBeenCalledWith(expect.anything(), null, 0.2);
+  });
+
+  it('ignores an out-of-range minSimilarity query param (falls back to the function default)', async () => {
+    findMergeSuggestionsMock.mockResolvedValue({ suggestions: [], nextCursor: null, totalClusters: 5 });
+
+    await peopleRouter.request('http://localhost/merge-suggestions?minSimilarity=1.5', {}, makeEnv());
+
+    expect(findMergeSuggestionsMock).toHaveBeenCalledWith(expect.anything(), null, undefined);
   });
 
   it('treats non-numeric cursor query params as no cursor', async () => {
@@ -118,7 +134,7 @@ describe('GET /admin/people/merge-suggestions', () => {
 
     await peopleRouter.request('http://localhost/merge-suggestions?sourceId=abc&candidateId=def', {}, makeEnv());
 
-    expect(findMergeSuggestionsMock).toHaveBeenCalledWith(expect.anything(), null);
+    expect(findMergeSuggestionsMock).toHaveBeenCalledWith(expect.anything(), null, undefined);
   });
 
   it('rejects non-admin requests without running the scan', async () => {

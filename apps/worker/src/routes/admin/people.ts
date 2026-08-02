@@ -48,8 +48,12 @@ app.post('/cluster-now', async (c) => {
  * (see findMergeSuggestions()'s doc comment in faceClustering.ts for why that can happen even
  * though clustering is working correctly). Pass `sourceId`/`candidateId` (both from a previous
  * response's `nextCursor`) to resume a scan in progress; omit both to start a fresh scan from
- * the beginning. The client-side "Find Merge Suggestions" button in AdminPeople.tsx loops this
- * the same way "Cluster Now" loops POST /cluster-now, accumulating suggestions until
+ * the beginning. Optionally pass `minSimilarity` (0-1) to override the default suggestion
+ * threshold (DEFAULT_MERGE_SUGGESTION_THRESHOLD, deliberately lower than clustering's own
+ * SAME_PERSON_THRESHOLD since these are always human-reviewed before merging — see that
+ * constant's doc comment) — useful for a broader/more lenient re-scan if the default still
+ * surfaces nothing. The client-side "Find Merge Suggestions" button in AdminPeople.tsx loops
+ * this the same way "Cluster Now" loops POST /cluster-now, accumulating suggestions until
  * `nextCursor` comes back null.
  */
 app.get('/merge-suggestions', async (c) => {
@@ -65,7 +69,16 @@ app.get('/merge-suggestions', async (c) => {
       }
     }
 
-    const result = await findMergeSuggestions(c.env, cursor);
+    let minSimilarity: number | undefined;
+    const minSimilarityParam = c.req.query('minSimilarity');
+    if (minSimilarityParam !== undefined) {
+      const parsed = parseFloat(minSimilarityParam);
+      if (Number.isFinite(parsed) && parsed > 0 && parsed <= 1) {
+        minSimilarity = parsed;
+      }
+    }
+
+    const result = await findMergeSuggestions(c.env, cursor, minSimilarity);
     return c.json(result);
   } catch (error) {
     console.error('Error finding merge suggestions:', error);

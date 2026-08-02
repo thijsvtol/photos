@@ -29,6 +29,21 @@ const AdminPeople: React.FC = () => {
   const [mergeScanTotal, setMergeScanTotal] = useState<number | null>(null);
   const mergeCancelRef = useRef(false);
   const [mergingKey, setMergingKey] = useState<string | null>(null);
+  const [usedLenientMergeThreshold, setUsedLenientMergeThreshold] = useState(false);
+  const [mergeScanComplete, setMergeScanComplete] = useState(false);
+  // Set once when a scan finishes, to how many suggestions it actually found — kept separate
+  // from mergeSuggestions.length so the "no results" empty state below doesn't incorrectly
+  // reappear after the admin has since merged/dismissed every item from a real result list.
+  const [scanFoundCount, setScanFoundCount] = useState(0);
+
+  // A second, much more lenient similarity threshold tried automatically only if the default
+  // (worker-side DEFAULT_MERGE_SUGGESTION_THRESHOLD) scan finds literally nothing — this app's
+  // action-sports photos (helmets/goggles/angles) can legitimately score well under even that
+  // already-lowered default for genuinely-matching faces, so a library with real duplicates can
+  // still come back empty at the default. The admin manually reviews every suggestion before
+  // merging either way, so a much lower bar here just means more (dismissable) candidates,
+  // never an unreviewed auto-merge.
+  const FALLBACK_MERGE_THRESHOLD = 0.2;
 
   const multiPhotoPeople = allPeople.filter((p) => p.face_count >= 2);
   const singlesCount = allPeople.length - multiPhotoPeople.length;
@@ -112,29 +127,47 @@ const AdminPeople: React.FC = () => {
     setFindingMerges(true);
     setMergeSuggestions([]);
     setMergeScanTotal(null);
+    setUsedLenientMergeThreshold(false);
+    setMergeScanComplete(false);
     mergeCancelRef.current = false;
     try {
       // Refresh allPeople first so cover photos/names/face_counts used to render suggestions
       // below are current, then loop the scan (each call is a small, CPU-bounded step server-
       // side, see faceClustering.ts's findMergeSuggestions) until it reports no more pages.
       await loadData();
-      const seen = new Set<string>();
-      const collected: MergeSuggestion[] = [];
-      let cursor: MergeSuggestionCursor | null = null;
-      for (;;) {
-        const page = await getMergeSuggestions(cursor);
-        setMergeScanTotal(page.totalClusters);
-        for (const s of page.suggestions) {
-          const key = suggestionKey(s);
-          if (!seen.has(key)) {
-            seen.add(key);
-            collected.push(s);
+
+      const runScan = async (minSimilarity?: number): Promise<MergeSuggestion[]> => {
+        const seen = new Set<string>();
+        const collected: MergeSuggestion[] = [];
+        let cursor: MergeSuggestionCursor | null = null;
+        for (;;) {
+          const page = await getMergeSuggestions(cursor, minSimilarity);
+          setMergeScanTotal(page.totalClusters);
+          for (const s of page.suggestions) {
+            const key = suggestionKey(s);
+            if (!seen.has(key)) {
+              seen.add(key);
+              collected.push(s);
+            }
           }
+          setMergeSuggestions([...collected]);
+          cursor = page.nextCursor;
+          if (!cursor || mergeCancelRef.current) break;
         }
-        setMergeSuggestions([...collected]);
-        cursor = page.nextCursor;
-        if (!cursor || mergeCancelRef.current) break;
+        return collected;
+      };
+
+      const primaryResults = await runScan();
+      // If the default (already-lenient) threshold found nothing, automatically retry once with
+      // a much broader one before giving up — see FALLBACK_MERGE_THRESHOLD above for why this is
+      // safe (every suggestion still requires manual admin review before anything merges).
+      let finalResults = primaryResults;
+      if (primaryResults.length === 0 && !mergeCancelRef.current) {
+        setUsedLenientMergeThreshold(true);
+        finalResults = await runScan(FALLBACK_MERGE_THRESHOLD);
       }
+      setScanFoundCount(finalResults.length);
+      setMergeScanComplete(true);
     } catch (err) {
       setError('Finding merge suggestions failed');
       console.error(err);
@@ -272,6 +305,14 @@ const AdminPeople: React.FC = () => {
           </div>
         )}
 
+        {mergeScanComplete && !findingMerges && scanFoundCount === 0 && (
+          <div className="mb-8 bg-gray-100 dark:bg-gray-800 rounded-lg p-4 text-sm text-gray-600 dark:text-gray-400">
+            No merge suggestions found, even after broadening the search. Either there aren't any
+            duplicate groups left, or two truly-matching photos of the same person score too
+            differently for this to catch automatically (common for very different angles/lighting).
+          </div>
+        )}
+
         {mergeSuggestions.length > 0 && (
           <div className="mb-8 bg-white dark:bg-gray-800 rounded-lg shadow p-4">
             <h2 className="text-lg font-semibold text-gray-900 dark:text-white mb-1 flex items-center gap-2">
@@ -280,6 +321,13 @@ const AdminPeople: React.FC = () => {
             <p className="text-sm text-gray-500 dark:text-gray-400 mb-4">
               These pairs look like the same person but were never automatically merged. Review each
               one and merge if they match, or dismiss if not.
+              {usedLenientMergeThreshold && (
+                <>
+                  {' '}No matches were found at the default sensitivity, so this list uses a much
+                  broader (lower-confidence) search instead — double-check each match carefully
+                  before merging.
+                </>
+              )}
             </p>
             <div className="space-y-3">
               {mergeSuggestions.map((suggestion) => {

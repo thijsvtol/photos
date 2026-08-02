@@ -1,6 +1,15 @@
 import { describe, expect, it } from 'vitest';
-import { runFaceClustering, countUnclusteredFaces, findMergeSuggestions, humanDistance, humanSimilarity, SAME_PERSON_THRESHOLD } from '../faceClustering';
+import {
+  runFaceClustering,
+  countUnclusteredFaces,
+  findMergeSuggestions,
+  humanDistance,
+  humanSimilarity,
+  SAME_PERSON_THRESHOLD,
+  DEFAULT_MERGE_SUGGESTION_THRESHOLD,
+} from '../faceClustering';
 import type { MergeSuggestionCursor } from '../faceClustering';
+import { EXPECTED_EMBEDDING_LENGTH } from '../faceValidation';
 import type { Env } from '../types';
 
 /**
@@ -112,6 +121,15 @@ function makeEnv(db: FakeFaceClusteringDb): Env {
 
 function embeddingOf(...values: number[]): ArrayBuffer {
   return new Float32Array(values).buffer;
+}
+
+/** A FULL, real-Human-descriptor-length (1024-dim) embedding filled with a constant value —
+ *  used by tests that need to prove behavior specifically at the real embedding size, since
+ *  the short 3-element vectors from embeddingOf() above don't exercise findMergeSuggestions()'s
+ *  early-exit optimization or dimension-based CPU budget realistically (a 3-element vector can
+ *  never use more than 3 "dims" of budget no matter what, unlike real 1024-dim descriptors). */
+function fullLengthEmbeddingOf(baseValue: number): ArrayBuffer {
+  return new Float32Array(EXPECTED_EMBEDDING_LENGTH).fill(baseValue).buffer;
 }
 
 describe('humanDistance / humanSimilarity', () => {
@@ -321,7 +339,32 @@ describe('findMergeSuggestions', () => {
     expect(result.totalClusters).toBe(3);
     expect(result.suggestions).toHaveLength(1);
     expect(result.suggestions[0]).toMatchObject({ clusterAId: 1, clusterBId: 2 });
-    expect(result.suggestions[0].similarity).toBeGreaterThanOrEqual(SAME_PERSON_THRESHOLD);
+    expect(result.suggestions[0].similarity).toBeGreaterThanOrEqual(DEFAULT_MERGE_SUGGESTION_THRESHOLD);
+  });
+
+  it('surfaces a pair scoring between the lenient default threshold and the stricter auto-merge threshold — the exact gap this feature exists to catch', async () => {
+    // This reproduces the reported production bug directly: clustering's own
+    // SAME_PERSON_THRESHOLD (0.5) is too strict to catch many genuine duplicates on this app's
+    // action-sports photos, so re-using it for merge suggestions returned ZERO matches even in
+    // a library that clearly had duplicates. A diff of 6 across all 3 dims here scores ~0.47
+    // similarity — below SAME_PERSON_THRESHOLD, but at/above DEFAULT_MERGE_SUGGESTION_THRESHOLD.
+    const a = new Float32Array([0, 0, 0]);
+    const b = new Float32Array([6, 6, 6]);
+    const similarity = humanSimilarity(a, b);
+    expect(similarity).toBeGreaterThanOrEqual(DEFAULT_MERGE_SUGGESTION_THRESHOLD);
+    expect(similarity).toBeLessThan(SAME_PERSON_THRESHOLD);
+
+    const db = new FakeFaceClusteringDb();
+    db.clusters = [
+      { id: 1, centroid_embedding: a.buffer, face_count: 1 },
+      { id: 2, centroid_embedding: b.buffer, face_count: 1 },
+    ];
+
+    const atDefaultThreshold = await findMergeSuggestions(makeEnv(db), null);
+    expect(atDefaultThreshold.suggestions).toHaveLength(1);
+
+    const atOldStrictThreshold = await findMergeSuggestions(makeEnv(db), null, SAME_PERSON_THRESHOLD);
+    expect(atOldStrictThreshold.suggestions).toHaveLength(0); // Reproduces the "0 matches" bug.
   });
 
   it('only ever reports a pair once, in (lower id, higher id) order', async () => {
@@ -388,29 +431,55 @@ describe('findMergeSuggestions', () => {
     expect(result).toEqual({ suggestions: [], nextCursor: null, totalClusters: 1 });
   });
 
-  it('stops after a deterministic comparison budget (NOT a wall-clock guard) when the pair count exceeds it, and resuming eventually completes the full scan', async () => {
-    // A DETERMINISTIC comparison-count cutoff is used here specifically because a wall-clock
-    // guard is provably useless for this loop on real Cloudflare Workers — Date.now() is frozen
-    // during synchronous execution there (see the doc comment above MAX_MERGE_COMPARISONS_PER_INVOCATION
-    // in faceClustering.ts) — but Node's test runtime does NOT freeze Date.now(), so a
-    // wall-clock-based version of this test would have passed locally while still 503ing in
-    // production (exactly what happened). Asserting on the exact deterministic cutoff count
-    // instead is what actually catches a regression back to a wall-clock guard.
+  it('stops after a deterministic dimension-operation budget (NOT a wall-clock guard) once real dims-per-invocation exceeds it, and resuming eventually completes the full scan', async () => {
+    // Uses FULL 1024-dim embeddings (matching real Human descriptors) with small enough
+    // per-cluster differences that NO pair ever triggers quickSimilarityCheck()'s early exit —
+    // every comparison scans the full embedding, exactly like production would for genuinely
+    // similar-looking (but not literally identical) faces. This is what makes the deterministic
+    // dims-based budget the actual bottleneck being tested here, rather than the early-exit
+    // optimization masking it (see the next test for early-exit's speedup specifically).
+    //
+    // A DETERMINISTIC dimension-count budget is used (not a wall-clock guard) specifically
+    // because Date.now() is frozen during synchronous execution on real Cloudflare Workers (see
+    // the big comment above DEFAULT_MERGE_SUGGESTION_THRESHOLD in faceClustering.ts) — but
+    // Node's test runtime does NOT freeze Date.now(), so a wall-clock-based version of this
+    // test would have passed locally while still 503ing in production (exactly what happened
+    // twice before this fix).
     const db = new FakeFaceClusteringDb();
-    // 27 clusters, all pairwise far apart (no two ever look like a match) => 27*26/2 = 351
-    // total possible pairs, comfortably more than the ~341 comparison budget for one call.
-    db.clusters = Array.from({ length: 27 }, (_, i) => ({
+    // 30 clusters -> C(30,2) = 435 possible pairs; at 1024 dims/comparison (no early exit) and
+    // a ~350,000-dim budget, one call can only fully scan ~341 of them.
+    db.clusters = Array.from({ length: 30 }, (_, i) => ({
       id: i + 1,
-      centroid_embedding: embeddingOf(i * 1000, i * 1000, i * 1000),
+      centroid_embedding: fullLengthEmbeddingOf(i * 0.01), // tiny per-cluster diff — never early-exits
       face_count: 1,
     }));
 
     const firstCall = await findMergeSuggestions(makeEnv(db), null);
-    expect(firstCall.nextCursor).not.toBeNull(); // Budget hit before the full 351-pair scan finished.
-    expect(firstCall.suggestions).toEqual([]); // Nothing actually matches.
+    expect(firstCall.nextCursor).not.toBeNull(); // Budget hit before the full 435-pair scan finished.
 
     const secondCall = await findMergeSuggestions(makeEnv(db), firstCall.nextCursor);
-    expect(secondCall.nextCursor).toBeNull(); // Remaining ~10 pairs easily finish in one more call.
-    expect(secondCall.suggestions).toEqual([]);
+    expect(secondCall.nextCursor).toBeNull(); // Remaining ~94 pairs easily finish in one more call.
+  });
+
+  it('early-exits obviously-non-matching pairs after only a few dimensions, letting one call examine far more PAIRS than a naive always-scan-all-1024-dims approach could', async () => {
+    // 100 clusters whose centroids are wildly different from each other in every dimension —
+    // every one of the C(100,2) = 4950 possible pairs should reject after just the first
+    // dimension or two (see quickSimilarityCheck()). WITHOUT the early-exit optimization this
+    // would need multiple resumed calls (4950 pairs / ~341 per call ≈ 15 calls) — exactly the
+    // "takes too long" symptom reported in production for a real library with hundreds of
+    // clusters. WITH it, the entire scan completes in a SINGLE call since almost no real
+    // dimension work is done per pair.
+    const db = new FakeFaceClusteringDb();
+    db.clusters = Array.from({ length: 100 }, (_, i) => ({
+      id: i + 1,
+      centroid_embedding: fullLengthEmbeddingOf(i * 1000), // huge per-dim gaps -> reject almost instantly
+      face_count: 1,
+    }));
+
+    const result = await findMergeSuggestions(makeEnv(db), null);
+
+    expect(result.nextCursor).toBeNull(); // Completed the ENTIRE O(n²) scan in one call.
+    expect(result.totalClusters).toBe(100);
+    expect(result.suggestions).toEqual([]); // Nothing actually matches — all wildly different.
   });
 });

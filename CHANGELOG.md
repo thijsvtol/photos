@@ -84,6 +84,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   fires and the full `O(clusterCount²)` scan ran unbounded. Replaced with a deterministic
   comparison-count budget instead (using the same "cost per comparison" math as clustering's
   candidate cap), which doesn't depend on the clock at all.
+- "Find Merge Suggestions" was also both very slow AND returned zero results even in libraries
+  with obvious duplicate groups. Slowness: every comparison always scored all 1024 embedding
+  dimensions even for wildly different (obviously non-matching) faces, so a full scan across a
+  large library needed hundreds of resumed calls. Zero results: the scan reused clustering's own
+  auto-merge threshold, but any pair that scores that high would (almost always) already have
+  been auto-merged during clustering — the scan could therefore only ever re-discover matches
+  clustering already found, never the genuinely harder ones (common for this app's action-sports
+  photos, where even real matches can score below that bar). Fixed by (1) adding an early-exit
+  check that abandons an obviously-non-matching comparison after only a few dimensions instead of
+  all 1024, letting one call examine far more pairs, and (2) using a deliberately lower default
+  similarity threshold for suggestions specifically (safe because every suggestion still requires
+  manual admin review before merging), with an automatic retry at an even broader threshold if
+  the default still finds nothing.
 
 ### Changed
 - Android app release bumped to build 48 (versionName 2.0.0).

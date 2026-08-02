@@ -519,10 +519,18 @@ export interface MergeSuggestionsPage {
 
 /** One bounded step of a resumable full pairwise scan for likely-duplicate person clusters
  *  clustering itself never got to compare (see worker's GET /admin/people/merge-suggestions for
- *  why). Pass the previous page's `nextCursor` to resume; omit to start a fresh scan. */
-export const getMergeSuggestions = async (cursor?: MergeSuggestionCursor | null): Promise<MergeSuggestionsPage> => {
+ *  why). Pass the previous page's `nextCursor` to resume; omit to start a fresh scan.
+ *  `minSimilarity` (0-1) overrides the worker's default suggestion threshold — used to retry
+ *  with a more lenient search if the default threshold finds nothing (see AdminPeople.tsx). */
+export const getMergeSuggestions = async (
+  cursor?: MergeSuggestionCursor | null,
+  minSimilarity?: number
+): Promise<MergeSuggestionsPage> => {
   const response = await api.get<MergeSuggestionsPage>('/admin/people/merge-suggestions', {
-    params: cursor ? { sourceId: cursor.sourceId, candidateId: cursor.candidateId } : undefined,
+    params: {
+      ...(cursor ? { sourceId: cursor.sourceId, candidateId: cursor.candidateId } : undefined),
+      ...(minSimilarity !== undefined ? { minSimilarity } : undefined),
+    },
     headers: getAdminHeaders(),
   });
   return response.data;

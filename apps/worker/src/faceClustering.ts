@@ -282,21 +282,90 @@ export interface MergeSuggestionsResult {
 // letting the full O(clusterCount²) scan run to completion regardless of size. This was tried
 // in production and 503'd instantly with Cloudflare's Error 1102 ("Worker exceeded resource
 // limits") once the library reached ~870 people (~379,000 pairs). The fix is a DETERMINISTIC
-// comparison-count budget instead — using the exact same per-comparison cost model
-// (O(embedding dimensions), see the big comment above computeBatchSize()) that's already
-// established as CPU-safe elsewhere in this file, rather than a timer that can't be trusted in
-// a loop with no I/O to force the clock forward.
-const MAX_MERGE_COMPARISONS_PER_INVOCATION = Math.floor(MAX_DIMENSION_OPS_PER_INVOCATION / EMBEDDING_DIM); // ~341
+// dimension-operation budget instead (see quickSimilarityCheck()/dimsUsed below) — the exact
+// same per-comparison cost model already established as CPU-safe for clustering above, rather
+// than a timer that can't be trusted in a loop with no I/O to force the clock forward.
+//
+// This budget is tracked in terms of ACTUAL embedding dimensions compared (not a flat "1 unit
+// per comparison" count) specifically so the early-exit optimization below can pay off: most
+// cluster pairs are NOT the same person and can be safely rejected after looking at only a
+// handful of the 1024 dimensions (see quickSimilarityCheck()), so a single invocation can
+// examine vastly more PAIRS than a naive "always score all 1024 dims" approach would allow
+// within the same real CPU budget — directly addressing how slow a full O(clusterCount²) scan
+// otherwise is across many resumed HTTP calls for a library with hundreds of clusters.
+
+/**
+ * Threshold used ONLY by findMergeSuggestions() below — deliberately LOWER than
+ * SAME_PERSON_THRESHOLD (which automatic clustering uses to merge faces with ZERO human
+ * review, and must therefore stay conservative). Merge suggestions are always reviewed by an
+ * admin before anything actually merges (see AdminPeople.tsx's Merge/"Not the same" buttons) —
+ * a false positive here costs one click to dismiss, whereas a false NEGATIVE (a real duplicate
+ * that never even gets suggested) is a silent, permanent gap the admin has no way to discover.
+ * Reusing SAME_PERSON_THRESHOLD here was tried first and returned ZERO suggestions in
+ * production even in an 871-cluster library that clearly had duplicates: any pair that would
+ * score >=SAME_PERSON_THRESHOLD would (with rare exceptions, see MAX_CLUSTERS_CONSIDERED above)
+ * already have been auto-merged during clustering itself, so a scan re-applying the exact same
+ * bar can only ever re-discover what clustering already found — it can never catch the
+ * genuinely harder cases: two photos of the same real person whose face descriptors score
+ * BELOW that bar, which is common for this app's action-sports photos (ice-skating/cycling with
+ * helmets/goggles — see repo memory for the extensive discussion of Human's recall limits on
+ * this photo style). Admins can override this default via the `minSimilarity` query param/
+ * function argument if this still surfaces nothing.
+ */
+export const DEFAULT_MERGE_SUGGESTION_THRESHOLD = 0.35;
+
+/**
+ * Given a target similarity score, returns the maximum raw sum-of-squared-diffs (BEFORE
+ * humanDistance's ×25 multiplier) at which humanSimilarity() can still reach that score —
+ * derived by algebraically inverting humanSimilarity's formula for MATCH_ORDER === 2 (the only
+ * value ever used here). Once a running sum-of-squared-diffs between two centroids exceeds
+ * this value, every remaining dimension can only make the sum larger (each term is >=0), so the
+ * final similarity is mathematically GUARANTEED to fall below the target — letting
+ * quickSimilarityCheck() below safely abandon a comparison early for pairs that are obviously
+ * not a match, without ever risking a false rejection of a pair that could have matched.
+ */
+function maxSumForSimilarity(targetSimilarity: number): number {
+  const rootAtThreshold = 100 * (1 - MATCH_MIN - targetSimilarity * (MATCH_MAX - MATCH_MIN));
+  const distAtThreshold = rootAtThreshold ** 2;
+  return distAtThreshold / MATCH_MULTIPLIER;
+}
+
+/**
+ * Fast approximate similarity check used only by findMergeSuggestions()'s O(clusterCount²)
+ * scan: computes the sum-of-squared-diffs between two descriptors with an EARLY EXIT the
+ * moment it's mathematically guaranteed the pair cannot reach `sumThreshold` (see
+ * maxSumForSimilarity() above) — for the (typically overwhelming majority of) pairs that are
+ * obviously not the same person, this touches only a handful of the embedding's dimensions
+ * instead of all of them. Returns `similarity: null` if rejected early; otherwise returns the
+ * EXACT same value humanSimilarity() would (the full computation only ever runs for pairs that
+ * passed the cheap check, so results are bit-for-bit identical to always calling
+ * humanSimilarity() directly — this is purely a speed optimization, not an approximation of the
+ * final decision). `dimsChecked` reports how much real work this call actually did, for the
+ * CPU-budget accounting in findMergeSuggestions() below.
+ */
+function quickSimilarityCheck(a: Float32Array, b: Float32Array, sumThreshold: number): { similarity: number | null; dimsChecked: number } {
+  let sum = 0;
+  const len = Math.min(a.length, b.length);
+  for (let i = 0; i < len; i++) {
+    const diff = a[i] - b[i];
+    sum += diff * diff;
+    if (sum > sumThreshold) {
+      return { similarity: null, dimsChecked: i + 1 };
+    }
+  }
+  return { similarity: humanSimilarity(a, b), dimsChecked: len };
+}
 
 /**
  * Resumable, CPU-safe full O(clusterCount²) similarity scan across ALL person clusters — see
  * the MergeSuggestion doc comment above for why this exists and why it's NOT limited to a
  * top-N subset the way runFaceClustering() is.
  *
- * A single call only ever performs MAX_MERGE_COMPARISONS_PER_INVOCATION comparisons (see that
- * constant's doc comment for why a wall-clock guard can't be used here) and returns a
- * `nextCursor` for the caller to pass back in to resume exactly where it left off — see the
- * client-side loop in AdminPeople.tsx's "Find Merge Suggestions" button.
+ * A single call only ever processes up to MAX_DIMENSION_OPS_PER_INVOCATION worth of ACTUAL
+ * dimension comparisons (tracked via quickSimilarityCheck()'s early exit, not a flat count —
+ * see the big comment above DEFAULT_MERGE_SUGGESTION_THRESHOLD for why this matters for speed)
+ * and returns a `nextCursor` for the caller to pass back in to resume exactly where it left
+ * off — see the client-side loop in AdminPeople.tsx's "Find Merge Suggestions" button.
  *
  * Only clusters with `id >= cursor.sourceId` are fetched from D1 (rather than the whole table
  * on every call) — clusters before that id have already been fully compared against everything
@@ -305,7 +374,11 @@ const MAX_MERGE_COMPARISONS_PER_INVOCATION = Math.floor(MAX_DIMENSION_OPS_PER_IN
  * many calls a full scan ends up taking. `totalClusters` (for the client's progress display) is
  * a separate, cheap `COUNT(*)` unaffected by that filter.
  */
-export async function findMergeSuggestions(env: Env, cursor: MergeSuggestionCursor | null): Promise<MergeSuggestionsResult> {
+export async function findMergeSuggestions(
+  env: Env,
+  cursor: MergeSuggestionCursor | null,
+  minSimilarity: number = DEFAULT_MERGE_SUGGESTION_THRESHOLD
+): Promise<MergeSuggestionsResult> {
   const totalClustersRow = await env.DB
     .prepare('SELECT COUNT(*) as count FROM person_clusters')
     .first<{ count: number }>();
@@ -336,26 +409,27 @@ export async function findMergeSuggestions(env: Env, cursor: MergeSuggestionCurs
     candidateIndexForFirstSource = found === -1 ? clusters.length : found;
   }
 
+  const sumThreshold = maxSumForSimilarity(minSimilarity);
   const suggestions: MergeSuggestion[] = [];
-  let comparisons = 0;
+  let dimsUsed = 0;
 
   for (let i = 0; i < clusters.length; i++) {
     const jStart = i === 0 && candidateIndexForFirstSource !== null ? candidateIndexForFirstSource : i + 1;
 
     for (let j = jStart; j < clusters.length; j++) {
-      if (comparisons >= MAX_MERGE_COMPARISONS_PER_INVOCATION) {
+      if (dimsUsed >= MAX_DIMENSION_OPS_PER_INVOCATION) {
         return { suggestions, nextCursor: { sourceId: clusters[i].id, candidateId: clusters[j].id }, totalClusters };
       }
-      comparisons++;
 
-      const similarity = humanSimilarity(clusters[i].centroid, clusters[j].centroid);
-      if (similarity >= SAME_PERSON_THRESHOLD) {
+      const { similarity, dimsChecked } = quickSimilarityCheck(clusters[i].centroid, clusters[j].centroid, sumThreshold);
+      dimsUsed += dimsChecked;
+      if (similarity !== null && similarity >= minSimilarity) {
         suggestions.push({ clusterAId: clusters[i].id, clusterBId: clusters[j].id, similarity });
       }
     }
   }
 
-  // Reached the end of every cluster without hitting the comparison budget — scan is complete.
+  // Reached the end of every cluster without hitting the dimension-op budget — scan complete.
   return { suggestions, nextCursor: null, totalClusters };
 }
 
