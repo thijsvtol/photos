@@ -484,20 +484,61 @@ export interface ClusterDataCluster {
 export interface ClusterData {
   faces: ClusterDataFace[];
   clusters: ClusterDataCluster[];
+  nextClusterCursor: number | null;
+  nextFaceCursor: number | null;
 }
 
-/** Fetches raw face/cluster data for client-side clustering or merge-suggestion matching (see
- *  faceClusteringClient.ts) — the Worker only ever does cheap I/O, never the vector-similarity
- *  math itself (that math doesn't fit safely within Cloudflare Workers' 10ms CPU-time limit
- *  once a library grows large — see faceClustering.ts's doc comment for the full history).
- *  Pass `includeFaces: false` to skip the (potentially large) unclustered-faces array when
- *  only cluster centroids are needed (merge-suggestion matching never needs faces). */
-export const getClusterData = async (includeFaces: boolean): Promise<ClusterData> => {
+/** Fetches ONE PAGE of raw face/cluster data for client-side clustering or merge-suggestion
+ *  matching (see faceClusteringClient.ts) — the Worker only ever does cheap I/O plus bounded
+ *  per-page marshalling, never the vector-similarity math itself (that math doesn't fit safely
+ *  within Cloudflare Workers' 10ms CPU-time limit once a library grows large — see
+ *  faceClustering.ts's doc comment for the full history, including why even converting/
+ *  serializing an unbounded number of rows in one call is itself unsafe, independent of any
+ *  math). Prefer `getFullClusterData()` below unless you specifically need manual pagination
+ *  control. Pass `includeFaces: false` to skip the (potentially large) unclustered-faces array
+ *  when only cluster centroids are needed (merge-suggestion matching never needs faces). */
+export const getClusterData = async (
+  includeFaces: boolean,
+  afterClusterId = 0,
+  afterFaceId = 0
+): Promise<ClusterData> => {
   const response = await api.get<ClusterData>('/admin/people/cluster-data', {
-    params: includeFaces ? undefined : { includeFaces: 0 },
+    params: {
+      ...(includeFaces ? undefined : { includeFaces: 0 }),
+      ...(afterClusterId ? { afterClusterId } : undefined),
+      ...(afterFaceId ? { afterFaceId } : undefined),
+    },
     headers: getAdminHeaders(),
   });
   return response.data;
+};
+
+/** Loops `getClusterData()` until every page has been fetched, accumulating the FULL dataset in
+ *  the browser before returning it — safe because a browser has no per-task CPU-time limit,
+ *  unlike the Worker (which can only safely marshal/serialize a bounded number of rows per
+ *  call, see getClusterData()'s doc comment). `onProgress` is called after each page (counts of
+ *  rows fetched SO FAR, not a percentage — the total isn't known until the last page). */
+export const getFullClusterData = async (
+  includeFaces: boolean,
+  onProgress?: (facesLoaded: number, clustersLoaded: number) => void
+): Promise<{ faces: ClusterDataFace[]; clusters: ClusterDataCluster[] }> => {
+  const faces: ClusterDataFace[] = [];
+  const clusters: ClusterDataCluster[] = [];
+  let afterClusterId = 0;
+  let afterFaceId = 0;
+
+  for (;;) {
+    const page = await getClusterData(includeFaces, afterClusterId, afterFaceId);
+    faces.push(...page.faces);
+    clusters.push(...page.clusters);
+    onProgress?.(faces.length, clusters.length);
+
+    if (page.nextClusterCursor === null && page.nextFaceCursor === null) break;
+    afterClusterId = page.nextClusterCursor ?? afterClusterId;
+    afterFaceId = page.nextFaceCursor ?? afterFaceId;
+  }
+
+  return { faces, clusters };
 };
 
 export interface ClusterResult {

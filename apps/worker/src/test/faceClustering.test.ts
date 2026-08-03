@@ -56,6 +56,15 @@ class FakeFaceClusteringDb {
           const photoIds = [...new Set(db.faces.filter((f) => f.embedding.byteLength !== expectedBytes).map((f) => f.photo_id))];
           return { results: photoIds.map((photo_id) => ({ photo_id })) as T[] };
         }
+        if (query.includes('FROM person_clusters') && query.includes('WHERE id > ?')) {
+          const [afterId, limit] = boundArgs as [number, number];
+          const results = [...db.clusters]
+            .sort((a, b) => a.id - b.id)
+            .filter((c) => c.id > afterId)
+            .slice(0, limit)
+            .map((c) => ({ id: c.id, centroid_embedding: c.centroid_embedding, face_count: c.face_count }));
+          return { results: results as T[] };
+        }
         if (query.includes('FROM person_clusters')) {
           const sorted = [...db.clusters].sort((a, b) => a.id - b.id);
           const results = sorted.map((c) => ({
@@ -63,6 +72,15 @@ class FakeFaceClusteringDb {
             centroid_embedding: c.centroid_embedding,
             face_count: c.face_count,
           }));
+          return { results: results as T[] };
+        }
+        if (query.includes('FROM photo_faces') && query.includes('WHERE person_id IS NULL AND id > ?')) {
+          const [afterId, limit] = boundArgs as [number, number];
+          const results = [...db.faces]
+            .sort((a, b) => a.id - b.id)
+            .filter((f) => f.person_id === null && f.id > afterId)
+            .slice(0, limit)
+            .map((f) => ({ id: f.id, photo_id: f.photo_id, embedding: f.embedding }));
           return { results: results as T[] };
         }
         if (query.includes('FROM photo_faces') && query.includes('WHERE person_id IS NULL')) {
@@ -179,7 +197,32 @@ describe('getClusterData', () => {
   it('returns empty arrays for an empty library', async () => {
     const db = new FakeFaceClusteringDb();
     const data = await getClusterData(makeEnv(db), true);
-    expect(data).toEqual({ faces: [], clusters: [] });
+    expect(data).toEqual({ faces: [], clusters: [], nextClusterCursor: null, nextFaceCursor: null });
+  });
+
+  it('paginates clusters/faces via afterClusterId/afterFaceId, returning null cursors once fully consumed', async () => {
+    const db = new FakeFaceClusteringDb();
+    db.clusters = [
+      { id: 1, centroid_embedding: embeddingOf(1, 1, 1), face_count: 1 },
+      { id: 2, centroid_embedding: embeddingOf(2, 2, 2), face_count: 1 },
+    ];
+    db.faces = [
+      { id: 10, photo_id: 'photo-a', embedding: embeddingOf(1, 1, 1), person_id: null },
+      { id: 11, photo_id: 'photo-b', embedding: embeddingOf(2, 2, 2), person_id: null },
+    ];
+
+    // First page starts from the defaults (0, 0) — returns everything since PAGE_SIZE (300)
+    // comfortably covers this tiny test dataset, so both cursors should already be null.
+    const firstPage = await getClusterData(makeEnv(db), true, 0, 0);
+    expect(firstPage.clusters.map((c) => c.id)).toEqual([1, 2]);
+    expect(firstPage.faces.map((f) => f.id)).toEqual([10, 11]);
+    expect(firstPage.nextClusterCursor).toBeNull();
+    expect(firstPage.nextFaceCursor).toBeNull();
+
+    // Resuming from a cursor should only return rows strictly AFTER it.
+    const resumed = await getClusterData(makeEnv(db), true, 1, 10);
+    expect(resumed.clusters.map((c) => c.id)).toEqual([2]);
+    expect(resumed.faces.map((f) => f.id)).toEqual([11]);
   });
 });
 

@@ -45,47 +45,81 @@ export interface ClusterDataCluster {
 export interface ClusterData {
   faces: ClusterDataFace[];
   clusters: ClusterDataCluster[];
+  /** Pass as `afterClusterId` on the next call to fetch the next page of clusters; null once
+   *  every cluster has been returned. */
+  nextClusterCursor: number | null;
+  /** Pass as `afterFaceId` on the next call to fetch the next page of faces; null once every
+   *  unclustered face has been returned (or `includeFaces` was false). */
+  nextFaceCursor: number | null;
 }
 
+// Converting a BLOB embedding into a plain number[] (Array.from(new Float32Array(...))) is
+// REAL synchronous CPU work — 1024 floats per row — and so is JSON-encoding the resulting
+// payload; both scale with however many cluster/face ROWS are fetched in one call, even though
+// the SQL query itself is cheap I/O. A large library (thousands of clusters and/or unclustered
+// faces) can make a single "fetch everything" call alone exceed the Workers Free plan's 10ms
+// CPU-time limit purely from this marshalling work, with ZERO vector-similarity math involved —
+// this is a DIFFERENT bug from (but the same failure class as) the CPU-time issues that moved
+// the actual clustering math to the browser in the first place; see this file's top-of-file
+// doc comment and repo memory for that earlier history. Fix: this endpoint is now CURSOR-
+// PAGINATED (id-based, ORDER BY id ASC) — each call converts/serializes at most PAGE_SIZE rows
+// of each kind, bounding the CPU cost of a SINGLE invocation regardless of total library size.
+// The client (apps/web/src/api.ts's getFullClusterData()) loops calling this repeatedly,
+// accumulating the full dataset across many small, safe requests before running the actual
+// clustering/merge-suggestion math in the browser.
+const PAGE_SIZE = 300;
+
 /**
- * Fetches ALL currently-unclustered faces and ALL existing person clusters in one go — pure I/O,
- * no vector math, so this is cheap regardless of how large the library has grown (D1
- * reads/writes don't count against Workers' CPU-time limit, only actual JS computation does).
- * `includeFaces=false` skips the (potentially large) unclustered-faces array entirely for
- * callers that only need cluster centroids (e.g. the merge-suggestions scan, which never reads
- * photo_faces at all).
+ * Fetches ONE PAGE of currently-unclustered faces and ONE PAGE of existing person clusters —
+ * pure I/O plus bounded (PAGE_SIZE-capped) marshalling work, safe regardless of how large the
+ * library has grown overall (see PAGE_SIZE's doc comment above for why marshalling itself,
+ * not just the SQL query, needed to be bounded). `includeFaces=false` skips fetching faces
+ * entirely for callers that only need cluster centroids (e.g. the merge-suggestions scan,
+ * which never reads photo_faces at all).
  */
-export async function getClusterData(env: Env, includeFaces: boolean): Promise<ClusterData> {
+export async function getClusterData(
+  env: Env,
+  includeFaces: boolean,
+  afterClusterId = 0,
+  afterFaceId = 0
+): Promise<ClusterData> {
   const { results: clusterRows } = await env.DB
-    .prepare('SELECT id, centroid_embedding, face_count FROM person_clusters ORDER BY id ASC')
+    .prepare('SELECT id, centroid_embedding, face_count FROM person_clusters WHERE id > ? ORDER BY id ASC LIMIT ?')
+    .bind(afterClusterId, PAGE_SIZE)
     .all<{ id: number; centroid_embedding: ArrayBuffer; face_count: number }>();
 
-  const clusters: ClusterDataCluster[] = (clusterRows || []).map((c) => ({
+  const clusterRowsArr = clusterRows || [];
+  const clusters: ClusterDataCluster[] = clusterRowsArr.map((c) => ({
     id: c.id,
     centroidEmbedding: Array.from(new Float32Array(c.centroid_embedding)),
     faceCount: c.face_count,
   }));
+  const nextClusterCursor = clusterRowsArr.length === PAGE_SIZE ? clusterRowsArr[clusterRowsArr.length - 1].id : null;
 
   if (!includeFaces) {
-    return { faces: [], clusters };
+    return { faces: [], clusters, nextClusterCursor, nextFaceCursor: null };
   }
 
   const { results: faceRows } = await env.DB
     .prepare(`
       SELECT id, photo_id, embedding
       FROM photo_faces
-      WHERE person_id IS NULL
-      ORDER BY created_at ASC
+      WHERE person_id IS NULL AND id > ?
+      ORDER BY id ASC
+      LIMIT ?
     `)
+    .bind(afterFaceId, PAGE_SIZE)
     .all<{ id: number; photo_id: string; embedding: ArrayBuffer }>();
 
-  const faces: ClusterDataFace[] = (faceRows || []).map((f) => ({
+  const faceRowsArr = faceRows || [];
+  const faces: ClusterDataFace[] = faceRowsArr.map((f) => ({
     id: f.id,
     photoId: f.photo_id,
     embedding: Array.from(new Float32Array(f.embedding)),
   }));
+  const nextFaceCursor = faceRowsArr.length === PAGE_SIZE ? faceRowsArr[faceRowsArr.length - 1].id : null;
 
-  return { faces, clusters };
+  return { faces, clusters, nextClusterCursor, nextFaceCursor };
 }
 
 /** One cluster's final state after the client's greedy-clustering pass, ready to persist. */

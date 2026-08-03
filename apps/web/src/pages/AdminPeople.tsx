@@ -2,7 +2,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { Users, ScanFace, Loader2, Sparkles, Eye, EyeOff, GitMerge, X, Check } from 'lucide-react';
 import Navbar from '../components/Navbar';
-import { getPeople, getPreviewUrl, getClusterData, applyClusteringResults, mergePeople, getLegacyFaceStats, resetLegacyFaces } from '../api';
+import { getPeople, getPreviewUrl, getFullClusterData, applyClusteringResults, mergePeople, getLegacyFaceStats, resetLegacyFaces } from '../api';
 import type { Person, LegacyFaceStats } from '../api';
 import { runBackfillScan } from '../faceBackfill';
 import type { BackfillProgress } from '../faceBackfill';
@@ -116,9 +116,11 @@ const AdminPeople: React.FC = () => {
 
   /**
    * Runs the ENTIRE clustering pass client-side in one shot (see faceClusteringClient.ts) —
-   * fetches every unclustered face + every existing cluster's centroid, computes assignments
+   * fetches every unclustered face + every existing cluster's centroid via getFullClusterData()
+   * (itself paginated across several small requests — see api.ts's doc comment on why even
+   * FETCHING an unbounded number of rows in one Worker call is unsafe), computes assignments
    * in the browser (no CPU-time limit here, unlike the Worker), then POSTs the results to be
-   * persisted. The persist step is deliberately split into several smaller
+   * persisted. The persist step is likewise split into several smaller
    * /admin/people/apply-clustering calls (see chunkClusteringResultsForApply()'s doc comment)
    * — sending every result in a single POST call can exceed the Workers Free plan's 50-
    * subrequests-per-request limit once a pass creates many new clusters, aborting the request
@@ -128,7 +130,9 @@ const AdminPeople: React.FC = () => {
     setClustering(true);
     setClusterProgress(null);
     try {
-      const { faces, clusters } = await getClusterData(true);
+      const { faces, clusters } = await getFullClusterData(true, (facesLoaded) => {
+        setClusterProgress({ processed: 0, total: facesLoaded });
+      });
       if (faces.length === 0) {
         await loadData();
         return;
@@ -164,9 +168,12 @@ const AdminPeople: React.FC = () => {
 
   /**
    * Runs the ENTIRE O(clusterCount²) merge-suggestion scan client-side in one shot — see
-   * faceClusteringClient.ts's findClientSideMergeSuggestions(). No cursor/pagination needed:
-   * a browser can examine even hundreds of thousands of pairs in well under a second, unlike
-   * the Worker (which used to need many resumed calls to stay within a 10ms CPU budget).
+   * faceClusteringClient.ts's findClientSideMergeSuggestions(). The scan itself needs no
+   * cursor/pagination (a browser can examine even hundreds of thousands of pairs in well under
+   * a second), but FETCHING the cluster centroids first still is paginated (getFullClusterData()
+   * — see api.ts's doc comment), since converting/serializing an unbounded number of rows is
+   * itself real, library-size-scaling CPU work on the Worker side, independent of any
+   * vector-similarity math.
    */
   const handleFindMergeSuggestions = async () => {
     setFindingMerges(true);
@@ -179,7 +186,9 @@ const AdminPeople: React.FC = () => {
       // below are current.
       await loadData();
 
-      const { clusters } = await getClusterData(false);
+      const { clusters } = await getFullClusterData(false, (_facesLoaded, clustersLoaded) => {
+        setMergeScanProgress({ comparisons: 0, total: clustersLoaded });
+      });
 
       const runScan = (minSimilarity: number) =>
         findClientSideMergeSuggestions(clusters, minSimilarity, (comparisons, total) => {

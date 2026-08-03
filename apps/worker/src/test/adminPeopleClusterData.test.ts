@@ -59,7 +59,7 @@ describe('GET /admin/people/cluster-data', () => {
 
     expect(res.status).toBe(200);
     expect(body.faces).toHaveLength(1);
-    expect(getClusterDataMock).toHaveBeenCalledWith(expect.anything(), true);
+    expect(getClusterDataMock).toHaveBeenCalledWith(expect.anything(), true, 0, 0);
   });
 
   it('passes includeFaces=false through when ?includeFaces=0 is given', async () => {
@@ -67,7 +67,7 @@ describe('GET /admin/people/cluster-data', () => {
 
     await peopleRouter.request('http://localhost/cluster-data?includeFaces=0', {}, makeEnv());
 
-    expect(getClusterDataMock).toHaveBeenCalledWith(expect.anything(), false);
+    expect(getClusterDataMock).toHaveBeenCalledWith(expect.anything(), false, 0, 0);
   });
 
   it('rejects non-admin requests', async () => {

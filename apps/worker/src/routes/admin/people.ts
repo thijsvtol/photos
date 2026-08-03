@@ -21,17 +21,24 @@ app.use('/*', requireAdmin);
 /**
  * GET /people/cluster-data
  *
- * Returns the raw data the browser needs to run a full clustering pass or merge-suggestions
- * scan itself: every currently-unclustered face's embedding, and every existing person
- * cluster's centroid. Pure I/O (SELECT), no vector math — cheap regardless of library size.
- * Pass `?includeFaces=0` to skip the (potentially large) unclustered-faces array when only
- * cluster centroids are needed (e.g. the merge-suggestions scan, which never touches
- * photo_faces at all).
+ * Returns ONE PAGE of the raw data the browser needs to run a full clustering pass or merge-
+ * suggestions scan itself: unclustered faces + person cluster centroids. Cursor-paginated
+ * (`?afterClusterId=`/`?afterFaceId=`, both id-based/exclusive) — a single call converting/
+ * serializing an UNBOUNDED number of rows is itself real, library-size-scaling CPU work (BLOB
+ * -> array conversion + JSON encoding), independent of any vector-similarity math, and can
+ * alone exceed the Workers Free plan's 10ms CPU-time limit for a large library — see
+ * faceClustering.ts's `PAGE_SIZE` doc comment for the full explanation. The response's
+ * `nextClusterCursor`/`nextFaceCursor` (null once exhausted) tell the caller (see
+ * apps/web/src/api.ts's `getFullClusterData()`) whether to fetch another page. Pass
+ * `?includeFaces=0` to skip the (potentially large) unclustered-faces array/pagination entirely
+ * when only cluster centroids are needed (e.g. the merge-suggestions scan).
  */
 app.get('/cluster-data', async (c) => {
   try {
     const includeFaces = c.req.query('includeFaces') !== '0';
-    const data = await getClusterData(c.env, includeFaces);
+    const afterClusterId = parseInt(c.req.query('afterClusterId') || '0', 10) || 0;
+    const afterFaceId = parseInt(c.req.query('afterFaceId') || '0', 10) || 0;
+    const data = await getClusterData(c.env, includeFaces, afterClusterId, afterFaceId);
     return c.json(data);
   } catch (error) {
     console.error('Error fetching cluster data:', error);
