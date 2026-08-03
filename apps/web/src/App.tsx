@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect } from 'react';
+import { Suspense, useEffect } from 'react';
 import { BrowserRouter, Routes, Route, useNavigate, useLocation } from 'react-router-dom';
 import { HelmetProvider } from 'react-helmet-async';
 import { Capacitor } from '@capacitor/core';
@@ -15,32 +15,36 @@ import { AndroidAppPrompt } from './components/AndroidAppPrompt';
 import { initAnalytics, trackPageView } from './services/analytics';
 import { useAndroidBackButton } from './hooks/useAndroidBackButton';
 import { useStatusBar } from './hooks/useStatusBar';
+import { lazyWithReload } from './lazyWithReload';
 
-// Lazy load route components for better code splitting
-const Landing = lazy(() => import('./pages/Landing'));
-const EventList = lazy(() => import('./pages/EventList'));
-const EventGallery = lazy(() => import('./pages/EventGallery'));
-const PhotoDetail = lazy(() => import('./pages/PhotoDetail'));
-const MyFavorites = lazy(() => import('./pages/MyFavorites'));
-const Logout = lazy(() => import('./pages/Logout'));
-const MapView = lazy(() => import('./pages/MapView'));
-const PhotoUsage = lazy(() => import('./pages/PhotoUsage'));
-const InviteAccept = lazy(() => import('./pages/InviteAccept'));
-const PrivacyPolicy = lazy(() => import('./pages/PrivacyPolicy'));
-const ShareUpload = lazy(() => import('./pages/ShareUpload'));
-const Timeline = lazy(() => import('./pages/Timeline'));
-const CastReceiver = lazy(() => import('./pages/CastReceiver'));
-const SearchPage = lazy(() => import('./pages/SearchPage'));
-const AdminPeople = lazy(() => import('./pages/AdminPeople'));
-const AdminPersonDetail = lazy(() => import('./pages/AdminPersonDetail'));
-const AdminDashboard = lazy(() => import('./pages/AdminDashboard'));
-const AdminPhotoManager = lazy(() => import('./pages/AdminPhotoManager'));
-const AdminTagManager = lazy(() => import('./pages/AdminTagManager'));
-const AdminTrash = lazy(() => import('./pages/AdminTrash'));
-const AdminDuplicates = lazy(() => import('./pages/AdminDuplicates'));
-const AdminAlbums = lazy(() => import('./pages/AdminAlbums'));
-const AdminAlbumDetail = lazy(() => import('./pages/AdminAlbumDetail'));
-const AdminActivity = lazy(() => import('./pages/AdminActivity'));
+// Lazy load route components for better code splitting — wrapped in lazyWithReload() so a
+// stale hashed-chunk 404 (after a new deploy replaces the file a user's already-open tab still
+// references) self-heals with one automatic reload instead of showing a broken page — see
+// lazyWithReload.ts's doc comment for the full 2026-08-03 incident this fixes.
+const Landing = lazyWithReload(() => import('./pages/Landing'));
+const EventList = lazyWithReload(() => import('./pages/EventList'));
+const EventGallery = lazyWithReload(() => import('./pages/EventGallery'));
+const PhotoDetail = lazyWithReload(() => import('./pages/PhotoDetail'));
+const MyFavorites = lazyWithReload(() => import('./pages/MyFavorites'));
+const Logout = lazyWithReload(() => import('./pages/Logout'));
+const MapView = lazyWithReload(() => import('./pages/MapView'));
+const PhotoUsage = lazyWithReload(() => import('./pages/PhotoUsage'));
+const InviteAccept = lazyWithReload(() => import('./pages/InviteAccept'));
+const PrivacyPolicy = lazyWithReload(() => import('./pages/PrivacyPolicy'));
+const ShareUpload = lazyWithReload(() => import('./pages/ShareUpload'));
+const Timeline = lazyWithReload(() => import('./pages/Timeline'));
+const CastReceiver = lazyWithReload(() => import('./pages/CastReceiver'));
+const SearchPage = lazyWithReload(() => import('./pages/SearchPage'));
+const AdminPeople = lazyWithReload(() => import('./pages/AdminPeople'));
+const AdminPersonDetail = lazyWithReload(() => import('./pages/AdminPersonDetail'));
+const AdminDashboard = lazyWithReload(() => import('./pages/AdminDashboard'));
+const AdminPhotoManager = lazyWithReload(() => import('./pages/AdminPhotoManager'));
+const AdminTagManager = lazyWithReload(() => import('./pages/AdminTagManager'));
+const AdminTrash = lazyWithReload(() => import('./pages/AdminTrash'));
+const AdminDuplicates = lazyWithReload(() => import('./pages/AdminDuplicates'));
+const AdminAlbums = lazyWithReload(() => import('./pages/AdminAlbums'));
+const AdminAlbumDetail = lazyWithReload(() => import('./pages/AdminAlbumDetail'));
+const AdminActivity = lazyWithReload(() => import('./pages/AdminActivity'));
 
 // Loading component
 const LoadingFallback = () => (

@@ -9,6 +9,22 @@ import { folderSyncService } from './services/folderSync';
 import { MobileAuthService } from './services/mobileAuth';
 import { startFaceDetectionQueue } from './faceDetectionQueue';
 
+// Self-heals from stale-hashed-chunk failures after a new deploy (see lazyWithReload.ts's doc
+// comment for the full 2026-08-03 "entire site is broken / MIME type text/html" incident this
+// prevents). `lazyWithReload()` (used for all React Router route chunks in App.tsx) catches
+// failures from EXPLICIT dynamic import() calls, but Vite ALSO proactively <link
+// rel="modulepreload">s chunks it predicts will be needed soon — a failure there fires this
+// separate `vite:preloadError` event instead of rejecting any particular import() promise, so
+// it needs its own listener. Same one-reload-per-page-load guard (shared sessionStorage key
+// with lazyWithReload.ts) to avoid a reload loop if a failure persists for an unrelated reason.
+window.addEventListener('vite:preloadError', () => {
+  const reloadKey = 'lazyWithReload:reloaded';
+  if (!sessionStorage.getItem(reloadKey)) {
+    sessionStorage.setItem(reloadKey, '1');
+    window.location.reload();
+  }
+});
+
 // CRITICAL: Log immediately to verify JavaScript executes
 console.log('[MAIN.TSX] ===== JavaScript bundle executing =====');
 console.log('[MAIN.TSX] isNativePlatform:', Capacitor.isNativePlatform());
