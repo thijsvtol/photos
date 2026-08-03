@@ -163,6 +163,28 @@ async function yieldPeriodically(iteration: number, everyN: number): Promise<voi
  */
 const CENTROID_UPDATE_CAP = 30;
 
+// HARD CAP on how many faces a single cluster can automatically absorb in one "Cluster Now"
+// pass (added 2026-08-03 after production evidence that CENTROID_UPDATE_CAP ALONE was
+// insufficient): even with drift-dilution capped, one cluster still grew to 2467 of a
+// 2915-face library (85%) — proving that for this app's content (action-sports, where
+// helmets/goggles/motion blur make faces measurably less distinctive to the embedding model),
+// individual faces can keep crossing SAME_PERSON_THRESHOLD against an already-large cluster's
+// centroid indefinitely; capping the LEARNING RATE slows dilution but does not stop the
+// snowball once enough borderline matches accumulate. This is a hard, structural circuit
+// breaker instead of a statistical mitigation: once a cluster (existing OR newly created within
+// this same pass) reaches `MAX_AUTO_CLUSTER_SIZE` members, it is EXCLUDED from being a match
+// target for any further face in this pass — a face that would have joined it instead starts
+// (or joins) a different cluster. This guarantees no single automatic pass can ever again
+// produce an unbounded runaway cluster, at the cost of splitting one real person's photos
+// across multiple smaller groups once they exceed the cap — exactly the scenario the new
+// manual "Combine with another person" feature (see AdminPersonDetail.tsx) exists to clean up
+// afterward, one deliberate admin-reviewed action at a time rather than an unsupervised
+// snowball. Clusters already AT/OVER the cap from a PREVIOUS pass are also excluded (checked
+// against the incoming face_count), so an oversized legacy cluster can't keep growing either
+// — it stays exactly as large as it already is until an admin manually intervenes (merge/move,
+// or delete-and-let-it-recluster).
+const MAX_AUTO_CLUSTER_SIZE = 60;
+
 export async function runClientSideClustering(
   faces: ClusterDataFace[],
   clusters: ClusterDataCluster[],
@@ -203,6 +225,7 @@ export async function runClientSideClustering(
     let bestTarget: { centroid: Float32Array; count: number; addedFaceIds: number[]; changed?: boolean } | null = null;
 
     for (const cluster of working) {
+      if (cluster.count >= MAX_AUTO_CLUSTER_SIZE) continue;
       const similarity = humanSimilarity(embedding, cluster.centroid);
       if (similarity > bestSimilarity) {
         bestSimilarity = similarity;
@@ -210,6 +233,7 @@ export async function runClientSideClustering(
       }
     }
     for (const cluster of newClusters) {
+      if (cluster.count >= MAX_AUTO_CLUSTER_SIZE) continue;
       const similarity = humanSimilarity(embedding, cluster.centroid);
       if (similarity > bestSimilarity) {
         bestSimilarity = similarity;

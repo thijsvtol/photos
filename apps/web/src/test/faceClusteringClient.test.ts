@@ -200,6 +200,48 @@ describe('runClientSideClustering', () => {
     // NOT the old formula's 3 * (1/51) ≈ 0.0588.
     expect(results[0].centroidEmbedding[0]).toBeCloseTo(0.1, 5);
   });
+
+  it('excludes an existing cluster already at/over MAX_AUTO_CLUSTER_SIZE (60) from receiving any more automatic matches (regression test for the 2467-face runaway-merge incident that survived the drift-cap fix alone)', async () => {
+    const existingClusters: ClusterDataCluster[] = [
+      { id: 1, centroidEmbedding: pad1024(0, 0, 0), faceCount: 60 }, // already at the cap
+    ];
+    // A face that would clearly match cluster 1 on similarity alone (identical centroid).
+    const faces: ClusterDataFace[] = [{ id: 999, photoId: 'photo-x', embedding: pad1024(0, 0, 0) }];
+
+    const results = await runClientSideClustering(faces, existingClusters);
+
+    // The face must NOT be added to cluster 1 (still at the cap) — instead it starts a
+    // brand-new cluster.
+    expect(results).toHaveLength(1);
+    expect(results[0].clusterId).toBeNull();
+    expect(results[0].addedFaceIds).toEqual([999]);
+  });
+
+  it('stops adding to a cluster mid-pass once it reaches MAX_AUTO_CLUSTER_SIZE, redirecting further matching faces elsewhere instead of letting it grow unbounded', async () => {
+    // Start one cluster just 1 face below the cap, then feed it several more near-identical
+    // faces in the same pass — the FIRST should still be accepted (bringing it exactly to the
+    // cap), but every face AFTER that must be redirected into a new cluster instead.
+    const existingClusters: ClusterDataCluster[] = [
+      { id: 1, centroidEmbedding: pad1024(0, 0, 0), faceCount: 59 },
+    ];
+    const faces: ClusterDataFace[] = [
+      { id: 1, photoId: 'photo-a', embedding: pad1024(0, 0, 0) },
+      { id: 2, photoId: 'photo-b', embedding: pad1024(0, 0, 0) },
+      { id: 3, photoId: 'photo-c', embedding: pad1024(0, 0, 0) },
+    ];
+
+    const results = await runClientSideClustering(faces, existingClusters);
+
+    const originalClusterResult = results.find((r) => r.clusterId === 1);
+    expect(originalClusterResult?.faceCount).toBe(60); // 59 + exactly 1 more, then capped
+    expect(originalClusterResult?.addedFaceIds).toEqual([1]);
+
+    // Faces 2 and 3 must have gone somewhere else (a brand-new cluster), not into cluster 1.
+    const newClusterResults = results.filter((r) => r.clusterId === null);
+    expect(newClusterResults.length).toBeGreaterThan(0);
+    const allNewlyAddedIds = newClusterResults.flatMap((r) => r.addedFaceIds);
+    expect(allNewlyAddedIds).toEqual(expect.arrayContaining([2, 3]));
+  });
 });
 
 describe('findClientSideMergeSuggestions', () => {
