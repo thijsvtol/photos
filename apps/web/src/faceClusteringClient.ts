@@ -163,27 +163,46 @@ async function yieldPeriodically(iteration: number, everyN: number): Promise<voi
  */
 const CENTROID_UPDATE_CAP = 30;
 
-// HARD CAP on how many faces a single cluster can automatically absorb in one "Cluster Now"
-// pass (added 2026-08-03 after production evidence that CENTROID_UPDATE_CAP ALONE was
-// insufficient): even with drift-dilution capped, one cluster still grew to 2467 of a
-// 2915-face library (85%) — proving that for this app's content (action-sports, where
-// helmets/goggles/motion blur make faces measurably less distinctive to the embedding model),
-// individual faces can keep crossing SAME_PERSON_THRESHOLD against an already-large cluster's
-// centroid indefinitely; capping the LEARNING RATE slows dilution but does not stop the
-// snowball once enough borderline matches accumulate. This is a hard, structural circuit
-// breaker instead of a statistical mitigation: once a cluster (existing OR newly created within
-// this same pass) reaches `MAX_AUTO_CLUSTER_SIZE` members, it is EXCLUDED from being a match
-// target for any further face in this pass — a face that would have joined it instead starts
-// (or joins) a different cluster. This guarantees no single automatic pass can ever again
-// produce an unbounded runaway cluster, at the cost of splitting one real person's photos
-// across multiple smaller groups once they exceed the cap — exactly the scenario the new
-// manual "Combine with another person" feature (see AdminPersonDetail.tsx) exists to clean up
-// afterward, one deliberate admin-reviewed action at a time rather than an unsupervised
-// snowball. Clusters already AT/OVER the cap from a PREVIOUS pass are also excluded (checked
-// against the incoming face_count), so an oversized legacy cluster can't keep growing either
-// — it stays exactly as large as it already is until an admin manually intervenes (merge/move,
-// or delete-and-let-it-recluster).
-const MAX_AUTO_CLUSTER_SIZE = 60;
+// ADAPTIVE (size-scaled) matching threshold, replacing an earlier HARD cluster-size cap
+// (2026-08-03) that turned out to be the wrong tool: a flat cap of 60 faces/cluster stopped the
+// runaway-merge snowball, but also incorrectly split real people who legitimately appear in
+// 200+ photos (this app's own photographer + regular friends) into multiple separate groups —
+// exactly the opposite of what clustering should do for a genuinely-recurring person. Simply
+// raising the cap would just delay the same snowball to a larger size instead of fixing it.
+//
+// The actual problem was never "clusters shouldn't get large" — it's that a FIXED similarity
+// bar (SAME_PERSON_THRESHOLD) becomes progressively less reliable evidence as a cluster's
+// centroid represents more and more distinct photos: a borderline ~0.50-0.55 similarity against
+// a small, tight 2-3-photo cluster is fairly good evidence of a real match, but the SAME
+// borderline score against an already-500-photo cluster's centroid is much weaker evidence
+// (given this app's content — action-sports with helmets/goggles/motion blur — genuinely
+// different people's faces can drift into that same borderline range against a large,
+// somewhat-generalized centroid). Fix: the bar a face must clear to join a cluster RISES
+// gradually with that cluster's current size, so:
+//  - Small/new clusters keep the original, already-tuned SAME_PERSON_THRESHOLD (0.5) — no
+//    behavior change for the common case of a person who has only accumulated a few photos.
+//  - Large, well-established clusters require an increasingly CONFIDENT match to keep growing,
+//    which lets a real recurring person's clearly-matching photos keep joining (their genuine
+//    similarity scores are typically well above the baseline threshold, not borderline) while
+//    filtering out the marginal, easily-wrong matches that caused the earlier snowball.
+// Growth is capped at MAX_THRESHOLD_BOOST so the bar never becomes unreasonably strict even for
+// a very large, legitimate cluster (200+ photos) — a genuinely well-matching face should still
+// pass a 0.60 bar even at that scale.
+const THRESHOLD_GROWTH_START = 20; // clusters below this size use the flat baseline threshold
+const THRESHOLD_GROWTH_RATE = 0.001; // additional threshold required per member above the start
+const MAX_THRESHOLD_BOOST = 0.1; // hard ceiling on how much the bar can rise (0.5 -> 0.6 max)
+
+function effectiveThresholdForClusterSize(count: number): number {
+  const boost = Math.min(MAX_THRESHOLD_BOOST, THRESHOLD_GROWTH_RATE * Math.max(0, count - THRESHOLD_GROWTH_START));
+  return SAME_PERSON_THRESHOLD + boost;
+}
+
+// Absolute, should-never-be-reached safety net (NOT the primary defense anymore — see
+// effectiveThresholdForClusterSize() above) against a truly pathological runaway in case some
+// future bug reintroduces one — comfortably above any real person's legitimate photo count in
+// this app's library, but still finite so a single cluster can never grow completely unbounded
+// regardless of any other logic's correctness.
+const MAX_AUTO_CLUSTER_SIZE = 2000;
 
 export async function runClientSideClustering(
   faces: ClusterDataFace[],
@@ -241,7 +260,7 @@ export async function runClientSideClustering(
       }
     }
 
-    if (bestTarget && bestSimilarity >= SAME_PERSON_THRESHOLD) {
+    if (bestTarget && bestSimilarity >= effectiveThresholdForClusterSize(bestTarget.count)) {
       const newCount = bestTarget.count + 1;
       const updateWeight = 1 / Math.min(newCount, CENTROID_UPDATE_CAP);
       const newCentroid = new Float32Array(bestTarget.centroid.length);

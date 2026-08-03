@@ -201,46 +201,54 @@ describe('runClientSideClustering', () => {
     expect(results[0].centroidEmbedding[0]).toBeCloseTo(0.1, 5);
   });
 
-  it('excludes an existing cluster already at/over MAX_AUTO_CLUSTER_SIZE (60) from receiving any more automatic matches (regression test for the 2467-face runaway-merge incident that survived the drift-cap fix alone)', async () => {
+  it('a small/new cluster still matches at the flat baseline threshold (no behavior change for the common case)', async () => {
+    // A single-dimension diff of 9.4 scores ~0.55 similarity — above the flat baseline
+    // SAME_PERSON_THRESHOLD (0.5), so a small cluster (below THRESHOLD_GROWTH_START=20) should
+    // still accept it exactly as before this fix.
     const existingClusters: ClusterDataCluster[] = [
-      { id: 1, centroidEmbedding: pad1024(0, 0, 0), faceCount: 60 }, // already at the cap
+      { id: 1, centroidEmbedding: pad1024(0), faceCount: 10 },
     ];
-    // A face that would clearly match cluster 1 on similarity alone (identical centroid).
-    const faces: ClusterDataFace[] = [{ id: 999, photoId: 'photo-x', embedding: pad1024(0, 0, 0) }];
+    const faces: ClusterDataFace[] = [{ id: 999, photoId: 'photo-x', embedding: pad1024(9.4) }];
 
     const results = await runClientSideClustering(faces, existingClusters);
 
-    // The face must NOT be added to cluster 1 (still at the cap) — instead it starts a
-    // brand-new cluster.
     expect(results).toHaveLength(1);
-    expect(results[0].clusterId).toBeNull();
-    expect(results[0].addedFaceIds).toEqual([999]);
+    expect(results[0].clusterId).toBe(1);
   });
 
-  it('stops adding to a cluster mid-pass once it reaches MAX_AUTO_CLUSTER_SIZE, redirecting further matching faces elsewhere instead of letting it grow unbounded', async () => {
-    // Start one cluster just 1 face below the cap, then feed it several more near-identical
-    // faces in the same pass — the FIRST should still be accepted (bringing it exactly to the
-    // cap), but every face AFTER that must be redirected into a new cluster instead.
+  it('a large, well-established cluster requires a MORE CONFIDENT match, rejecting the same borderline similarity a small cluster would accept (fix for the 2467-face runaway-merge incident, which a flat hard cap alone did not solve)', async () => {
+    // Same ~0.55-similarity face as above, but this time against an already-large (150-member)
+    // cluster — at that size the adaptive threshold has risen to its 0.6 ceiling
+    // (THRESHOLD_GROWTH_START=20, THRESHOLD_GROWTH_RATE=0.001, MAX_THRESHOLD_BOOST=0.1 -> fully
+    // saturated well before 150 members), so this borderline match must now be REJECTED,
+    // starting a new cluster instead of further diluting the large one.
     const existingClusters: ClusterDataCluster[] = [
-      { id: 1, centroidEmbedding: pad1024(0, 0, 0), faceCount: 59 },
+      { id: 1, centroidEmbedding: pad1024(0), faceCount: 150 },
     ];
-    const faces: ClusterDataFace[] = [
-      { id: 1, photoId: 'photo-a', embedding: pad1024(0, 0, 0) },
-      { id: 2, photoId: 'photo-b', embedding: pad1024(0, 0, 0) },
-      { id: 3, photoId: 'photo-c', embedding: pad1024(0, 0, 0) },
-    ];
+    const faces: ClusterDataFace[] = [{ id: 999, photoId: 'photo-x', embedding: pad1024(9.4) }];
 
     const results = await runClientSideClustering(faces, existingClusters);
 
-    const originalClusterResult = results.find((r) => r.clusterId === 1);
-    expect(originalClusterResult?.faceCount).toBe(60); // 59 + exactly 1 more, then capped
-    expect(originalClusterResult?.addedFaceIds).toEqual([1]);
+    expect(results).toHaveLength(1);
+    expect(results[0].clusterId).toBeNull(); // rejected from cluster 1, started a new one instead
+  });
 
-    // Faces 2 and 3 must have gone somewhere else (a brand-new cluster), not into cluster 1.
-    const newClusterResults = results.filter((r) => r.clusterId === null);
-    expect(newClusterResults.length).toBeGreaterThan(0);
-    const allNewlyAddedIds = newClusterResults.flatMap((r) => r.addedFaceIds);
-    expect(allNewlyAddedIds).toEqual(expect.arrayContaining([2, 3]));
+  it('lets a genuinely large, legitimate person (200+ photos) keep growing when the match is confidently ABOVE the raised bar — the whole point of replacing the old flat 60-face hard cap', async () => {
+    // A clearly-matching (near-identical) face should still join even a very large cluster,
+    // since 0.5+diff-derived-near-1.0 similarity comfortably clears the raised (but capped at
+    // 0.6) threshold — unlike the old flat MAX_AUTO_CLUSTER_SIZE=60 cap, which would have
+    // rejected this unconditionally purely based on size, incorrectly splitting a real
+    // recurring person (e.g. the photographer themselves) into multiple groups.
+    const existingClusters: ClusterDataCluster[] = [
+      { id: 1, centroidEmbedding: pad1024(0), faceCount: 250 },
+    ];
+    const faces: ClusterDataFace[] = [{ id: 999, photoId: 'photo-x', embedding: pad1024(0.01) }]; // near-identical
+
+    const results = await runClientSideClustering(faces, existingClusters);
+
+    expect(results).toHaveLength(1);
+    expect(results[0].clusterId).toBe(1);
+    expect(results[0].faceCount).toBe(251);
   });
 });
 
