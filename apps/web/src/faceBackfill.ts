@@ -28,27 +28,47 @@ export interface BackfillProgress {
 async function processPhoto(photo: { id: string; file_type: string; cache_version: number; event_slug: string }): Promise<void> {
   const previewUrl = getPreviewUrl(photo.event_slug, photo.id, photo.file_type, photo.cache_version);
 
-  // Fetch as a blob first (same pattern used by ImageEditorModal/auto-enhance)
-  // so @vladmandic/human always operates on a same-origin blob URL, avoiding any
-  // cross-origin canvas-tainting issues on native.
-  const res = await fetch(previewUrl);
-  if (!res.ok) throw new Error(`Failed to fetch preview (${res.status})`);
-  const blob = await res.blob();
-  const objectUrl = URL.createObjectURL(blob);
   try {
-    const faces = await detectFaces(objectUrl);
-    await saveBackfilledFaces(photo.id, faces);
-  } finally {
-    URL.revokeObjectURL(objectUrl);
+    // Fetch as a blob first (same pattern used by ImageEditorModal/auto-enhance)
+    // so @vladmandic/human always operates on a same-origin blob URL, avoiding any
+    // cross-origin canvas-tainting issues on native.
+    const res = await fetch(previewUrl);
+    if (!res.ok) throw new Error(`Failed to fetch preview (${res.status})`);
+    const blob = await res.blob();
+    const objectUrl = URL.createObjectURL(blob);
+    try {
+      const faces = await detectFaces(objectUrl);
+      await saveBackfilledFaces(photo.id, faces);
+    } finally {
+      URL.revokeObjectURL(objectUrl);
+    }
+  } catch (err) {
+    // A photo whose preview/original image can no longer be fetched or decoded (e.g. an
+    // orphaned row whose R2 object was removed, or a corrupt file) will NEVER succeed on
+    // retry — but faces_processed_at is only ever set on the SUCCESS path above, so before
+    // this fix such a photo was refetched by every future "Scan Library for Faces" run forever
+    // (GET /admin/photos/faces-pending always returns the SAME oldest still-unprocessed photos
+    // first), making the scan loop endlessly (processed count climbing while remaining stayed
+    // stuck near 0, since the exact same small stuck batch kept getting reselected). Mark it
+    // processed with 0 faces instead so it's never retried again — we genuinely cannot detect
+    // faces on an image that can't be fetched/decoded, so "checked, found none" is accurate.
+    console.warn('[faceBackfill] Failed to detect faces for photo — marking as processed with 0 faces to avoid retrying forever', photo.id, err);
+    try {
+      await saveBackfilledFaces(photo.id, []);
+    } catch (markErr) {
+      console.error('[faceBackfill] Also failed to mark photo as processed after a detection failure — it will be retried', photo.id, markErr);
+    }
   }
 }
 
 /**
  * Processes photos in small batches until none remain (or `onProgress`
- * returns false, signalling the caller wants to stop). Never throws — a
- * single photo failing to process is logged and skipped so one bad photo
- * doesn't halt the whole scan (it's simply left for a future run to retry,
- * since faces_processed_at is only set on success).
+ * returns false, signalling the caller wants to stop). Never throws for a
+ * single bad photo — processPhoto() itself marks a permanently-broken photo
+ * (missing/corrupt image) as processed with 0 faces rather than leaving it
+ * pending forever (see its own doc comment for why that used to cause an
+ * infinite scan loop). The try/catch below is just defense-in-depth against
+ * an unexpected error escaping processPhoto entirely.
  */
 export async function runBackfillScan(
   onProgress: (progress: BackfillProgress) => boolean | void
