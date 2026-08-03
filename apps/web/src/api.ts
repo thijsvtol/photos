@@ -526,6 +526,7 @@ export const applyClusteringResults = async (results: ClusterResult[]): Promise<
 export interface LegacyFaceStats {
   legacyFaces: number;
   legacyClusters: number;
+  corruptedClusters: number;
 }
 
 /** See resetLegacyFaces()'s doc comment (apps/worker/src/faceClustering.ts) — checks whether

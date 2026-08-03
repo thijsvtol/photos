@@ -48,11 +48,30 @@ export const DEFAULT_MERGE_SUGGESTION_THRESHOLD = 0.35;
  * Minkowski distance between two descriptors (order=2 = Euclidean), ported from Human's
  * `distance()` — NOT square-rooted here (matches the upstream implementation, which takes the
  * root later inside `normalizeDistance`/`similarity`).
+ *
+ * IMPORTANT: returns `Number.POSITIVE_INFINITY` (never-a-match) if the two descriptors have
+ * different lengths, rather than silently comparing only their first `Math.min(a.length,
+ * b.length)` dimensions. This app switched face-embedding models mid-flight (face-api.js's
+ * 128-dim descriptor -> @vladmandic/human's 1024-dim one, see faceDetection.ts's doc comment)
+ * — any photo processed before the switch has a permanently-incompatible-shaped embedding
+ * (different model, different training, each dimension means something different), so
+ * comparing a 1024-dim descriptor against a 128-dim one by truncating both to the first 128
+ * values does NOT produce a meaningful (if imprecise) similarity score — it produces a
+ * comparison between two unrelated numeric spaces that can spuriously score as a "match" (or
+ * not) essentially at random. Worse, if such a spurious match were ever accepted, the running-
+ * average centroid update in runClientSideClustering() below indexes the embedding by
+ * `newCentroid.length` (the EXISTING, correct-dimension cluster's length) — reading past the
+ * end of a shorter legacy embedding produces `undefined`, and `undefined - number` is `NaN`,
+ * permanently corrupting that cluster's centroid with `NaN` in every dimension beyond 128 (see
+ * repo memory for the full incident writeup). Rejecting mismatched-length comparisons outright
+ * (instead of a defensive silent truncation) prevents this class of corruption entirely — see
+ * getLegacyFaceStats()/resetLegacyFaces() in apps/worker/src/faceClustering.ts for the
+ * (separate, one-time) cleanup of data already corrupted before this fix existed.
  */
 export function humanDistance(a: Float32Array, b: Float32Array): number {
+  if (a.length !== b.length) return Number.POSITIVE_INFINITY;
   let sum = 0;
-  const len = Math.min(a.length, b.length);
-  for (let i = 0; i < len; i++) {
+  for (let i = 0; i < a.length; i++) {
     const diff = a[i] - b[i];
     sum += diff * diff;
   }
@@ -62,11 +81,13 @@ export function humanDistance(a: Float32Array, b: Float32Array): number {
 /**
  * Normalized 0..1 similarity between two face descriptors, ported from Human's
  * `similarity()`/`normalizeDistance()`. 0 = no similarity, 1 = perfect match; per Human's own
- * docs, >=0.5 is considered a match.
+ * docs, >=0.5 is considered a match. Returns 0 for descriptors of different lengths — see
+ * humanDistance()'s doc comment above.
  */
 export function humanSimilarity(a: Float32Array, b: Float32Array): number {
   const dist = humanDistance(a, b);
   if (dist === 0) return 1; // short-circuit for identical inputs
+  if (!Number.isFinite(dist)) return 0; // mismatched descriptor lengths — never a match
   const root = Math.sqrt(dist);
   const norm = (1 - root / 100 - MATCH_MIN) / (MATCH_MAX - MATCH_MIN);
   return Math.round(100 * Math.max(Math.min(norm, 1), 0)) / 100;

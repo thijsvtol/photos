@@ -101,6 +101,7 @@ const AdminPeople: React.FC = () => {
         if (cancelRef.current) return false;
       });
       await loadData();
+      setLegacyStats(await getLegacyFaceStats());
     } catch (err) {
       setError('Face scan failed');
       console.error(err);
@@ -139,6 +140,7 @@ const AdminPeople: React.FC = () => {
         await applyClusteringResults(results);
       }
       await loadData();
+      setLegacyStats(await getLegacyFaceStats());
     } catch (err) {
       setError('Clustering failed');
       console.error(err);
@@ -318,17 +320,29 @@ const AdminPeople: React.FC = () => {
           </div>
         )}
 
-        {legacyStats && (legacyStats.legacyFaces > 0 || legacyStats.legacyClusters > 0) && (
+        {legacyStats && (legacyStats.legacyFaces > 0 || legacyStats.legacyClusters > 0 || legacyStats.corruptedClusters > 0) && (
           <div className="mb-8 bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800 text-amber-800 dark:text-amber-300 px-4 py-3 rounded-lg">
             <p className="font-medium mb-1">Outdated face data detected</p>
             <p className="text-sm mb-3">
               {legacyStats.legacyFaces} face{legacyStats.legacyFaces === 1 ? '' : 's'} and{' '}
               {legacyStats.legacyClusters} group{legacyStats.legacyClusters === 1 ? '' : 's'} were
               detected using an older face-recognition model and can no longer be matched against
-              anything scanned since. This is very likely why "Find Merge Suggestions" (or
-              clustering) finds nothing for people who obviously do appear more than once. Fixing
-              this removes the outdated data and re-queues those photos for "Scan Library for
-              Faces" to re-detect — no photos are affected, only the face data.
+              anything scanned since.
+              {legacyStats.corruptedClusters > 0 && (
+                <>
+                  {' '}Additionally, {legacyStats.corruptedClusters} group
+                  {legacyStats.corruptedClusters === 1 ? '' : 's'} got corrupted by an old bug that
+                  let one of these outdated faces merge in incorrectly, permanently breaking that
+                  group's ability to match future faces (this is why clustering can produce many
+                  separate 2-photo groups for what's really the same person).
+                </>
+              )}{' '}
+              This is very likely why "Find Merge Suggestions" (or clustering) finds nothing for
+              people who obviously do appear more than once. Fixing this removes the outdated/
+              corrupted data (any affected photo just goes back to unclustered — nothing is
+              deleted except the group records themselves) and re-queues legacy photos for "Scan
+              Library for Faces" to re-detect. Run "Cluster Now" again afterwards to re-group
+              everything cleanly.
             </p>
             <button
               onClick={handleFixLegacyFaces}

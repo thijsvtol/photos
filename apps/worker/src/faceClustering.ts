@@ -176,24 +176,57 @@ const EXPECTED_EMBEDDING_BYTES = EXPECTED_EMBEDDING_LENGTH * 4;
 /** Number of photo_faces rows and person_clusters rows still using the legacy pre-2026-08
  *  face-api.js embedding format (see EXPECTED_EMBEDDING_BYTES doc comment above) — surfaced to
  *  the admin so they know why "same person" matches might be silently missing, and so they can
- *  trigger resetLegacyFaces() to fix it. */
+ *  trigger resetLegacyFaces() to fix it. `corruptedClusters` counts a SEPARATE, worse problem:
+ *  clusters whose centroid is already the CORRECT byte length but contains `NaN` values — see
+ *  findCorruptedClusterIds()'s doc comment below for exactly how this happens. */
 export interface LegacyFaceStats {
   legacyFaces: number;
   legacyClusters: number;
+  corruptedClusters: number;
+}
+
+/**
+ * Finds person_clusters whose centroid_embedding is the CORRECT byte length (so
+ * getLegacyFaceStats()'s simple LENGTH() check misses them) but contains `NaN` in one or more
+ * dimensions — this happens when a legacy (128-dim) face was, before humanDistance()'s
+ * dimension-mismatch guard existed (see faceClusteringClient.ts's doc comment on humanDistance
+ * for the full incident), incorrectly matched via a truncated 128-dim-only comparison into an
+ * otherwise-healthy 1024-dim cluster: the running-average centroid update indexes the new
+ * face's embedding by the EXISTING (1024-dim) cluster's length, so reading past the shorter
+ * legacy embedding's end produces `undefined`, and `undefined - number` is `NaN` — permanently
+ * corrupting that cluster's centroid in every dimension beyond 128, silently breaking ALL
+ * future comparisons against it (a `NaN` in any operand makes every comparison false, so a
+ * corrupted cluster can never again match a genuinely-matching face, forcing new near-duplicate
+ * clusters to form for what should be the same person — the "lots of 2-photo duplicate people"
+ * symptom this exists to catch). Deliberately does the NaN check in JS after fetching each
+ * candidate cluster's raw bytes, since SQLite has no portable way to test individual float32
+ * BLOB elements for NaN.
+ */
+async function findCorruptedClusterIds(env: Env): Promise<number[]> {
+  const { results } = await env.DB
+    .prepare('SELECT id, centroid_embedding FROM person_clusters WHERE LENGTH(centroid_embedding) = ?')
+    .bind(EXPECTED_EMBEDDING_BYTES)
+    .all<{ id: number; centroid_embedding: ArrayBuffer }>();
+
+  return (results || [])
+    .filter((row) => new Float32Array(row.centroid_embedding).some((v) => Number.isNaN(v)))
+    .map((row) => row.id);
 }
 
 export async function getLegacyFaceStats(env: Env): Promise<LegacyFaceStats> {
-  const [faceRow, clusterRow] = await Promise.all([
+  const [faceRow, clusterRow, corruptedClusterIds] = await Promise.all([
     env.DB.prepare('SELECT COUNT(*) as count FROM photo_faces WHERE LENGTH(embedding) != ?')
       .bind(EXPECTED_EMBEDDING_BYTES)
       .first<{ count: number }>(),
     env.DB.prepare('SELECT COUNT(*) as count FROM person_clusters WHERE LENGTH(centroid_embedding) != ?')
       .bind(EXPECTED_EMBEDDING_BYTES)
       .first<{ count: number }>(),
+    findCorruptedClusterIds(env),
   ]);
   return {
     legacyFaces: faceRow?.count ?? 0,
     legacyClusters: clusterRow?.count ?? 0,
+    corruptedClusters: corruptedClusterIds.length,
   };
 }
 
@@ -212,14 +245,20 @@ export async function getLegacyFaceStats(env: Env): Promise<LegacyFaceStats> {
  *     via truncated-comparison) assigned to that legacy cluster are unassigned back to
  *     unclustered (`person_id = NULL`) rather than deleted, so they simply get a chance to
  *     re-cluster correctly on the next "Cluster Now" pass.
- * Pure I/O, safe to run repeatedly (a no-op once no legacy rows remain).
+ *  3. Deletes every person_clusters row whose centroid is already NaN-corrupted (see
+ *     findCorruptedClusterIds() above) — unlike step 2, ALL of that cluster's member faces are
+ *     unassigned back to unclustered (not deleted), since those faces themselves are perfectly
+ *     valid, correctly-dimensioned data; only the cluster's centroid/grouping is untrustworthy.
+ * Pure I/O, safe to run repeatedly (a no-op once no legacy/corrupted rows remain).
  */
 export async function resetLegacyFaces(env: Env): Promise<{ facesReset: number; clustersRemoved: number }> {
-  const { results: legacyClusterRows } = await env.DB
-    .prepare('SELECT id FROM person_clusters WHERE LENGTH(centroid_embedding) != ?')
-    .bind(EXPECTED_EMBEDDING_BYTES)
-    .all<{ id: number }>();
-  const legacyClusterIds = (legacyClusterRows || []).map((r) => r.id);
+  const [{ results: legacyClusterRows }, corruptedClusterIds] = await Promise.all([
+    env.DB.prepare('SELECT id FROM person_clusters WHERE LENGTH(centroid_embedding) != ?')
+      .bind(EXPECTED_EMBEDDING_BYTES)
+      .all<{ id: number }>(),
+    findCorruptedClusterIds(env),
+  ]);
+  const legacyClusterIds = [...new Set([...(legacyClusterRows || []).map((r) => r.id), ...corruptedClusterIds])];
 
   for (const idChunk of chunk(legacyClusterIds, FACE_ID_CHUNK_SIZE)) {
     if (idChunk.length === 0) continue;

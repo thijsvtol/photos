@@ -44,6 +44,18 @@ describe('humanDistance / humanSimilarity', () => {
     const b = new Float32Array([16]);
     expect(humanSimilarity(a, b)).toBe(0);
   });
+
+  it('humanDistance is Infinity for descriptors of different lengths (never a truncated/silent comparison)', () => {
+    const legacy = new Float32Array(128); // pre-2026-08 face-api.js descriptor length
+    const current = new Float32Array(1024); // @vladmandic/human descriptor length
+    expect(humanDistance(legacy, current)).toBe(Number.POSITIVE_INFINITY);
+  });
+
+  it('humanSimilarity is 0 (never a match) for descriptors of different lengths, even if the overlapping prefix is identical', () => {
+    const legacy = new Float32Array(128).fill(1);
+    const current = new Float32Array(1024).fill(1); // first 128 values identical to `legacy`
+    expect(humanSimilarity(legacy, current)).toBe(0);
+  });
 });
 
 describe('runClientSideClustering', () => {

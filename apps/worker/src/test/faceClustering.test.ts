@@ -37,6 +37,13 @@ class FakeFaceClusteringDb {
         return stmt;
       },
       async all<T>() {
+        if (query.includes('SELECT id, centroid_embedding FROM person_clusters WHERE LENGTH(centroid_embedding)')) {
+          const [expectedBytes] = boundArgs as [number];
+          const results = db.clusters
+            .filter((c) => c.centroid_embedding.byteLength === expectedBytes)
+            .map((c) => ({ id: c.id, centroid_embedding: c.centroid_embedding }));
+          return { results: results as T[] };
+        }
         if (query.includes('SELECT id FROM person_clusters WHERE LENGTH(centroid_embedding)')) {
           const [expectedBytes] = boundArgs as [number];
           const results = db.clusters
@@ -284,7 +291,7 @@ describe('getLegacyFaceStats', () => {
 
     const stats = await getLegacyFaceStats(makeEnv(db));
 
-    expect(stats).toEqual({ legacyFaces: 1, legacyClusters: 1 });
+    expect(stats).toEqual({ legacyFaces: 1, legacyClusters: 1, corruptedClusters: 0 });
   });
 
   it('returns all zeros for a fully up-to-date library', async () => {
@@ -292,7 +299,21 @@ describe('getLegacyFaceStats', () => {
     db.faces = [{ id: 1, photo_id: 'photo-a', embedding: embeddingOf(...Array(1024).fill(0)), person_id: null }];
     db.clusters = [{ id: 1, centroid_embedding: embeddingOf(...Array(1024).fill(0)), face_count: 1 }];
 
-    expect(await getLegacyFaceStats(makeEnv(db))).toEqual({ legacyFaces: 0, legacyClusters: 0 });
+    expect(await getLegacyFaceStats(makeEnv(db))).toEqual({ legacyFaces: 0, legacyClusters: 0, corruptedClusters: 0 });
+  });
+
+  it('separately counts clusters whose centroid is the CORRECT byte length but contains NaN (corrupted by a past truncated-comparison merge)', async () => {
+    const db = new FakeFaceClusteringDb();
+    const corrupted = new Float32Array(1024).fill(0);
+    corrupted[500] = NaN; // simulates the dimension-mismatch-update bug described in faceClustering.ts
+    db.clusters = [
+      { id: 1, centroid_embedding: embeddingOf(...Array(1024).fill(0)), face_count: 1 }, // healthy
+      { id: 2, centroid_embedding: corrupted.buffer, face_count: 3 }, // corrupted, but right length
+    ];
+
+    const stats = await getLegacyFaceStats(makeEnv(db));
+
+    expect(stats).toEqual({ legacyFaces: 0, legacyClusters: 0, corruptedClusters: 1 });
   });
 });
 
@@ -340,5 +361,33 @@ describe('resetLegacyFaces', () => {
     expect(result).toEqual({ facesReset: 0, clustersRemoved: 0 });
     expect(db.clusters).toHaveLength(1);
     expect(db.faces).toHaveLength(1);
+  });
+
+  it('also cleans up a NaN-corrupted cluster (correct byte length, but a bad float from a past truncated-comparison merge), unassigning ALL its member faces', async () => {
+    const db = new FakeFaceClusteringDb();
+    const corrupted = new Float32Array(1024).fill(0);
+    corrupted[999] = NaN;
+    db.photos = [{ id: 'photo-current', faces_processed_at: '2026-08-01' }];
+    db.clusters = [
+      { id: 1, centroid_embedding: embeddingOf(...Array(1024).fill(0)), face_count: 1 }, // healthy, untouched
+      { id: 2, centroid_embedding: corrupted.buffer, face_count: 2 }, // corrupted
+    ];
+    db.faces = [
+      { id: 1, photo_id: 'photo-current', embedding: embeddingOf(...Array(1024).fill(0)), person_id: 1 },
+      // Both members of the corrupted cluster are perfectly valid-dimension faces — only the
+      // cluster's grouping/centroid is untrustworthy, so both get unassigned (not deleted).
+      { id: 2, photo_id: 'photo-current', embedding: embeddingOf(...Array(1024).fill(1)), person_id: 2 },
+      { id: 3, photo_id: 'photo-current', embedding: embeddingOf(...Array(1024).fill(2)), person_id: 2 },
+    ];
+
+    const result = await resetLegacyFaces(makeEnv(db));
+
+    expect(result).toEqual({ facesReset: 0, clustersRemoved: 1 });
+    expect(db.clusters.map((c) => c.id)).toEqual([1]);
+    expect(db.faces.find((f) => f.id === 1)?.person_id).toBe(1); // untouched
+    expect(db.faces.find((f) => f.id === 2)?.person_id).toBeNull();
+    expect(db.faces.find((f) => f.id === 3)?.person_id).toBeNull();
+    // No embedding rows were the wrong byte length, so no photo needs re-scanning.
+    expect(db.photos.find((p) => p.id === 'photo-current')?.faces_processed_at).toBe('2026-08-01');
   });
 });
