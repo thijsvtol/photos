@@ -16,7 +16,6 @@ import meRoutes from './routes/me';
 import { seo } from './routes/seo';
 import { runUploadNotifications, runStaleUploadCleanup, runTrashPurge } from './scheduled';
 import { runAiEnrichment } from './aiEnrichment';
-import { runFaceClustering } from './faceClustering';
 
 const app = new Hono<{ Bindings: Env }>();
 
@@ -133,8 +132,11 @@ export default {
     ctx.waitUntil(
       runAiEnrichment(env).catch((err) => log.error('Scheduled runAiEnrichment failed:', err))
     );
-    ctx.waitUntil(
-      runFaceClustering(env).catch((err) => log.error('Scheduled runFaceClustering failed:', err))
-    );
+    // NOTE: face clustering is intentionally NOT run on this cron. It used to be, but the
+    // vector-similarity math it requires doesn't fit safely within Cloudflare Workers' 10ms
+    // per-invocation CPU-time limit once a library grows large — see faceClustering.ts's doc
+    // comment for the full history of CPU-limit crashes this caused. Clustering now runs
+    // entirely client-side, triggered on-demand by an admin via the "Cluster Now" button on
+    // /admin/people (apps/web/src/faceClusteringClient.ts).
   },
 };

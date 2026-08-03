@@ -2,10 +2,21 @@ import React, { useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { Users, ScanFace, Loader2, Sparkles, Eye, EyeOff, GitMerge, X, Check } from 'lucide-react';
 import Navbar from '../components/Navbar';
-import { getPeople, getPreviewUrl, clusterPeopleNow, getMergeSuggestions, mergePeople } from '../api';
-import type { Person, MergeSuggestion, MergeSuggestionCursor } from '../api';
+import { getPeople, getPreviewUrl, getClusterData, applyClusteringResults, mergePeople } from '../api';
+import type { Person } from '../api';
 import { runBackfillScan } from '../faceBackfill';
 import type { BackfillProgress } from '../faceBackfill';
+import { runClientSideClustering, findClientSideMergeSuggestions, DEFAULT_MERGE_SUGGESTION_THRESHOLD } from '../faceClusteringClient';
+import type { MergeSuggestion } from '../faceClusteringClient';
+
+// A second, much more lenient similarity threshold tried automatically only if the default
+// (DEFAULT_MERGE_SUGGESTION_THRESHOLD) scan finds literally nothing — this app's action-sports
+// photos (helmets/goggles/angles) can legitimately score well under even that already-lowered
+// default for genuinely-matching faces, so a library with real duplicates can still come back
+// empty at the default. The admin manually reviews every suggestion before merging either way,
+// so a much lower bar here just means more (dismissable) candidates, never an unreviewed
+// auto-merge.
+const FALLBACK_MERGE_THRESHOLD = 0.2;
 
 const AdminPeople: React.FC = () => {
   // Holds EVERY cluster (including single-photo ones) so the UI can tell the
@@ -22,12 +33,10 @@ const AdminPeople: React.FC = () => {
   const [scanProgress, setScanProgress] = useState<BackfillProgress | null>(null);
   const cancelRef = useRef(false);
   const [clustering, setClustering] = useState(false);
-  const [clusterRemaining, setClusterRemaining] = useState<number | null>(null);
-  const clusterCancelRef = useRef(false);
+  const [clusterProgress, setClusterProgress] = useState<{ processed: number; total: number } | null>(null);
   const [findingMerges, setFindingMerges] = useState(false);
+  const [mergeScanProgress, setMergeScanProgress] = useState<{ comparisons: number; total: number } | null>(null);
   const [mergeSuggestions, setMergeSuggestions] = useState<MergeSuggestion[]>([]);
-  const [mergeScanTotal, setMergeScanTotal] = useState<number | null>(null);
-  const mergeCancelRef = useRef(false);
   const [mergingKey, setMergingKey] = useState<string | null>(null);
   const [usedLenientMergeThreshold, setUsedLenientMergeThreshold] = useState(false);
   const [mergeScanComplete, setMergeScanComplete] = useState(false);
@@ -35,15 +44,6 @@ const AdminPeople: React.FC = () => {
   // from mergeSuggestions.length so the "no results" empty state below doesn't incorrectly
   // reappear after the admin has since merged/dismissed every item from a real result list.
   const [scanFoundCount, setScanFoundCount] = useState(0);
-
-  // A second, much more lenient similarity threshold tried automatically only if the default
-  // (worker-side DEFAULT_MERGE_SUGGESTION_THRESHOLD) scan finds literally nothing — this app's
-  // action-sports photos (helmets/goggles/angles) can legitimately score well under even that
-  // already-lowered default for genuinely-matching faces, so a library with real duplicates can
-  // still come back empty at the default. The admin manually reviews every suggestion before
-  // merging either way, so a much lower bar here just means more (dismissable) candidates,
-  // never an unreviewed auto-merge.
-  const FALLBACK_MERGE_THRESHOLD = 0.2;
 
   const multiPhotoPeople = allPeople.filter((p) => p.face_count >= 2);
   const singlesCount = allPeople.length - multiPhotoPeople.length;
@@ -89,19 +89,30 @@ const AdminPeople: React.FC = () => {
     cancelRef.current = true;
   };
 
+  /**
+   * Runs the ENTIRE clustering pass client-side in one shot (see faceClusteringClient.ts) —
+   * fetches every unclustered face + every existing cluster's centroid, computes assignments
+   * in the browser (no CPU-time limit here, unlike the Worker), then POSTs the final results
+   * to be persisted. No cursor/loop/"Stop and resume" needed anymore since a browser can finish
+   * even a large backlog in well under a second — see repo docs for why this used to be a
+   * server-side, budget-limited, multi-call process.
+   */
   const handleClusterNow = async () => {
     setClustering(true);
-    setClusterRemaining(null);
-    clusterCancelRef.current = false;
+    setClusterProgress(null);
     try {
-      // Loop the manual clustering pass (each call is itself internally
-      // time-budgeted server-side, see faceClustering.ts) until the backlog
-      // is fully drained, so a big backfill doesn't have to wait for the
-      // hourly cron to trickle through it 200 faces at a time.
-      for (;;) {
-        const { processed, remaining } = await clusterPeopleNow();
-        setClusterRemaining(remaining);
-        if (remaining === 0 || processed === 0 || clusterCancelRef.current) break;
+      const { faces, clusters } = await getClusterData(true);
+      if (faces.length === 0) {
+        await loadData();
+        return;
+      }
+
+      const results = await runClientSideClustering(faces, clusters, (processed, total) => {
+        setClusterProgress({ processed, total });
+      });
+
+      if (results.length > 0) {
+        await applyClusteringResults(results);
       }
       await loadData();
     } catch (err) {
@@ -109,75 +120,59 @@ const AdminPeople: React.FC = () => {
       console.error(err);
     } finally {
       setClustering(false);
+      setClusterProgress(null);
     }
   };
 
-  const handleCancelCluster = () => {
-    clusterCancelRef.current = true;
-  };
-
   // Person clusters are looked up from `allPeople` (already fetched with includeSingles=true)
-  // rather than re-fetched per-suggestion, since the worker's scan only ever returns bare
-  // cluster ids + a similarity score (see faceClustering.ts's MergeSuggestion doc comment for
-  // why the scan itself stays minimal/CPU-cheap).
+  // rather than re-fetched per-suggestion, since the merge scan only ever works with bare
+  // cluster ids + centroids + a similarity score.
   const personById = (id: number): Person | undefined => allPeople.find((p) => p.id === id);
   const suggestionKey = (s: MergeSuggestion) => `${s.clusterAId}-${s.clusterBId}`;
 
+  /**
+   * Runs the ENTIRE O(clusterCount²) merge-suggestion scan client-side in one shot — see
+   * faceClusteringClient.ts's findClientSideMergeSuggestions(). No cursor/pagination needed:
+   * a browser can examine even hundreds of thousands of pairs in well under a second, unlike
+   * the Worker (which used to need many resumed calls to stay within a 10ms CPU budget).
+   */
   const handleFindMergeSuggestions = async () => {
     setFindingMerges(true);
     setMergeSuggestions([]);
-    setMergeScanTotal(null);
+    setMergeScanProgress(null);
     setUsedLenientMergeThreshold(false);
     setMergeScanComplete(false);
-    mergeCancelRef.current = false;
     try {
       // Refresh allPeople first so cover photos/names/face_counts used to render suggestions
-      // below are current, then loop the scan (each call is a small, CPU-bounded step server-
-      // side, see faceClustering.ts's findMergeSuggestions) until it reports no more pages.
+      // below are current.
       await loadData();
 
-      const runScan = async (minSimilarity?: number): Promise<MergeSuggestion[]> => {
-        const seen = new Set<string>();
-        const collected: MergeSuggestion[] = [];
-        let cursor: MergeSuggestionCursor | null = null;
-        for (;;) {
-          const page = await getMergeSuggestions(cursor, minSimilarity);
-          setMergeScanTotal(page.totalClusters);
-          for (const s of page.suggestions) {
-            const key = suggestionKey(s);
-            if (!seen.has(key)) {
-              seen.add(key);
-              collected.push(s);
-            }
-          }
-          setMergeSuggestions([...collected]);
-          cursor = page.nextCursor;
-          if (!cursor || mergeCancelRef.current) break;
-        }
-        return collected;
-      };
+      const { clusters } = await getClusterData(false);
 
-      const primaryResults = await runScan();
+      const runScan = (minSimilarity: number) =>
+        findClientSideMergeSuggestions(clusters, minSimilarity, (comparisons, total) => {
+          setMergeScanProgress({ comparisons, total });
+        });
+
+      let results = await runScan(DEFAULT_MERGE_SUGGESTION_THRESHOLD);
       // If the default (already-lenient) threshold found nothing, automatically retry once with
       // a much broader one before giving up — see FALLBACK_MERGE_THRESHOLD above for why this is
       // safe (every suggestion still requires manual admin review before anything merges).
-      let finalResults = primaryResults;
-      if (primaryResults.length === 0 && !mergeCancelRef.current) {
+      if (results.length === 0) {
         setUsedLenientMergeThreshold(true);
-        finalResults = await runScan(FALLBACK_MERGE_THRESHOLD);
+        results = await runScan(FALLBACK_MERGE_THRESHOLD);
       }
-      setScanFoundCount(finalResults.length);
+
+      setMergeSuggestions(results);
+      setScanFoundCount(results.length);
       setMergeScanComplete(true);
     } catch (err) {
       setError('Finding merge suggestions failed');
       console.error(err);
     } finally {
       setFindingMerges(false);
+      setMergeScanProgress(null);
     }
-  };
-
-  const handleCancelFindMerges = () => {
-    mergeCancelRef.current = true;
   };
 
   const handleMergeSuggestion = async (suggestion: MergeSuggestion) => {
@@ -238,11 +233,11 @@ const AdminPeople: React.FC = () => {
               </button>
               {clustering ? (
                 <button
-                  onClick={handleCancelCluster}
-                  className="px-4 py-2 bg-gray-300 text-gray-700 rounded-lg hover:bg-gray-400 transition flex items-center gap-2"
+                  disabled
+                  className="px-4 py-2 bg-gray-300 text-gray-700 rounded-lg flex items-center gap-2 cursor-wait"
                 >
                   <Loader2 className="w-4 h-4 animate-spin" />
-                  {clusterRemaining !== null ? `Grouping… ${clusterRemaining} left — Stop` : 'Starting…'}
+                  {clusterProgress ? `Grouping… ${clusterProgress.processed}/${clusterProgress.total}` : 'Loading…'}
                 </button>
               ) : (
                 <button
@@ -263,11 +258,11 @@ const AdminPeople: React.FC = () => {
               )}
               {findingMerges ? (
                 <button
-                  onClick={handleCancelFindMerges}
-                  className="px-4 py-2 bg-gray-300 text-gray-700 rounded-lg hover:bg-gray-400 transition flex items-center gap-2"
+                  disabled
+                  className="px-4 py-2 bg-gray-300 text-gray-700 rounded-lg flex items-center gap-2 cursor-wait"
                 >
                   <Loader2 className="w-4 h-4 animate-spin" />
-                  {mergeScanTotal !== null ? `Scanning ${mergeScanTotal} groups… Stop` : 'Starting…'}
+                  {mergeScanProgress ? `Scanning… ${mergeScanProgress.comparisons}/${mergeScanProgress.total}` : 'Loading…'}
                 </button>
               ) : (
                 <button
@@ -286,17 +281,11 @@ const AdminPeople: React.FC = () => {
           to backfill them (this runs in your browser and may take a while for large libraries; you
           can stop and resume anytime). Groups with only one photo are hidden by default (often the
           same person just hasn't been matched to another photo of them YET — clustering improves
-          as more of their photos get grouped). Detected faces are grouped into named people by a
-          background job that normally runs hourly — use "Cluster Now" to run it immediately
-          instead of waiting (useful right after a large scan). One click keeps stepping through
-          the whole backlog automatically, but each step stays deliberately tiny to avoid hitting
-          the hosting platform's per-request limits, so a very large backlog — especially once a
-          lot of different people have already been recognized — can take a while to fully drain.
-          Keep this tab open until it's done (or click Stop and resume anytime). Because
-          "Cluster Now" only ever compares a new photo against your most-established people (to
-          stay CPU-safe), two groups can sometimes turn out to be the same person without ever
-          being compared — use "Find Merge Suggestions" to sweep the whole library for likely
-          duplicates and merge them with one click.
+          as more of their photos get grouped). Detected faces are grouped into named people by
+          "Cluster Now" — this runs entirely in your browser (not on the server), so it can group
+          your whole library in one go, even with thousands of photos. "Find Merge Suggestions"
+          sweeps the whole library for groups that are likely the same person but never got merged
+          automatically, and lets you merge them with one click.
         </p>
 
         {error && (

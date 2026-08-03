@@ -1,440 +1,155 @@
 import type { Env } from './types';
-import { createLogger } from './logger';
-import { EXPECTED_EMBEDDING_LENGTH } from './faceValidation';
 
 /**
- * Greedy nearest-centroid face clustering — pure JS vector math, no AI
- * binding needed (Workers AI has no face-embedding model; face descriptors
- * are computed CLIENT-SIDE via @vladmandic/human at upload time, see
- * apps/web/src/faceDetection.ts + faceDetectionQueue.ts, and posted to
- * POST /admin/events/:slug/uploads/:photoId/faces which just stores the raw
- * detections in `photo_faces`). This job assigns each not-yet-clustered
- * face to the nearest existing `person_clusters` centroid (within a
- * similarity threshold), or creates a new cluster if none match closely
- * enough, and updates a running-average centroid — same architectural
- * pattern as the trash-purge/AI-enrichment cron jobs (batch-limited,
- * runs hourly alongside them, no new infrastructure).
+ * People/face clustering — the actual vector-similarity math (comparing face descriptors to
+ * find matches) runs ENTIRELY CLIENT-SIDE in the admin's browser (see
+ * apps/web/src/faceClusteringClient.ts), not in this Worker.
  *
- * The distance()/similarity() functions below are a direct port of
- * vladmandic/human's src/face/match.ts (MIT licensed) rather than an
- * invented formula — Human's own docs state "Similarity match above 50%
- * can be considered a match", so reusing their exact math means our
- * SAME_PERSON_THRESHOLD is grounded in the library author's own guidance
- * for this specific embedding space, not a guessed number. This matters
- * because Human's 1024-dim FaceRes descriptor is NOT on the same distance
- * scale as face-api.js's 128-dim descriptor this app used previously.
+ * HISTORY / WHY: this used to run server-side here, guarded by increasingly elaborate CPU-time
+ * budgets (adaptive batch sizes, candidate-cluster caps, wall-clock guards, deterministic
+ * dimension-operation budgets, early-exit optimizations...). Every one of those attempts still
+ * eventually 503'd with Cloudflare's `Error 1102: Worker exceeded resource limits` once the
+ * library grew large enough (the Workers Free plan hard-caps CPU time at just 10ms per request/
+ * cron trigger — see developers.cloudflare.com/workers/platform/limits/), because there is no
+ * batch size small enough to both (a) make real progress and (b) never risk exceeding 10ms of
+ * REAL CPU time for an operation whose cost scales with however large the library has grown.
+ * A phone/laptop browser has no such limit, and this is admin-only tooling (not per-visitor
+ * page-load code), so the fix is architectural, not another tuning pass: this Worker now only
+ * ever does cheap I/O (SELECT/UPDATE/INSERT), never the O(n) or O(n²) vector math itself.
+ *
+ * This file now only contains:
+ *  - Pure I/O helpers to fetch the raw data the client needs (getClusterData) and to persist
+ *    the client's already-computed results (applyClusteringResults).
+ *  - countUnclusteredFaces(), a trivial COUNT(*) used by the People page for progress display.
+ *
+ * The distance/similarity formula itself (ported from vladmandic/human's src/face/match.ts) is
+ * now duplicated in faceClusteringClient.ts on the web side, since these are two separate npm
+ * packages (apps/worker and apps/web) with no shared-code build step in this repo — see that
+ * file's own doc comment for the exact same math + rationale as this file used to have.
  */
 
-// Batch sizing is ADAPTIVE, not fixed, and deliberately conservative: Cloudflare Workers CPU
-// time (not wall-clock time!) is capped at just 10ms per HTTP request/cron trigger on the
-// Workers Free plan (non-configurable — only the Paid plan can raise this, via
-// `[limits] cpu_ms`, and this app is explicitly built to stay on the free tier). D1 reads/
-// writes are I/O and don't count against that budget, but the vector-similarity math very
-// much does.
-//
-// IMPORTANT, CORRECTED (this got wrong twice before landing here): the cost of ONE similarity
-// comparison is NOT O(1) — humanDistance() loops over all EXPECTED_EMBEDDING_LENGTH (1024)
-// dimensions per comparison. So the real CPU cost of one invocation is proportional to
-// `facesInBatch * clustersConsidered * EMBEDDING_DIM`, not just `facesInBatch * clusters`. A
-// batch-size formula that ignored the `* EMBEDDING_DIM` factor (an earlier version of this
-// file) still 503'd in production once the library grew to ~870 recognized people, because a
-// "small-looking" batch of 4 faces against 871 clusters is actually ~3.5 MILLION scalar
-// float ops, not 3484.
-//
-// Two independent safety mechanisms, because neither alone is trustworthy without real
-// profiling data for this exact runtime:
-//  1. `computeBatchSize()` below picks a batch size so that
-//     `facesInBatch * min(clusterCount, MAX_CLUSTERS_CONSIDERED) * EMBEDDING_DIM` stays under
-//     a conservative op budget, AND separately caps how many clusters a single face is ever
-//     compared against (MAX_CLUSTERS_CONSIDERED) — because once a library has thousands of
-//     recognized people, even a batch of ONE face compared against ALL of them is unsafe; no
-//     batch-size shrinkage alone can fix an unbounded per-face candidate-cluster count. The
-//     considered clusters are the ones with the HIGHEST face_count (people who already have
-//     multiple photos are the most likely — and most valuable — repeat match, versus other
-//     rarely-seen singles), so this specifically protects the "does this look like someone we
-//     already recognize well" case rather than being a random/arbitrary cut.
-//  2. A real WALL-CLOCK guard between faces (see runFaceClustering() below), capped at a value
-//     ALREADY SMALLER than the true CPU limit (5ms guard vs. the actual 10ms limit) — since
-//     wall time is always >= CPU time, bounding cumulative wall time this tightly strictly
-//     bounds cumulative CPU time to at most that same small constant, even in the worst case
-//     of zero I/O wait (100% real compute). This is the key difference from an EARLIER WRONG
-//     fix that wall-clock-bounded a loop at 20 SECONDS — reasoning "D1 calls are I/O not CPU"
-//     (true, but irrelevant: nothing stopped a huge amount of REAL CPU work, the vector math
-//     itself, from running inside that 20-second window). It only ever aborts BETWEEN whole
-//     faces (never mid-scan for a given face), so a face is either fully compared against its
-//     entire considered-candidate set, or left untouched for a later invocation — never
-//     assigned based on an incomplete scan.
-const EMBEDDING_DIM = EXPECTED_EMBEDDING_LENGTH;
-const MAX_DIMENSION_OPS_PER_INVOCATION = 350_000; // faces * consideredClusters * EMBEDDING_DIM
-const MAX_CLUSTERS_CONSIDERED = 300; // hard cap regardless of batch size — see above
-const MIN_BATCH_SIZE = 1;
-const MAX_BATCH_SIZE = 40;
-const CPU_TIME_GUARD_MS = 5; // conservative — well under the 10ms Free-plan CPU limit
-
-function computeBatchSize(clusterCount: number): number {
-  const consideredClusters = Math.min(clusterCount, MAX_CLUSTERS_CONSIDERED);
-  if (consideredClusters <= 0) return MAX_BATCH_SIZE;
-  const size = Math.floor(MAX_DIMENSION_OPS_PER_INVOCATION / (consideredClusters * EMBEDDING_DIM));
-  return Math.min(MAX_BATCH_SIZE, Math.max(MIN_BATCH_SIZE, size));
+/** Raw data needed to run one full clustering pass — see faceClusteringClient.ts. */
+export interface ClusterDataFace {
+  id: number;
+  photoId: string;
+  embedding: number[];
 }
 
-// Human's default similarity() options: order=2 (Euclidean), multiplier=25,
-// normalize the resulting root-distance into a 0..1 "similarity" using a
-// [min, max] = [0.2, 0.8] window before clamping. See vladmandic/human's
-// wiki/Embedding: "Similarity match above 50% can be considered a match".
-const MATCH_ORDER = 2;
-const MATCH_MULTIPLIER = 25;
-const MATCH_MIN = 0.2;
-const MATCH_MAX = 0.8;
-export const SAME_PERSON_THRESHOLD = 0.5;
+export interface ClusterDataCluster {
+  id: number;
+  centroidEmbedding: number[];
+  faceCount: number;
+}
 
-/**
- * Minkowski distance between two descriptors (order=2 = Euclidean),
- * ported from Human's `distance()` — NOT square-rooted here (matches the
- * upstream implementation, which takes the root later inside
- * `normalizeDistance`/`similarity`).
- */
-export function humanDistance(a: Float32Array, b: Float32Array): number {
-  let sum = 0;
-  const len = Math.min(a.length, b.length);
-  for (let i = 0; i < len; i++) {
-    const diff = a[i] - b[i];
-    sum += diff * diff;
-  }
-  return Math.round(100 * MATCH_MULTIPLIER * sum) / 100;
+export interface ClusterData {
+  faces: ClusterDataFace[];
+  clusters: ClusterDataCluster[];
 }
 
 /**
- * Normalized 0..1 similarity between two face descriptors, ported from
- * Human's `similarity()`/`normalizeDistance()`. 0 = no similarity, 1 =
- * perfect match; per Human's own docs, >=0.5 is considered a match.
+ * Fetches ALL currently-unclustered faces and ALL existing person clusters in one go — pure I/O,
+ * no vector math, so this is cheap regardless of how large the library has grown (D1
+ * reads/writes don't count against Workers' CPU-time limit, only actual JS computation does).
+ * `includeFaces=false` skips the (potentially large) unclustered-faces array entirely for
+ * callers that only need cluster centroids (e.g. the merge-suggestions scan, which never reads
+ * photo_faces at all).
  */
-export function humanSimilarity(a: Float32Array, b: Float32Array): number {
-  const dist = humanDistance(a, b);
-  if (dist === 0) return 1; // short-circuit for identical inputs
-  const root = MATCH_ORDER === 2 ? Math.sqrt(dist) : dist ** (1 / MATCH_ORDER);
-  const norm = (1 - (root / 100) - MATCH_MIN) / (MATCH_MAX - MATCH_MIN);
-  return Math.round(100 * Math.max(Math.min(norm, 1), 0)) / 100;
-}
+export async function getClusterData(env: Env, includeFaces: boolean): Promise<ClusterData> {
+  const { results: clusterRows } = await env.DB
+    .prepare('SELECT id, centroid_embedding, face_count FROM person_clusters ORDER BY id ASC')
+    .all<{ id: number; centroid_embedding: ArrayBuffer; face_count: number }>();
 
-export async function runFaceClustering(env: Env): Promise<{ processed: number }> {
-  const log = createLogger(env);
-
-  // Cluster count is fetched FIRST (cheap COUNT(*), no row bodies) so the face batch size can
-  // be sized to the CURRENT number of clusters — see computeBatchSize()'s doc comment above for
-  // why this must be adaptive rather than a fixed constant.
-  const clusterCountRow = await env.DB
-    .prepare('SELECT COUNT(*) as count FROM person_clusters')
-    .first<{ count: number }>();
-  const totalClusterCount = clusterCountRow?.count ?? 0;
-  const batchSize = computeBatchSize(totalClusterCount);
-
-  const { results: faceRows } = await env.DB.prepare(`
-    SELECT f.id, f.photo_id, f.embedding
-    FROM photo_faces f
-    WHERE f.person_id IS NULL
-    ORDER BY f.created_at ASC
-    LIMIT ?
-  `).bind(batchSize).all<{ id: number; photo_id: string; embedding: ArrayBuffer }>();
-
-  const faces = faceRows || [];
-  if (faces.length === 0) {
-    log.debug('[runFaceClustering] No unclustered faces pending');
-    return { processed: 0 };
-  }
-
-  // Only the MAX_CLUSTERS_CONSIDERED clusters with the highest face_count are fetched — see
-  // the doc comment above MAX_CLUSTERS_CONSIDERED for why this specific ordering (biggest/
-  // most-established people first) is the right tradeoff when a library has more recognized
-  // clusters than we can safely compare a single face against in one invocation.
-  const { results: clusterRows } = await env.DB.prepare(`
-    SELECT id, centroid_embedding, face_count FROM person_clusters
-    ORDER BY face_count DESC
-    LIMIT ?
-  `).bind(MAX_CLUSTERS_CONSIDERED).all<{ id: number; centroid_embedding: ArrayBuffer; face_count: number }>();
-
-  // In-memory working copy of clusters — updated as we go so faces within
-  // the same batch can join a cluster created earlier in the same run.
-  const clusters = (clusterRows || []).map((c) => ({
+  const clusters: ClusterDataCluster[] = (clusterRows || []).map((c) => ({
     id: c.id,
-    centroid: new Float32Array(c.centroid_embedding),
-    count: c.face_count,
+    centroidEmbedding: Array.from(new Float32Array(c.centroid_embedding)),
+    faceCount: c.face_count,
   }));
 
-  const loopStartedAt = Date.now();
-  let processedCount = 0;
+  if (!includeFaces) {
+    return { faces: [], clusters };
+  }
 
-  for (const face of faces) {
-    // Wall-clock guard, checked BETWEEN whole faces (never mid-scan for a given face, so a
-    // face is always either fully compared against its whole candidate set or left untouched
-    // for a later invocation — never assigned from a partial scan). This loop's body DOES
-    // still contain awaited D1 writes below (not pure synchronous CPU work), so wall time here
-    // isn't a precise measure of CPU time alone — but wall time is always >= CPU time, so
-    // capping cumulative wall time to CPU_TIME_GUARD_MS strictly caps cumulative CPU time to at
-    // most that same small constant too, regardless of how much of it was spent waiting on I/O
-    // vs actually computing. This is the key difference from an EARLIER, WRONG version of this
-    // fix, which wall-clock-bounded a loop at 20 SECONDS reasoning "D1 calls are I/O not CPU" —
-    // true, but at 20 seconds there was no bound at all on how much REAL CPU work (the vector
-    // math, which genuinely is CPU) could run inside that window, so it still blew the 10ms CPU
-    // limit. Here the guard itself (5ms) is already smaller than the real CPU limit (10ms), so
-    // even in the worst case — zero I/O, 100% of that time being actual compute — it still
-    // can't exceed the true budget.
-    if (Date.now() - loopStartedAt > CPU_TIME_GUARD_MS) {
-      log.debug(`[runFaceClustering] Stopping early after ${processedCount}/${faces.length} face(s) to stay within the CPU time budget`);
-      break;
+  const { results: faceRows } = await env.DB
+    .prepare(`
+      SELECT id, photo_id, embedding
+      FROM photo_faces
+      WHERE person_id IS NULL
+      ORDER BY created_at ASC
+    `)
+    .all<{ id: number; photo_id: string; embedding: ArrayBuffer }>();
+
+  const faces: ClusterDataFace[] = (faceRows || []).map((f) => ({
+    id: f.id,
+    photoId: f.photo_id,
+    embedding: Array.from(new Float32Array(f.embedding)),
+  }));
+
+  return { faces, clusters };
+}
+
+/** One cluster's final state after the client's greedy-clustering pass, ready to persist. */
+export interface ClusterResult {
+  /** null = brand-new cluster (never existed before this pass); otherwise an existing cluster id. */
+  clusterId: number | null;
+  centroidEmbedding: number[];
+  faceCount: number;
+  /** photo_faces.id values to assign to this cluster (only the NEWLY assigned ones this pass). */
+  addedFaceIds: number[];
+  /** Required (and only used) when clusterId is null — becomes the new cluster's cover photo. */
+  coverPhotoId?: string;
+}
+
+// D1 (SQLite) has a bound-parameter-count limit per statement; chunk large face-id lists the
+// same way photoDeletion.ts already does for DELETE statements, to stay well under it.
+const FACE_ID_CHUNK_SIZE = 90;
+
+function chunk<T>(items: T[], size: number): T[][] {
+  const chunks: T[][] = [];
+  for (let i = 0; i < items.length; i += size) {
+    chunks.push(items.slice(i, i + size));
+  }
+  return chunks;
+}
+
+/**
+ * Persists the client's already-computed clustering results — pure I/O (INSERT/UPDATE), no
+ * vector math. See ClusterResult above for the shape the client sends.
+ */
+export async function applyClusteringResults(env: Env, results: ClusterResult[]): Promise<{ facesAssigned: number }> {
+  let facesAssigned = 0;
+
+  for (const result of results) {
+    let clusterId = result.clusterId;
+
+    if (clusterId === null) {
+      const inserted = await env.DB
+        .prepare('INSERT INTO person_clusters (centroid_embedding, face_count, cover_photo_id) VALUES (?, ?, ?) RETURNING id')
+        .bind(new Float32Array(result.centroidEmbedding).buffer, result.faceCount, result.coverPhotoId ?? null)
+        .first<{ id: number }>();
+      if (!inserted) continue;
+      clusterId = inserted.id;
+    } else {
+      await env.DB
+        .prepare("UPDATE person_clusters SET centroid_embedding = ?, face_count = ?, updated_at = datetime('now') WHERE id = ?")
+        .bind(new Float32Array(result.centroidEmbedding).buffer, result.faceCount, clusterId)
+        .run();
     }
 
-    try {
-      const embedding = new Float32Array(face.embedding);
-
-      let bestClusterIndex = -1;
-      let bestSimilarity = -Infinity;
-      for (let i = 0; i < clusters.length; i++) {
-        const similarity = humanSimilarity(embedding, clusters[i].centroid);
-        if (similarity > bestSimilarity) {
-          bestSimilarity = similarity;
-          bestClusterIndex = i;
-        }
-      }
-
-      if (bestClusterIndex >= 0 && bestSimilarity >= SAME_PERSON_THRESHOLD) {
-        const cluster = clusters[bestClusterIndex];
-        const newCount = cluster.count + 1;
-        // Running average centroid: newCentroid = old + (embedding - old) / newCount
-        const newCentroid = new Float32Array(cluster.centroid.length);
-        for (let i = 0; i < newCentroid.length; i++) {
-          newCentroid[i] = cluster.centroid[i] + (embedding[i] - cluster.centroid[i]) / newCount;
-        }
-        cluster.centroid = newCentroid;
-        cluster.count = newCount;
-
-        await env.DB.prepare(`
-          UPDATE person_clusters SET centroid_embedding = ?, face_count = ?, updated_at = datetime('now')
-          WHERE id = ?
-        `).bind(newCentroid.buffer, newCount, cluster.id).run();
-
-        await env.DB.prepare('UPDATE photo_faces SET person_id = ? WHERE id = ?')
-          .bind(cluster.id, face.id).run();
-      } else {
-        const result = await env.DB.prepare(`
-          INSERT INTO person_clusters (centroid_embedding, face_count, cover_photo_id) VALUES (?, 1, ?) RETURNING id
-        `).bind(embedding.buffer, face.photo_id).first<{ id: number }>();
-
-        if (result) {
-          clusters.push({ id: result.id, centroid: embedding, count: 1 });
-          await env.DB.prepare('UPDATE photo_faces SET person_id = ? WHERE id = ?')
-            .bind(result.id, face.id).run();
-        }
-      }
-
-      processedCount++;
-    } catch (err) {
-      log.error(`[runFaceClustering] Failed to cluster face ${face.id}:`, err);
-      processedCount++; // Counted as "attempted" even on failure, same as before.
-    }
-  }
-
-  log.debug(`[runFaceClustering] Processed ${processedCount}/${faces.length} face(s) (batch size ${batchSize}, ${clusters.length}/${totalClusterCount} cluster(s) considered)`);
-  return { processed: processedCount };
-}
-
-/**
- * A candidate pair of person clusters that likely represent the SAME real person, surfaced for
- * an admin to manually merge (see routes/admin/people.ts's GET /people/merge-suggestions and
- * POST /people/merge).
- *
- * WHY THIS IS NEEDED: runFaceClustering() only ever compares a new face against the (at most
- * MAX_CLUSTERS_CONSIDERED) most-established existing clusters — a deliberate CPU-safety
- * tradeoff (see the big comment above computeBatchSize()) that means two clusters can end up
- * being the same person WITHOUT clustering ever having had the chance to notice, e.g. two
- * small/rarely-seen clusters that were both created before either had enough photos to rank
- * into that top-N window. This scan finds those missed matches after the fact by comparing
- * EVERY cluster against every other cluster — an O(clusterCount²) operation, deliberately NOT
- * bounded to a top-N subset like clustering itself, since here the goal is a complete/thorough
- * sweep rather than a fast per-face decision.
- */
-export interface MergeSuggestion {
-  clusterAId: number;
-  clusterBId: number;
-  similarity: number;
-}
-
-/** Opaque resume position for findMergeSuggestions()'s paginated scan — see its doc comment. */
-export interface MergeSuggestionCursor {
-  sourceId: number;
-  candidateId: number;
-}
-
-export interface MergeSuggestionsResult {
-  suggestions: MergeSuggestion[];
-  nextCursor: MergeSuggestionCursor | null;
-  totalClusters: number;
-}
-
-// A wall-clock guard (like CPU_TIME_GUARD_MS used in runFaceClustering() above) is a NO-OP here
-// and must NOT be used for this loop. Cloudflare's own docs are explicit: "Date.now() returns
-// the time of the last I/O. It does not advance during code execution" (Spectre-timing
-// mitigation — see developers.cloudflare.com/workers/reference/security-model/). This is
-// harmless in runFaceClustering()'s loop because EVERY iteration there awaits a real D1 write,
-// which counts as I/O and lets the clock tick forward between iterations. This merge-suggestion
-// scan's inner comparison loop has NO awaits at all (pure synchronous vector math) — so
-// Date.now() is frozen for its entire duration and a wall-clock check inside it can never fire,
-// letting the full O(clusterCount²) scan run to completion regardless of size. This was tried
-// in production and 503'd instantly with Cloudflare's Error 1102 ("Worker exceeded resource
-// limits") once the library reached ~870 people (~379,000 pairs). The fix is a DETERMINISTIC
-// dimension-operation budget instead (see quickSimilarityCheck()/dimsUsed below) — the exact
-// same per-comparison cost model already established as CPU-safe for clustering above, rather
-// than a timer that can't be trusted in a loop with no I/O to force the clock forward.
-//
-// This budget is tracked in terms of ACTUAL embedding dimensions compared (not a flat "1 unit
-// per comparison" count) specifically so the early-exit optimization below can pay off: most
-// cluster pairs are NOT the same person and can be safely rejected after looking at only a
-// handful of the 1024 dimensions (see quickSimilarityCheck()), so a single invocation can
-// examine vastly more PAIRS than a naive "always score all 1024 dims" approach would allow
-// within the same real CPU budget — directly addressing how slow a full O(clusterCount²) scan
-// otherwise is across many resumed HTTP calls for a library with hundreds of clusters.
-
-/**
- * Threshold used ONLY by findMergeSuggestions() below — deliberately LOWER than
- * SAME_PERSON_THRESHOLD (which automatic clustering uses to merge faces with ZERO human
- * review, and must therefore stay conservative). Merge suggestions are always reviewed by an
- * admin before anything actually merges (see AdminPeople.tsx's Merge/"Not the same" buttons) —
- * a false positive here costs one click to dismiss, whereas a false NEGATIVE (a real duplicate
- * that never even gets suggested) is a silent, permanent gap the admin has no way to discover.
- * Reusing SAME_PERSON_THRESHOLD here was tried first and returned ZERO suggestions in
- * production even in an 871-cluster library that clearly had duplicates: any pair that would
- * score >=SAME_PERSON_THRESHOLD would (with rare exceptions, see MAX_CLUSTERS_CONSIDERED above)
- * already have been auto-merged during clustering itself, so a scan re-applying the exact same
- * bar can only ever re-discover what clustering already found — it can never catch the
- * genuinely harder cases: two photos of the same real person whose face descriptors score
- * BELOW that bar, which is common for this app's action-sports photos (ice-skating/cycling with
- * helmets/goggles — see repo memory for the extensive discussion of Human's recall limits on
- * this photo style). Admins can override this default via the `minSimilarity` query param/
- * function argument if this still surfaces nothing.
- */
-export const DEFAULT_MERGE_SUGGESTION_THRESHOLD = 0.35;
-
-/**
- * Given a target similarity score, returns the maximum raw sum-of-squared-diffs (BEFORE
- * humanDistance's ×25 multiplier) at which humanSimilarity() can still reach that score —
- * derived by algebraically inverting humanSimilarity's formula for MATCH_ORDER === 2 (the only
- * value ever used here). Once a running sum-of-squared-diffs between two centroids exceeds
- * this value, every remaining dimension can only make the sum larger (each term is >=0), so the
- * final similarity is mathematically GUARANTEED to fall below the target — letting
- * quickSimilarityCheck() below safely abandon a comparison early for pairs that are obviously
- * not a match, without ever risking a false rejection of a pair that could have matched.
- */
-function maxSumForSimilarity(targetSimilarity: number): number {
-  const rootAtThreshold = 100 * (1 - MATCH_MIN - targetSimilarity * (MATCH_MAX - MATCH_MIN));
-  const distAtThreshold = rootAtThreshold ** 2;
-  return distAtThreshold / MATCH_MULTIPLIER;
-}
-
-/**
- * Fast approximate similarity check used only by findMergeSuggestions()'s O(clusterCount²)
- * scan: computes the sum-of-squared-diffs between two descriptors with an EARLY EXIT the
- * moment it's mathematically guaranteed the pair cannot reach `sumThreshold` (see
- * maxSumForSimilarity() above) — for the (typically overwhelming majority of) pairs that are
- * obviously not the same person, this touches only a handful of the embedding's dimensions
- * instead of all of them. Returns `similarity: null` if rejected early; otherwise returns the
- * EXACT same value humanSimilarity() would (the full computation only ever runs for pairs that
- * passed the cheap check, so results are bit-for-bit identical to always calling
- * humanSimilarity() directly — this is purely a speed optimization, not an approximation of the
- * final decision). `dimsChecked` reports how much real work this call actually did, for the
- * CPU-budget accounting in findMergeSuggestions() below.
- */
-function quickSimilarityCheck(a: Float32Array, b: Float32Array, sumThreshold: number): { similarity: number | null; dimsChecked: number } {
-  let sum = 0;
-  const len = Math.min(a.length, b.length);
-  for (let i = 0; i < len; i++) {
-    const diff = a[i] - b[i];
-    sum += diff * diff;
-    if (sum > sumThreshold) {
-      return { similarity: null, dimsChecked: i + 1 };
-    }
-  }
-  return { similarity: humanSimilarity(a, b), dimsChecked: len };
-}
-
-/**
- * Resumable, CPU-safe full O(clusterCount²) similarity scan across ALL person clusters — see
- * the MergeSuggestion doc comment above for why this exists and why it's NOT limited to a
- * top-N subset the way runFaceClustering() is.
- *
- * A single call only ever processes up to MAX_DIMENSION_OPS_PER_INVOCATION worth of ACTUAL
- * dimension comparisons (tracked via quickSimilarityCheck()'s early exit, not a flat count —
- * see the big comment above DEFAULT_MERGE_SUGGESTION_THRESHOLD for why this matters for speed)
- * and returns a `nextCursor` for the caller to pass back in to resume exactly where it left
- * off — see the client-side loop in AdminPeople.tsx's "Find Merge Suggestions" button.
- *
- * Only clusters with `id >= cursor.sourceId` are fetched from D1 (rather than the whole table
- * on every call) — clusters before that id have already been fully compared against everything
- * in earlier calls and can never contribute a new pair, so re-fetching (and re-transferring)
- * their embeddings on every subsequent call would be pure waste, growing linearly with however
- * many calls a full scan ends up taking. `totalClusters` (for the client's progress display) is
- * a separate, cheap `COUNT(*)` unaffected by that filter.
- */
-export async function findMergeSuggestions(
-  env: Env,
-  cursor: MergeSuggestionCursor | null,
-  minSimilarity: number = DEFAULT_MERGE_SUGGESTION_THRESHOLD
-): Promise<MergeSuggestionsResult> {
-  const totalClustersRow = await env.DB
-    .prepare('SELECT COUNT(*) as count FROM person_clusters')
-    .first<{ count: number }>();
-  const totalClusters = totalClustersRow?.count ?? 0;
-
-  const { results: clusterRows } = await env.DB
-    .prepare('SELECT id, centroid_embedding FROM person_clusters WHERE id >= ? ORDER BY id ASC')
-    .bind(cursor?.sourceId ?? 0)
-    .all<{ id: number; centroid_embedding: ArrayBuffer }>();
-
-  const clusters = (clusterRows || []).map((c) => ({ id: c.id, centroid: new Float32Array(c.centroid_embedding) }));
-
-  if (clusters.length === 0) {
-    // Either there are no clusters at all, or every remaining cluster from the cursor onward is
-    // gone (e.g. all merged away since the previous call) — scan is effectively done either way.
-    return { suggestions: [], nextCursor: null, totalClusters };
-  }
-
-  // Since the query already filtered to id >= cursor.sourceId, the source cluster to resume
-  // FROM (if it still exists) is always clusters[0] — only the CANDIDATE resume position needs
-  // locating. If the exact cursor source cluster no longer exists (merged/deleted since the
-  // previous call), clusters[0] is simply whatever comes next, and comparisons for it start
-  // fresh (no candidate to skip past) rather than guessing a resume point that may no longer
-  // make sense.
-  let candidateIndexForFirstSource: number | null = null;
-  if (cursor && clusters[0].id === cursor.sourceId) {
-    const found = clusters.findIndex((c, idx) => idx > 0 && c.id >= cursor.candidateId);
-    candidateIndexForFirstSource = found === -1 ? clusters.length : found;
-  }
-
-  const sumThreshold = maxSumForSimilarity(minSimilarity);
-  const suggestions: MergeSuggestion[] = [];
-  let dimsUsed = 0;
-
-  for (let i = 0; i < clusters.length; i++) {
-    const jStart = i === 0 && candidateIndexForFirstSource !== null ? candidateIndexForFirstSource : i + 1;
-
-    for (let j = jStart; j < clusters.length; j++) {
-      if (dimsUsed >= MAX_DIMENSION_OPS_PER_INVOCATION) {
-        return { suggestions, nextCursor: { sourceId: clusters[i].id, candidateId: clusters[j].id }, totalClusters };
-      }
-
-      const { similarity, dimsChecked } = quickSimilarityCheck(clusters[i].centroid, clusters[j].centroid, sumThreshold);
-      dimsUsed += dimsChecked;
-      if (similarity !== null && similarity >= minSimilarity) {
-        suggestions.push({ clusterAId: clusters[i].id, clusterBId: clusters[j].id, similarity });
-      }
+    for (const idChunk of chunk(result.addedFaceIds, FACE_ID_CHUNK_SIZE)) {
+      if (idChunk.length === 0) continue;
+      const placeholders = idChunk.map(() => '?').join(',');
+      await env.DB
+        .prepare(`UPDATE photo_faces SET person_id = ? WHERE id IN (${placeholders})`)
+        .bind(clusterId, ...idChunk)
+        .run();
+      facesAssigned += idChunk.length;
     }
   }
 
-  // Reached the end of every cluster without hitting the dimension-op budget — scan complete.
-  return { suggestions, nextCursor: null, totalClusters };
+  return { facesAssigned };
 }
 
-/** Count of faces still awaiting clustering — used by the admin "Cluster now"
- *  endpoint to report progress (see routes/admin/people.ts). */
+/** Count of faces still awaiting clustering — used by the People page for progress display. */
 export async function countUnclusteredFaces(env: Env): Promise<number> {
   const row = await env.DB
     .prepare('SELECT COUNT(*) as count FROM photo_faces WHERE person_id IS NULL')

@@ -1,8 +1,8 @@
 import { Hono } from 'hono';
 import type { Env, User } from '../../types';
 import { requireAdmin } from '../../auth';
-import { runFaceClustering, countUnclusteredFaces, findMergeSuggestions } from '../../faceClustering';
-import type { MergeSuggestionCursor } from '../../faceClustering';
+import { getClusterData, applyClusteringResults, countUnclusteredFaces } from '../../faceClustering';
+import type { ClusterResult } from '../../faceClustering';
 
 type Variables = {
   user: User;
@@ -10,79 +10,56 @@ type Variables = {
 
 const app = new Hono<{ Bindings: Env; Variables: Variables }>();
 
-// People/face clusters are populated by the hourly runFaceClustering cron
-// (see apps/worker/src/faceClustering.ts) from faces detected client-side at
-// upload time (apps/web/src/faceDetection.ts). Admin-only management, same
-// pattern as tags/albums.
+// People/face clusters are populated by the admin-triggered client-side clustering pass (see
+// apps/web/src/faceClusteringClient.ts — the vector-similarity math runs in the browser, not
+// here, since Cloudflare Workers' 10ms-per-request CPU limit can never safely fit an operation
+// whose cost scales with an ever-growing library; see faceClustering.ts's doc comment for the
+// full history). This route module only ever does cheap I/O. Admin-only, same pattern as
+// tags/albums.
 app.use('/*', requireAdmin);
 
 /**
- * POST /people/cluster-now
+ * GET /people/cluster-data
  *
- * Manually runs one CPU-cheap clustering batch right away instead of waiting for the hourly
- * cron. Exists because right after a large "Scan Library for Faces" backfill (see
- * faceBackfill.ts), the backlog of unclustered faces can be much bigger than one batch clears
- * — without this, newly-detected faces would only trickle into visible person clusters over
- * many hours, making the People page look empty/broken even though detection itself already
- * succeeded. Each call processes only a small, CPU-budget-adaptive batch (see faceClustering.ts
- * — Cloudflare's Workers Free plan hard-caps CPU time at 10ms per request, so this endpoint
- * canNOT just loop internally until the backlog is drained; the client-side "Cluster Now"
- * button in AdminPeople.tsx is what loops, calling this repeatedly until `remaining` reaches 0).
+ * Returns the raw data the browser needs to run a full clustering pass or merge-suggestions
+ * scan itself: every currently-unclustered face's embedding, and every existing person
+ * cluster's centroid. Pure I/O (SELECT), no vector math — cheap regardless of library size.
+ * Pass `?includeFaces=0` to skip the (potentially large) unclustered-faces array when only
+ * cluster centroids are needed (e.g. the merge-suggestions scan, which never touches
+ * photo_faces at all).
  */
-app.post('/cluster-now', async (c) => {
+app.get('/cluster-data', async (c) => {
   try {
-    const { processed } = await runFaceClustering(c.env);
-    const remaining = await countUnclusteredFaces(c.env);
-    return c.json({ processed, remaining });
+    const includeFaces = c.req.query('includeFaces') !== '0';
+    const data = await getClusterData(c.env, includeFaces);
+    return c.json(data);
   } catch (error) {
-    console.error('Error running face clustering:', error);
-    return c.json({ error: 'Failed to run face clustering' }, 500);
+    console.error('Error fetching cluster data:', error);
+    return c.json({ error: 'Failed to fetch cluster data' }, 500);
   }
 });
 
 /**
- * GET /people/merge-suggestions
+ * POST /people/apply-clustering
  *
- * One bounded step of a resumable, full pairwise scan across every person cluster, looking for
- * pairs that likely represent the same real person but were never merged by clustering itself
- * (see findMergeSuggestions()'s doc comment in faceClustering.ts for why that can happen even
- * though clustering is working correctly). Pass `sourceId`/`candidateId` (both from a previous
- * response's `nextCursor`) to resume a scan in progress; omit both to start a fresh scan from
- * the beginning. Optionally pass `minSimilarity` (0-1) to override the default suggestion
- * threshold (DEFAULT_MERGE_SUGGESTION_THRESHOLD, deliberately lower than clustering's own
- * SAME_PERSON_THRESHOLD since these are always human-reviewed before merging — see that
- * constant's doc comment) — useful for a broader/more lenient re-scan if the default still
- * surfaces nothing. The client-side "Find Merge Suggestions" button in AdminPeople.tsx loops
- * this the same way "Cluster Now" loops POST /cluster-now, accumulating suggestions until
- * `nextCursor` comes back null.
+ * Persists a batch of clustering results the browser already computed client-side (see
+ * apps/web/src/faceClusteringClient.ts and AdminPeople.tsx's "Cluster Now" button) — pure I/O
+ * (INSERT/UPDATE), no vector math, so this is safe regardless of how many faces/clusters were
+ * involved in the client's computation.
  */
-app.get('/merge-suggestions', async (c) => {
+app.post('/apply-clustering', async (c) => {
   try {
-    const sourceIdParam = c.req.query('sourceId');
-    const candidateIdParam = c.req.query('candidateId');
-    let cursor: MergeSuggestionCursor | null = null;
-    if (sourceIdParam !== undefined && candidateIdParam !== undefined) {
-      const sourceId = parseInt(sourceIdParam, 10);
-      const candidateId = parseInt(candidateIdParam, 10);
-      if (Number.isFinite(sourceId) && Number.isFinite(candidateId)) {
-        cursor = { sourceId, candidateId };
-      }
+    const { results } = await c.req.json<{ results: ClusterResult[] }>();
+    if (!Array.isArray(results)) {
+      return c.json({ error: 'results array is required' }, 400);
     }
 
-    let minSimilarity: number | undefined;
-    const minSimilarityParam = c.req.query('minSimilarity');
-    if (minSimilarityParam !== undefined) {
-      const parsed = parseFloat(minSimilarityParam);
-      if (Number.isFinite(parsed) && parsed > 0 && parsed <= 1) {
-        minSimilarity = parsed;
-      }
-    }
-
-    const result = await findMergeSuggestions(c.env, cursor, minSimilarity);
-    return c.json(result);
+    const { facesAssigned } = await applyClusteringResults(c.env, results);
+    const remaining = await countUnclusteredFaces(c.env);
+    return c.json({ facesAssigned, remaining });
   } catch (error) {
-    console.error('Error finding merge suggestions:', error);
-    return c.json({ error: 'Failed to find merge suggestions' }, 500);
+    console.error('Error applying clustering results:', error);
+    return c.json({ error: 'Failed to apply clustering results' }, 500);
   }
 });
 

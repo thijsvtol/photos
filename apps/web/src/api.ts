@@ -469,14 +469,55 @@ export const getPeople = async (includeSingles = false): Promise<Person[]> => {
   return response.data.people;
 };
 
-/** Manually runs a clustering pass right now instead of waiting for the hourly cron — see
- *  worker's POST /admin/people/cluster-now for why this exists (mainly: right after a big
- *  "Scan Library for Faces" backfill). Returns how many faces were processed this call and
- *  how many still remain unclustered, so callers can loop until `remaining` is 0. */
-export const clusterPeopleNow = async (): Promise<{ processed: number; remaining: number }> => {
-  const response = await api.post<{ processed: number; remaining: number }>(
-    '/admin/people/cluster-now',
-    {},
+export interface ClusterDataFace {
+  id: number;
+  photoId: string;
+  embedding: number[];
+}
+
+export interface ClusterDataCluster {
+  id: number;
+  centroidEmbedding: number[];
+  faceCount: number;
+}
+
+export interface ClusterData {
+  faces: ClusterDataFace[];
+  clusters: ClusterDataCluster[];
+}
+
+/** Fetches raw face/cluster data for client-side clustering or merge-suggestion matching (see
+ *  faceClusteringClient.ts) — the Worker only ever does cheap I/O, never the vector-similarity
+ *  math itself (that math doesn't fit safely within Cloudflare Workers' 10ms CPU-time limit
+ *  once a library grows large — see faceClustering.ts's doc comment for the full history).
+ *  Pass `includeFaces: false` to skip the (potentially large) unclustered-faces array when
+ *  only cluster centroids are needed (merge-suggestion matching never needs faces). */
+export const getClusterData = async (includeFaces: boolean): Promise<ClusterData> => {
+  const response = await api.get<ClusterData>('/admin/people/cluster-data', {
+    params: includeFaces ? undefined : { includeFaces: 0 },
+    headers: getAdminHeaders(),
+  });
+  return response.data;
+};
+
+export interface ClusterResult {
+  /** null = brand-new cluster (never existed before this pass); otherwise an existing cluster id. */
+  clusterId: number | null;
+  centroidEmbedding: number[];
+  faceCount: number;
+  /** photo_faces.id values to assign to this cluster (only the NEWLY assigned ones this pass). */
+  addedFaceIds: number[];
+  /** Required (and only used) when clusterId is null — becomes the new cluster's cover photo. */
+  coverPhotoId?: string;
+}
+
+/** Persists client-computed clustering results (see faceClusteringClient.ts's
+ *  runClientSideClustering()) — pure I/O on the Worker side, safe regardless of how many faces/
+ *  clusters were involved in the client's computation. */
+export const applyClusteringResults = async (results: ClusterResult[]): Promise<{ facesAssigned: number; remaining: number }> => {
+  const response = await api.post<{ facesAssigned: number; remaining: number }>(
+    '/admin/people/apply-clustering',
+    { results },
     { headers: getAdminHeaders() }
   );
   return response.data;
@@ -498,42 +539,6 @@ export const updatePerson = async (
 
 export const mergePeople = async (targetPersonId: number, sourcePersonIds: number[]): Promise<void> => {
   await api.post('/admin/people/merge', { targetPersonId, sourcePersonIds }, { headers: getAdminHeaders() });
-};
-
-export interface MergeSuggestion {
-  clusterAId: number;
-  clusterBId: number;
-  similarity: number;
-}
-
-export interface MergeSuggestionCursor {
-  sourceId: number;
-  candidateId: number;
-}
-
-export interface MergeSuggestionsPage {
-  suggestions: MergeSuggestion[];
-  nextCursor: MergeSuggestionCursor | null;
-  totalClusters: number;
-}
-
-/** One bounded step of a resumable full pairwise scan for likely-duplicate person clusters
- *  clustering itself never got to compare (see worker's GET /admin/people/merge-suggestions for
- *  why). Pass the previous page's `nextCursor` to resume; omit to start a fresh scan.
- *  `minSimilarity` (0-1) overrides the worker's default suggestion threshold — used to retry
- *  with a more lenient search if the default threshold finds nothing (see AdminPeople.tsx). */
-export const getMergeSuggestions = async (
-  cursor?: MergeSuggestionCursor | null,
-  minSimilarity?: number
-): Promise<MergeSuggestionsPage> => {
-  const response = await api.get<MergeSuggestionsPage>('/admin/people/merge-suggestions', {
-    params: {
-      ...(cursor ? { sourceId: cursor.sourceId, candidateId: cursor.candidateId } : undefined),
-      ...(minSimilarity !== undefined ? { minSimilarity } : undefined),
-    },
-    headers: getAdminHeaders(),
-  });
-  return response.data;
 };
 
 export const deletePerson = async (personId: number): Promise<void> => {
