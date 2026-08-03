@@ -31,6 +31,23 @@ const MATCH_MULTIPLIER = 25;
 const MATCH_MIN = 0.2;
 const MATCH_MAX = 0.8;
 
+// @vladmandic/human's FaceRes descriptor is always exactly 1024 numbers (see
+// faceValidation.ts's EXPECTED_EMBEDDING_LENGTH, kept in sync manually with the worker since
+// these are separate npm packages). Any face/cluster arriving from the Worker with a DIFFERENT
+// length is definitely NOT a valid embedding — see apps/worker/src/faceClustering.ts's
+// blobToFloat32Array()/top-of-file doc comment for the exact production incident (a BLOB-
+// reading bug once silently fed every clustering pass 4x-too-long "embeddings" that were
+// actually just raw bytes reinterpreted as garbage floats) this guards against. Filtering these
+// out here — the EARLIEST possible point, before any clustering math runs at all — means a
+// future recurrence of that class of bug produces an obvious, loud console warning and simply
+// skips the bad rows (leaving them unclustered for a later retry) instead of silently building
+// meaningless clusters from noise.
+const EXPECTED_EMBEDDING_LENGTH = 1024;
+
+function isValidEmbeddingLength(embedding: number[]): boolean {
+  return embedding.length === EXPECTED_EMBEDDING_LENGTH;
+}
+
 /** Threshold used by automatic clustering (assigning a face to an existing person with zero
  *  human review). Lowered from Human's own documented "0.5 = match" guidance to 0.45
  *  (2026-08-03) specifically for this app's content: it is essentially entirely action/sports
@@ -127,8 +144,22 @@ export async function runClientSideClustering(
   clusters: ClusterDataCluster[],
   onProgress?: (processed: number, total: number) => void
 ): Promise<ClusterResult[]> {
+  // Filter out anything with a malformed embedding length BEFORE any clustering math runs —
+  // see EXPECTED_EMBEDDING_LENGTH's doc comment above for why this must never be trusted
+  // blindly. Bad faces are simply skipped (left unclustered for a later retry, e.g. after a
+  // "Fix outdated face data" repair); bad existing clusters are dropped from the working set
+  // entirely (never matched against, never further corrupted).
+  const validFaces = faces.filter((f) => isValidEmbeddingLength(f.embedding));
+  if (validFaces.length !== faces.length) {
+    console.error(`runClientSideClustering: skipping ${faces.length - validFaces.length} face(s) with a malformed embedding length`);
+  }
+  const validClusters = clusters.filter((c) => isValidEmbeddingLength(c.centroidEmbedding));
+  if (validClusters.length !== clusters.length) {
+    console.error(`runClientSideClustering: ignoring ${clusters.length - validClusters.length} existing cluster(s) with a malformed centroid length`);
+  }
+
   // In-memory working copy — updated as we go, same as the old worker implementation.
-  const working = clusters.map((c) => ({
+  const working = validClusters.map((c) => ({
     id: c.id,
     centroid: new Float32Array(c.centroidEmbedding),
     count: c.faceCount,
@@ -140,8 +171,8 @@ export async function runClientSideClustering(
   // but stable temp key, never sent to the server) since real ids don't exist until persisted.
   const newClusters: { centroid: Float32Array; count: number; addedFaceIds: number[]; coverPhotoId: string }[] = [];
 
-  for (let i = 0; i < faces.length; i++) {
-    const face = faces[i];
+  for (let i = 0; i < validFaces.length; i++) {
+    const face = validFaces[i];
     const embedding = new Float32Array(face.embedding);
 
     let bestSimilarity = -Infinity;
@@ -176,7 +207,7 @@ export async function runClientSideClustering(
       newClusters.push({ centroid: embedding, count: 1, addedFaceIds: [face.id], coverPhotoId: face.photoId });
     }
 
-    onProgress?.(i + 1, faces.length);
+    onProgress?.(i + 1, validFaces.length);
     await yieldPeriodically(i, 200);
   }
 
@@ -280,16 +311,23 @@ export async function findClientSideMergeSuggestions(
   minSimilarity: number = DEFAULT_MERGE_SUGGESTION_THRESHOLD,
   onProgress?: (comparisons: number, totalComparisons: number) => void
 ): Promise<MergeSuggestion[]> {
-  const centroids = clusters.map((c) => new Float32Array(c.centroidEmbedding));
-  const totalComparisons = (clusters.length * (clusters.length - 1)) / 2;
+  // Same malformed-embedding-length guard as runClientSideClustering() above — see
+  // EXPECTED_EMBEDDING_LENGTH's doc comment.
+  const validClusters = clusters.filter((c) => isValidEmbeddingLength(c.centroidEmbedding));
+  if (validClusters.length !== clusters.length) {
+    console.error(`findClientSideMergeSuggestions: ignoring ${clusters.length - validClusters.length} cluster(s) with a malformed centroid length`);
+  }
+
+  const centroids = validClusters.map((c) => new Float32Array(c.centroidEmbedding));
+  const totalComparisons = (validClusters.length * (validClusters.length - 1)) / 2;
   const suggestions: MergeSuggestion[] = [];
 
   let comparisons = 0;
-  for (let i = 0; i < clusters.length; i++) {
-    for (let j = i + 1; j < clusters.length; j++) {
+  for (let i = 0; i < validClusters.length; i++) {
+    for (let j = i + 1; j < validClusters.length; j++) {
       const similarity = humanSimilarity(centroids[i], centroids[j]);
       if (similarity >= minSimilarity) {
-        suggestions.push({ clusterAId: clusters[i].id, clusterBId: clusters[j].id, similarity });
+        suggestions.push({ clusterAId: validClusters[i].id, clusterBId: validClusters[j].id, similarity });
       }
       comparisons++;
       onProgress?.(comparisons, totalComparisons);

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { getClusterData, applyClusteringResults, countUnclusteredFaces, getLegacyFaceStats, resetLegacyFaces } from '../faceClustering';
+import { getClusterData, applyClusteringResults, countUnclusteredFaces, getLegacyFaceStats, resetLegacyFaces, blobToFloat32Array } from '../faceClustering';
 import type { Env } from '../types';
 
 /**
@@ -168,6 +168,55 @@ function embeddingOf(...values: number[]): ArrayBuffer {
   return new Float32Array(values).buffer;
 }
 
+// applyClusteringResults() now hard-rejects any centroidEmbedding that isn't exactly
+// EXPECTED_EMBEDDING_LENGTH (1024) — see faceClustering.ts's top-of-file doc comment for the
+// production incident this guards against. Pads a short, easy-to-read list of values out to
+// the full 1024-length array (zeros for the remainder) so these tests can keep using small,
+// readable numbers while still passing the length guard.
+function resultCentroidOf(...values: number[]): number[] {
+  const padded = new Array(1024).fill(0);
+  values.forEach((v, i) => { padded[i] = v; });
+  return padded;
+}
+
+describe('blobToFloat32Array', () => {
+  it('correctly reinterprets a genuine ArrayBuffer\'s bytes as packed floats (the normal case)', () => {
+    const original = new Float32Array([1.5, -2.25, 3.0]);
+    const result = blobToFloat32Array(original.buffer);
+    expect(Array.from(result)).toEqual([1.5, -2.25, 3.0]);
+    expect(result.length).toBe(3);
+  });
+
+  it("does NOT corrupt data when D1 hands back a Uint8Array VIEW instead of a raw ArrayBuffer — the exact production incident this guards against", () => {
+    // Simulates the confirmed production bug: D1 (or some intermediate layer) returning the
+    // BLOB as a Uint8Array view rather than a bare ArrayBuffer. Passing that Uint8Array
+    // straight into `new Float32Array(...)` would (per the JS spec) copy each BYTE VALUE
+    // (0-255) as its own float element — 4x too many "floats", each a meaningless small
+    // integer — instead of correctly reinterpreting every 4 bytes as one packed float.
+    const original = new Float32Array([1.5, -2.25, 3.0, 1000.25]);
+    const view = new Uint8Array(original.buffer); // a VIEW, not the raw ArrayBuffer itself
+
+    const result = blobToFloat32Array(view);
+
+    expect(result.length).toBe(4); // NOT 16 (4 bytes/float * 4 floats)
+    expect(Array.from(result)).toEqual([1.5, -2.25, 3.0, 1000.25]);
+  });
+
+  it('correctly handles a Uint8Array view with a nonzero byteOffset into a larger shared buffer', () => {
+    const original = new Float32Array([9, 8, 7]);
+    // Simulate a view that doesn't start at byte 0 of its underlying buffer (e.g. a Node
+    // Buffer slice or a D1 result sharing a larger response buffer).
+    const padded = new ArrayBuffer(8 + original.buffer.byteLength);
+    new Uint8Array(padded, 8).set(new Uint8Array(original.buffer));
+    const offsetView = new Uint8Array(padded, 8, original.buffer.byteLength);
+
+    const result = blobToFloat32Array(offsetView);
+
+    expect(result.length).toBe(3);
+    expect(Array.from(result)).toEqual([9, 8, 7]);
+  });
+});
+
 describe('getClusterData', () => {
   it('returns both unclustered faces and existing clusters when includeFaces is true', async () => {
     const db = new FakeFaceClusteringDb();
@@ -237,7 +286,7 @@ describe('applyClusteringResults', () => {
     const { facesAssigned } = await applyClusteringResults(makeEnv(db), [
       {
         clusterId: null,
-        centroidEmbedding: [1, 1, 1],
+        centroidEmbedding: resultCentroidOf(1, 1, 1),
         faceCount: 2,
         addedFaceIds: [100, 101],
         coverPhotoId: 'photo-x',
@@ -255,11 +304,11 @@ describe('applyClusteringResults', () => {
     db.faces = [{ id: 200, photo_id: 'photo-z', embedding: embeddingOf(2, 2, 2), person_id: null }];
 
     await applyClusteringResults(makeEnv(db), [
-      { clusterId: 5, centroidEmbedding: [0.5, 0.5, 0.5], faceCount: 4, addedFaceIds: [200] },
+      { clusterId: 5, centroidEmbedding: resultCentroidOf(0.5, 0.5, 0.5), faceCount: 4, addedFaceIds: [200] },
     ]);
 
     expect(db.clusters[0].face_count).toBe(4);
-    expect(Array.from(new Float32Array(db.clusters[0].centroid_embedding))).toEqual([0.5, 0.5, 0.5]);
+    expect(Array.from(new Float32Array(db.clusters[0].centroid_embedding)).slice(0, 3)).toEqual([0.5, 0.5, 0.5]);
     expect(db.faces[0].person_id).toBe(5);
   });
 
@@ -269,7 +318,7 @@ describe('applyClusteringResults', () => {
     db.faces = faceIds.map((id) => ({ id, photo_id: `photo-${id}`, embedding: embeddingOf(1, 1, 1), person_id: null }));
 
     const { facesAssigned } = await applyClusteringResults(makeEnv(db), [
-      { clusterId: null, centroidEmbedding: [1, 1, 1], faceCount: 250, addedFaceIds: faceIds, coverPhotoId: 'photo-1000' },
+      { clusterId: null, centroidEmbedding: resultCentroidOf(1, 1, 1), faceCount: 250, addedFaceIds: faceIds, coverPhotoId: 'photo-1000' },
     ]);
 
     expect(facesAssigned).toBe(250);
@@ -285,13 +334,48 @@ describe('applyClusteringResults', () => {
     ];
 
     await applyClusteringResults(makeEnv(db), [
-      { clusterId: 1, centroidEmbedding: [9, 9, 9], faceCount: 2, addedFaceIds: [1] },
-      { clusterId: null, centroidEmbedding: [50, 50, 50], faceCount: 1, addedFaceIds: [2], coverPhotoId: 'photo-b' },
+      { clusterId: 1, centroidEmbedding: resultCentroidOf(9, 9, 9), faceCount: 2, addedFaceIds: [1] },
+      { clusterId: null, centroidEmbedding: resultCentroidOf(50, 50, 50), faceCount: 1, addedFaceIds: [2], coverPhotoId: 'photo-b' },
     ]);
 
     expect(db.clusters).toHaveLength(2);
     expect(db.faces.find((f) => f.id === 1)?.person_id).toBe(1);
     expect(db.faces.find((f) => f.id === 2)?.person_id).toBe(db.clusters[1].id);
+  });
+
+  it('rejects (never writes) a result whose centroidEmbedding is not exactly 1024 numbers, and reports it as rejected', async () => {
+    const db = new FakeFaceClusteringDb();
+    db.faces = [{ id: 1, photo_id: 'photo-a', embedding: embeddingOf(1, 1, 1), person_id: null }];
+
+    const { facesAssigned, rejected } = await applyClusteringResults(makeEnv(db), [
+      // Malformed: only 3 numbers instead of 1024 — e.g. what a corrupted read-side bug (see
+      // this file's top-of-file doc comment) could produce.
+      { clusterId: null, centroidEmbedding: [1, 1, 1], faceCount: 1, addedFaceIds: [1], coverPhotoId: 'photo-a' },
+    ]);
+
+    expect(rejected).toBe(1);
+    expect(facesAssigned).toBe(0);
+    expect(db.clusters).toHaveLength(0);
+    expect(db.faces[0].person_id).toBeNull();
+  });
+
+  it('still applies well-formed results in the same batch as a rejected malformed one', async () => {
+    const db = new FakeFaceClusteringDb();
+    db.faces = [
+      { id: 1, photo_id: 'photo-a', embedding: embeddingOf(1, 1, 1), person_id: null },
+      { id: 2, photo_id: 'photo-b', embedding: embeddingOf(2, 2, 2), person_id: null },
+    ];
+
+    const { facesAssigned, rejected } = await applyClusteringResults(makeEnv(db), [
+      { clusterId: null, centroidEmbedding: [1, 1, 1], faceCount: 1, addedFaceIds: [1], coverPhotoId: 'photo-a' }, // malformed
+      { clusterId: null, centroidEmbedding: resultCentroidOf(2, 2, 2), faceCount: 1, addedFaceIds: [2], coverPhotoId: 'photo-b' }, // well-formed
+    ]);
+
+    expect(rejected).toBe(1);
+    expect(facesAssigned).toBe(1);
+    expect(db.clusters).toHaveLength(1);
+    expect(db.faces.find((f) => f.id === 2)?.person_id).toBe(db.clusters[0].id);
+    expect(db.faces.find((f) => f.id === 1)?.person_id).toBeNull();
   });
 });
 

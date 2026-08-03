@@ -29,6 +29,54 @@ import { EXPECTED_EMBEDDING_LENGTH } from './faceValidation';
  * file's own doc comment for the exact same math + rationale as this file used to have.
  */
 
+/**
+ * THE REAL ROOT CAUSE of "clustering never groups more than 2 photos, no real matches ever
+ * found" (2026-08-03, discovered by directly inspecting production D1 data after 4 rounds of
+ * platform-limit fixes still didn't resolve the reported symptoms): `new Float32Array(x)`
+ * behaves COMPLETELY differently depending on what `x` actually is at runtime:
+ *  - If `x` is a raw `ArrayBuffer`: the bytes are REINTERPRETED as packed 32-bit floats (a
+ *    4096-byte buffer becomes 1024 floats) — this is what every BLOB-reading call in this file
+ *    always assumed and was typed for (`ArrayBuffer` in every D1 row type below).
+ *  - If `x` is instead ANY other typed array / array-like (e.g. a `Uint8Array` VIEW), the
+ *    constructor instead COPIES ELEMENT VALUES ONE-FOR-ONE with NO byte reinterpretation — a
+ *    4096-byte Uint8Array (4096 elements, each a raw byte 0-255) becomes a Float32Array of
+ *    4096 elements, each just that byte's numeric value (0-255) cast to float — i.e. the
+ *    individual BYTES of the real embedding, not the real (4-bytes-per-float) embedding values
+ *    at all. Confirmed directly against production data: every single stored
+ *    `person_clusters.centroid_embedding` was 16384 bytes (4096 floats, 4x too many) and EVERY
+ *    ONE of those 4096 values was a plain integer in [0, 255] — the unmistakable signature of
+ *    this exact bug, not real embedding data. Whatever D1/runtime detail causes `f.embedding`/
+ *    `c.centroid_embedding` to arrive as something other than a plain `ArrayBuffer` in
+ *    production (this repo's own D1 mocks in tests always hand back genuine `ArrayBuffer`s, so
+ *    none of this feature's many unit tests ever could have caught it), the effect is that
+ *    EVERY face/centroid this Worker has ever handed to the browser for clustering has been
+ *    pure noise (raw bytes reinterpreted as garbage floats) rather than real face descriptors —
+ *    explaining, in one stroke, every previously-reported symptom: clustering never grouping
+ *    more than 1-2 photos (comparing noise to noise essentially never "matches"), merge
+ *    suggestions finding nothing (same reason), and the escalating 503s (ever-more garbage
+ *    clusters accumulating, each still needing to be fetched/converted/serialized every pass).
+ *
+ * FIX: `blobToFloat32Array()` below normalizes ANY BLOB value D1 hands back — whether it's a
+ * genuine `ArrayBuffer` or some other `ArrayBufferView` — into a CORRECTLY byte-reinterpreted
+ * Float32Array, by explicitly slicing out the view's own backing bytes before constructing the
+ * Float32Array, rather than ever passing an ambiguous value straight into `new Float32Array()`.
+ * ALL BLOB reads in this file now go through this helper. As defense-in-depth (in case some
+ * other, still-unknown mechanism produces a wrong-length array in the future),
+ * `applyClusteringResults()` also now HARD-REJECTS (never writes) any result whose
+ * `centroidEmbedding` isn't exactly `EXPECTED_EMBEDDING_LENGTH` — so even if a future bug
+ * produces garbage client-side, it can no longer silently reach the database.
+ */
+export function blobToFloat32Array(blob: ArrayBuffer | ArrayBufferView): Float32Array {
+  if (ArrayBuffer.isView(blob)) {
+    // blob is some other typed array/view (Uint8Array, Buffer, etc.) — slice out exactly its
+    // own backing bytes into a fresh, tightly-sized ArrayBuffer before reinterpreting, so the
+    // result is correct regardless of the view's element type, offset, or any surrounding
+    // buffer padding/pooling.
+    return new Float32Array(blob.buffer.slice(blob.byteOffset, blob.byteOffset + blob.byteLength));
+  }
+  return new Float32Array(blob);
+}
+
 /** Raw data needed to run one full clustering pass — see faceClusteringClient.ts. */
 export interface ClusterDataFace {
   id: number;
@@ -91,7 +139,7 @@ export async function getClusterData(
   const clusterRowsArr = clusterRows || [];
   const clusters: ClusterDataCluster[] = clusterRowsArr.map((c) => ({
     id: c.id,
-    centroidEmbedding: Array.from(new Float32Array(c.centroid_embedding)),
+    centroidEmbedding: Array.from(blobToFloat32Array(c.centroid_embedding)),
     faceCount: c.face_count,
   }));
   const nextClusterCursor = clusterRowsArr.length === PAGE_SIZE ? clusterRowsArr[clusterRowsArr.length - 1].id : null;
@@ -115,7 +163,7 @@ export async function getClusterData(
   const faces: ClusterDataFace[] = faceRowsArr.map((f) => ({
     id: f.id,
     photoId: f.photo_id,
-    embedding: Array.from(new Float32Array(f.embedding)),
+    embedding: Array.from(blobToFloat32Array(f.embedding)),
   }));
   const nextFaceCursor = faceRowsArr.length === PAGE_SIZE ? faceRowsArr[faceRowsArr.length - 1].id : null;
 
@@ -149,11 +197,28 @@ function chunk<T>(items: T[], size: number): T[][] {
 /**
  * Persists the client's already-computed clustering results — pure I/O (INSERT/UPDATE), no
  * vector math. See ClusterResult above for the shape the client sends.
+ *
+ * Defense-in-depth: HARD-REJECTS (skips, never writes) any result whose `centroidEmbedding`
+ * isn't exactly `EXPECTED_EMBEDDING_LENGTH` (1024) — see this file's top-of-file doc comment
+ * for the exact production incident this guards against (a read-side bug once silently fed
+ * 4x-too-long, garbage "embeddings" all the way through clustering and into the database).
+ * Even with that read-side bug now fixed, this guard ensures no future, still-unknown bug can
+ * ever again silently write a malformed centroid — better to lose one cluster update/skip one
+ * new cluster than to permanently corrupt matching for that person going forward.
  */
-export async function applyClusteringResults(env: Env, results: ClusterResult[]): Promise<{ facesAssigned: number }> {
+export async function applyClusteringResults(env: Env, results: ClusterResult[]): Promise<{ facesAssigned: number; rejected: number }> {
   let facesAssigned = 0;
+  let rejected = 0;
 
   for (const result of results) {
+    if (result.centroidEmbedding.length !== EXPECTED_EMBEDDING_LENGTH) {
+      console.error(
+        `Rejected clustering result with malformed centroidEmbedding length ${result.centroidEmbedding.length} (expected ${EXPECTED_EMBEDDING_LENGTH})`
+      );
+      rejected++;
+      continue;
+    }
+
     let clusterId = result.clusterId;
 
     if (clusterId === null) {
@@ -181,7 +246,7 @@ export async function applyClusteringResults(env: Env, results: ClusterResult[])
     }
   }
 
-  return { facesAssigned };
+  return { facesAssigned, rejected };
 }
 
 /** Count of faces still awaiting clustering — used by the People page for progress display. */
@@ -243,7 +308,7 @@ async function findCorruptedClusterIds(env: Env): Promise<number[]> {
     .all<{ id: number; centroid_embedding: ArrayBuffer }>();
 
   return (results || [])
-    .filter((row) => new Float32Array(row.centroid_embedding).some((v) => Number.isNaN(v)))
+    .filter((row) => blobToFloat32Array(row.centroid_embedding).some((v) => Number.isNaN(v)))
     .map((row) => row.id);
 }
 

@@ -14,7 +14,19 @@ import type { ClusterDataFace, ClusterDataCluster, ClusterResult } from '../api'
  * Tests for the client-side face-clustering + merge-suggestion matching that replaced the
  * old server-side (Cloudflare Worker) implementation — see faceClusteringClient.ts's doc
  * comment for why this moved out of the Worker entirely (repeated CPU-time-limit crashes).
+ *
+ * runClientSideClustering()/findClientSideMergeSuggestions() now filter out any embedding that
+ * isn't exactly 1024 numbers long (see EXPECTED_EMBEDDING_LENGTH's doc comment in
+ * faceClusteringClient.ts — a defense against the confirmed production incident where a BLOB-
+ * reading bug once fed 4x-too-long garbage "embeddings" through the whole pipeline), so test
+ * fixtures below use `pad1024()` to build realistic-length embeddings instead of short
+ * illustrative arrays.
  */
+function pad1024(...values: number[]): number[] {
+  const padded = new Array(1024).fill(0);
+  values.forEach((v, i) => { padded[i] = v; });
+  return padded;
+}
 
 describe('humanDistance / humanSimilarity', () => {
   it('humanDistance is zero for identical vectors', () => {
@@ -66,8 +78,8 @@ describe('humanDistance / humanSimilarity', () => {
 describe('runClientSideClustering', () => {
   it('groups two near-identical faces into the same brand-new person cluster', async () => {
     const faces: ClusterDataFace[] = [
-      { id: 1, photoId: 'photo-a', embedding: [1, 1, 1] },
-      { id: 2, photoId: 'photo-b', embedding: [1.01, 1.01, 1.01] },
+      { id: 1, photoId: 'photo-a', embedding: pad1024(1, 1, 1) },
+      { id: 2, photoId: 'photo-b', embedding: pad1024(1.01, 1.01, 1.01) },
     ];
 
     const results = await runClientSideClustering(faces, []);
@@ -82,8 +94,8 @@ describe('runClientSideClustering', () => {
   it('creates separate clusters for faces further apart than the same-person threshold', async () => {
     const far = 16; // humanSimilarity() = 0 for a single-component diff of 16 — see math tests above.
     const faces: ClusterDataFace[] = [
-      { id: 1, photoId: 'photo-a', embedding: [0, 0, 0] },
-      { id: 2, photoId: 'photo-b', embedding: [far, 0, 0] },
+      { id: 1, photoId: 'photo-a', embedding: pad1024(0, 0, 0) },
+      { id: 2, photoId: 'photo-b', embedding: pad1024(far, 0, 0) },
     ];
 
     const results = await runClientSideClustering(faces, []);
@@ -94,9 +106,9 @@ describe('runClientSideClustering', () => {
 
   it('assigns a new face to an existing cluster passed in from the server', async () => {
     const existingClusters: ClusterDataCluster[] = [
-      { id: 42, centroidEmbedding: [2, 2, 2], faceCount: 3 },
+      { id: 42, centroidEmbedding: pad1024(2, 2, 2), faceCount: 3 },
     ];
-    const faces: ClusterDataFace[] = [{ id: 1, photoId: 'photo-a', embedding: [2.01, 1.99, 2.0] }];
+    const faces: ClusterDataFace[] = [{ id: 1, photoId: 'photo-a', embedding: pad1024(2.01, 1.99, 2.0) }];
 
     const results = await runClientSideClustering(faces, existingClusters);
 
@@ -108,9 +120,9 @@ describe('runClientSideClustering', () => {
 
   it('lets a face join a brand-new cluster created earlier in the SAME pass', async () => {
     const faces: ClusterDataFace[] = [
-      { id: 1, photoId: 'photo-a', embedding: [5, 5, 5] },
-      { id: 2, photoId: 'photo-b', embedding: [5.01, 5.01, 5.01] },
-      { id: 3, photoId: 'photo-c', embedding: [5.02, 4.98, 5.0] },
+      { id: 1, photoId: 'photo-a', embedding: pad1024(5, 5, 5) },
+      { id: 2, photoId: 'photo-b', embedding: pad1024(5.01, 5.01, 5.01) },
+      { id: 3, photoId: 'photo-c', embedding: pad1024(5.02, 4.98, 5.0) },
     ];
 
     const results = await runClientSideClustering(faces, []);
@@ -127,9 +139,9 @@ describe('runClientSideClustering', () => {
 
   it('does not include unchanged existing clusters in the results (only clusters that actually changed)', async () => {
     const existingClusters: ClusterDataCluster[] = [
-      { id: 1, centroidEmbedding: [0, 0, 0], faceCount: 1 }, // never matched, should be untouched
+      { id: 1, centroidEmbedding: pad1024(0, 0, 0), faceCount: 1 }, // never matched, should be untouched
     ];
-    const faces: ClusterDataFace[] = [{ id: 1, photoId: 'photo-a', embedding: [500, 500, 500] }]; // wildly different
+    const faces: ClusterDataFace[] = [{ id: 1, photoId: 'photo-a', embedding: pad1024(500, 500, 500) }]; // wildly different
 
     const results = await runClientSideClustering(faces, existingClusters);
 
@@ -139,8 +151,8 @@ describe('runClientSideClustering', () => {
 
   it('reports progress via the onProgress callback', async () => {
     const faces: ClusterDataFace[] = [
-      { id: 1, photoId: 'photo-a', embedding: [1, 1, 1] },
-      { id: 2, photoId: 'photo-b', embedding: [2, 2, 2] },
+      { id: 1, photoId: 'photo-a', embedding: pad1024(1, 1, 1) },
+      { id: 2, photoId: 'photo-b', embedding: pad1024(2, 2, 2) },
     ];
     const calls: Array<[number, number]> = [];
 
@@ -148,14 +160,33 @@ describe('runClientSideClustering', () => {
 
     expect(calls).toEqual([[1, 2], [2, 2]]);
   });
+
+  it('filters out (and never uses) faces or clusters with a malformed (non-1024) embedding length', async () => {
+    const faces: ClusterDataFace[] = [
+      { id: 1, photoId: 'photo-a', embedding: [1, 1, 1] }, // malformed — only 3 numbers
+      { id: 2, photoId: 'photo-b', embedding: pad1024(9, 9, 9) },
+    ];
+    const existingClusters: ClusterDataCluster[] = [
+      { id: 5, centroidEmbedding: [1, 1], faceCount: 1 }, // malformed — only 2 numbers
+    ];
+
+    const results = await runClientSideClustering(faces, existingClusters);
+
+    // The malformed face is silently skipped (never assigned/clustered); the malformed existing
+    // cluster is ignored entirely (never matched against, never appears in results); only the
+    // well-formed face produces a result.
+    expect(results).toHaveLength(1);
+    expect(results[0].addedFaceIds).toEqual([2]);
+    expect(results.some((r) => r.clusterId === 5)).toBe(false);
+  });
 });
 
 describe('findClientSideMergeSuggestions', () => {
   it('suggests a pair of clusters whose centroids are near-identical, but not a far-apart third cluster', async () => {
     const clusters: ClusterDataCluster[] = [
-      { id: 1, centroidEmbedding: [1, 1, 1], faceCount: 1 },
-      { id: 2, centroidEmbedding: [1.01, 1.01, 1.01], faceCount: 1 },
-      { id: 3, centroidEmbedding: [50, 50, 50], faceCount: 1 },
+      { id: 1, centroidEmbedding: pad1024(1, 1, 1), faceCount: 1 },
+      { id: 2, centroidEmbedding: pad1024(1.01, 1.01, 1.01), faceCount: 1 },
+      { id: 3, centroidEmbedding: pad1024(50, 50, 50), faceCount: 1 },
     ];
 
     const suggestions = await findClientSideMergeSuggestions(clusters);
@@ -167,8 +198,8 @@ describe('findClientSideMergeSuggestions', () => {
 
   it('only ever reports a pair once, in (lower id, higher id) order', async () => {
     const clusters: ClusterDataCluster[] = [
-      { id: 1, centroidEmbedding: [1, 1, 1], faceCount: 1 },
-      { id: 2, centroidEmbedding: [1.01, 1.01, 1.01], faceCount: 1 },
+      { id: 1, centroidEmbedding: pad1024(1, 1, 1), faceCount: 1 },
+      { id: 2, centroidEmbedding: pad1024(1.01, 1.01, 1.01), faceCount: 1 },
     ];
 
     const suggestions = await findClientSideMergeSuggestions(clusters);
@@ -179,7 +210,7 @@ describe('findClientSideMergeSuggestions', () => {
 
   it('returns an empty array for an empty or single-cluster library', async () => {
     expect(await findClientSideMergeSuggestions([])).toEqual([]);
-    expect(await findClientSideMergeSuggestions([{ id: 1, centroidEmbedding: [1], faceCount: 1 }])).toEqual([]);
+    expect(await findClientSideMergeSuggestions([{ id: 1, centroidEmbedding: pad1024(1), faceCount: 1 }])).toEqual([]);
   });
 
   it('surfaces a pair scoring between the lenient default threshold and the stricter auto-merge threshold', async () => {
@@ -188,8 +219,8 @@ describe('findClientSideMergeSuggestions', () => {
     // (0.35, used only for human-reviewed suggestions) — this is exactly the gap this feature
     // exists to catch (see faceClusteringClient.ts's doc comment on the two thresholds).
     const clusters: ClusterDataCluster[] = [
-      { id: 1, centroidEmbedding: [0, 0, 0], faceCount: 1 },
-      { id: 2, centroidEmbedding: [6.5, 6.5, 6.5], faceCount: 1 },
+      { id: 1, centroidEmbedding: pad1024(0, 0, 0), faceCount: 1 },
+      { id: 2, centroidEmbedding: pad1024(6.5, 6.5, 6.5), faceCount: 1 },
     ];
 
     const atDefault = await findClientSideMergeSuggestions(clusters, DEFAULT_MERGE_SUGGESTION_THRESHOLD);
@@ -201,9 +232,9 @@ describe('findClientSideMergeSuggestions', () => {
 
   it('reports progress via the onProgress callback', async () => {
     const clusters: ClusterDataCluster[] = [
-      { id: 1, centroidEmbedding: [0, 0, 0], faceCount: 1 },
-      { id: 2, centroidEmbedding: [100, 100, 100], faceCount: 1 },
-      { id: 3, centroidEmbedding: [200, 200, 200], faceCount: 1 },
+      { id: 1, centroidEmbedding: pad1024(0, 0, 0), faceCount: 1 },
+      { id: 2, centroidEmbedding: pad1024(100, 100, 100), faceCount: 1 },
+      { id: 3, centroidEmbedding: pad1024(200, 200, 200), faceCount: 1 },
     ];
     const calls: Array<[number, number]> = [];
 
@@ -213,6 +244,19 @@ describe('findClientSideMergeSuggestions', () => {
 
     // C(3,2) = 3 total comparisons.
     expect(calls).toEqual([[1, 3], [2, 3], [3, 3]]);
+  });
+
+  it('ignores (never compares against) any cluster with a malformed (non-1024) centroid length', async () => {
+    const clusters: ClusterDataCluster[] = [
+      { id: 1, centroidEmbedding: pad1024(1, 1, 1), faceCount: 1 },
+      { id: 2, centroidEmbedding: pad1024(1.01, 1.01, 1.01), faceCount: 1 },
+      { id: 3, centroidEmbedding: [1, 1, 1], faceCount: 1 }, // malformed — only 3 numbers
+    ];
+
+    const suggestions = await findClientSideMergeSuggestions(clusters);
+
+    expect(suggestions).toHaveLength(1);
+    expect(suggestions.every((s) => s.clusterAId !== 3 && s.clusterBId !== 3)).toBe(true);
   });
 });
 

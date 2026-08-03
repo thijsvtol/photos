@@ -89,8 +89,8 @@ describe('GET /admin/people/cluster-data', () => {
 });
 
 describe('POST /admin/people/apply-clustering', () => {
-  it('persists results and reports facesAssigned/remaining', async () => {
-    applyClusteringResultsMock.mockResolvedValue({ facesAssigned: 3 });
+  it('persists results and reports facesAssigned/remaining/rejected', async () => {
+    applyClusteringResultsMock.mockResolvedValue({ facesAssigned: 3, rejected: 0 });
     countUnclusteredFacesMock.mockResolvedValue(7);
 
     const results = [{ clusterId: null, centroidEmbedding: [1, 2], faceCount: 1, addedFaceIds: [10], coverPhotoId: 'p1' }];
@@ -102,7 +102,7 @@ describe('POST /admin/people/apply-clustering', () => {
     const body = await res.json() as any;
 
     expect(res.status).toBe(200);
-    expect(body).toEqual({ facesAssigned: 3, remaining: 7 });
+    expect(body).toEqual({ facesAssigned: 3, remaining: 7, rejected: 0 });
     expect(applyClusteringResultsMock).toHaveBeenCalledWith(expect.anything(), results);
   });
 

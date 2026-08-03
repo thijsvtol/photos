@@ -61,9 +61,9 @@ app.post('/apply-clustering', async (c) => {
       return c.json({ error: 'results array is required' }, 400);
     }
 
-    const { facesAssigned } = await applyClusteringResults(c.env, results);
+    const { facesAssigned, rejected } = await applyClusteringResults(c.env, results);
     const remaining = await countUnclusteredFaces(c.env);
-    return c.json({ facesAssigned, remaining });
+    return c.json({ facesAssigned, remaining, rejected });
   } catch (error) {
     console.error('Error applying clustering results:', error);
     return c.json({ error: 'Failed to apply clustering results' }, 500);

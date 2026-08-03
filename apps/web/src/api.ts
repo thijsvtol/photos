@@ -554,9 +554,13 @@ export interface ClusterResult {
 
 /** Persists client-computed clustering results (see faceClusteringClient.ts's
  *  runClientSideClustering()) — pure I/O on the Worker side, safe regardless of how many faces/
- *  clusters were involved in the client's computation. */
-export const applyClusteringResults = async (results: ClusterResult[]): Promise<{ facesAssigned: number; remaining: number }> => {
-  const response = await api.post<{ facesAssigned: number; remaining: number }>(
+ *  clusters were involved in the client's computation. `rejected` counts results the Worker
+ *  refused to write because their centroidEmbedding wasn't the expected length (a defense-in-
+ *  depth guard against the exact malformed-embedding corruption incident — see
+ *  faceClustering.ts's top-of-file doc comment); those faces stay unclustered and are simply
+ *  retried on the next "Cluster Now" pass. */
+export const applyClusteringResults = async (results: ClusterResult[]): Promise<{ facesAssigned: number; remaining: number; rejected: number }> => {
+  const response = await api.post<{ facesAssigned: number; remaining: number; rejected: number }>(
     '/admin/people/apply-clustering',
     { results },
     { headers: getAdminHeaders() }
