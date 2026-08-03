@@ -160,11 +160,22 @@ export async function getClusterData(
     .all<{ id: number; photo_id: string; embedding: ArrayBuffer }>();
 
   const faceRowsArr = faceRows || [];
+  if (faceRowsArr.length > 0) {
+    const sample = faceRowsArr[0].embedding as unknown;
+    console.error(
+      `[DEBUG getClusterData] sample face blob constructor=${(sample as object)?.constructor?.name}` +
+      ` isView=${ArrayBuffer.isView(sample as ArrayBufferView)}` +
+      ` byteLength=${(sample as ArrayBuffer | ArrayBufferView)?.byteLength}`
+    );
+  }
   const faces: ClusterDataFace[] = faceRowsArr.map((f) => ({
     id: f.id,
     photoId: f.photo_id,
     embedding: Array.from(blobToFloat32Array(f.embedding)),
   }));
+  if (faces.length > 0) {
+    console.error(`[DEBUG getClusterData] first converted face embedding.length=${faces[0].embedding.length}`);
+  }
   const nextFaceCursor = faceRowsArr.length === PAGE_SIZE ? faceRowsArr[faceRowsArr.length - 1].id : null;
 
   return { faces, clusters, nextClusterCursor, nextFaceCursor };
