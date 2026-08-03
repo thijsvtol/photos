@@ -1,7 +1,7 @@
 import { Hono } from 'hono';
 import type { Env, User } from '../../types';
 import { requireAdmin } from '../../auth';
-import { getClusterData, applyClusteringResults, countUnclusteredFaces, getLegacyFaceStats, resetLegacyFaces, mergeClusters, assignPhotosToPerson } from '../../faceClustering';
+import { getClusterData, applyClusteringResults, countUnclusteredFaces, getLegacyFaceStats, resetLegacyFaces, mergeClusters, assignPhotosToPerson, resetAllClusters } from '../../faceClustering';
 import type { ClusterResult } from '../../faceClustering';
 
 type Variables = {
@@ -38,7 +38,8 @@ app.get('/cluster-data', async (c) => {
     const includeFaces = c.req.query('includeFaces') !== '0';
     const afterClusterId = parseInt(c.req.query('afterClusterId') || '0', 10) || 0;
     const afterFaceId = parseInt(c.req.query('afterFaceId') || '0', 10) || 0;
-    const data = await getClusterData(c.env, includeFaces, afterClusterId, afterFaceId);
+    const unclusteredOnly = c.req.query('unclusteredOnly') !== '0';
+    const data = await getClusterData(c.env, includeFaces, afterClusterId, afterFaceId, unclusteredOnly);
     return c.json(data);
   } catch (error) {
     console.error('Error fetching cluster data:', error);
@@ -106,6 +107,25 @@ app.post('/reset-legacy-faces', async (c) => {
   } catch (error) {
     console.error('Error resetting legacy faces:', error);
     return c.json({ error: 'Failed to reset legacy faces' }, 500);
+  }
+});
+
+/**
+ * POST /people/reset-clusters
+ *
+ * Unassigns every face from its person and deletes every person cluster, in preparation for a
+ * full "Rebuild All (Deep)" reclustering pass (see resetAllClusters()'s doc comment in
+ * faceClustering.ts). Raw photo_faces.embedding rows are never touched — fully recoverable by
+ * reclustering again, nothing is permanently lost. Destructive but idempotent/safe to call
+ * repeatedly (a no-op once already reset).
+ */
+app.post('/reset-clusters', async (c) => {
+  try {
+    const result = await resetAllClusters(c.env);
+    return c.json(result);
+  } catch (error) {
+    console.error('Error resetting clusters:', error);
+    return c.json({ error: 'Failed to reset clusters' }, 500);
   }
 });
 

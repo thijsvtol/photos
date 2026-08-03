@@ -2,11 +2,11 @@ import React, { useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { Users, ScanFace, Loader2, Sparkles, Eye, EyeOff, GitMerge, X, Check } from 'lucide-react';
 import Navbar from '../components/Navbar';
-import { getPeople, getPreviewUrl, getFullClusterData, applyClusteringResults, mergePeople, getLegacyFaceStats, resetLegacyFaces } from '../api';
+import { getPeople, getPreviewUrl, getFullClusterData, getAllFacesForDeepRebuild, applyClusteringResults, resetAllClusters, mergePeople, getLegacyFaceStats, resetLegacyFaces } from '../api';
 import type { Person, LegacyFaceStats } from '../api';
 import { runBackfillScan } from '../faceBackfill';
 import type { BackfillProgress } from '../faceBackfill';
-import { runClientSideClustering, findClientSideMergeSuggestions, chunkClusteringResultsForApply, DEFAULT_MERGE_SUGGESTION_THRESHOLD } from '../faceClusteringClient';
+import { runClientSideClustering, runDeepRebuildClustering, findClientSideMergeSuggestions, chunkClusteringResultsForApply, DEFAULT_MERGE_SUGGESTION_THRESHOLD } from '../faceClusteringClient';
 import type { MergeSuggestion } from '../faceClusteringClient';
 
 // A second, much more lenient similarity threshold tried automatically only if the default
@@ -34,6 +34,8 @@ const AdminPeople: React.FC = () => {
   const cancelRef = useRef(false);
   const [clustering, setClustering] = useState(false);
   const [clusterProgress, setClusterProgress] = useState<{ processed: number; total: number } | null>(null);
+  const [deepRebuilding, setDeepRebuilding] = useState(false);
+  const [deepRebuildProgress, setDeepRebuildProgress] = useState<{ processed: number; total: number } | null>(null);
   const [findingMerges, setFindingMerges] = useState(false);
   const [mergeScanProgress, setMergeScanProgress] = useState<{ comparisons: number; total: number } | null>(null);
   const [mergeSuggestions, setMergeSuggestions] = useState<MergeSuggestion[]>([]);
@@ -167,6 +169,56 @@ const AdminPeople: React.FC = () => {
   const suggestionKey = (s: MergeSuggestion) => `${s.clusterAId}-${s.clusterBId}`;
 
   /**
+   * "Rebuild All (Deep)" — a much stronger, from-scratch reclustering pass using
+   * runDeepRebuildClustering()'s representative-sample algorithm (see its doc comment in
+   * faceClusteringClient.ts) instead of the routine incremental nearest-centroid one. Unlike
+   * "Cluster Now" (which only ever looks at NOT-YET-clustered faces and trusts existing
+   * clusters' centroids), this discards every existing person/cluster entirely and recomputes
+   * everyone from every face's real, unmodified embedding — the fix for centroid drift ever
+   * letting different people blend into one group. Destructive (all current person groupings
+   * are thrown away and rebuilt), so requires an explicit confirmation; NOTHING about the
+   * underlying photos/face embeddings themselves is touched or lost, and this can be re-run
+   * as many times as needed.
+   */
+  const handleDeepRebuild = async () => {
+    if (
+      !window.confirm(
+        'This will discard ALL current people/groupings and rebuild everyone from scratch using a stronger matching algorithm. Named people will need to be renamed afterward. Photos/faces themselves are never affected. Continue?'
+      )
+    ) {
+      return;
+    }
+    setDeepRebuilding(true);
+    setDeepRebuildProgress(null);
+    try {
+      await resetAllClusters();
+      const faces = await getAllFacesForDeepRebuild((facesLoaded) => {
+        setDeepRebuildProgress({ processed: 0, total: facesLoaded });
+      });
+
+      const results = await runDeepRebuildClustering(faces, (processed, total) => {
+        setDeepRebuildProgress({ processed, total });
+      });
+
+      if (results.length > 0) {
+        const batches = chunkClusteringResultsForApply(results);
+        for (let i = 0; i < batches.length; i++) {
+          await applyClusteringResults(batches[i]);
+          setDeepRebuildProgress({ processed: faces.length, total: faces.length });
+        }
+      }
+      await loadData();
+      setLegacyStats(await getLegacyFaceStats());
+    } catch (err) {
+      setError('Deep rebuild failed');
+      console.error(err);
+    } finally {
+      setDeepRebuilding(false);
+      setDeepRebuildProgress(null);
+    }
+  };
+
+  /**
    * Runs the ENTIRE O(clusterCount²) merge-suggestion scan client-side in one shot — see
    * faceClusteringClient.ts's findClientSideMergeSuggestions(). The scan itself needs no
    * cursor/pagination (a browser can examine even hundreds of thousands of pairs in well under
@@ -286,6 +338,23 @@ const AdminPeople: React.FC = () => {
                   className="px-4 py-2 bg-gray-200 dark:bg-gray-700 text-gray-800 dark:text-gray-200 rounded-lg hover:bg-gray-300 dark:hover:bg-gray-600 transition flex items-center gap-2"
                 >
                   <Sparkles className="w-4 h-4" /> Cluster Now
+                </button>
+              )}
+              {deepRebuilding ? (
+                <button
+                  disabled
+                  className="px-4 py-2 bg-gray-300 text-gray-700 rounded-lg flex items-center gap-2 cursor-wait"
+                >
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                  {deepRebuildProgress ? `Rebuilding… ${deepRebuildProgress.processed}/${deepRebuildProgress.total}` : 'Starting…'}
+                </button>
+              ) : (
+                <button
+                  onClick={handleDeepRebuild}
+                  title="Discards all current groupings and rebuilds everyone from scratch with a stronger, drift-free matching algorithm"
+                  className="px-4 py-2 bg-gray-200 dark:bg-gray-700 text-gray-800 dark:text-gray-200 rounded-lg hover:bg-gray-300 dark:hover:bg-gray-600 transition flex items-center gap-2"
+                >
+                  <Sparkles className="w-4 h-4" /> Rebuild All (Deep)
                 </button>
               )}
               {singlesCount > 0 && (

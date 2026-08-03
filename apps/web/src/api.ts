@@ -500,13 +500,15 @@ export interface ClusterData {
 export const getClusterData = async (
   includeFaces: boolean,
   afterClusterId = 0,
-  afterFaceId = 0
+  afterFaceId = 0,
+  unclusteredOnly = true
 ): Promise<ClusterData> => {
   const response = await api.get<ClusterData>('/admin/people/cluster-data', {
     params: {
       ...(includeFaces ? undefined : { includeFaces: 0 }),
       ...(afterClusterId ? { afterClusterId } : undefined),
       ...(afterFaceId ? { afterFaceId } : undefined),
+      ...(unclusteredOnly ? undefined : { unclusteredOnly: 0 }),
     },
     headers: getAdminHeaders(),
   });
@@ -539,6 +541,31 @@ export const getFullClusterData = async (
   }
 
   return { faces, clusters };
+};
+
+/** Loops `getClusterData()` fetching EVERY face regardless of current cluster assignment
+ *  (`unclusteredOnly: false`) — used only by the "Rebuild All (Deep)" full-reclustering flow
+ *  (see faceClusteringClient.ts's runDeepRebuildClustering()), which recomputes every person
+ *  from scratch using each face's real embedding rather than incrementally trusting whatever
+ *  clusters already exist. Cluster centroids aren't needed here (rebuilding ignores them
+ *  entirely), so this always calls with `includeFaces: true` and discards the (should-be-empty,
+ *  since callers reset clusters first) clusters array. */
+export const getAllFacesForDeepRebuild = async (
+  onProgress?: (facesLoaded: number) => void
+): Promise<ClusterDataFace[]> => {
+  const faces: ClusterDataFace[] = [];
+  let afterFaceId = 0;
+
+  for (;;) {
+    const page = await getClusterData(true, 0, afterFaceId, false);
+    faces.push(...page.faces);
+    onProgress?.(faces.length);
+
+    if (page.nextFaceCursor === null) break;
+    afterFaceId = page.nextFaceCursor;
+  }
+
+  return faces;
 };
 
 export interface ClusterResult {
@@ -590,6 +617,18 @@ export const getLegacyFaceStats = async (): Promise<LegacyFaceStats> => {
 export const resetLegacyFaces = async (): Promise<{ facesReset: number; clustersRemoved: number }> => {
   const response = await api.post<{ facesReset: number; clustersRemoved: number }>(
     '/admin/people/reset-legacy-faces',
+    {},
+    { headers: getAdminHeaders() }
+  );
+  return response.data;
+};
+
+/** Unassigns every face and deletes every person cluster — see resetAllClusters()'s doc comment
+ *  in apps/worker/src/faceClustering.ts. Used before a full "Rebuild All (Deep)" reclustering
+ *  pass; raw face embeddings are never touched, fully recoverable by reclustering again. */
+export const resetAllClusters = async (): Promise<{ facesUnassigned: number; clustersDeleted: number }> => {
+  const response = await api.post<{ facesUnassigned: number; clustersDeleted: number }>(
+    '/admin/people/reset-clusters',
     {},
     { headers: getAdminHeaders() }
   );

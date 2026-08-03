@@ -139,13 +139,19 @@ const PAGE_SIZE = 300;
  * library has grown overall (see PAGE_SIZE's doc comment above for why marshalling itself,
  * not just the SQL query, needed to be bounded). `includeFaces=false` skips fetching faces
  * entirely for callers that only need cluster centroids (e.g. the merge-suggestions scan,
- * which never reads photo_faces at all).
+ * which never reads photo_faces at all). `unclusteredOnly=false` (added 2026-08-04 for the
+ * "Rebuild All" deep-reclustering mode) drops the `WHERE person_id IS NULL` filter, returning
+ * EVERY face regardless of current assignment — used when recomputing every cluster from
+ * scratch using each face's REAL embedding (see faceClusteringClient.ts's
+ * runDeepRebuildClustering()), rather than only the not-yet-clustered ones incremental
+ * clustering cares about.
  */
 export async function getClusterData(
   env: Env,
   includeFaces: boolean,
   afterClusterId = 0,
-  afterFaceId = 0
+  afterFaceId = 0,
+  unclusteredOnly = true
 ): Promise<ClusterData> {
   const { results: clusterRows } = await env.DB
     .prepare('SELECT id, centroid_embedding, face_count FROM person_clusters WHERE id > ? ORDER BY id ASC LIMIT ?')
@@ -165,13 +171,11 @@ export async function getClusterData(
   }
 
   const { results: faceRows } = await env.DB
-    .prepare(`
-      SELECT id, photo_id, embedding
-      FROM photo_faces
-      WHERE person_id IS NULL AND id > ?
-      ORDER BY id ASC
-      LIMIT ?
-    `)
+    .prepare(
+      unclusteredOnly
+        ? `SELECT id, photo_id, embedding FROM photo_faces WHERE person_id IS NULL AND id > ? ORDER BY id ASC LIMIT ?`
+        : `SELECT id, photo_id, embedding FROM photo_faces WHERE id > ? ORDER BY id ASC LIMIT ?`
+    )
     .bind(afterFaceId, PAGE_SIZE)
     .all<{ id: number; photo_id: string; embedding: ArrayBuffer }>();
 
@@ -184,6 +188,25 @@ export async function getClusterData(
   const nextFaceCursor = faceRowsArr.length === PAGE_SIZE ? faceRowsArr[faceRowsArr.length - 1].id : null;
 
   return { faces, clusters, nextClusterCursor, nextFaceCursor };
+}
+
+/**
+ * Unassigns every face from its person and deletes every person cluster — used before a full
+ * "Rebuild All (Deep)" reclustering pass, which recomputes every cluster from scratch using
+ * each face's real embedding rather than incrementally matching against existing (possibly
+ * imperfect) clusters. Raw `photo_faces.embedding` rows are NEVER touched/deleted, only the
+ * derived `person_id` assignment and `person_clusters` rows — fully recoverable by running
+ * clustering again, nothing is permanently lost.
+ */
+export async function resetAllClusters(env: Env): Promise<{ facesUnassigned: number; clustersDeleted: number }> {
+  const unassignResult = await env.DB
+    .prepare('UPDATE photo_faces SET person_id = NULL WHERE person_id IS NOT NULL')
+    .run();
+  const deleteResult = await env.DB.prepare('DELETE FROM person_clusters').run();
+  return {
+    facesUnassigned: unassignResult.meta.changes ?? 0,
+    clustersDeleted: deleteResult.meta.changes ?? 0,
+  };
 }
 
 /** One cluster's final state after the client's greedy-clustering pass, ready to persist. */

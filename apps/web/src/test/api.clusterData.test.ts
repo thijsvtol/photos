@@ -117,3 +117,72 @@ describe('getFullClusterData', () => {
     expect(getMock).toHaveBeenCalledTimes(1);
   });
 });
+
+/**
+ * Tests for getAllFacesForDeepRebuild() (2026-08-04) — used only by the "Rebuild All (Deep)"
+ * full-reclustering flow, which needs EVERY face regardless of current cluster assignment
+ * (unlike getFullClusterData(), which only ever fetches not-yet-clustered ones).
+ */
+describe('getAllFacesForDeepRebuild', () => {
+  it('passes unclusteredOnly=0 and loops until the face cursor is exhausted', async () => {
+    getMock
+      .mockResolvedValueOnce(page([{ id: 1, photoId: 'p1', embedding: [1] }], [], 1, null))
+      .mockResolvedValueOnce(page([{ id: 2, photoId: 'p2', embedding: [2] }], [], null, null));
+
+    const { getAllFacesForDeepRebuild } = await import('../api');
+    const faces = await getAllFacesForDeepRebuild();
+
+    expect(faces.map((f) => f.id)).toEqual([1, 2]);
+    expect(getMock).toHaveBeenCalledTimes(2);
+    const firstCallParams = getMock.mock.calls[0][1]?.params;
+    expect(firstCallParams).toMatchObject({ unclusteredOnly: 0 });
+    const secondCallParams = getMock.mock.calls[1][1]?.params;
+    expect(secondCallParams).toMatchObject({ afterFaceId: 1, unclusteredOnly: 0 });
+  });
+
+  it('reports progress via onProgress after each page', async () => {
+    getMock
+      .mockResolvedValueOnce(page([{ id: 1, photoId: 'p1', embedding: [1] }], [], 1, null))
+      .mockResolvedValueOnce(page([{ id: 2, photoId: 'p2', embedding: [2] }], [], null, null));
+
+    const { getAllFacesForDeepRebuild } = await import('../api');
+    const calls: number[] = [];
+    await getAllFacesForDeepRebuild((facesLoaded) => calls.push(facesLoaded));
+
+    expect(calls).toEqual([1, 2]);
+  });
+
+  it('returns everything in one page when already exhausted', async () => {
+    getMock.mockResolvedValueOnce(page([{ id: 1, photoId: 'p1', embedding: [1] }], [], null, null));
+
+    const { getAllFacesForDeepRebuild } = await import('../api');
+    const faces = await getAllFacesForDeepRebuild();
+
+    expect(faces).toHaveLength(1);
+    expect(getMock).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('resetAllClusters', () => {
+  it('POSTs to /admin/people/reset-clusters and returns the counts', async () => {
+    const postMock = vi.fn().mockResolvedValue({ data: { facesUnassigned: 5, clustersDeleted: 2 } });
+    vi.doMock('axios', () => ({
+      default: {
+        create: () => ({
+          get: getMock,
+          post: postMock,
+          put: vi.fn(),
+          delete: vi.fn(),
+          interceptors: { request: { use: vi.fn() }, response: { use: vi.fn() } },
+        }),
+      },
+    }));
+    vi.resetModules();
+
+    const { resetAllClusters } = await import('../api');
+    const result = await resetAllClusters();
+
+    expect(result).toEqual({ facesUnassigned: 5, clustersDeleted: 2 });
+    expect(postMock).toHaveBeenCalledWith('/admin/people/reset-clusters', {}, expect.anything());
+  });
+});

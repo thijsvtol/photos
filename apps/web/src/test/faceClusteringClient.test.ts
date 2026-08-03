@@ -5,6 +5,7 @@ import {
   SAME_PERSON_THRESHOLD,
   DEFAULT_MERGE_SUGGESTION_THRESHOLD,
   runClientSideClustering,
+  runDeepRebuildClustering,
   findClientSideMergeSuggestions,
   chunkClusteringResultsForApply,
 } from '../faceClusteringClient';
@@ -397,5 +398,81 @@ describe('chunkClusteringResultsForApply', () => {
     // with each other.
     const batchContainingHuge = batches.find((b) => b.includes(hugeResult));
     expect(batchContainingHuge).toEqual([hugeResult]);
+  });
+});
+
+/**
+ * Tests for the "Rebuild All (Deep)" representative-sample clustering algorithm (2026-08-04) —
+ * see runDeepRebuildClustering()'s doc comment for why this is a fundamentally more robust
+ * replacement for incremental nearest-CENTROID matching: decisions are always made against
+ * real, unmodified member embeddings (a random sample, never averaged/blended), never a mutable
+ * aggregate that can "melt" into a generic attractor as a cluster grows.
+ */
+describe('runDeepRebuildClustering', () => {
+  it('groups several near-identical faces of the same identity into one cluster', async () => {
+    const faces: ClusterDataFace[] = [
+      { id: 1, photoId: 'p1', embedding: pad1024(0) },
+      { id: 2, photoId: 'p2', embedding: pad1024(0) },
+      { id: 3, photoId: 'p3', embedding: pad1024(1) },
+      { id: 4, photoId: 'p4', embedding: pad1024(-1) },
+    ];
+
+    const results = await runDeepRebuildClustering(faces);
+
+    expect(results).toHaveLength(1);
+    expect(results[0].addedFaceIds.slice().sort()).toEqual([1, 2, 3, 4]);
+    expect(results[0].faceCount).toBe(4);
+  });
+
+  it('keeps two different identities in separate clusters (the class of bug centroid-based matching was vulnerable to)', async () => {
+    // A single-dimension diff of 15 scores similarity around 0.08 (well below both the 0.5
+    // average bar and the 0.55 max-representative bar) — a clearly different identity.
+    const faces: ClusterDataFace[] = [
+      { id: 1, photoId: 'p1', embedding: pad1024(0) },
+      { id: 2, photoId: 'p2', embedding: pad1024(15) },
+    ];
+
+    const results = await runDeepRebuildClustering(faces);
+
+    expect(results).toHaveLength(2);
+    expect(results.every((r) => r.faceCount === 1)).toBe(true);
+  });
+
+  it('rejects a face whose similarity to a clusters real representative members is below the required bar, instead of silently accepting it', async () => {
+    const faces: ClusterDataFace[] = [
+      { id: 1, photoId: 'p1', embedding: pad1024(0) },
+      { id: 2, photoId: 'p2', embedding: pad1024(0) },
+      { id: 3, photoId: 'p3', embedding: pad1024(15) }, // similarity ~0.08 to the cluster above
+    ];
+
+    const results = await runDeepRebuildClustering(faces);
+
+    expect(results).toHaveLength(2);
+    const sizes = results.map((r) => r.faceCount).slice().sort();
+    expect(sizes).toEqual([1, 2]);
+  });
+
+  it('filters out faces with a malformed embedding length before clustering, matching the existing safety guard', async () => {
+    const faces: ClusterDataFace[] = [
+      { id: 1, photoId: 'p1', embedding: pad1024(0) },
+      { id: 2, photoId: 'p2', embedding: [1, 2, 3] }, // malformed — not 1024 long
+    ];
+
+    const results = await runDeepRebuildClustering(faces);
+
+    expect(results).toHaveLength(1);
+    expect(results[0].addedFaceIds).toEqual([1]);
+  });
+
+  it('returns clusterId: null for every result (caller is expected to reset all clusters before running a deep rebuild)', async () => {
+    const faces: ClusterDataFace[] = [{ id: 1, photoId: 'p1', embedding: pad1024(0) }];
+
+    const results = await runDeepRebuildClustering(faces);
+
+    expect(results[0].clusterId).toBeNull();
+  });
+
+  it('returns an empty array for an empty input', async () => {
+    expect(await runDeepRebuildClustering([])).toEqual([]);
   });
 });

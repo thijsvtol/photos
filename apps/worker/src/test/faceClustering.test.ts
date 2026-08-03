@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { getClusterData, applyClusteringResults, countUnclusteredFaces, getLegacyFaceStats, resetLegacyFaces, blobToFloat32Array, mergeClusters, assignPhotosToPerson } from '../faceClustering';
+import { getClusterData, applyClusteringResults, countUnclusteredFaces, getLegacyFaceStats, resetLegacyFaces, blobToFloat32Array, mergeClusters, assignPhotosToPerson, resetAllClusters } from '../faceClustering';
 import type { Env } from '../types';
 
 /**
@@ -93,6 +93,15 @@ class FakeFaceClusteringDb {
           const results = [...db.faces]
             .sort((a, b) => a.id - b.id)
             .filter((f) => f.person_id === null && f.id > afterId)
+            .slice(0, limit)
+            .map((f) => ({ id: f.id, photo_id: f.photo_id, embedding: f.embedding }));
+          return { results: results as T[] };
+        }
+        if (query.includes('FROM photo_faces') && query.includes('WHERE id > ?') && !query.includes('person_id')) {
+          const [afterId, limit] = boundArgs as [number, number];
+          const results = [...db.faces]
+            .sort((a, b) => a.id - b.id)
+            .filter((f) => f.id > afterId)
             .slice(0, limit)
             .map((f) => ({ id: f.id, photo_id: f.photo_id, embedding: f.embedding }));
           return { results: results as T[] };
@@ -205,6 +214,16 @@ class FakeFaceClusteringDb {
           for (const photo of db.photos) {
             if (photoIds.includes(photo.id)) photo.faces_processed_at = null;
           }
+        }
+        if (query.includes('UPDATE photo_faces SET person_id = NULL WHERE person_id IS NOT NULL')) {
+          const changed = db.faces.filter((f) => f.person_id !== null).length;
+          for (const face of db.faces) face.person_id = null;
+          return { success: true, meta: { changes: changed } };
+        }
+        if (query === 'DELETE FROM person_clusters') {
+          const changed = db.clusters.length;
+          db.clusters = [];
+          return { success: true, meta: { changes: changed } };
         }
         return { success: true };
       },
@@ -361,6 +380,47 @@ describe('getClusterData', () => {
     const resumed = await getClusterData(makeEnv(db), true, 1, 10);
     expect(resumed.clusters.map((c) => c.id)).toEqual([2]);
     expect(resumed.faces.map((f) => f.id)).toEqual([11]);
+  });
+
+  it('returns EVERY face regardless of person_id when unclusteredOnly is false (deep-rebuild mode)', async () => {
+    const db = new FakeFaceClusteringDb();
+    db.faces = [
+      { id: 10, photo_id: 'photo-a', embedding: embeddingOf(1, 1, 1), person_id: null },
+      { id: 11, photo_id: 'photo-b', embedding: embeddingOf(2, 2, 2), person_id: 5 }, // already clustered
+    ];
+
+    const data = await getClusterData(makeEnv(db), true, 0, 0, false);
+
+    expect(data.faces.map((f) => f.id)).toEqual([10, 11]);
+  });
+});
+
+describe('resetAllClusters', () => {
+  it('unassigns every face and deletes every cluster, returning the counts, without touching raw embeddings', async () => {
+    const db = new FakeFaceClusteringDb();
+    db.clusters = [
+      { id: 1, centroid_embedding: embeddingOf(1, 1, 1), face_count: 2 },
+      { id: 2, centroid_embedding: embeddingOf(2, 2, 2), face_count: 1 },
+    ];
+    db.faces = [
+      { id: 10, photo_id: 'photo-a', embedding: embeddingOf(1, 1, 1), person_id: 1 },
+      { id: 11, photo_id: 'photo-b', embedding: embeddingOf(1, 1, 1), person_id: 1 },
+      { id: 12, photo_id: 'photo-c', embedding: embeddingOf(2, 2, 2), person_id: 2 },
+      { id: 13, photo_id: 'photo-d', embedding: embeddingOf(3, 3, 3), person_id: null },
+    ];
+
+    const result = await resetAllClusters(makeEnv(db));
+
+    expect(result).toEqual({ facesUnassigned: 3, clustersDeleted: 2 });
+    expect(db.clusters).toEqual([]);
+    expect(db.faces.every((f) => f.person_id === null)).toBe(true);
+    // Raw embeddings themselves are untouched.
+    expect(db.faces.map((f) => f.embedding)).toEqual([
+      embeddingOf(1, 1, 1),
+      embeddingOf(1, 1, 1),
+      embeddingOf(2, 2, 2),
+      embeddingOf(3, 3, 3),
+    ]);
   });
 });
 

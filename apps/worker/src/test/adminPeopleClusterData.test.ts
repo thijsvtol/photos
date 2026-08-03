@@ -27,6 +27,7 @@ const getLegacyFaceStatsMock = vi.fn();
 const resetLegacyFacesMock = vi.fn();
 const mergeClustersMock = vi.fn();
 const assignPhotosToPersonMock = vi.fn();
+const resetAllClustersMock = vi.fn();
 
 vi.mock('../faceClustering', () => ({
   getClusterData: (...args: unknown[]) => getClusterDataMock(...args),
@@ -36,6 +37,7 @@ vi.mock('../faceClustering', () => ({
   resetLegacyFaces: (...args: unknown[]) => resetLegacyFacesMock(...args),
   mergeClusters: (...args: unknown[]) => mergeClustersMock(...args),
   assignPhotosToPerson: (...args: unknown[]) => assignPhotosToPersonMock(...args),
+  resetAllClusters: (...args: unknown[]) => resetAllClustersMock(...args),
 }));
 
 import peopleRouter from '../routes/admin/people';
@@ -54,6 +56,7 @@ beforeEach(() => {
   resetLegacyFacesMock.mockReset();
   mergeClustersMock.mockReset();
   assignPhotosToPersonMock.mockReset();
+  resetAllClustersMock.mockReset();
 });
 
 describe('GET /admin/people/cluster-data', () => {
@@ -65,7 +68,7 @@ describe('GET /admin/people/cluster-data', () => {
 
     expect(res.status).toBe(200);
     expect(body.faces).toHaveLength(1);
-    expect(getClusterDataMock).toHaveBeenCalledWith(expect.anything(), true, 0, 0);
+    expect(getClusterDataMock).toHaveBeenCalledWith(expect.anything(), true, 0, 0, true);
   });
 
   it('passes includeFaces=false through when ?includeFaces=0 is given', async () => {
@@ -73,7 +76,15 @@ describe('GET /admin/people/cluster-data', () => {
 
     await peopleRouter.request('http://localhost/cluster-data?includeFaces=0', {}, makeEnv());
 
-    expect(getClusterDataMock).toHaveBeenCalledWith(expect.anything(), false, 0, 0);
+    expect(getClusterDataMock).toHaveBeenCalledWith(expect.anything(), false, 0, 0, true);
+  });
+
+  it('passes unclusteredOnly=false through when ?unclusteredOnly=0 is given (deep-rebuild mode)', async () => {
+    getClusterDataMock.mockResolvedValue({ faces: [], clusters: [] });
+
+    await peopleRouter.request('http://localhost/cluster-data?unclusteredOnly=0', {}, makeEnv());
+
+    expect(getClusterDataMock).toHaveBeenCalledWith(expect.anything(), true, 0, 0, false);
   });
 
   it('rejects non-admin requests', async () => {
@@ -202,6 +213,35 @@ describe('POST /admin/people/reset-legacy-faces', () => {
     resetLegacyFacesMock.mockRejectedValue(new Error('D1 boom'));
 
     const res = await peopleRouter.request('http://localhost/reset-legacy-faces', { method: 'POST' }, makeEnv());
+
+    expect(res.status).toBe(500);
+  });
+});
+
+describe('POST /admin/people/reset-clusters', () => {
+  it('runs the reset and returns the counts', async () => {
+    resetAllClustersMock.mockResolvedValue({ facesUnassigned: 1288, clustersDeleted: 22 });
+
+    const res = await peopleRouter.request('http://localhost/reset-clusters', { method: 'POST' }, makeEnv());
+    const body = await res.json() as any;
+
+    expect(res.status).toBe(200);
+    expect(body).toEqual({ facesUnassigned: 1288, clustersDeleted: 22 });
+  });
+
+  it('rejects non-admin requests', async () => {
+    currentIsAdmin = false;
+
+    const res = await peopleRouter.request('http://localhost/reset-clusters', { method: 'POST' }, makeEnv());
+
+    expect(res.status).toBe(403);
+    expect(resetAllClustersMock).not.toHaveBeenCalled();
+  });
+
+  it('returns 500 if the reset throws', async () => {
+    resetAllClustersMock.mockRejectedValue(new Error('D1 boom'));
+
+    const res = await peopleRouter.request('http://localhost/reset-clusters', { method: 'POST' }, makeEnv());
 
     expect(res.status).toBe(500);
   });

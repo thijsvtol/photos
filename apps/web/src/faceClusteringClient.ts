@@ -330,6 +330,165 @@ export async function runClientSideClustering(
   return results;
 }
 
+// ============================================================================================
+// DEEP REBUILD: representative-sample clustering (2026-08-04)
+// ============================================================================================
+//
+// Every fix so far in this saga (drift cap, centroid freeze, adaptive threshold) treated the
+// SYMPTOM of incremental nearest-CENTROID clustering: a single mutable "average point" per
+// cluster is fundamentally the wrong representation for deciding whether a new face belongs,
+// because ANY aggregate of many faces necessarily discards information — two clusters with
+// identical centroids can still be made of very different real people, and a centroid can only
+// ever get more generic (never more specific) as it absorbs more members. No amount of capping
+// the update rate or raising the required similarity fixes that root design issue, it only
+// slows down how fast the symptom reappears at a larger scale.
+//
+// `runDeepRebuildClustering()` below instead never computes or stores an aggregate at all.
+// Membership decisions are always made by comparing a candidate face directly against a small,
+// UNBIASED RANDOM SAMPLE of REAL member embeddings already confirmed to belong to that cluster
+// (reservoir sampling, see `addRepresentative()`) — since nothing is ever averaged/blended, a
+// cluster's decision boundary can never "melt" into a generic attractor no matter how large it
+// grows; it's always anchored to a handful of its own genuine, unmodified members.
+//
+// A candidate only joins a cluster if BOTH:
+//   (a) its BEST (max) similarity against any single representative clears a raised bar
+//       (`REP_MAX_MARGIN` above the base threshold) — proves it strongly resembles at least
+//       one confirmed real member, not just a lucky coincidence against a blurry average, and
+//   (b) its AVERAGE similarity across ALL representatives clears the (adaptive, size-scaled)
+//       base threshold — proves it isn't just similar to one atypical/mislabeled member while
+//       being a poor match for the cluster as a whole.
+// Requiring both conditions is deliberately conservative — false positives (wrongly merging two
+// different people) are far more costly to undo than false negatives (leaving two genuinely
+// matching photos in separate clusters, which "Find Merge Suggestions" or a manual "Combine
+// with another person" action can always fix later with human review).
+//
+// Cost: O(faces × clusters × REP_SIZE × embeddingDim) in the worst case, all in the browser
+// (no per-task CPU-time limit, unlike the Worker) — REP_SIZE is deliberately small (8) since
+// representativeness saturates quickly for a fixed real embedding distribution, and the exact
+// same `yieldPeriodically()` UX helper used elsewhere keeps the tab responsive during a large
+// pass (this is NOT a CPU-safety mechanism here, just avoids the tab looking frozen).
+const REP_SIZE = 8;
+const REP_MAX_MARGIN = 0.05;
+
+interface DeepCluster {
+  representatives: Float32Array[];
+  memberCount: number;
+  memberIds: number[];
+  sumEmbedding: Float32Array;
+  coverPhotoId: string;
+}
+
+/** Reservoir sampling (uniform-random, unbiased): keeps `representatives` a fair random sample
+ *  of every member ever added to the cluster, so the sample's composition doesn't skew toward
+ *  "whichever members happened to arrive first" (which — unlike averaging — wouldn't corrupt
+ *  the comparison math, but WOULD make the sample progressively less representative of the
+ *  cluster's true, possibly-evolved appearance for a very large cluster). */
+function addRepresentative(cluster: DeepCluster, embedding: Float32Array): void {
+  if (cluster.representatives.length < REP_SIZE) {
+    cluster.representatives.push(embedding);
+    return;
+  }
+  // Classic reservoir-sampling replacement probability: REP_SIZE / memberCount (memberCount was
+  // already incremented for this member by the caller before this runs).
+  const replaceIndex = Math.floor(Math.random() * cluster.memberCount);
+  if (replaceIndex < REP_SIZE) {
+    cluster.representatives[replaceIndex] = embedding;
+  }
+}
+
+/** Scores a candidate embedding against one cluster's representative sample. Returns null if
+ *  the cluster has no representatives yet (shouldn't happen in practice — every cluster starts
+ *  with its founding member as its first representative). */
+function scoreAgainstCluster(embedding: Float32Array, cluster: DeepCluster): { max: number; avg: number } {
+  let max = -Infinity;
+  let sum = 0;
+  for (const rep of cluster.representatives) {
+    const sim = humanSimilarity(embedding, rep);
+    if (sim > max) max = sim;
+    sum += sim;
+  }
+  return { max, avg: sum / cluster.representatives.length };
+}
+
+/**
+ * Full from-scratch reclustering of EVERY face in the library (not just newly-unclustered
+ * ones), ignoring any prior cluster assignment entirely — see the doc comment above for why
+ * this representative-sample approach is a fundamentally more robust replacement for the
+ * incremental nearest-centroid algorithm used by `runClientSideClustering()`. Intended to be
+ * run ONCE after the caller has reset all existing clusters (see `resetAllClusters()` in
+ * api.ts) via the "Rebuild All (Deep)" admin action — NOT for routine incremental re-runs
+ * (`runClientSideClustering()` remains the right tool for cheaply absorbing new photos into
+ * already-good clusters between deep rebuilds).
+ *
+ * Processing order is deterministic (ascending face id) so results are reproducible given the
+ * same input data. Returns ClusterResult[] with `clusterId: null` for every group (since the
+ * caller is expected to have reset all clusters first, everything really is brand new).
+ */
+export async function runDeepRebuildClustering(
+  faces: ClusterDataFace[],
+  onProgress?: (processed: number, total: number) => void
+): Promise<ClusterResult[]> {
+  const validFaces = faces
+    .filter((f) => isValidEmbeddingLength(f.embedding))
+    .slice()
+    .sort((a, b) => a.id - b.id);
+  if (validFaces.length !== faces.length) {
+    console.error(`runDeepRebuildClustering: skipping ${faces.length - validFaces.length} face(s) with a malformed embedding length`);
+  }
+
+  const clusters: DeepCluster[] = [];
+
+  for (let i = 0; i < validFaces.length; i++) {
+    const face = validFaces[i];
+    const embedding = new Float32Array(face.embedding);
+
+    let bestCluster: DeepCluster | null = null;
+    let bestAvg = -Infinity;
+    const requiredBase = effectiveThresholdForClusterSize(0); // representative-based scoring isn't
+    // size-scaled the same way centroid matching is (there's no centroid to dilute), but reuse
+    // the same flat baseline for the "avg" condition, plus a fixed margin above it for "max".
+    for (const cluster of clusters) {
+      const { max, avg } = scoreAgainstCluster(embedding, cluster);
+      if (max >= requiredBase + REP_MAX_MARGIN && avg >= requiredBase && avg > bestAvg) {
+        bestAvg = avg;
+        bestCluster = cluster;
+      }
+    }
+
+    if (bestCluster) {
+      bestCluster.memberCount += 1;
+      bestCluster.memberIds.push(face.id);
+      for (let d = 0; d < bestCluster.sumEmbedding.length; d++) bestCluster.sumEmbedding[d] += embedding[d];
+      addRepresentative(bestCluster, embedding);
+    } else {
+      const sumEmbedding = new Float32Array(embedding.length);
+      sumEmbedding.set(embedding);
+      clusters.push({
+        representatives: [embedding],
+        memberCount: 1,
+        memberIds: [face.id],
+        sumEmbedding,
+        coverPhotoId: face.photoId,
+      });
+    }
+
+    onProgress?.(i + 1, validFaces.length);
+    await yieldPeriodically(i, 100);
+  }
+
+  return clusters.map((cluster) => {
+    const centroidEmbedding = new Array(cluster.sumEmbedding.length);
+    for (let d = 0; d < centroidEmbedding.length; d++) centroidEmbedding[d] = cluster.sumEmbedding[d] / cluster.memberCount;
+    return {
+      clusterId: null,
+      centroidEmbedding,
+      faceCount: cluster.memberCount,
+      addedFaceIds: cluster.memberIds,
+      coverPhotoId: cluster.coverPhotoId,
+    };
+  });
+}
+
 // The Cloudflare Workers FREE plan caps SUBREQUESTS (which includes every D1 query) at 50 per
 // HTTP request invocation — a SEPARATE, independent limit from the earlier CPU-time saga (see
 // repo memory), but with the exact same failure shape: POST /admin/people/apply-clustering
