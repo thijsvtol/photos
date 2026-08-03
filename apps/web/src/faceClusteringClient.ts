@@ -163,6 +163,24 @@ async function yieldPeriodically(iteration: number, everyN: number): Promise<voi
  */
 const CENTROID_UPDATE_CAP = 30;
 
+// FIFTH FIX in this saga (2026-08-04): even with CENTROID_UPDATE_CAP, the centroid was still
+// drifting FOREVER — every single new member past 30 still nudges it by a fixed ~1/30 weight,
+// with no limit on how many times that can happen. Over hundreds of accepted matches that's
+// still unbounded CUMULATIVE drift (each nudge is small, but they don't cancel out — a long
+// run of nudges in a consistent direction, e.g. gradually accepting slightly-different-looking
+// people, walks the centroid arbitrarily far from where it started), which is exactly the same
+// underlying snowball risk as the original uncapped 1/n bug, just slowed down rather than
+// eliminated. FIX: once a cluster has accumulated CENTROID_FREEZE_SIZE members, its centroid is
+// FROZEN — no further updates, ever, regardless of how many more faces subsequently match it.
+// This anchors the cluster's identity permanently to its first ~40 members (comfortably enough
+// samples to characterize a real recurring person, per this app's own real-world photo counts)
+// and guarantees the centroid can never wander further via slow drift, no matter how large the
+// cluster eventually grows — combined with effectiveThresholdForClusterSize()'s rising bar
+// below, a large established cluster now has BOTH a fixed, unmovable reference point AND an
+// increasingly strict match requirement, closing off the two mechanisms (drift + eroding bar)
+// that previously let clusters snowball.
+const CENTROID_FREEZE_SIZE = 40;
+
 // ADAPTIVE (size-scaled) matching threshold, replacing an earlier HARD cluster-size cap
 // (2026-08-03) that turned out to be the wrong tool: a flat cap of 60 faces/cluster stopped the
 // runaway-merge snowball, but also incorrectly split real people who legitimately appear in
@@ -188,9 +206,14 @@ const CENTROID_UPDATE_CAP = 30;
 // Growth is capped at MAX_THRESHOLD_BOOST so the bar never becomes unreasonably strict even for
 // a very large, legitimate cluster (200+ photos) — a genuinely well-matching face should still
 // pass a 0.60 bar even at that scale.
-const THRESHOLD_GROWTH_START = 20; // clusters below this size use the flat baseline threshold
-const THRESHOLD_GROWTH_RATE = 0.001; // additional threshold required per member above the start
-const MAX_THRESHOLD_BOOST = 0.1; // hard ceiling on how much the bar can rise (0.5 -> 0.6 max)
+// Growth rate/start tightened (2026-08-04) after the adaptive threshold ALONE still proved
+// insufficient in production (a cluster still grew to absorb multiple different people even
+// with this in place) — the bar now starts rising sooner and climbs faster, reaching its
+// ceiling by a more modest cluster size instead of only meaningfully biting well past 100
+// members.
+const THRESHOLD_GROWTH_START = 12; // clusters below this size use the flat baseline threshold
+const THRESHOLD_GROWTH_RATE = 0.003; // additional threshold required per member above the start
+const MAX_THRESHOLD_BOOST = 0.15; // hard ceiling on how much the bar can rise (0.5 -> 0.65 max)
 
 function effectiveThresholdForClusterSize(count: number): number {
   const boost = Math.min(MAX_THRESHOLD_BOOST, THRESHOLD_GROWTH_RATE * Math.max(0, count - THRESHOLD_GROWTH_START));
@@ -262,12 +285,17 @@ export async function runClientSideClustering(
 
     if (bestTarget && bestSimilarity >= effectiveThresholdForClusterSize(bestTarget.count)) {
       const newCount = bestTarget.count + 1;
-      const updateWeight = 1 / Math.min(newCount, CENTROID_UPDATE_CAP);
-      const newCentroid = new Float32Array(bestTarget.centroid.length);
-      for (let d = 0; d < newCentroid.length; d++) {
-        newCentroid[d] = bestTarget.centroid[d] + (embedding[d] - bestTarget.centroid[d]) * updateWeight;
+      // Once a cluster has reached CENTROID_FREEZE_SIZE, stop updating its centroid entirely —
+      // see CENTROID_FREEZE_SIZE's doc comment above for why an ever-continuing (even if
+      // capped-rate) update is still an unbounded long-term drift risk.
+      if (bestTarget.count < CENTROID_FREEZE_SIZE) {
+        const updateWeight = 1 / Math.min(newCount, CENTROID_UPDATE_CAP);
+        const newCentroid = new Float32Array(bestTarget.centroid.length);
+        for (let d = 0; d < newCentroid.length; d++) {
+          newCentroid[d] = bestTarget.centroid[d] + (embedding[d] - bestTarget.centroid[d]) * updateWeight;
+        }
+        bestTarget.centroid = newCentroid;
       }
-      bestTarget.centroid = newCentroid;
       bestTarget.count = newCount;
       bestTarget.addedFaceIds.push(face.id);
       bestTarget.changed = true;

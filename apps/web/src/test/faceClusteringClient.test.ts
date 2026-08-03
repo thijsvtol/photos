@@ -181,13 +181,14 @@ describe('runClientSideClustering', () => {
   });
 
   it('caps centroid-drift dilution so a large cluster keeps moving toward NEW faces instead of freezing into a stale average (regression test for the 2354-face runaway-merge incident)', async () => {
-    // Simulate an existing, already-large cluster whose centroid sits at [0,0,0,...] with 50
-    // accumulated members — under the OLD unbounded running-average formula
-    // (`centroid += diff / newCount`), a single new face would only move the centroid by
-    // 1/51st of the difference, making it essentially immovable at this size. Under the capped
-    // formula, a new face should still move it by a fixed ~1/30 weight.
+    // Simulate an existing, already-large (but not yet FROZEN, see CENTROID_FREEZE_SIZE=40)
+    // cluster whose centroid sits at [0,0,0,...] with 35 accumulated members — under the OLD
+    // unbounded running-average formula (`centroid += diff / newCount`), a single new face would
+    // only move the centroid by 1/36th of the difference, making it essentially immovable at
+    // this size. Under the capped formula, a new face should still move it by a fixed ~1/30
+    // weight.
     const existingClusters: ClusterDataCluster[] = [
-      { id: 1, centroidEmbedding: pad1024(0, 0, 0), faceCount: 50 },
+      { id: 1, centroidEmbedding: pad1024(0, 0, 0), faceCount: 35 },
     ];
     // A face close enough to match (within SAME_PERSON_THRESHOLD) but clearly offset, so we can
     // observe how far the centroid actually moved.
@@ -196,14 +197,28 @@ describe('runClientSideClustering', () => {
     const results = await runClientSideClustering(faces, existingClusters);
 
     expect(results).toHaveLength(1);
-    // Capped weight = 1 / min(51, 30) = 1/30 -> centroid[0] moves from 0 to 3 * (1/30) = 0.1,
-    // NOT the old formula's 3 * (1/51) ≈ 0.0588.
+    // Capped weight = 1 / min(36, 30) = 1/30 -> centroid[0] moves from 0 to 3 * (1/30) = 0.1,
+    // NOT the old formula's 3 * (1/36) ≈ 0.0833.
     expect(results[0].centroidEmbedding[0]).toBeCloseTo(0.1, 5);
+  });
+
+  it('FREEZES the centroid entirely once a cluster reaches CENTROID_FREEZE_SIZE (40), preventing unbounded long-term drift even at the capped rate (fix for a cluster still absorbing multiple different people despite the drift cap alone)', async () => {
+    const existingClusters: ClusterDataCluster[] = [
+      { id: 1, centroidEmbedding: pad1024(0, 0, 0), faceCount: 40 },
+    ];
+    const faces: ClusterDataFace[] = [{ id: 999, photoId: 'photo-x', embedding: pad1024(3, 0, 0) }];
+
+    const results = await runClientSideClustering(faces, existingClusters);
+
+    expect(results).toHaveLength(1);
+    // Centroid must NOT move at all once frozen — still exactly 0, not 3 * (1/30) = 0.1.
+    expect(results[0].centroidEmbedding[0]).toBeCloseTo(0, 5);
+    expect(results[0].faceCount).toBe(41);
   });
 
   it('a small/new cluster still matches at the flat baseline threshold (no behavior change for the common case)', async () => {
     // A single-dimension diff of 9.4 scores ~0.55 similarity — above the flat baseline
-    // SAME_PERSON_THRESHOLD (0.5), so a small cluster (below THRESHOLD_GROWTH_START=20) should
+    // SAME_PERSON_THRESHOLD (0.5), so a small cluster (below THRESHOLD_GROWTH_START=12) should
     // still accept it exactly as before this fix.
     const existingClusters: ClusterDataCluster[] = [
       { id: 1, centroidEmbedding: pad1024(0), faceCount: 10 },
@@ -219,7 +234,7 @@ describe('runClientSideClustering', () => {
   it('a large, well-established cluster requires a MORE CONFIDENT match, rejecting the same borderline similarity a small cluster would accept (fix for the 2467-face runaway-merge incident, which a flat hard cap alone did not solve)', async () => {
     // Same ~0.55-similarity face as above, but this time against an already-large (150-member)
     // cluster — at that size the adaptive threshold has risen to its 0.6 ceiling
-    // (THRESHOLD_GROWTH_START=20, THRESHOLD_GROWTH_RATE=0.001, MAX_THRESHOLD_BOOST=0.1 -> fully
+    // (THRESHOLD_GROWTH_START=12, THRESHOLD_GROWTH_RATE=0.003, MAX_THRESHOLD_BOOST=0.15 -> fully
     // saturated well before 150 members), so this borderline match must now be REJECTED,
     // starting a new cluster instead of further diluting the large one.
     const existingClusters: ClusterDataCluster[] = [
@@ -236,7 +251,7 @@ describe('runClientSideClustering', () => {
   it('lets a genuinely large, legitimate person (200+ photos) keep growing when the match is confidently ABOVE the raised bar — the whole point of replacing the old flat 60-face hard cap', async () => {
     // A clearly-matching (near-identical) face should still join even a very large cluster,
     // since 0.5+diff-derived-near-1.0 similarity comfortably clears the raised (but capped at
-    // 0.6) threshold — unlike the old flat MAX_AUTO_CLUSTER_SIZE=60 cap, which would have
+    // 0.65) threshold — unlike the old flat MAX_AUTO_CLUSTER_SIZE=60 cap, which would have
     // rejected this unconditionally purely based on size, incorrectly splitting a real
     // recurring person (e.g. the photographer themselves) into multiple groups.
     const existingClusters: ClusterDataCluster[] = [
