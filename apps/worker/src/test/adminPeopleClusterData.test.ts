@@ -23,11 +23,15 @@ vi.mock('../auth', async (importOriginal) => {
 const getClusterDataMock = vi.fn();
 const applyClusteringResultsMock = vi.fn();
 const countUnclusteredFacesMock = vi.fn();
+const getLegacyFaceStatsMock = vi.fn();
+const resetLegacyFacesMock = vi.fn();
 
 vi.mock('../faceClustering', () => ({
   getClusterData: (...args: unknown[]) => getClusterDataMock(...args),
   applyClusteringResults: (...args: unknown[]) => applyClusteringResultsMock(...args),
   countUnclusteredFaces: (...args: unknown[]) => countUnclusteredFacesMock(...args),
+  getLegacyFaceStats: (...args: unknown[]) => getLegacyFaceStatsMock(...args),
+  resetLegacyFaces: (...args: unknown[]) => resetLegacyFacesMock(...args),
 }));
 
 import peopleRouter from '../routes/admin/people';
@@ -42,6 +46,8 @@ beforeEach(() => {
   getClusterDataMock.mockReset();
   applyClusteringResultsMock.mockReset();
   countUnclusteredFacesMock.mockReset();
+  getLegacyFaceStatsMock.mockReset();
+  resetLegacyFacesMock.mockReset();
 });
 
 describe('GET /admin/people/cluster-data', () => {
@@ -132,6 +138,64 @@ describe('POST /admin/people/apply-clustering', () => {
       { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ results: [] }) },
       makeEnv()
     );
+
+    expect(res.status).toBe(500);
+  });
+});
+
+describe('GET /admin/people/legacy-face-stats', () => {
+  it('returns the legacy counts', async () => {
+    getLegacyFaceStatsMock.mockResolvedValue({ legacyFaces: 4, legacyClusters: 2 });
+
+    const res = await peopleRouter.request('http://localhost/legacy-face-stats', {}, makeEnv());
+    const body = await res.json() as any;
+
+    expect(res.status).toBe(200);
+    expect(body).toEqual({ legacyFaces: 4, legacyClusters: 2 });
+  });
+
+  it('rejects non-admin requests', async () => {
+    currentIsAdmin = false;
+
+    const res = await peopleRouter.request('http://localhost/legacy-face-stats', {}, makeEnv());
+
+    expect(res.status).toBe(403);
+    expect(getLegacyFaceStatsMock).not.toHaveBeenCalled();
+  });
+
+  it('returns 500 if the stats query throws', async () => {
+    getLegacyFaceStatsMock.mockRejectedValue(new Error('D1 boom'));
+
+    const res = await peopleRouter.request('http://localhost/legacy-face-stats', {}, makeEnv());
+
+    expect(res.status).toBe(500);
+  });
+});
+
+describe('POST /admin/people/reset-legacy-faces', () => {
+  it('runs the repair and returns the counts', async () => {
+    resetLegacyFacesMock.mockResolvedValue({ facesReset: 3, clustersRemoved: 1 });
+
+    const res = await peopleRouter.request('http://localhost/reset-legacy-faces', { method: 'POST' }, makeEnv());
+    const body = await res.json() as any;
+
+    expect(res.status).toBe(200);
+    expect(body).toEqual({ facesReset: 3, clustersRemoved: 1 });
+  });
+
+  it('rejects non-admin requests', async () => {
+    currentIsAdmin = false;
+
+    const res = await peopleRouter.request('http://localhost/reset-legacy-faces', { method: 'POST' }, makeEnv());
+
+    expect(res.status).toBe(403);
+    expect(resetLegacyFacesMock).not.toHaveBeenCalled();
+  });
+
+  it('returns 500 if the repair throws', async () => {
+    resetLegacyFacesMock.mockRejectedValue(new Error('D1 boom'));
+
+    const res = await peopleRouter.request('http://localhost/reset-legacy-faces', { method: 'POST' }, makeEnv());
 
     expect(res.status).toBe(500);
   });

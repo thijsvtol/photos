@@ -523,6 +523,33 @@ export const applyClusteringResults = async (results: ClusterResult[]): Promise<
   return response.data;
 };
 
+export interface LegacyFaceStats {
+  legacyFaces: number;
+  legacyClusters: number;
+}
+
+/** See resetLegacyFaces()'s doc comment (apps/worker/src/faceClustering.ts) — checks whether
+ *  any photo_faces/person_clusters rows still use the legacy pre-2026-08 face-api.js embedding
+ *  format, which silently breaks clustering/merge-suggestion matching against those rows. */
+export const getLegacyFaceStats = async (): Promise<LegacyFaceStats> => {
+  const response = await api.get<LegacyFaceStats>('/admin/people/legacy-face-stats', {
+    headers: getAdminHeaders(),
+  });
+  return response.data;
+};
+
+/** One-time repair — see resetLegacyFaces() in faceClustering.ts. Deletes legacy-dimension
+ *  rows and resets faces_processed_at so affected photos get re-detected by the next
+ *  "Scan Library for Faces" pass. */
+export const resetLegacyFaces = async (): Promise<{ facesReset: number; clustersRemoved: number }> => {
+  const response = await api.post<{ facesReset: number; clustersRemoved: number }>(
+    '/admin/people/reset-legacy-faces',
+    {},
+    { headers: getAdminHeaders() }
+  );
+  return response.data;
+};
+
 export const getPerson = async (personId: number): Promise<{ person: Person; photos: PersonPhoto[] }> => {
   const response = await api.get<{ person: Person; photos: PersonPhoto[] }>(`/admin/people/${personId}`, {
     headers: getAdminHeaders(),

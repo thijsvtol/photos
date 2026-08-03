@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { getClusterData, applyClusteringResults, countUnclusteredFaces } from '../faceClustering';
+import { getClusterData, applyClusteringResults, countUnclusteredFaces, getLegacyFaceStats, resetLegacyFaces } from '../faceClustering';
 import type { Env } from '../types';
 
 /**
@@ -25,6 +25,7 @@ interface ClusterRow {
 class FakeFaceClusteringDb {
   faces: FaceRow[] = [];
   clusters: ClusterRow[] = [];
+  photos: { id: string; faces_processed_at: string | null }[] = [];
   private nextClusterId = 1;
 
   prepare(query: string) {
@@ -36,6 +37,18 @@ class FakeFaceClusteringDb {
         return stmt;
       },
       async all<T>() {
+        if (query.includes('SELECT id FROM person_clusters WHERE LENGTH(centroid_embedding)')) {
+          const [expectedBytes] = boundArgs as [number];
+          const results = db.clusters
+            .filter((c) => c.centroid_embedding.byteLength !== expectedBytes)
+            .map((c) => ({ id: c.id }));
+          return { results: results as T[] };
+        }
+        if (query.includes('SELECT DISTINCT photo_id FROM photo_faces WHERE LENGTH(embedding)')) {
+          const [expectedBytes] = boundArgs as [number];
+          const photoIds = [...new Set(db.faces.filter((f) => f.embedding.byteLength !== expectedBytes).map((f) => f.photo_id))];
+          return { results: photoIds.map((photo_id) => ({ photo_id })) as T[] };
+        }
         if (query.includes('FROM person_clusters')) {
           const sorted = [...db.clusters].sort((a, b) => a.id - b.id);
           const results = sorted.map((c) => ({
@@ -65,6 +78,16 @@ class FakeFaceClusteringDb {
           const count = db.faces.filter((f) => f.person_id === null).length;
           return { count } as T;
         }
+        if (query.includes('SELECT COUNT(*) as count FROM photo_faces WHERE LENGTH(embedding)')) {
+          const [expectedBytes] = boundArgs as [number];
+          const count = db.faces.filter((f) => f.embedding.byteLength !== expectedBytes).length;
+          return { count } as T;
+        }
+        if (query.includes('SELECT COUNT(*) as count FROM person_clusters WHERE LENGTH(centroid_embedding)')) {
+          const [expectedBytes] = boundArgs as [number];
+          const count = db.clusters.filter((c) => c.centroid_embedding.byteLength !== expectedBytes).length;
+          return { count } as T;
+        }
         return null;
       },
       async run() {
@@ -76,11 +99,33 @@ class FakeFaceClusteringDb {
             cluster.face_count = faceCount;
           }
         }
-        if (query.includes('UPDATE photo_faces SET person_id')) {
+        if (query.includes('UPDATE photo_faces SET person_id = ? WHERE id IN')) {
           const [personId, ...faceIds] = boundArgs as [number, ...number[]];
           for (const faceId of faceIds) {
             const face = db.faces.find((f) => f.id === faceId);
             if (face) face.person_id = personId;
+          }
+        }
+        if (query.includes('UPDATE photo_faces SET person_id = NULL WHERE person_id IN')) {
+          const clusterIds = boundArgs as number[];
+          for (const face of db.faces) {
+            if (face.person_id !== null && clusterIds.includes(face.person_id)) {
+              face.person_id = null;
+            }
+          }
+        }
+        if (query.includes('DELETE FROM person_clusters WHERE id IN')) {
+          const clusterIds = boundArgs as number[];
+          db.clusters = db.clusters.filter((c) => !clusterIds.includes(c.id));
+        }
+        if (query.includes('DELETE FROM photo_faces WHERE LENGTH(embedding)')) {
+          const [expectedBytes] = boundArgs as [number];
+          db.faces = db.faces.filter((f) => f.embedding.byteLength === expectedBytes);
+        }
+        if (query.includes('UPDATE photos SET faces_processed_at = NULL WHERE id IN')) {
+          const photoIds = boundArgs as string[];
+          for (const photo of db.photos) {
+            if (photoIds.includes(photo.id)) photo.faces_processed_at = null;
           }
         }
         return { success: true };
@@ -216,5 +261,84 @@ describe('countUnclusteredFaces', () => {
     const db = new FakeFaceClusteringDb();
     db.faces = [{ id: 1, photo_id: 'photo-a', embedding: embeddingOf(1, 1, 1), person_id: 1 }];
     expect(await countUnclusteredFaces(makeEnv(db))).toBe(0);
+  });
+});
+
+// A legacy (pre-2026-08 face-api.js) embedding is 128 floats = 512 bytes, vs the current
+// @vladmandic/human 1024-float/4096-byte format — see EXPECTED_EMBEDDING_BYTES's doc comment.
+function legacyEmbedding(): ArrayBuffer {
+  return new Float32Array(128).buffer;
+}
+
+describe('getLegacyFaceStats', () => {
+  it('counts legacy-dimension faces and clusters separately', async () => {
+    const db = new FakeFaceClusteringDb();
+    db.faces = [
+      { id: 1, photo_id: 'photo-a', embedding: embeddingOf(...Array(1024).fill(0)), person_id: null },
+      { id: 2, photo_id: 'photo-b', embedding: legacyEmbedding(), person_id: null },
+    ];
+    db.clusters = [
+      { id: 1, centroid_embedding: embeddingOf(...Array(1024).fill(0)), face_count: 1 },
+      { id: 2, centroid_embedding: legacyEmbedding(), face_count: 1 },
+    ];
+
+    const stats = await getLegacyFaceStats(makeEnv(db));
+
+    expect(stats).toEqual({ legacyFaces: 1, legacyClusters: 1 });
+  });
+
+  it('returns all zeros for a fully up-to-date library', async () => {
+    const db = new FakeFaceClusteringDb();
+    db.faces = [{ id: 1, photo_id: 'photo-a', embedding: embeddingOf(...Array(1024).fill(0)), person_id: null }];
+    db.clusters = [{ id: 1, centroid_embedding: embeddingOf(...Array(1024).fill(0)), face_count: 1 }];
+
+    expect(await getLegacyFaceStats(makeEnv(db))).toEqual({ legacyFaces: 0, legacyClusters: 0 });
+  });
+});
+
+describe('resetLegacyFaces', () => {
+  it('deletes legacy faces, unassigns/removes legacy clusters, and re-queues affected photos', async () => {
+    const db = new FakeFaceClusteringDb();
+    db.photos = [
+      { id: 'photo-legacy', faces_processed_at: '2026-01-01' },
+      { id: 'photo-current', faces_processed_at: '2026-08-01' },
+    ];
+    db.clusters = [
+      { id: 1, centroid_embedding: legacyEmbedding(), face_count: 2 }, // legacy cluster
+      { id: 2, centroid_embedding: embeddingOf(...Array(1024).fill(0)), face_count: 1 }, // current cluster
+    ];
+    db.faces = [
+      { id: 1, photo_id: 'photo-legacy', embedding: legacyEmbedding(), person_id: 1 },
+      // A current-model face that was incorrectly truncated-matched into the legacy cluster.
+      { id: 2, photo_id: 'photo-current', embedding: embeddingOf(...Array(1024).fill(0)), person_id: 1 },
+      { id: 3, photo_id: 'photo-current', embedding: embeddingOf(...Array(1024).fill(0)), person_id: 2 },
+    ];
+
+    const result = await resetLegacyFaces(makeEnv(db));
+
+    expect(result).toEqual({ facesReset: 1, clustersRemoved: 1 });
+    // Legacy cluster gone; current cluster untouched.
+    expect(db.clusters.map((c) => c.id)).toEqual([2]);
+    // Legacy face row deleted entirely.
+    expect(db.faces.find((f) => f.id === 1)).toBeUndefined();
+    // The current-model face that had been in the legacy cluster is unassigned, not deleted.
+    expect(db.faces.find((f) => f.id === 2)?.person_id).toBeNull();
+    // The face already correctly in the current cluster is untouched.
+    expect(db.faces.find((f) => f.id === 3)?.person_id).toBe(2);
+    // Only the photo that had a legacy face gets re-queued for backfill.
+    expect(db.photos.find((p) => p.id === 'photo-legacy')?.faces_processed_at).toBeNull();
+    expect(db.photos.find((p) => p.id === 'photo-current')?.faces_processed_at).toBe('2026-08-01');
+  });
+
+  it('is a no-op on an already-clean library', async () => {
+    const db = new FakeFaceClusteringDb();
+    db.clusters = [{ id: 1, centroid_embedding: embeddingOf(...Array(1024).fill(0)), face_count: 1 }];
+    db.faces = [{ id: 1, photo_id: 'photo-a', embedding: embeddingOf(...Array(1024).fill(0)), person_id: 1 }];
+
+    const result = await resetLegacyFaces(makeEnv(db));
+
+    expect(result).toEqual({ facesReset: 0, clustersRemoved: 0 });
+    expect(db.clusters).toHaveLength(1);
+    expect(db.faces).toHaveLength(1);
   });
 });

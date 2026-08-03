@@ -2,8 +2,8 @@ import React, { useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { Users, ScanFace, Loader2, Sparkles, Eye, EyeOff, GitMerge, X, Check } from 'lucide-react';
 import Navbar from '../components/Navbar';
-import { getPeople, getPreviewUrl, getClusterData, applyClusteringResults, mergePeople } from '../api';
-import type { Person } from '../api';
+import { getPeople, getPreviewUrl, getClusterData, applyClusteringResults, mergePeople, getLegacyFaceStats, resetLegacyFaces } from '../api';
+import type { Person, LegacyFaceStats } from '../api';
 import { runBackfillScan } from '../faceBackfill';
 import type { BackfillProgress } from '../faceBackfill';
 import { runClientSideClustering, findClientSideMergeSuggestions, DEFAULT_MERGE_SUGGESTION_THRESHOLD } from '../faceClusteringClient';
@@ -44,6 +44,13 @@ const AdminPeople: React.FC = () => {
   // from mergeSuggestions.length so the "no results" empty state below doesn't incorrectly
   // reappear after the admin has since merged/dismissed every item from a real result list.
   const [scanFoundCount, setScanFoundCount] = useState(0);
+  // Non-null once checked; nonzero counts mean some photos were processed under the OLD
+  // face-api.js embedding model (pre-2026-08) and can never meaningfully match against
+  // anything detected under the current model until re-scanned — see resetLegacyFaces()'s doc
+  // comment in faceClustering.ts for why this silently causes "0 merge suggestions" even for
+  // people who obviously do recur in the library.
+  const [legacyStats, setLegacyStats] = useState<LegacyFaceStats | null>(null);
+  const [fixingLegacy, setFixingLegacy] = useState(false);
 
   const multiPhotoPeople = allPeople.filter((p) => p.face_count >= 2);
   const singlesCount = allPeople.length - multiPhotoPeople.length;
@@ -51,6 +58,9 @@ const AdminPeople: React.FC = () => {
 
   useEffect(() => {
     loadData();
+    getLegacyFaceStats()
+      .then(setLegacyStats)
+      .catch((err) => console.error('Failed to check for legacy face data', err));
   }, []);
 
   const loadData = async () => {
@@ -64,6 +74,20 @@ const AdminPeople: React.FC = () => {
       console.error(err);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleFixLegacyFaces = async () => {
+    setFixingLegacy(true);
+    try {
+      await resetLegacyFaces();
+      setLegacyStats(await getLegacyFaceStats());
+      await loadData();
+    } catch (err) {
+      setError('Failed to reset outdated face data');
+      console.error(err);
+    } finally {
+      setFixingLegacy(false);
     }
   };
 
@@ -291,6 +315,29 @@ const AdminPeople: React.FC = () => {
         {error && (
           <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded mb-4">
             {error}
+          </div>
+        )}
+
+        {legacyStats && (legacyStats.legacyFaces > 0 || legacyStats.legacyClusters > 0) && (
+          <div className="mb-8 bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800 text-amber-800 dark:text-amber-300 px-4 py-3 rounded-lg">
+            <p className="font-medium mb-1">Outdated face data detected</p>
+            <p className="text-sm mb-3">
+              {legacyStats.legacyFaces} face{legacyStats.legacyFaces === 1 ? '' : 's'} and{' '}
+              {legacyStats.legacyClusters} group{legacyStats.legacyClusters === 1 ? '' : 's'} were
+              detected using an older face-recognition model and can no longer be matched against
+              anything scanned since. This is very likely why "Find Merge Suggestions" (or
+              clustering) finds nothing for people who obviously do appear more than once. Fixing
+              this removes the outdated data and re-queues those photos for "Scan Library for
+              Faces" to re-detect — no photos are affected, only the face data.
+            </p>
+            <button
+              onClick={handleFixLegacyFaces}
+              disabled={fixingLegacy}
+              className="px-3 py-1.5 text-sm bg-amber-600 text-white rounded-lg hover:bg-amber-700 transition disabled:opacity-50 flex items-center gap-1.5"
+            >
+              {fixingLegacy && <Loader2 className="w-4 h-4 animate-spin" />}
+              Fix outdated face data
+            </button>
           </div>
         )}
 

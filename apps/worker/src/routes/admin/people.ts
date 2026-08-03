@@ -1,7 +1,7 @@
 import { Hono } from 'hono';
 import type { Env, User } from '../../types';
 import { requireAdmin } from '../../auth';
-import { getClusterData, applyClusteringResults, countUnclusteredFaces } from '../../faceClustering';
+import { getClusterData, applyClusteringResults, countUnclusteredFaces, getLegacyFaceStats, resetLegacyFaces } from '../../faceClustering';
 import type { ClusterResult } from '../../faceClustering';
 
 type Variables = {
@@ -60,6 +60,45 @@ app.post('/apply-clustering', async (c) => {
   } catch (error) {
     console.error('Error applying clustering results:', error);
     return c.json({ error: 'Failed to apply clustering results' }, 500);
+  }
+});
+
+/**
+ * GET /people/legacy-face-stats
+ *
+ * Counts how many photo_faces/person_clusters rows still use the legacy pre-2026-08
+ * face-api.js embedding format (128-dim) instead of the current @vladmandic/human format
+ * (1024-dim) — see getLegacyFaceStats()'s doc comment in faceClustering.ts for why this
+ * silently breaks clustering/merge-suggestion matches for anyone whose photos predate the
+ * model switch. Surfaced on the People admin page as a one-time "fix outdated face data"
+ * prompt when either count is nonzero.
+ */
+app.get('/legacy-face-stats', async (c) => {
+  try {
+    const stats = await getLegacyFaceStats(c.env);
+    return c.json(stats);
+  } catch (error) {
+    console.error('Error fetching legacy face stats:', error);
+    return c.json({ error: 'Failed to fetch legacy face stats' }, 500);
+  }
+});
+
+/**
+ * POST /people/reset-legacy-faces
+ *
+ * One-time repair: deletes every legacy-dimension photo_faces/person_clusters row (they can't
+ * be "fixed" in place — the old embedding is simply the wrong shape) and resets
+ * `faces_processed_at` on affected photos so the next "Scan Library for Faces" backfill
+ * re-detects them under the current model. See resetLegacyFaces()'s doc comment in
+ * faceClustering.ts for full details. Safe to call repeatedly (no-op once clean).
+ */
+app.post('/reset-legacy-faces', async (c) => {
+  try {
+    const result = await resetLegacyFaces(c.env);
+    return c.json(result);
+  } catch (error) {
+    console.error('Error resetting legacy faces:', error);
+    return c.json({ error: 'Failed to reset legacy faces' }, 500);
   }
 });
 
