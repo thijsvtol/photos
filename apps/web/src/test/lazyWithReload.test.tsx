@@ -63,11 +63,11 @@ describe('lazyWithReload', () => {
     );
 
     await waitFor(() => expect(reloadSpy).toHaveBeenCalledTimes(1));
-    expect(sessionStorage.getItem('lazyWithReload:reloaded')).toBe('1');
+    expect(sessionStorage.getItem('lazyWithReload:lastReloadAt')).not.toBeNull();
   });
 
-  it('does not reload a second time in the same session if sessionStorage already recorded a reload attempt', async () => {
-    sessionStorage.setItem('lazyWithReload:reloaded', '1');
+  it('does not reload a second time within the cooldown window (prevents a tight reload loop for a genuinely-persisting failure)', async () => {
+    sessionStorage.setItem('lazyWithReload:lastReloadAt', String(Date.now()));
     const reloadSpy = vi.fn();
     Object.defineProperty(window, 'location', { value: { reload: reloadSpy }, writable: true });
     // Suppress React's expected "error boundary caught an error" console.error noise for this
@@ -90,5 +90,26 @@ describe('lazyWithReload', () => {
     // another reload.
     await waitFor(() => expect(screen.getByText('Something went wrong')).toBeInTheDocument());
     expect(reloadSpy).not.toHaveBeenCalled();
+  });
+
+  it('DOES allow a new reload for a LATER, unrelated stale-chunk failure once the cooldown window has passed (regression test for the 2026-08-04 incident: a boolean "reloaded ever" flag permanently blocked self-healing for the rest of a tab\'s lifetime after its first use)', async () => {
+    // Simulate a reload that happened well outside the cooldown window (e.g. from an earlier,
+    // separate deploy hours ago in the same long-lived tab).
+    sessionStorage.setItem('lazyWithReload:lastReloadAt', String(Date.now() - 60_000));
+    const reloadSpy = vi.fn();
+    Object.defineProperty(window, 'location', { value: { reload: reloadSpy }, writable: true });
+
+    const TestComponent = lazyWithReload(async () => {
+      throw new Error('Failed to fetch dynamically imported module');
+    });
+
+    render(
+      <Suspense fallback={<div>Loading…</div>}>
+        <TestComponent />
+      </Suspense>
+    );
+
+    // A brand-new stale-chunk failure, long after the previous reload, must still self-heal.
+    await waitFor(() => expect(reloadSpy).toHaveBeenCalledTimes(1));
   });
 });
