@@ -6,8 +6,9 @@ import {
   DEFAULT_MERGE_SUGGESTION_THRESHOLD,
   runClientSideClustering,
   findClientSideMergeSuggestions,
+  chunkClusteringResultsForApply,
 } from '../faceClusteringClient';
-import type { ClusterDataFace, ClusterDataCluster } from '../api';
+import type { ClusterDataFace, ClusterDataCluster, ClusterResult } from '../api';
 
 /**
  * Tests for the client-side face-clustering + merge-suggestion matching that replaced the
@@ -212,5 +213,59 @@ describe('findClientSideMergeSuggestions', () => {
 
     // C(3,2) = 3 total comparisons.
     expect(calls).toEqual([[1, 3], [2, 3], [3, 3]]);
+  });
+});
+
+/**
+ * Tests for the client-side apply-clustering batching fix (2026-08-03) — see
+ * chunkClusteringResultsForApply()'s doc comment for the full incident: sending an entire
+ * clustering pass's results in a single POST /admin/people/apply-clustering call could exceed
+ * the Workers Free plan's 50-subrequests-per-request limit once a pass created many new
+ * clusters, aborting the request mid-way and leaving a partially-applied, fragmented result
+ * (spurious small clusters that never got the chance to grow to their full size).
+ */
+describe('chunkClusteringResultsForApply', () => {
+  function makeResult(addedFaceIds: number[]): ClusterResult {
+    return { clusterId: null, centroidEmbedding: [0, 0, 0], faceCount: addedFaceIds.length, addedFaceIds };
+  }
+
+  it('returns a single batch containing everything when the whole pass is small', () => {
+    const results = [makeResult([1]), makeResult([2, 3]), makeResult([4])];
+
+    const batches = chunkClusteringResultsForApply(results);
+
+    expect(batches).toEqual([results]);
+  });
+
+  it('splits a large pass (many new clusters) into multiple batches instead of one oversized call', () => {
+    // Each result costs 2 estimated D1 ops (1 cluster row + 1 face-id chunk, since
+    // addedFaceIds.length <= 90) — with MAX_D1_OPS_PER_APPLY_CALL=30, that's 15 results/batch.
+    const results = Array.from({ length: 40 }, (_, i) => makeResult([i]));
+
+    const batches = chunkClusteringResultsForApply(results);
+
+    expect(batches.length).toBeGreaterThan(1);
+    // Every result must appear exactly once across all batches, in original order.
+    const flattened = batches.flat();
+    expect(flattened).toEqual(results);
+  });
+
+  it('returns an empty array of batches for an empty results list', () => {
+    expect(chunkClusteringResultsForApply([])).toEqual([]);
+  });
+
+  it('still isolates a single pathologically large result into its own batch rather than crashing/looping', () => {
+    // 3200 faces / 90-per-chunk = 36 face-id chunks + 1 cluster-row op = 37 estimated ops,
+    // which alone already exceeds MAX_D1_OPS_PER_APPLY_CALL (30).
+    const hugeResult = makeResult(Array.from({ length: 3200 }, (_, i) => i));
+    const results = [makeResult([1]), hugeResult, makeResult([2])];
+
+    const batches = chunkClusteringResultsForApply(results);
+
+    // The huge result must end up alone in its own batch (never merged with neighbors, since
+    // it alone already exceeds the budget) — the two small results can still share a batch
+    // with each other.
+    const batchContainingHuge = batches.find((b) => b.includes(hugeResult));
+    expect(batchContainingHuge).toEqual([hugeResult]);
   });
 });

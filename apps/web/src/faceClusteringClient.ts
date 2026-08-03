@@ -203,6 +203,64 @@ export async function runClientSideClustering(
   return results;
 }
 
+// The Cloudflare Workers FREE plan caps SUBREQUESTS (which includes every D1 query) at 50 per
+// HTTP request invocation — a SEPARATE, independent limit from the earlier CPU-time saga (see
+// repo memory), but with the exact same failure shape: POST /admin/people/apply-clustering
+// (apps/worker/src/faceClustering.ts's applyClusteringResults()) does roughly 1 D1 call per
+// new/updated cluster PLUS 1 more per 90-face chunk of that cluster's addedFaceIds — sending
+// every ClusterResult from a large "Cluster Now" pass in ONE POST call can very easily exceed
+// 50 D1 calls (e.g. ~30+ new clusters found in one pass already blows the budget). Once the
+// limit is hit mid-loop, the whole request aborts with a 500 — but every D1 write already
+// AWAITED before the abort has already committed, so the batch is left PARTIALLY applied:
+// several small (often 1-2 face) clusters get created and then the request dies before any
+// more of them can be genuinely grown into larger, correctly-merged groups — this is exactly
+// the "clustering 500s, but I get a bunch of spurious 2-photo duplicate groups" symptom this
+// fix addresses. FACE_ID_CHUNK_SIZE below must match apps/worker/src/faceClustering.ts's own
+// constant of the same name (kept in sync manually — see that file's comment).
+const FACE_ID_CHUNK_SIZE = 90;
+// Deliberately well under the real 50/request cap: leaves headroom for
+// applyClusteringResults()'s trailing countUnclusteredFaces() call, plus a safety margin for
+// any single result whose own addedFaceIds needs more than one 90-item chunk.
+const MAX_D1_OPS_PER_APPLY_CALL = 30;
+
+function estimatedD1OpsForResult(result: ClusterResult): number {
+  // 1 D1 call to INSERT/UPDATE the cluster row itself, plus 1 more per face-id chunk (a
+  // result with 0 addedFaceIds still needs its 1 cluster-row call).
+  return 1 + Math.max(1, Math.ceil(result.addedFaceIds.length / FACE_ID_CHUNK_SIZE));
+}
+
+/**
+ * Splits a full clustering pass's results into multiple smaller batches, each conservatively
+ * sized to stay well under the Workers Free plan's 50-subrequests-per-request limit (see the
+ * doc comment above) — the caller should POST each batch as a SEPARATE
+ * /admin/people/apply-clustering call rather than sending the whole `results` array in one
+ * request. A single oversized result (one cluster gaining an extremely large number of faces
+ * in one pass) is still sent as its own batch even if that exceeds the budget alone — splitting
+ * a single result's addedFaceIds across multiple apply calls would require the worker to hand
+ * back newly-created cluster ids mid-sequence, which the current API doesn't support; this is
+ * an accepted, extremely unlikely-in-practice edge case (would need one person to appear in
+ * thousands of previously-unclustered photos within a single "Cluster Now" run).
+ */
+export function chunkClusteringResultsForApply(results: ClusterResult[]): ClusterResult[][] {
+  const batches: ClusterResult[][] = [];
+  let current: ClusterResult[] = [];
+  let currentOps = 0;
+
+  for (const result of results) {
+    const ops = estimatedD1OpsForResult(result);
+    if (current.length > 0 && currentOps + ops > MAX_D1_OPS_PER_APPLY_CALL) {
+      batches.push(current);
+      current = [];
+      currentOps = 0;
+    }
+    current.push(result);
+    currentOps += ops;
+  }
+  if (current.length > 0) batches.push(current);
+
+  return batches;
+}
+
 export interface MergeSuggestion {
   clusterAId: number;
   clusterBId: number;

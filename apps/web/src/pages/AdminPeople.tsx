@@ -6,7 +6,7 @@ import { getPeople, getPreviewUrl, getClusterData, applyClusteringResults, merge
 import type { Person, LegacyFaceStats } from '../api';
 import { runBackfillScan } from '../faceBackfill';
 import type { BackfillProgress } from '../faceBackfill';
-import { runClientSideClustering, findClientSideMergeSuggestions, DEFAULT_MERGE_SUGGESTION_THRESHOLD } from '../faceClusteringClient';
+import { runClientSideClustering, findClientSideMergeSuggestions, chunkClusteringResultsForApply, DEFAULT_MERGE_SUGGESTION_THRESHOLD } from '../faceClusteringClient';
 import type { MergeSuggestion } from '../faceClusteringClient';
 
 // A second, much more lenient similarity threshold tried automatically only if the default
@@ -117,10 +117,12 @@ const AdminPeople: React.FC = () => {
   /**
    * Runs the ENTIRE clustering pass client-side in one shot (see faceClusteringClient.ts) —
    * fetches every unclustered face + every existing cluster's centroid, computes assignments
-   * in the browser (no CPU-time limit here, unlike the Worker), then POSTs the final results
-   * to be persisted. No cursor/loop/"Stop and resume" needed anymore since a browser can finish
-   * even a large backlog in well under a second — see repo docs for why this used to be a
-   * server-side, budget-limited, multi-call process.
+   * in the browser (no CPU-time limit here, unlike the Worker), then POSTs the results to be
+   * persisted. The persist step is deliberately split into several smaller
+   * /admin/people/apply-clustering calls (see chunkClusteringResultsForApply()'s doc comment)
+   * — sending every result in a single POST call can exceed the Workers Free plan's 50-
+   * subrequests-per-request limit once a pass creates many new clusters, aborting the request
+   * mid-way and leaving a partially-applied, fragmented result (many spurious small clusters).
    */
   const handleClusterNow = async () => {
     setClustering(true);
@@ -137,7 +139,11 @@ const AdminPeople: React.FC = () => {
       });
 
       if (results.length > 0) {
-        await applyClusteringResults(results);
+        const batches = chunkClusteringResultsForApply(results);
+        for (let i = 0; i < batches.length; i++) {
+          await applyClusteringResults(batches[i]);
+          setClusterProgress({ processed: faces.length, total: faces.length });
+        }
       }
       await loadData();
       setLegacyStats(await getLegacyFaceStats());
