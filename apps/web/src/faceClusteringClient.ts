@@ -32,8 +32,16 @@ const MATCH_MIN = 0.2;
 const MATCH_MAX = 0.8;
 
 /** Threshold used by automatic clustering (assigning a face to an existing person with zero
- *  human review) — must stay conservative. Matches the worker's former SAME_PERSON_THRESHOLD. */
-export const SAME_PERSON_THRESHOLD = 0.5;
+ *  human review). Lowered from Human's own documented "0.5 = match" guidance to 0.45
+ *  (2026-08-03) specifically for this app's content: it is essentially entirely action/sports
+ *  photography (speed skating, cycling — helmets, goggles/visors, motion blur, extreme angles),
+ *  which measurably scores lower on Human's FaceRes descriptor even for genuinely-matching
+ *  faces than the frontal/well-lit portraits the 0.5 guidance was calibrated against. Kept
+ *  deliberately still meaningfully ABOVE DEFAULT_MERGE_SUGGESTION_THRESHOLD below (0.35) so the
+ *  human-reviewed merge-suggestion safety net still catches genuinely-harder cases that even
+ *  this loosened automatic bar misses — automatic clustering must stay more conservative than
+ *  a review-gated feature, just less conservative than Human's generic default. */
+export const SAME_PERSON_THRESHOLD = 0.45;
 
 /** Threshold used by merge SUGGESTIONS only — deliberately lower than SAME_PERSON_THRESHOLD.
  *  Every merge suggestion is manually reviewed by an admin before anything actually merges (one

@@ -82,12 +82,78 @@ export interface DetectedFace {
   bbox: { x: number; y: number; width: number; height: number };
 }
 
+type HumanInstance = import('@vladmandic/human').Human;
+type DetectInput = HTMLImageElement | HTMLCanvasElement;
+
+function mapResultToFaces(result: Awaited<ReturnType<HumanInstance['detect']>>): DetectedFace[] {
+  return result.face
+    .filter((face) => Array.isArray(face.embedding) && face.embedding.length > 0)
+    .map((face) => {
+      const [x, y, width, height] = face.box;
+      return {
+        embedding: face.embedding as number[],
+        bbox: { x, y, width, height },
+      };
+    });
+}
+
+// Retry pass multiplier/enhancement applied ONLY when the first (fast, unmodified) detection
+// pass finds literally zero faces — this app's photos are almost entirely action/sports
+// (speed skating, cycling), where small, motion-blurred, or low-contrast faces (distant
+// subjects, harsh outdoor lighting/shadows under helmets) are a common cause of the detector
+// missing a face outright, as opposed to detecting-but-not-matching (which is a clustering/
+// threshold concern, not a detection one — see faceClusteringClient.ts). Upscaling gives the
+// detector's fixed-input-size model more effective pixels to work with for small/distant
+// faces; the contrast/brightness boost helps recover faces lost in shadow (a full-face helmet
+// visor, bright sky backgrounds common in outdoor rink/course photography). Only ever run as a
+// SECOND pass (never first) since it roughly doubles detection cost per photo — most photos
+// already detect fine on the first, cheap pass.
+const RETRY_SCALE = 1.5;
+const RETRY_CONTRAST = 1.3;
+const RETRY_BRIGHTNESS = 1.15;
+// Canvas dimensions are capped to avoid excessive memory/compute on already-large source images
+// (the enhancement is aimed at recovering SMALL/distant faces, which benefit most from
+// upscaling — an already-large image gains little from it and risks an oversized canvas).
+const RETRY_MAX_DIMENSION = 3000;
+
+/** Pure helper (no DOM) so the scale-selection logic is unit-testable without a real
+ *  Image/canvas — returns the upscale factor to use, or a value <= 1 if upscaling wouldn't
+ *  help (image already at/above RETRY_MAX_DIMENSION on its longest side). */
+export function computeRetryScale(width: number, height: number): number {
+  if (!width || !height) return 1;
+  return Math.min(RETRY_SCALE, RETRY_MAX_DIMENSION / Math.max(width, height));
+}
+
+function buildEnhancedCanvas(img: HTMLImageElement): HTMLCanvasElement | null {
+  const naturalWidth = img.naturalWidth;
+  const naturalHeight = img.naturalHeight;
+  if (!naturalWidth || !naturalHeight) return null;
+
+  const scale = computeRetryScale(naturalWidth, naturalHeight);
+  if (scale <= 1) return null; // image is already large enough that upscaling wouldn't help
+
+  const canvas = document.createElement('canvas');
+  canvas.width = Math.round(naturalWidth * scale);
+  canvas.height = Math.round(naturalHeight * scale);
+  const ctx = canvas.getContext('2d');
+  if (!ctx) return null;
+
+  ctx.filter = `contrast(${RETRY_CONTRAST}) brightness(${RETRY_BRIGHTNESS})`;
+  ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+  return canvas;
+}
+
 /**
  * Detects faces in the image at `imageUrl` (must be same-origin or a blob:
  * URL — see faceDetectionQueue.ts for how the caller ensures this) and
  * returns their bounding boxes + descriptors. Returns an empty array (never
  * throws) on any failure — face detection is a best-effort enhancement, not
  * a critical path, and must never surface errors to the uploader.
+ *
+ * If the first pass finds zero faces, automatically retries ONCE against an upscaled/contrast-
+ * enhanced version of the same image (see buildEnhancedCanvas() above) before giving up — this
+ * specifically targets small/distant or harsh-lighting faces common in this app's action-sports
+ * photos that the detector misses on a first pass over the unmodified image.
  */
 export async function detectFaces(imageUrl: string): Promise<DetectedFace[]> {
   try {
@@ -101,19 +167,23 @@ export async function detectFaces(imageUrl: string): Promise<DetectedFace[]> {
       img.src = imageUrl;
     });
 
-    const result = await human.detect(img);
+    const detect = async (input: DetectInput) => mapResultToFaces(await human.detect(input));
 
-    return result.face
-      .filter((face) => Array.isArray(face.embedding) && face.embedding.length > 0)
-      .map((face) => {
-        const [x, y, width, height] = face.box;
-        return {
-          embedding: face.embedding as number[],
-          bbox: { x, y, width, height },
-        };
-      });
+    const faces = await detect(img);
+    if (faces.length > 0) return faces;
+
+    const enhancedCanvas = buildEnhancedCanvas(img);
+    if (!enhancedCanvas) return faces;
+
+    try {
+      return await detect(enhancedCanvas);
+    } catch (retryErr) {
+      console.warn('[faceDetection] Enhanced retry pass failed:', retryErr);
+      return faces;
+    }
   } catch (err) {
     console.warn('[faceDetection] Failed to detect faces:', err);
     return [];
   }
 }
+

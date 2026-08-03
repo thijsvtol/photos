@@ -32,11 +32,15 @@ describe('humanDistance / humanSimilarity', () => {
     expect(humanSimilarity(a, a)).toBe(1);
   });
 
-  it('humanSimilarity sits exactly at the documented 0.5 "match" boundary for a known distance', () => {
+  it('humanSimilarity sits exactly at Human\'s documented 0.5 "match" boundary for a known distance', () => {
     const a = new Float32Array([0]);
     const b = new Float32Array([10]);
     expect(humanSimilarity(a, b)).toBe(0.5);
-    expect(SAME_PERSON_THRESHOLD).toBe(0.5);
+  });
+
+  it('SAME_PERSON_THRESHOLD is deliberately looser than Human\'s generic 0.5 guidance, for this app\'s action-sports content', () => {
+    expect(SAME_PERSON_THRESHOLD).toBe(0.45);
+    expect(SAME_PERSON_THRESHOLD).toBeGreaterThan(DEFAULT_MERGE_SUGGESTION_THRESHOLD);
   });
 
   it('humanSimilarity clamps to 0 for very dissimilar vectors', () => {
@@ -178,13 +182,13 @@ describe('findClientSideMergeSuggestions', () => {
   });
 
   it('surfaces a pair scoring between the lenient default threshold and the stricter auto-merge threshold', async () => {
-    // A diff of 6 across all 3 dims scores ~0.47 similarity — below SAME_PERSON_THRESHOLD
-    // (0.5, which automatic clustering uses) but at/above DEFAULT_MERGE_SUGGESTION_THRESHOLD
+    // A diff of 6.5 across all 3 dims scores 0.4 similarity — below SAME_PERSON_THRESHOLD
+    // (0.45, which automatic clustering uses) but at/above DEFAULT_MERGE_SUGGESTION_THRESHOLD
     // (0.35, used only for human-reviewed suggestions) — this is exactly the gap this feature
     // exists to catch (see faceClusteringClient.ts's doc comment on the two thresholds).
     const clusters: ClusterDataCluster[] = [
       { id: 1, centroidEmbedding: [0, 0, 0], faceCount: 1 },
-      { id: 2, centroidEmbedding: [6, 6, 6], faceCount: 1 },
+      { id: 2, centroidEmbedding: [6.5, 6.5, 6.5], faceCount: 1 },
     ];
 
     const atDefault = await findClientSideMergeSuggestions(clusters, DEFAULT_MERGE_SUGGESTION_THRESHOLD);
