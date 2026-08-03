@@ -65,8 +65,24 @@ import { EXPECTED_EMBEDDING_LENGTH } from './faceValidation';
  * `applyClusteringResults()` also now HARD-REJECTS (never writes) any result whose
  * `centroidEmbedding` isn't exactly `EXPECTED_EMBEDDING_LENGTH` — so even if a future bug
  * produces garbage client-side, it can no longer silently reach the database.
+ *
+ * FOLLOW-UP (confirmed live via `wrangler tail` against production, 2026-08-03): even after the
+ * ArrayBuffer/ArrayBufferView handling above, clustering STILL produced zero results — logging
+ * the raw value's constructor revealed D1's binding API in THIS runtime actually hands BLOB
+ * columns back as a plain JS `Array` of numbers (`constructor=Array`, `isView=false`, i.e.
+ * neither an `ArrayBuffer` nor any `ArrayBufferView`) — a THIRD possible shape beyond the two
+ * this function originally handled. Each element of that array is one raw BYTE (0-255) of the
+ * BLOB, so `new Float32Array(plainArray)` hits the exact same "copy each element's value,
+ * don't reinterpret bytes" behavior as the ArrayBufferView case (a plain array is also
+ * array-like, so the Float32Array constructor treats it identically) — same 4x-inflated,
+ * byte-value corruption, just from yet another possible runtime representation.
  */
-export function blobToFloat32Array(blob: ArrayBuffer | ArrayBufferView): Float32Array {
+export function blobToFloat32Array(blob: ArrayBuffer | ArrayBufferView | number[]): Float32Array {
+  if (Array.isArray(blob)) {
+    // A plain array of raw byte values (0-255) — build a real Uint8Array from it first, then
+    // reinterpret ITS backing buffer as packed floats.
+    return new Float32Array(Uint8Array.from(blob).buffer);
+  }
   if (ArrayBuffer.isView(blob)) {
     // blob is some other typed array/view (Uint8Array, Buffer, etc.) — slice out exactly its
     // own backing bytes into a fresh, tightly-sized ArrayBuffer before reinterpreting, so the
@@ -160,22 +176,11 @@ export async function getClusterData(
     .all<{ id: number; photo_id: string; embedding: ArrayBuffer }>();
 
   const faceRowsArr = faceRows || [];
-  if (faceRowsArr.length > 0) {
-    const sample = faceRowsArr[0].embedding as unknown;
-    console.error(
-      `[DEBUG getClusterData] sample face blob constructor=${(sample as object)?.constructor?.name}` +
-      ` isView=${ArrayBuffer.isView(sample as ArrayBufferView)}` +
-      ` byteLength=${(sample as ArrayBuffer | ArrayBufferView)?.byteLength}`
-    );
-  }
   const faces: ClusterDataFace[] = faceRowsArr.map((f) => ({
     id: f.id,
     photoId: f.photo_id,
     embedding: Array.from(blobToFloat32Array(f.embedding)),
   }));
-  if (faces.length > 0) {
-    console.error(`[DEBUG getClusterData] first converted face embedding.length=${faces[0].embedding.length}`);
-  }
   const nextFaceCursor = faceRowsArr.length === PAGE_SIZE ? faceRowsArr[faceRowsArr.length - 1].id : null;
 
   return { faces, clusters, nextClusterCursor, nextFaceCursor };

@@ -215,6 +215,22 @@ describe('blobToFloat32Array', () => {
     expect(result.length).toBe(3);
     expect(Array.from(result)).toEqual([9, 8, 7]);
   });
+
+  it("does NOT corrupt data when D1 hands back a plain JS Array of raw byte values instead of an ArrayBuffer/view — confirmed live in production via wrangler tail (2026-08-03)", () => {
+    // This is the ACTUAL shape D1's binding API was observed returning for BLOB columns in
+    // production, beyond the two shapes (ArrayBuffer, ArrayBufferView) this function originally
+    // handled — a plain `Array` (`Array.isArray() === true`, NOT `ArrayBuffer.isView()`) of raw
+    // byte values (0-255). `new Float32Array(plainArray)` treats a plain array as array-like and
+    // copies each element's VALUE as its own float (same behavior as the ArrayBufferView case),
+    // producing the exact same 4x-inflated, byte-value corruption if not handled explicitly.
+    const original = new Float32Array([1.5, -2.25, 3.0, 1000.25]);
+    const plainByteArray = Array.from(new Uint8Array(original.buffer)); // a plain number[], not a typed array
+
+    const result = blobToFloat32Array(plainByteArray);
+
+    expect(result.length).toBe(4); // NOT 16
+    expect(Array.from(result)).toEqual([1.5, -2.25, 3.0, 1000.25]);
+  });
 });
 
 describe('getClusterData', () => {
@@ -247,6 +263,19 @@ describe('getClusterData', () => {
     const db = new FakeFaceClusteringDb();
     const data = await getClusterData(makeEnv(db), true);
     expect(data).toEqual({ faces: [], clusters: [], nextClusterCursor: null, nextFaceCursor: null });
+  });
+
+  it('correctly converts embeddings end-to-end even when D1 hands back a plain Array instead of an ArrayBuffer (the confirmed production shape)', async () => {
+    const db = new FakeFaceClusteringDb();
+    const realEmbedding = new Float32Array([1.5, -2.25, 3.0]);
+    const asPlainByteArray = Array.from(new Uint8Array(realEmbedding.buffer));
+    db.faces = [
+      { id: 10, photo_id: 'photo-a', embedding: asPlainByteArray as unknown as ArrayBuffer, person_id: null },
+    ];
+
+    const data = await getClusterData(makeEnv(db), true);
+
+    expect(data.faces).toEqual([{ id: 10, photoId: 'photo-a', embedding: [1.5, -2.25, 3.0] }]);
   });
 
   it('paginates clusters/faces via afterClusterId/afterFaceId, returning null cursors once fully consumed', async () => {
