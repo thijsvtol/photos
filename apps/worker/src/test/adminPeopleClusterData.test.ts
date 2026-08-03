@@ -25,6 +25,8 @@ const applyClusteringResultsMock = vi.fn();
 const countUnclusteredFacesMock = vi.fn();
 const getLegacyFaceStatsMock = vi.fn();
 const resetLegacyFacesMock = vi.fn();
+const mergeClustersMock = vi.fn();
+const assignPhotosToPersonMock = vi.fn();
 
 vi.mock('../faceClustering', () => ({
   getClusterData: (...args: unknown[]) => getClusterDataMock(...args),
@@ -32,6 +34,8 @@ vi.mock('../faceClustering', () => ({
   countUnclusteredFaces: (...args: unknown[]) => countUnclusteredFacesMock(...args),
   getLegacyFaceStats: (...args: unknown[]) => getLegacyFaceStatsMock(...args),
   resetLegacyFaces: (...args: unknown[]) => resetLegacyFacesMock(...args),
+  mergeClusters: (...args: unknown[]) => mergeClustersMock(...args),
+  assignPhotosToPerson: (...args: unknown[]) => assignPhotosToPersonMock(...args),
 }));
 
 import peopleRouter from '../routes/admin/people';
@@ -48,6 +52,8 @@ beforeEach(() => {
   countUnclusteredFacesMock.mockReset();
   getLegacyFaceStatsMock.mockReset();
   resetLegacyFacesMock.mockReset();
+  mergeClustersMock.mockReset();
+  assignPhotosToPersonMock.mockReset();
 });
 
 describe('GET /admin/people/cluster-data', () => {
@@ -200,3 +206,121 @@ describe('POST /admin/people/reset-legacy-faces', () => {
     expect(res.status).toBe(500);
   });
 });
+
+describe('POST /admin/people/merge', () => {
+  it('merges source clusters into the target and returns facesMoved', async () => {
+    mergeClustersMock.mockResolvedValue({ facesMoved: 5 });
+
+    const res = await peopleRouter.request(
+      'http://localhost/merge',
+      { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ targetPersonId: 1, sourcePersonIds: [2, 3] }) },
+      makeEnv()
+    );
+    const body = await res.json() as any;
+
+    expect(res.status).toBe(200);
+    expect(body).toEqual({ success: true, facesMoved: 5 });
+    expect(mergeClustersMock).toHaveBeenCalledWith(expect.anything(), 1, [2, 3]);
+  });
+
+  it('rejects a request missing targetPersonId or sourcePersonIds', async () => {
+    const res = await peopleRouter.request(
+      'http://localhost/merge',
+      { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ targetPersonId: 1, sourcePersonIds: [] }) },
+      makeEnv()
+    );
+
+    expect(res.status).toBe(400);
+    expect(mergeClustersMock).not.toHaveBeenCalled();
+  });
+
+  it('rejects non-admin requests', async () => {
+    currentIsAdmin = false;
+
+    const res = await peopleRouter.request(
+      'http://localhost/merge',
+      { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ targetPersonId: 1, sourcePersonIds: [2] }) },
+      makeEnv()
+    );
+
+    expect(res.status).toBe(403);
+    expect(mergeClustersMock).not.toHaveBeenCalled();
+  });
+
+  it('returns 500 if merging throws', async () => {
+    mergeClustersMock.mockRejectedValue(new Error('D1 boom'));
+
+    const res = await peopleRouter.request(
+      'http://localhost/merge',
+      { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ targetPersonId: 1, sourcePersonIds: [2] }) },
+      makeEnv()
+    );
+
+    expect(res.status).toBe(500);
+  });
+});
+
+describe('POST /admin/people/:personId/photos', () => {
+  it('assigns the given photos to the person and returns assigned/skipped counts', async () => {
+    assignPhotosToPersonMock.mockResolvedValue({ assigned: 2, skipped: 1 });
+
+    const res = await peopleRouter.request(
+      'http://localhost/42/photos',
+      { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ photoIds: ['photo-a', 'photo-b'] }) },
+      makeEnv()
+    );
+    const body = await res.json() as any;
+
+    expect(res.status).toBe(200);
+    expect(body).toEqual({ assigned: 2, skipped: 1 });
+    expect(assignPhotosToPersonMock).toHaveBeenCalledWith(expect.anything(), 42, ['photo-a', 'photo-b']);
+  });
+
+  it('rejects an invalid person id', async () => {
+    const res = await peopleRouter.request(
+      'http://localhost/not-a-number/photos',
+      { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ photoIds: ['photo-a'] }) },
+      makeEnv()
+    );
+
+    expect(res.status).toBe(400);
+    expect(assignPhotosToPersonMock).not.toHaveBeenCalled();
+  });
+
+  it('rejects a request with an empty or missing photoIds array', async () => {
+    const res = await peopleRouter.request(
+      'http://localhost/42/photos',
+      { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ photoIds: [] }) },
+      makeEnv()
+    );
+
+    expect(res.status).toBe(400);
+    expect(assignPhotosToPersonMock).not.toHaveBeenCalled();
+  });
+
+  it('rejects non-admin requests', async () => {
+    currentIsAdmin = false;
+
+    const res = await peopleRouter.request(
+      'http://localhost/42/photos',
+      { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ photoIds: ['photo-a'] }) },
+      makeEnv()
+    );
+
+    expect(res.status).toBe(403);
+    expect(assignPhotosToPersonMock).not.toHaveBeenCalled();
+  });
+
+  it('returns 500 if assignment throws', async () => {
+    assignPhotosToPersonMock.mockRejectedValue(new Error('D1 boom'));
+
+    const res = await peopleRouter.request(
+      'http://localhost/42/photos',
+      { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ photoIds: ['photo-a'] }) },
+      makeEnv()
+    );
+
+    expect(res.status).toBe(500);
+  });
+});
+

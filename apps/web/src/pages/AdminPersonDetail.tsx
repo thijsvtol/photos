@@ -1,8 +1,8 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
-import { Users, Pencil, Trash2, Check, X, UserPlus } from 'lucide-react';
+import { Users, Pencil, Trash2, Check, X, UserPlus, GitMerge, MoveRight } from 'lucide-react';
 import Navbar from '../components/Navbar';
-import { getPerson, updatePerson, deletePerson, getPreviewUrl, searchUsers } from '../api';
+import { getPerson, updatePerson, deletePerson, getPreviewUrl, searchUsers, getPeople, mergePeople, assignPhotosToPerson } from '../api';
 import type { Person, PersonPhoto } from '../api';
 
 const AdminPersonDetail: React.FC = () => {
@@ -20,6 +20,24 @@ const AdminPersonDetail: React.FC = () => {
   const [linkError, setLinkError] = useState<string | null>(null);
   const [linking, setLinking] = useState(false);
   const linkSearchTimeout = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+
+  // "Combine with another person" — lets an admin merge a second, duplicate person group into
+  // this one (same underlying mergePeople() the automatic "Find Merge Suggestions" flow uses,
+  // just admin-picked instead of algorithm-suggested — useful when the admin spots a duplicate
+  // themselves without waiting for a suggestion scan). allPeople is fetched lazily (only once
+  // this section is opened) since it's not needed for the rest of the page.
+  const [showCombine, setShowCombine] = useState(false);
+  const [allPeople, setAllPeople] = useState<Person[] | null>(null);
+  const [combineSearch, setCombineSearch] = useState('');
+  const [combining, setCombining] = useState(false);
+  const [combineError, setCombineError] = useState<string | null>(null);
+
+  // "Move to another person" — per-photo action to correct a misclustered/never-clustered
+  // photo. Also reuses the lazily-fetched allPeople list.
+  const [movingPhotoId, setMovingPhotoId] = useState<string | null>(null);
+  const [moveSearch, setMoveSearch] = useState('');
+  const [moveError, setMoveError] = useState<string | null>(null);
+  const [moving, setMoving] = useState(false);
 
   useEffect(() => {
     if (personId) loadData();
@@ -125,6 +143,73 @@ const AdminPersonDetail: React.FC = () => {
     }
   };
 
+  // Fetches the full people list (incl. singles) once, lazily — used by both the "Combine"
+  // and per-photo "Move to" pickers below so opening either doesn't require a second load if
+  // the admin uses both in the same visit.
+  const ensurePeopleLoaded = async () => {
+    if (allPeople) return allPeople;
+    const data = await getPeople(true);
+    setAllPeople(data);
+    return data;
+  };
+
+  const handleOpenCombine = async () => {
+    setCombineError(null);
+    setShowCombine(true);
+    try {
+      await ensurePeopleLoaded();
+    } catch (err) {
+      setCombineError('Failed to load people');
+      console.error(err);
+    }
+  };
+
+  const handleCombineWith = async (otherPersonId: number) => {
+    if (!person) return;
+    try {
+      setCombining(true);
+      setCombineError(null);
+      await mergePeople(person.id, [otherPersonId]);
+      await loadData();
+      setShowCombine(false);
+      setCombineSearch('');
+    } catch (err) {
+      setCombineError('Failed to combine people');
+      console.error(err);
+    } finally {
+      setCombining(false);
+    }
+  };
+
+  const handleOpenMovePhoto = async (photoId: string) => {
+    setMoveError(null);
+    setMovingPhotoId(photoId);
+    setMoveSearch('');
+    try {
+      await ensurePeopleLoaded();
+    } catch (err) {
+      setMoveError('Failed to load people');
+      console.error(err);
+    }
+  };
+
+  const handleMovePhotoTo = async (targetPersonId: number, photoId: string) => {
+    try {
+      setMoving(true);
+      setMoveError(null);
+      await assignPhotosToPerson(targetPersonId, [photoId]);
+      // This photo no longer belongs to the CURRENT person, so drop it from the list locally
+      // rather than waiting for a full reload.
+      setPhotos((prev) => prev.filter((p) => p.id !== photoId));
+      setMovingPhotoId(null);
+    } catch (err) {
+      setMoveError('Failed to move photo');
+      console.error(err);
+    } finally {
+      setMoving(false);
+    }
+  };
+
   if (loading) {
     return (
       <div className="min-h-screen bg-gray-50 dark:bg-gray-900">
@@ -191,6 +276,73 @@ const AdminPersonDetail: React.FC = () => {
           Full name is admin-only — if this person's account is linked below, they'll only ever
           see their first name on the Timeline's "Just me" filter toggle.
         </p>
+
+        {person && (
+          <div className="mb-6 p-4 bg-white dark:bg-gray-800 rounded-lg shadow">
+            <div className="flex items-center justify-between flex-wrap gap-2 mb-2">
+              <h2 className="text-sm font-semibold text-gray-700 dark:text-gray-300 flex items-center gap-2">
+                <GitMerge className="w-4 h-4" /> Combine with another person
+              </h2>
+              {!showCombine && (
+                <button
+                  onClick={handleOpenCombine}
+                  className="px-3 py-1.5 text-sm bg-gray-200 dark:bg-gray-700 text-gray-800 dark:text-gray-200 rounded-lg hover:bg-gray-300 dark:hover:bg-gray-600 transition"
+                >
+                  Combine…
+                </button>
+              )}
+            </div>
+            {showCombine && (
+              <div className="relative">
+                <p className="text-sm text-gray-600 dark:text-gray-400 mb-2">
+                  Merges another person group into this one — all their photos move here and
+                  this person's face-matching improves from the correction. This cannot be
+                  undone automatically.
+                </p>
+                <div className="flex items-center gap-2">
+                  <input
+                    type="text"
+                    value={combineSearch}
+                    onChange={(e) => setCombineSearch(e.target.value)}
+                    placeholder="Search by name…"
+                    disabled={combining}
+                    autoFocus
+                    className="w-full max-w-sm px-3 py-2 border rounded-lg text-sm"
+                  />
+                  <button
+                    onClick={() => { setShowCombine(false); setCombineSearch(''); setCombineError(null); }}
+                    className="px-3 py-1.5 text-sm bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300 transition"
+                  >
+                    Cancel
+                  </button>
+                </div>
+                {allPeople === null ? (
+                  <p className="text-sm text-gray-500 mt-2">Loading people…</p>
+                ) : (
+                  <ul className="mt-2 max-h-64 overflow-y-auto border rounded-lg divide-y dark:divide-gray-700">
+                    {allPeople
+                      .filter((p) => p.id !== person.id)
+                      .filter((p) => !combineSearch.trim() || (p.name || 'Unnamed').toLowerCase().includes(combineSearch.trim().toLowerCase()))
+                      .slice(0, 25)
+                      .map((p) => (
+                        <li key={p.id}>
+                          <button
+                            onClick={() => handleCombineWith(p.id)}
+                            disabled={combining}
+                            className="w-full text-left px-3 py-2 text-sm hover:bg-gray-100 dark:hover:bg-gray-700 flex items-center justify-between disabled:opacity-50"
+                          >
+                            <span>{p.name || 'Unnamed'}</span>
+                            <span className="text-xs text-gray-500">{p.face_count} photo{p.face_count === 1 ? '' : 's'}</span>
+                          </button>
+                        </li>
+                      ))}
+                  </ul>
+                )}
+                {combineError && <p className="text-sm text-red-600 mt-2">{combineError}</p>}
+              </div>
+            )}
+          </div>
+        )}
 
         {person && (
           <div className="mb-6 p-4 bg-white dark:bg-gray-800 rounded-lg shadow">
@@ -266,12 +418,63 @@ const AdminPersonDetail: React.FC = () => {
                     />
                   </div>
                 </Link>
-                <button
-                  onClick={() => handleSetCover(photo.id)}
-                  className="absolute top-2 right-2 px-2 py-1 bg-blue-600 text-white rounded text-xs opacity-0 group-hover:opacity-100 transition"
-                >
-                  Set as cover
-                </button>
+                <div className="absolute top-2 right-2 flex flex-col items-end gap-1 opacity-0 group-hover:opacity-100 transition">
+                  <button
+                    onClick={() => handleSetCover(photo.id)}
+                    className="px-2 py-1 bg-blue-600 text-white rounded text-xs"
+                  >
+                    Set as cover
+                  </button>
+                  <button
+                    onClick={() => handleOpenMovePhoto(photo.id)}
+                    className="px-2 py-1 bg-gray-700 text-white rounded text-xs flex items-center gap-1"
+                  >
+                    <MoveRight className="w-3 h-3" /> Move to…
+                  </button>
+                </div>
+                {movingPhotoId === photo.id && (
+                  <div className="absolute inset-0 bg-black/70 p-2 flex flex-col z-10">
+                    <div className="flex items-center justify-between mb-1">
+                      <span className="text-white text-xs font-medium">Move to person</span>
+                      <button onClick={() => setMovingPhotoId(null)} className="text-white">
+                        <X className="w-3 h-3" />
+                      </button>
+                    </div>
+                    <input
+                      type="text"
+                      value={moveSearch}
+                      onChange={(e) => setMoveSearch(e.target.value)}
+                      placeholder="Search by name…"
+                      disabled={moving}
+                      autoFocus
+                      className="w-full px-2 py-1 text-xs rounded mb-1"
+                    />
+                    <div className="flex-1 overflow-y-auto bg-white rounded">
+                      {allPeople === null ? (
+                        <p className="text-xs text-gray-500 p-2">Loading…</p>
+                      ) : (
+                        <ul className="divide-y">
+                          {allPeople
+                            .filter((p) => p.id !== person?.id)
+                            .filter((p) => !moveSearch.trim() || (p.name || 'Unnamed').toLowerCase().includes(moveSearch.trim().toLowerCase()))
+                            .slice(0, 15)
+                            .map((p) => (
+                              <li key={p.id}>
+                                <button
+                                  onClick={() => handleMovePhotoTo(p.id, photo.id)}
+                                  disabled={moving}
+                                  className="w-full text-left px-2 py-1.5 text-xs hover:bg-gray-100 disabled:opacity-50"
+                                >
+                                  {p.name || 'Unnamed'}
+                                </button>
+                              </li>
+                            ))}
+                        </ul>
+                      )}
+                    </div>
+                    {moveError && <p className="text-xs text-red-300 mt-1">{moveError}</p>}
+                  </div>
+                )}
               </div>
             ))}
           </div>

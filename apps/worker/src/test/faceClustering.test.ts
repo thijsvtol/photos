@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { getClusterData, applyClusteringResults, countUnclusteredFaces, getLegacyFaceStats, resetLegacyFaces, blobToFloat32Array } from '../faceClustering';
+import { getClusterData, applyClusteringResults, countUnclusteredFaces, getLegacyFaceStats, resetLegacyFaces, blobToFloat32Array, mergeClusters, assignPhotosToPerson } from '../faceClustering';
 import type { Env } from '../types';
 
 /**
@@ -37,6 +37,20 @@ class FakeFaceClusteringDb {
         return stmt;
       },
       async all<T>() {
+        if (query.includes('SELECT id, centroid_embedding, face_count FROM person_clusters WHERE id IN')) {
+          const ids = boundArgs as number[];
+          const results = db.clusters
+            .filter((c) => ids.includes(c.id))
+            .map((c) => ({ id: c.id, centroid_embedding: c.centroid_embedding, face_count: c.face_count }));
+          return { results: results as T[] };
+        }
+        if (query.includes('SELECT id, embedding, person_id FROM photo_faces WHERE photo_id IN')) {
+          const photoIds = boundArgs as string[];
+          const results = db.faces
+            .filter((f) => photoIds.includes(f.photo_id))
+            .map((f) => ({ id: f.id, embedding: f.embedding, person_id: f.person_id }));
+          return { results: results as T[] };
+        }
         if (query.includes('SELECT id, centroid_embedding FROM person_clusters WHERE LENGTH(centroid_embedding)')) {
           const [expectedBytes] = boundArgs as [number];
           const results = db.clusters
@@ -92,6 +106,23 @@ class FakeFaceClusteringDb {
         return { results: [] as T[] };
       },
       async first<T>() {
+        if (query.includes('SELECT centroid_embedding, face_count FROM person_clusters WHERE id = ?')) {
+          const [id] = boundArgs as [number];
+          const cluster = db.clusters.find((c) => c.id === id);
+          if (!cluster) return null;
+          return { centroid_embedding: cluster.centroid_embedding, face_count: cluster.face_count } as T;
+        }
+        if (query.includes('SELECT face_count FROM person_clusters WHERE id = ?')) {
+          const [id] = boundArgs as [number];
+          const cluster = db.clusters.find((c) => c.id === id);
+          if (!cluster) return null;
+          return { face_count: cluster.face_count } as T;
+        }
+        if (query.includes('SELECT COUNT(*) as count FROM photo_faces WHERE person_id = ?')) {
+          const [id] = boundArgs as [number];
+          const count = db.faces.filter((f) => f.person_id === id).length;
+          return { count } as T;
+        }
         if (query.includes('INSERT INTO person_clusters') && query.includes('RETURNING id')) {
           const [centroidEmbedding, faceCount, coverPhotoId] = boundArgs as [ArrayBuffer, number, string | null];
           const id = db.nextClusterId++;
@@ -124,11 +155,33 @@ class FakeFaceClusteringDb {
             cluster.face_count = faceCount;
           }
         }
+        if (query.includes('UPDATE person_clusters SET face_count = ?') && !query.includes('centroid_embedding')) {
+          const [faceCount, id] = boundArgs as [number, number];
+          const cluster = db.clusters.find((c) => c.id === id);
+          if (cluster) cluster.face_count = faceCount;
+        }
+        if (query.includes('DELETE FROM person_clusters WHERE id = ?')) {
+          const [id] = boundArgs as [number];
+          db.clusters = db.clusters.filter((c) => c.id !== id);
+        }
+        if (query.includes('UPDATE photo_faces SET person_id = ? WHERE id = ?')) {
+          const [personId, faceId] = boundArgs as [number, number];
+          const face = db.faces.find((f) => f.id === faceId);
+          if (face) face.person_id = personId;
+        }
         if (query.includes('UPDATE photo_faces SET person_id = ? WHERE id IN')) {
           const [personId, ...faceIds] = boundArgs as [number, ...number[]];
           for (const faceId of faceIds) {
             const face = db.faces.find((f) => f.id === faceId);
             if (face) face.person_id = personId;
+          }
+        }
+        if (query.includes('UPDATE photo_faces SET person_id = ? WHERE person_id IN')) {
+          const [newPersonId, ...oldPersonIds] = boundArgs as [number, ...number[]];
+          for (const face of db.faces) {
+            if (face.person_id !== null && oldPersonIds.includes(face.person_id)) {
+              face.person_id = newPersonId;
+            }
           }
         }
         if (query.includes('UPDATE photo_faces SET person_id = NULL WHERE person_id IN')) {
@@ -177,6 +230,13 @@ function resultCentroidOf(...values: number[]): number[] {
   const padded = new Array(1024).fill(0);
   values.forEach((v, i) => { padded[i] = v; });
   return padded;
+}
+
+// Same padding idea as resultCentroidOf(), but returning a real 1024-float ArrayBuffer BLOB —
+// used for mergeClusters()/assignPhotosToPerson() tests, which also require exactly
+// EXPECTED_EMBEDDING_LENGTH-shaped stored data.
+function embedding1024Of(...values: number[]): ArrayBuffer {
+  return new Float32Array(resultCentroidOf(...values)).buffer;
 }
 
 describe('blobToFloat32Array', () => {
@@ -405,6 +465,191 @@ describe('applyClusteringResults', () => {
     expect(db.clusters).toHaveLength(1);
     expect(db.faces.find((f) => f.id === 2)?.person_id).toBe(db.clusters[0].id);
     expect(db.faces.find((f) => f.id === 1)?.person_id).toBeNull();
+  });
+});
+
+describe('mergeClusters', () => {
+  it("recomputes the target's centroid as a face_count-weighted average of target + sources (the \"learn from merge\" behavior)", async () => {
+    const db = new FakeFaceClusteringDb();
+    db.clusters = [
+      { id: 1, centroid_embedding: embedding1024Of(0, 0, 0), face_count: 1 }, // target
+      { id: 2, centroid_embedding: embedding1024Of(10, 0, 0), face_count: 3 }, // source
+    ];
+    db.faces = [
+      { id: 1, photo_id: 'photo-a', embedding: embedding1024Of(0, 0, 0), person_id: 1 },
+      { id: 2, photo_id: 'photo-b', embedding: embedding1024Of(10, 0, 0), person_id: 2 },
+      { id: 3, photo_id: 'photo-c', embedding: embedding1024Of(10, 0, 0), person_id: 2 },
+      { id: 4, photo_id: 'photo-d', embedding: embedding1024Of(10, 0, 0), person_id: 2 },
+    ];
+
+    const { facesMoved } = await mergeClusters(makeEnv(db), 1, [2]);
+
+    expect(facesMoved).toBe(4);
+    expect(db.clusters).toHaveLength(1);
+    expect(db.clusters[0].face_count).toBe(4);
+    // Weighted average: (0*1 + 10*3) / 4 = 7.5, NOT a naive unweighted average of the two
+    // centroids (which would incorrectly give 5).
+    expect(Array.from(blobToFloat32Array(db.clusters[0].centroid_embedding))[0]).toBeCloseTo(7.5, 5);
+    expect(db.faces.every((f) => f.person_id === 1)).toBe(true);
+  });
+
+  it('merges multiple source clusters into one target in a single call', async () => {
+    const db = new FakeFaceClusteringDb();
+    db.clusters = [
+      { id: 1, centroid_embedding: embedding1024Of(0, 0, 0), face_count: 2 },
+      { id: 2, centroid_embedding: embedding1024Of(10, 0, 0), face_count: 1 },
+      { id: 3, centroid_embedding: embedding1024Of(20, 0, 0), face_count: 1 },
+    ];
+    db.faces = [
+      { id: 1, photo_id: 'photo-a', embedding: embedding1024Of(0, 0, 0), person_id: 1 },
+      { id: 2, photo_id: 'photo-b', embedding: embedding1024Of(0, 0, 0), person_id: 1 },
+      { id: 3, photo_id: 'photo-c', embedding: embedding1024Of(10, 0, 0), person_id: 2 },
+      { id: 4, photo_id: 'photo-d', embedding: embedding1024Of(20, 0, 0), person_id: 3 },
+    ];
+
+    const { facesMoved } = await mergeClusters(makeEnv(db), 1, [2, 3]);
+
+    expect(facesMoved).toBe(4);
+    expect(db.clusters).toHaveLength(1);
+    // (0*2 + 10*1 + 20*1) / 4 = 7.5
+    expect(Array.from(blobToFloat32Array(db.clusters[0].centroid_embedding))[0]).toBeCloseTo(7.5, 5);
+  });
+
+  it('is a no-op when sourcePersonIds only contains the target itself', async () => {
+    const db = new FakeFaceClusteringDb();
+    db.clusters = [{ id: 1, centroid_embedding: embedding1024Of(0, 0, 0), face_count: 1 }];
+
+    const { facesMoved } = await mergeClusters(makeEnv(db), 1, [1]);
+
+    expect(facesMoved).toBe(0);
+    expect(db.clusters).toHaveLength(1);
+  });
+
+  it('excludes a malformed-centroid source from the weighted-average math, but still moves its faces', async () => {
+    const db = new FakeFaceClusteringDb();
+    db.clusters = [
+      { id: 1, centroid_embedding: embedding1024Of(0, 0, 0), face_count: 1 },
+      { id: 2, centroid_embedding: embeddingOf(1, 1, 1), face_count: 1 }, // malformed — only 3 floats
+    ];
+    db.faces = [
+      { id: 1, photo_id: 'photo-a', embedding: embedding1024Of(0, 0, 0), person_id: 1 },
+      { id: 2, photo_id: 'photo-b', embedding: embedding1024Of(1, 1, 1), person_id: 2 },
+    ];
+
+    const { facesMoved } = await mergeClusters(makeEnv(db), 1, [2]);
+
+    expect(facesMoved).toBe(2);
+    // Centroid stays exactly the target's original value since the malformed source was
+    // excluded from the average entirely (not zeroed/garbage-averaged in).
+    expect(Array.from(blobToFloat32Array(db.clusters[0].centroid_embedding))[0]).toBeCloseTo(0, 5);
+  });
+});
+
+describe('assignPhotosToPerson', () => {
+  it("assigns an unclustered photo's face to a person and incorporates its embedding into the centroid (\"learn from that\")", async () => {
+    const db = new FakeFaceClusteringDb();
+    db.clusters = [{ id: 1, centroid_embedding: embedding1024Of(0, 0, 0), face_count: 1 }];
+    db.faces = [
+      { id: 1, photo_id: 'photo-existing', embedding: embedding1024Of(0, 0, 0), person_id: 1 },
+      { id: 2, photo_id: 'photo-new', embedding: embedding1024Of(3, 0, 0), person_id: null },
+    ];
+
+    const { assigned, skipped } = await assignPhotosToPerson(makeEnv(db), 1, ['photo-new']);
+
+    expect(assigned).toBe(1);
+    expect(skipped).toBe(0);
+    expect(db.faces.find((f) => f.id === 2)?.person_id).toBe(1);
+    expect(db.clusters[0].face_count).toBe(2);
+    // Capped drift formula: weight = 1/min(2,30) = 0.5 -> centroid[0] = 0 + (3-0)*0.5 = 1.5.
+    expect(Array.from(blobToFloat32Array(db.clusters[0].centroid_embedding))[0]).toBeCloseTo(1.5, 5);
+  });
+
+  it('moves a face away from its OLD cluster (decrementing face_count) when reassigning to a different person', async () => {
+    const db = new FakeFaceClusteringDb();
+    db.clusters = [
+      { id: 1, centroid_embedding: embedding1024Of(0, 0, 0), face_count: 1 },
+      { id: 2, centroid_embedding: embedding1024Of(5, 0, 0), face_count: 2 },
+    ];
+    db.faces = [
+      { id: 1, photo_id: 'photo-a', embedding: embedding1024Of(0, 0, 0), person_id: 1 },
+      { id: 2, photo_id: 'photo-b', embedding: embedding1024Of(5, 0, 0), person_id: 2 }, // misclustered under person 2
+      { id: 3, photo_id: 'photo-c', embedding: embedding1024Of(5, 0, 0), person_id: 2 },
+    ];
+
+    const { assigned } = await assignPhotosToPerson(makeEnv(db), 1, ['photo-b']);
+
+    expect(assigned).toBe(1);
+    expect(db.faces.find((f) => f.id === 2)?.person_id).toBe(1);
+    // Old cluster (person 2) shrinks from 2 to 1, but is NOT deleted (still has 1 member left).
+    expect(db.clusters.find((c) => c.id === 2)?.face_count).toBe(1);
+  });
+
+  it('deletes the OLD cluster entirely once its last face is reassigned away', async () => {
+    const db = new FakeFaceClusteringDb();
+    db.clusters = [
+      { id: 1, centroid_embedding: embedding1024Of(0, 0, 0), face_count: 1 },
+      { id: 2, centroid_embedding: embedding1024Of(5, 0, 0), face_count: 1 },
+    ];
+    db.faces = [
+      { id: 1, photo_id: 'photo-a', embedding: embedding1024Of(0, 0, 0), person_id: 1 },
+      { id: 2, photo_id: 'photo-b', embedding: embedding1024Of(5, 0, 0), person_id: 2 },
+    ];
+
+    await assignPhotosToPerson(makeEnv(db), 1, ['photo-b']);
+
+    expect(db.clusters.find((c) => c.id === 2)).toBeUndefined();
+    expect(db.clusters).toHaveLength(1);
+  });
+
+  it('skips a face already belonging to the target person (no-op, not double-counted)', async () => {
+    const db = new FakeFaceClusteringDb();
+    db.clusters = [{ id: 1, centroid_embedding: embedding1024Of(0, 0, 0), face_count: 1 }];
+    db.faces = [{ id: 1, photo_id: 'photo-a', embedding: embedding1024Of(0, 0, 0), person_id: 1 }];
+
+    const { assigned, skipped } = await assignPhotosToPerson(makeEnv(db), 1, ['photo-a']);
+
+    expect(assigned).toBe(0);
+    expect(skipped).toBe(1);
+    expect(db.clusters[0].face_count).toBe(1);
+  });
+
+  it('assigns every face on a multi-face photo, not just the first', async () => {
+    const db = new FakeFaceClusteringDb();
+    db.clusters = [{ id: 1, centroid_embedding: embedding1024Of(0, 0, 0), face_count: 1 }];
+    db.faces = [
+      { id: 1, photo_id: 'photo-existing', embedding: embedding1024Of(0, 0, 0), person_id: 1 },
+      { id: 2, photo_id: 'photo-group', embedding: embedding1024Of(1, 0, 0), person_id: null },
+      { id: 3, photo_id: 'photo-group', embedding: embedding1024Of(2, 0, 0), person_id: null },
+    ];
+
+    const { assigned } = await assignPhotosToPerson(makeEnv(db), 1, ['photo-group']);
+
+    expect(assigned).toBe(2);
+    expect(db.faces.find((f) => f.id === 2)?.person_id).toBe(1);
+    expect(db.faces.find((f) => f.id === 3)?.person_id).toBe(1);
+    expect(db.clusters[0].face_count).toBe(3);
+  });
+
+  it('skips a face with a malformed embedding length instead of corrupting the centroid', async () => {
+    const db = new FakeFaceClusteringDb();
+    db.clusters = [{ id: 1, centroid_embedding: embedding1024Of(0, 0, 0), face_count: 1 }];
+    db.faces = [
+      { id: 1, photo_id: 'photo-existing', embedding: embedding1024Of(0, 0, 0), person_id: 1 },
+      { id: 2, photo_id: 'photo-bad', embedding: embeddingOf(1, 1, 1), person_id: null }, // malformed
+    ];
+
+    const { assigned, skipped } = await assignPhotosToPerson(makeEnv(db), 1, ['photo-bad']);
+
+    expect(assigned).toBe(0);
+    expect(skipped).toBe(1);
+    expect(db.faces.find((f) => f.id === 2)?.person_id).toBeNull();
+  });
+
+  it('throws if the target person does not exist', async () => {
+    const db = new FakeFaceClusteringDb();
+    db.faces = [{ id: 1, photo_id: 'photo-a', embedding: embedding1024Of(0, 0, 0), person_id: null }];
+
+    await expect(assignPhotosToPerson(makeEnv(db), 999, ['photo-a'])).rejects.toThrow();
   });
 });
 

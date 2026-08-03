@@ -1,7 +1,7 @@
 import { Hono } from 'hono';
 import type { Env, User } from '../../types';
 import { requireAdmin } from '../../auth';
-import { getClusterData, applyClusteringResults, countUnclusteredFaces, getLegacyFaceStats, resetLegacyFaces } from '../../faceClustering';
+import { getClusterData, applyClusteringResults, countUnclusteredFaces, getLegacyFaceStats, resetLegacyFaces, mergeClusters, assignPhotosToPerson } from '../../faceClustering';
 import type { ClusterResult } from '../../faceClustering';
 
 type Variables = {
@@ -273,9 +273,12 @@ app.put('/:personId', async (c) => {
 
 /**
  * POST /people/merge
- * Merge one or more source clusters into a target cluster (e.g. the
- * clustering algorithm split the same person into two groups). Reassigns
- * every face to the target and deletes the source clusters.
+ * Merge one or more source clusters into a target cluster (e.g. the clustering algorithm split
+ * the same person into two groups, or an admin recognizes two people are actually one). Moves
+ * every face to the target and deletes the source clusters. The target's centroid is
+ * recomputed as a face_count-weighted average of all merged centroids (see mergeClusters()'s
+ * doc comment in faceClustering.ts) so this manual correction "teaches" the target person's
+ * centroid, benefiting future automatic clustering passes too.
  */
 app.post('/merge', async (c) => {
   try {
@@ -288,33 +291,41 @@ app.post('/merge', async (c) => {
       return c.json({ error: 'targetPersonId and a non-empty sourcePersonIds array are required' }, 400);
     }
 
-    const idsToMerge = sourcePersonIds.filter((id) => id !== targetPersonId);
-    if (idsToMerge.length === 0) {
-      return c.json({ error: 'No valid source clusters to merge' }, 400);
-    }
-
-    const placeholders = idsToMerge.map(() => '?').join(',');
-    await c.env.DB
-      .prepare(`UPDATE photo_faces SET person_id = ? WHERE person_id IN (${placeholders})`)
-      .bind(targetPersonId, ...idsToMerge)
-      .run();
-
-    const countRow = await c.env.DB
-      .prepare('SELECT COUNT(*) as count FROM photo_faces WHERE person_id = ?')
-      .bind(targetPersonId)
-      .first<{ count: number }>();
-
-    await c.env.DB
-      .prepare("UPDATE person_clusters SET face_count = ?, updated_at = datetime('now') WHERE id = ?")
-      .bind(countRow?.count || 0, targetPersonId)
-      .run();
-
-    await c.env.DB.prepare(`DELETE FROM person_clusters WHERE id IN (${placeholders})`).bind(...idsToMerge).run();
-
-    return c.json({ success: true });
+    const { facesMoved } = await mergeClusters(c.env, targetPersonId, sourcePersonIds);
+    return c.json({ success: true, facesMoved });
   } catch (error) {
     console.error('Error merging people:', error);
     return c.json({ error: 'Failed to merge people' }, 500);
+  }
+});
+
+/**
+ * POST /people/:personId/photos
+ *
+ * Manually assigns EVERY detected face on the given photos to this person — used when an admin
+ * corrects a mistake (a photo was never clustered, or landed under the wrong person) via an
+ * "Assign to this person" action in the People admin UI. "The model should learn from that":
+ * the person's centroid is updated to incorporate each newly assigned face's real embedding
+ * (see assignPhotosToPerson()'s doc comment in faceClustering.ts for the exact drift-safe
+ * formula), so the correction improves future automatic clustering too, not just this one photo.
+ */
+app.post('/:personId/photos', async (c) => {
+  try {
+    const personId = parseInt(c.req.param('personId'), 10);
+    if (!Number.isFinite(personId)) {
+      return c.json({ error: 'Invalid person ID' }, 400);
+    }
+
+    const { photoIds } = await c.req.json<{ photoIds: string[] }>();
+    if (!Array.isArray(photoIds) || photoIds.length === 0 || !photoIds.every((id) => typeof id === 'string')) {
+      return c.json({ error: 'photoIds must be a non-empty array of strings' }, 400);
+    }
+
+    const { assigned, skipped } = await assignPhotosToPerson(c.env, personId, photoIds);
+    return c.json({ assigned, skipped });
+  } catch (error) {
+    console.error('Error assigning photos to person:', error);
+    return c.json({ error: 'Failed to assign photos to person' }, 500);
   }
 });
 

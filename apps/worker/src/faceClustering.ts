@@ -198,6 +198,221 @@ export interface ClusterResult {
   coverPhotoId?: string;
 }
 
+// Same drift-safeguard as apps/web/src/faceClusteringClient.ts's CENTROID_UPDATE_CAP (kept in
+// sync manually — see that file's doc comment for the full "runaway 2354-face cluster"
+// incident this prevents): once a cluster has this many members, each ADDITIONAL face still
+// nudges the centroid by a fixed ~1/30 weight instead of an ever-shrinking 1/n one, so a
+// large cluster's centroid stays representative of its RECENT members rather than freezing
+// into an over-generic average of its entire history. Used here for manual "assign this photo
+// to this person" actions (see assignPhotosToPerson()) so a manual correction "teaches" the
+// centroid the same safe way automatic clustering does.
+const CENTROID_UPDATE_CAP = 30;
+
+/** Incorporates one new member embedding into a running centroid using the same drift-capped
+ *  weighted-average formula as the client-side clustering algorithm (see CENTROID_UPDATE_CAP's
+ *  doc comment) — used when a human manually assigns a face to a person, so that correction
+ *  actually "teaches" the person's centroid instead of leaving it stale. */
+function incorporateEmbedding(centroid: Float32Array, count: number, embedding: Float32Array): { centroid: Float32Array; count: number } {
+  const newCount = count + 1;
+  const weight = 1 / Math.min(newCount, CENTROID_UPDATE_CAP);
+  const newCentroid = new Float32Array(centroid.length);
+  for (let d = 0; d < newCentroid.length; d++) {
+    newCentroid[d] = centroid[d] + (embedding[d] - centroid[d]) * weight;
+  }
+  return { centroid: newCentroid, count: newCount };
+}
+
+// Defensive cap on how many faces one manual assignment call will process — this is meant for
+// "assign a photo (usually 1, occasionally a few faces) to a person", NOT a bulk-reclustering
+// tool (that's what "Cluster Now" is for) — each face touched costs a handful of D1 calls
+// (read + person_id update + possible old-cluster shrink/delete), so an unbounded list here
+// could itself approach the Workers Free plan's 50-subrequests-per-request limit (see repo
+// docs for the multi-round history of hitting that exact limit elsewhere in this feature).
+export const MAX_MANUAL_ASSIGN_FACES = 40;
+
+/**
+ * Manually assigns EVERY photo_faces row belonging to the given photos to `targetPersonId` —
+ * used when an admin corrects a mistake (a photo's face was never clustered, or landed under
+ * the wrong person) via an "Assign to this person" action in the UI. Takes photo ids (not raw
+ * face ids) since that's what the admin actually picks in the UI (a photo, not an individual
+ * detected face) — most photos have exactly one face, but this resolves ALL faces on each given
+ * photo so a multi-face photo doesn't leave some faces behind. For each face:
+ *  1. If it currently belongs to a DIFFERENT cluster, that cluster's face_count is decremented
+ *     (and the cluster deleted entirely if it reaches 0) — its centroid is NOT recomputed
+ *     backward, since precisely undoing a running average without replaying its full history
+ *     isn't possible; a stale centroid missing one member is a negligible, self-correcting
+ *     drift (the next full "Cluster Now" recomputes everything from scratch anyway).
+ *  2. The face's `person_id` is set to `targetPersonId`.
+ *  3. `targetPersonId`'s centroid/face_count are updated via `incorporateEmbedding()` — this is
+ *     the "the model should learn from that" behavior: a manual correction directly teaches the
+ *     target person's centroid using the exact same drift-safe formula automatic clustering
+ *     uses, so future automatic clustering passes benefit from the correction too.
+ * Faces already belonging to `targetPersonId` are skipped (no-op, not double-counted).
+ */
+export async function assignPhotosToPerson(
+  env: Env,
+  targetPersonId: number,
+  photoIds: string[]
+): Promise<{ assigned: number; skipped: number }> {
+  const target = await env.DB
+    .prepare('SELECT centroid_embedding, face_count FROM person_clusters WHERE id = ?')
+    .bind(targetPersonId)
+    .first<{ centroid_embedding: ArrayBuffer; face_count: number }>();
+  if (!target) {
+    throw new Error(`Person ${targetPersonId} not found`);
+  }
+
+  const boundedPhotoIds = photoIds.slice(0, MAX_MANUAL_ASSIGN_FACES);
+  const faceRows: { id: number; embedding: ArrayBuffer; person_id: number | null }[] = [];
+  for (const photoIdChunk of chunk(boundedPhotoIds, FACE_ID_CHUNK_SIZE)) {
+    if (photoIdChunk.length === 0) continue;
+    const placeholders = photoIdChunk.map(() => '?').join(',');
+    const { results } = await env.DB
+      .prepare(`SELECT id, embedding, person_id FROM photo_faces WHERE photo_id IN (${placeholders})`)
+      .bind(...photoIdChunk)
+      .all<{ id: number; embedding: ArrayBuffer; person_id: number | null }>();
+    faceRows.push(...(results || []));
+  }
+  // Defense-in-depth: even if a caller passes more photoIds than MAX_MANUAL_ASSIGN_FACES worth
+  // of faces (e.g. several multi-face photos), still cap the actual per-face work performed.
+  const boundedFaceRows = faceRows.slice(0, MAX_MANUAL_ASSIGN_FACES);
+
+  let centroid = blobToFloat32Array(target.centroid_embedding);
+  let count = target.face_count;
+  let assigned = 0;
+  let skipped = 0;
+
+  for (const face of boundedFaceRows) {
+    if (face.person_id === targetPersonId) {
+      skipped++;
+      continue;
+    }
+    if (blobToFloat32Array(face.embedding).length !== EXPECTED_EMBEDDING_LENGTH) {
+      console.error(`assignPhotosToPerson: skipping face ${face.id} with a malformed embedding length`);
+      skipped++;
+      continue;
+    }
+
+    if (face.person_id !== null) {
+      const oldCluster = await env.DB
+        .prepare('SELECT face_count FROM person_clusters WHERE id = ?')
+        .bind(face.person_id)
+        .first<{ face_count: number }>();
+      if (oldCluster) {
+        const newOldCount = oldCluster.face_count - 1;
+        if (newOldCount <= 0) {
+          await env.DB.prepare('DELETE FROM person_clusters WHERE id = ?').bind(face.person_id).run();
+        } else {
+          await env.DB
+            .prepare("UPDATE person_clusters SET face_count = ?, updated_at = datetime('now') WHERE id = ?")
+            .bind(newOldCount, face.person_id)
+            .run();
+        }
+      }
+    }
+
+    await env.DB.prepare('UPDATE photo_faces SET person_id = ? WHERE id = ?').bind(targetPersonId, face.id).run();
+
+    const embedding = blobToFloat32Array(face.embedding);
+    const updated = incorporateEmbedding(centroid, count, embedding);
+    centroid = updated.centroid;
+    count = updated.count;
+    assigned++;
+  }
+
+  if (assigned > 0) {
+    await env.DB
+      .prepare("UPDATE person_clusters SET centroid_embedding = ?, face_count = ?, updated_at = datetime('now') WHERE id = ?")
+      .bind(centroid.buffer, count, targetPersonId)
+      .run();
+  }
+
+  return { assigned, skipped };
+}
+
+/**
+ * Merges one or more source person_clusters into a target cluster (e.g. an admin recognizes
+ * two groups are the same real person and combines them) — reassigns every source face to the
+ * target and deletes the source clusters.
+ *
+ * "The model should learn from that": the target's centroid is recomputed as a proper WEIGHTED
+ * AVERAGE of the target's and every source's existing centroids, weighted by each one's
+ * face_count — mathematically equivalent to averaging every individual member face's embedding
+ * directly (since each stored centroid is already the true average of its own members), without
+ * needing to re-fetch every individual face's embedding (cheap regardless of how many photos
+ * either person has — a merge of two people with thousands of photos each costs the same
+ * handful of D1 calls as merging two people with 2 photos each, unlike a naive "average every
+ * member face" approach which would scale with total photo count and risk the same CPU-time/
+ * subrequest limits documented elsewhere in this feature's history).
+ */
+export async function mergeClusters(env: Env, targetPersonId: number, sourcePersonIds: number[]): Promise<{ facesMoved: number }> {
+  const idsToMerge = sourcePersonIds.filter((id) => id !== targetPersonId);
+  if (idsToMerge.length === 0) {
+    return { facesMoved: 0 };
+  }
+
+  const target = await env.DB
+    .prepare('SELECT centroid_embedding, face_count FROM person_clusters WHERE id = ?')
+    .bind(targetPersonId)
+    .first<{ centroid_embedding: ArrayBuffer; face_count: number }>();
+  if (!target) {
+    throw new Error(`Person ${targetPersonId} not found`);
+  }
+
+  const placeholders = idsToMerge.map(() => '?').join(',');
+  const { results: sourceRows } = await env.DB
+    .prepare(`SELECT id, centroid_embedding, face_count FROM person_clusters WHERE id IN (${placeholders})`)
+    .bind(...idsToMerge)
+    .all<{ id: number; centroid_embedding: ArrayBuffer; face_count: number }>();
+
+  const targetCentroid = blobToFloat32Array(target.centroid_embedding);
+  const weightedSum = new Float64Array(targetCentroid.length);
+  for (let d = 0; d < targetCentroid.length; d++) {
+    weightedSum[d] = targetCentroid[d] * target.face_count;
+  }
+  let totalCount = target.face_count;
+
+  for (const source of sourceRows || []) {
+    const sourceCentroid = blobToFloat32Array(source.centroid_embedding);
+    if (sourceCentroid.length !== targetCentroid.length) {
+      // A malformed/legacy-dimension source centroid can't be safely averaged in — its faces
+      // still get moved below (they're individually valid, correctly-dimensioned rows; only
+      // this cluster's OWN centroid was untrustworthy), just excluded from the weighted-average
+      // math so it can't corrupt the target's centroid.
+      console.error(`mergeClusters: excluding source cluster ${source.id} from centroid averaging (malformed centroid length ${sourceCentroid.length})`);
+      continue;
+    }
+    for (let d = 0; d < weightedSum.length; d++) {
+      weightedSum[d] += sourceCentroid[d] * source.face_count;
+    }
+    totalCount += source.face_count;
+  }
+
+  const newCentroid = new Float32Array(weightedSum.length);
+  for (let d = 0; d < newCentroid.length; d++) {
+    newCentroid[d] = totalCount > 0 ? weightedSum[d] / totalCount : targetCentroid[d];
+  }
+
+  await env.DB
+    .prepare(`UPDATE photo_faces SET person_id = ? WHERE person_id IN (${placeholders})`)
+    .bind(targetPersonId, ...idsToMerge)
+    .run();
+
+  const countRow = await env.DB
+    .prepare('SELECT COUNT(*) as count FROM photo_faces WHERE person_id = ?')
+    .bind(targetPersonId)
+    .first<{ count: number }>();
+
+  await env.DB
+    .prepare("UPDATE person_clusters SET centroid_embedding = ?, face_count = ?, updated_at = datetime('now') WHERE id = ?")
+    .bind(newCentroid.buffer, countRow?.count || 0, targetPersonId)
+    .run();
+
+  await env.DB.prepare(`DELETE FROM person_clusters WHERE id IN (${placeholders})`).bind(...idsToMerge).run();
+
+  return { facesMoved: countRow?.count || 0 };
+}
+
 // D1 (SQLite) has a bound-parameter-count limit per statement; chunk large face-id lists the
 // same way photoDeletion.ts already does for DELETE statements, to stay well under it.
 const FACE_ID_CHUNK_SIZE = 90;

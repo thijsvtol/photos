@@ -610,8 +610,32 @@ export const updatePerson = async (
   await api.put(`/admin/people/${personId}`, data, { headers: getAdminHeaders() });
 };
 
-export const mergePeople = async (targetPersonId: number, sourcePersonIds: number[]): Promise<void> => {
-  await api.post('/admin/people/merge', { targetPersonId, sourcePersonIds }, { headers: getAdminHeaders() });
+/** Merges one or more source people into `targetPersonId`, moving every source photo/face to
+ *  the target and deleting the source person records. The target's centroid is recomputed
+ *  server-side as a face_count-weighted average of all merged centroids — see
+ *  mergeClusters()'s doc comment (apps/worker/src/faceClustering.ts) for why this "teaches" the
+ *  target person, improving future automatic clustering rather than leaving a stale centroid. */
+export const mergePeople = async (targetPersonId: number, sourcePersonIds: number[]): Promise<{ facesMoved: number }> => {
+  const response = await api.post<{ success: boolean; facesMoved: number }>(
+    '/admin/people/merge',
+    { targetPersonId, sourcePersonIds },
+    { headers: getAdminHeaders() }
+  );
+  return { facesMoved: response.data.facesMoved };
+};
+
+/** Manually assigns every detected face on the given photos to `personId` — used to correct a
+ *  photo that was never clustered, or clustered under the wrong person. "The model learns from
+ *  that": the person's centroid is updated to incorporate each newly assigned face's real
+ *  embedding (see assignPhotosToPerson()'s doc comment in apps/worker/src/faceClustering.ts for
+ *  the exact drift-safe formula), so the correction improves future automatic clustering too. */
+export const assignPhotosToPerson = async (personId: number, photoIds: string[]): Promise<{ assigned: number; skipped: number }> => {
+  const response = await api.post<{ assigned: number; skipped: number }>(
+    `/admin/people/${personId}/photos`,
+    { photoIds },
+    { headers: getAdminHeaders() }
+  );
+  return response.data;
 };
 
 export const deletePerson = async (personId: number): Promise<void> => {
