@@ -49,16 +49,23 @@ function isValidEmbeddingLength(embedding: number[]): boolean {
 }
 
 /** Threshold used by automatic clustering (assigning a face to an existing person with zero
- *  human review). Lowered from Human's own documented "0.5 = match" guidance to 0.45
- *  (2026-08-03) specifically for this app's content: it is essentially entirely action/sports
- *  photography (speed skating, cycling — helmets, goggles/visors, motion blur, extreme angles),
- *  which measurably scores lower on Human's FaceRes descriptor even for genuinely-matching
- *  faces than the frontal/well-lit portraits the 0.5 guidance was calibrated against. Kept
- *  deliberately still meaningfully ABOVE DEFAULT_MERGE_SUGGESTION_THRESHOLD below (0.35) so the
- *  human-reviewed merge-suggestion safety net still catches genuinely-harder cases that even
- *  this loosened automatic bar misses — automatic clustering must stay more conservative than
- *  a review-gated feature, just less conservative than Human's generic default. */
-export const SAME_PERSON_THRESHOLD = 0.45;
+ *  human review). REVERTED (2026-08-03) from 0.45 back to Human's own documented "0.5 = match"
+ *  guidance, after production evidence showed 0.45 causes catastrophic over-merging: with a
+ *  2915-face library, one single cluster grew to 2354 faces (81% of the ENTIRE library) and a
+ *  second grew to 411 (94% combined, in just 2 of 22 clusters) — clearly not one real person's
+ *  photos. Root cause is "centroid drift"/chaining, a known failure mode of incremental
+ *  nearest-CENTROID clustering (see runClientSideClustering()'s doc comment below): once a
+ *  cluster starts growing, its running-average centroid gradually blurs toward a generic
+ *  "average face" that then satisfies a lenient threshold against even MORE unrelated people,
+ *  which dilutes the centroid further, accepting still more people — a runaway snowball that
+ *  gets exponentially worse the more lenient the threshold is. 0.45 was evidently past the
+ *  tipping point for this to cascade; 0.5 (Human's own calibrated default) plus the centroid-
+ *  drift cap added below should prevent it recurring. If real matches are still missed at 0.5,
+ *  the "Find Merge Suggestions" human-reviewed tool (using the separate, more lenient
+ *  DEFAULT_MERGE_SUGGESTION_THRESHOLD below) remains the safe way to catch them, since every
+ *  suggestion there requires manual admin approval before merging — unlike automatic
+ *  clustering, which must stay conservative precisely because nothing reviews its decisions. */
+export const SAME_PERSON_THRESHOLD = 0.5;
 
 /** Threshold used by merge SUGGESTIONS only — deliberately lower than SAME_PERSON_THRESHOLD.
  *  Every merge suggestion is manually reviewed by an admin before anything actually merges (one
@@ -136,9 +143,26 @@ async function yieldPeriodically(iteration: number, everyN: number): Promise<voi
  * cluster's running-average centroid as it goes so faces within this same pass can join a
  * cluster created earlier in the pass.
  *
+ * IMPORTANT — centroid-drift/"chaining" safeguard (added 2026-08-03 after a production incident
+ * where a single cluster grew to 2354 faces, 81% of an entire 2915-face library): naively
+ * updating the centroid via a full running average (`centroid += (embedding - centroid) /
+ * newCount`) forever means each individual new face's influence on the centroid shrinks as
+ * `1/newCount` — once a cluster has accumulated dozens/hundreds of faces, ANY single new face
+ * (even a wrong match) barely moves the centroid at all, so the centroid essentially freezes
+ * into a generic "average face". A generic average of many different real faces is often, by
+ * regression to the mean, similar-ish to MANY different people — so once a cluster gets large
+ * enough for this to happen, it becomes progressively MORE likely (not less) to keep matching
+ * unrelated new faces, snowballing exponentially. FIX: the learning-rate denominator is capped
+ * at `CENTROID_UPDATE_CAP` (30) — once a cluster has that many members, every ADDITIONAL face
+ * still nudges the centroid by a fixed ~1/30 weight instead of an ever-shrinking one, keeping
+ * the centroid representative of its most RECENT ~30 members rather than melting into a
+ * frozen, over-generic average of its entire (potentially huge) history.
+ *
  * Returns a list of ClusterResult entries (only for clusters that actually changed) ready to
  * POST to /admin/people/apply-clustering — the worker just persists them (pure I/O).
  */
+const CENTROID_UPDATE_CAP = 30;
+
 export async function runClientSideClustering(
   faces: ClusterDataFace[],
   clusters: ClusterDataCluster[],
@@ -195,9 +219,10 @@ export async function runClientSideClustering(
 
     if (bestTarget && bestSimilarity >= SAME_PERSON_THRESHOLD) {
       const newCount = bestTarget.count + 1;
+      const updateWeight = 1 / Math.min(newCount, CENTROID_UPDATE_CAP);
       const newCentroid = new Float32Array(bestTarget.centroid.length);
       for (let d = 0; d < newCentroid.length; d++) {
-        newCentroid[d] = bestTarget.centroid[d] + (embedding[d] - bestTarget.centroid[d]) / newCount;
+        newCentroid[d] = bestTarget.centroid[d] + (embedding[d] - bestTarget.centroid[d]) * updateWeight;
       }
       bestTarget.centroid = newCentroid;
       bestTarget.count = newCount;

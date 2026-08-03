@@ -51,8 +51,8 @@ describe('humanDistance / humanSimilarity', () => {
     expect(humanSimilarity(a, b)).toBe(0.5);
   });
 
-  it('SAME_PERSON_THRESHOLD is deliberately looser than Human\'s generic 0.5 guidance, for this app\'s action-sports content', () => {
-    expect(SAME_PERSON_THRESHOLD).toBe(0.45);
+  it('SAME_PERSON_THRESHOLD matches Human\'s own documented "0.5 = match" guidance', () => {
+    expect(SAME_PERSON_THRESHOLD).toBe(0.5);
     expect(SAME_PERSON_THRESHOLD).toBeGreaterThan(DEFAULT_MERGE_SUGGESTION_THRESHOLD);
   });
 
@@ -179,6 +179,27 @@ describe('runClientSideClustering', () => {
     expect(results[0].addedFaceIds).toEqual([2]);
     expect(results.some((r) => r.clusterId === 5)).toBe(false);
   });
+
+  it('caps centroid-drift dilution so a large cluster keeps moving toward NEW faces instead of freezing into a stale average (regression test for the 2354-face runaway-merge incident)', async () => {
+    // Simulate an existing, already-large cluster whose centroid sits at [0,0,0,...] with 50
+    // accumulated members — under the OLD unbounded running-average formula
+    // (`centroid += diff / newCount`), a single new face would only move the centroid by
+    // 1/51st of the difference, making it essentially immovable at this size. Under the capped
+    // formula, a new face should still move it by a fixed ~1/30 weight.
+    const existingClusters: ClusterDataCluster[] = [
+      { id: 1, centroidEmbedding: pad1024(0, 0, 0), faceCount: 50 },
+    ];
+    // A face close enough to match (within SAME_PERSON_THRESHOLD) but clearly offset, so we can
+    // observe how far the centroid actually moved.
+    const faces: ClusterDataFace[] = [{ id: 999, photoId: 'photo-x', embedding: pad1024(3, 0, 0) }];
+
+    const results = await runClientSideClustering(faces, existingClusters);
+
+    expect(results).toHaveLength(1);
+    // Capped weight = 1 / min(51, 30) = 1/30 -> centroid[0] moves from 0 to 3 * (1/30) = 0.1,
+    // NOT the old formula's 3 * (1/51) ≈ 0.0588.
+    expect(results[0].centroidEmbedding[0]).toBeCloseTo(0.1, 5);
+  });
 });
 
 describe('findClientSideMergeSuggestions', () => {
@@ -215,7 +236,7 @@ describe('findClientSideMergeSuggestions', () => {
 
   it('surfaces a pair scoring between the lenient default threshold and the stricter auto-merge threshold', async () => {
     // A diff of 6.5 across all 3 dims scores 0.4 similarity — below SAME_PERSON_THRESHOLD
-    // (0.45, which automatic clustering uses) but at/above DEFAULT_MERGE_SUGGESTION_THRESHOLD
+    // (0.5, which automatic clustering uses) but at/above DEFAULT_MERGE_SUGGESTION_THRESHOLD
     // (0.35, used only for human-reviewed suggestions) — this is exactly the gap this feature
     // exists to catch (see faceClusteringClient.ts's doc comment on the two thresholds).
     const clusters: ClusterDataCluster[] = [
