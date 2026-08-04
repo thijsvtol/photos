@@ -89,8 +89,8 @@
     "patch-package": "^8.0.1",
     "postcss": "^8.5.8",
     "tailwindcss": "^4.3.0",
-    "typescript": "^6.0.3",
-    "vite": "^8.0.12",
+    "typescript": "^7.0.2",
+    "vite": "^8.2.0",
     "vitest": "^4.1.2"
   },
   "overrides": {
