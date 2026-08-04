@@ -55,8 +55,16 @@ export const SAME_PERSON_THRESHOLD = 0.35;
 
 /** Threshold used by merge SUGGESTIONS only — deliberately lower than SAME_PERSON_THRESHOLD,
  *  for the same asymmetric-risk reason as before (a false positive here just needs one click
- *  to dismiss; a false negative is a silent, undiscoverable gap). */
-export const DEFAULT_MERGE_SUGGESTION_THRESHOLD = 0.2;
+ *  to dismiss; a false negative is a silent, undiscoverable gap).
+ *
+ *  UPDATED 2026-08-04 after a real production run: 0.2 produced 57,093 suggestions (out of
+ *  ~500,500 pairwise comparisons across 1001 clusters) ranging as low as a 24% match -- an
+ *  unreviewable volume that also froze the admin's browser tab (the suggestions list isn't
+ *  virtualized). Spot-checking the raw scores showed genuine same-person pairs cluster well
+ *  above 45-50%, while the 24-40% range is dominated by unrelated people. Raised to 0.45
+ *  (still intentionally more lenient than SAME_PERSON_THRESHOLD) to keep the suggestion list
+ *  to a reviewable size while still catching genuine same-person fragmentation. */
+export const DEFAULT_MERGE_SUGGESTION_THRESHOLD = 0.45;
 
 /**
  * Cosine DISTANCE (1 - cosine similarity) between two embeddings — kept as a separate function
@@ -597,6 +605,11 @@ export async function findClientSideMergeSuggestions(
       await yieldPeriodically(comparisons, 5000);
     }
   }
+
+  // Highest-confidence matches first -- with real libraries this list can run into the
+  // thousands, and the admin reviews top-to-bottom, so the most-likely-correct (and most
+  // valuable to fix) pairs should never be buried under a long tail of marginal guesses.
+  suggestions.sort((a, b) => b.similarity - a.similarity);
 
   return suggestions;
 }

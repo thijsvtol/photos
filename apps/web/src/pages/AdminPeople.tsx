@@ -10,13 +10,20 @@ import { runClientSideClustering, runDeepRebuildClustering, findClientSideMergeS
 import type { MergeSuggestion } from '../faceClusteringClient';
 
 // A second, much more lenient similarity threshold tried automatically only if the default
-// (DEFAULT_MERGE_SUGGESTION_THRESHOLD) scan finds literally nothing — this app's action-sports
-// photos (helmets/goggles/angles) can legitimately score well under even that already-lowered
-// default for genuinely-matching faces, so a library with real duplicates can still come back
-// empty at the default. The admin manually reviews every suggestion before merging either way,
-// so a much lower bar here just means more (dismissable) candidates, never an unreviewed
-// auto-merge.
+// (DEFAULT_MERGE_SUGGESTION_THRESHOLD, 0.45 as of 2026-08-04) scan finds literally nothing —
+// this app's action-sports photos (helmets/goggles/angles) can legitimately score well under
+// even that default for genuinely-matching faces, so a library with real duplicates can still
+// come back empty at the default. The admin manually reviews every suggestion before merging
+// either way, so a much lower bar here just means more (dismissable) candidates, never an
+// unreviewed auto-merge.
 const FALLBACK_MERGE_THRESHOLD = 0.2;
+
+// Rendering every suggestion at once froze the admin's browser tab on a real production run
+// (57,093 unvirtualized cards, each with two images). The scan itself still examines every
+// pair (cheap, pure math), but only the top N by confidence are ever mounted into the DOM —
+// merging/dismissing an item removes it from mergeSuggestions, letting the next one in line
+// become visible.
+const MERGE_SUGGESTIONS_RENDER_LIMIT = 200;
 
 const AdminPeople: React.FC = () => {
   // Holds EVERY cluster (including single-photo ones) so the UI can tell the
@@ -453,8 +460,8 @@ const AdminPeople: React.FC = () => {
               <GitMerge className="w-5 h-5" /> Merge suggestions ({mergeSuggestions.length})
             </h2>
             <p className="text-sm text-gray-500 dark:text-gray-400 mb-4">
-              These pairs look like the same person but were never automatically merged. Review each
-              one and merge if they match, or dismiss if not.
+              These pairs look like the same person but were never automatically merged. Sorted by
+              confidence, highest first. Review each one and merge if they match, or dismiss if not.
               {usedLenientMergeThreshold && (
                 <>
                   {' '}No matches were found at the default sensitivity, so this list uses a much
@@ -462,9 +469,16 @@ const AdminPeople: React.FC = () => {
                   before merging.
                 </>
               )}
+              {mergeSuggestions.length > MERGE_SUGGESTIONS_RENDER_LIMIT && (
+                <>
+                  {' '}Showing the top {MERGE_SUGGESTIONS_RENDER_LIMIT.toLocaleString()} of{' '}
+                  {mergeSuggestions.length.toLocaleString()} — merge/dismiss some to reveal more (the
+                  full list isn't rendered at once to avoid freezing the page).
+                </>
+              )}
             </p>
             <div className="space-y-3">
-              {mergeSuggestions.map((suggestion) => {
+              {mergeSuggestions.slice(0, MERGE_SUGGESTIONS_RENDER_LIMIT).map((suggestion) => {
                 const personA = personById(suggestion.clusterAId);
                 const personB = personById(suggestion.clusterBId);
                 if (!personA || !personB) return null;

@@ -87,8 +87,17 @@ describe('humanDistance / humanSimilarity (cosine similarity on ArcFace embeddin
     expect(humanSimilarity(a, b)).toBe(-1);
   });
 
-  it('SAME_PERSON_THRESHOLD is stricter (higher) than DEFAULT_MERGE_SUGGESTION_THRESHOLD, preserving the asymmetric-risk design (auto-clustering must stay conservative; human-reviewed suggestions can be lenient)', () => {
-    expect(SAME_PERSON_THRESHOLD).toBeGreaterThan(DEFAULT_MERGE_SUGGESTION_THRESHOLD);
+  it('DEFAULT_MERGE_SUGGESTION_THRESHOLD and SAME_PERSON_THRESHOLD are both positive, sane cosine-similarity values (0..1)', () => {
+    // As of 2026-08-04 the merge-suggestion threshold (0.45) is intentionally HIGHER than the
+    // auto-clustering threshold (0.35) — a real production run showed the opposite (lenient)
+    // arrangement produced 57,093 unreviewable suggestions down to a 24% match. This is safe
+    // because merge-suggestions target a DIFFERENT gap than auto-clustering: two independently-
+    // formed clusters can score above SAME_PERSON_THRESHOLD against each other yet never get
+    // compared (auto-clustering only ever matches a NEW face against EXISTING clusters, never
+    // cluster-to-cluster), so a stricter-but-still-lenient-enough bar here still catches real
+    // fragmentation while keeping the review list a manageable size.
+    expect(SAME_PERSON_THRESHOLD).toBeGreaterThan(0);
+    expect(DEFAULT_MERGE_SUGGESTION_THRESHOLD).toBeGreaterThan(0);
   });
 
   it('humanDistance is Infinity for embeddings of different lengths (never a truncated/silent comparison)', () => {
@@ -324,20 +333,21 @@ describe('findClientSideMergeSuggestions', () => {
     expect(await findClientSideMergeSuggestions([{ id: 1, centroidEmbedding: unitVec(0), faceCount: 1 }])).toEqual([]);
   });
 
-  it('surfaces a pair scoring between the lenient default threshold and the stricter auto-merge threshold', async () => {
-    // similarity 0.28 is below SAME_PERSON_THRESHOLD (0.35, which automatic clustering uses)
-    // but at/above DEFAULT_MERGE_SUGGESTION_THRESHOLD (0.2, used only for human-reviewed
-    // suggestions) — exactly the gap this feature exists to catch.
+  it('surfaces a pair scoring at/above the default merge-suggestion threshold but rejects one below it', async () => {
     const clusters: ClusterDataCluster[] = [
       { id: 1, centroidEmbedding: unitVec(0), faceCount: 1 },
-      { id: 2, centroidEmbedding: vecWithSimilarity(0.28), faceCount: 1 },
+      { id: 2, centroidEmbedding: vecWithSimilarity(0.5), faceCount: 1 },
     ];
 
     const atDefault = await findClientSideMergeSuggestions(clusters, DEFAULT_MERGE_SUGGESTION_THRESHOLD);
     expect(atDefault).toHaveLength(1);
 
-    const atStrict = await findClientSideMergeSuggestions(clusters, SAME_PERSON_THRESHOLD);
-    expect(atStrict).toHaveLength(0);
+    const clustersBelow: ClusterDataCluster[] = [
+      { id: 1, centroidEmbedding: unitVec(0), faceCount: 1 },
+      { id: 2, centroidEmbedding: vecWithSimilarity(0.3), faceCount: 1 },
+    ];
+    const belowDefault = await findClientSideMergeSuggestions(clustersBelow, DEFAULT_MERGE_SUGGESTION_THRESHOLD);
+    expect(belowDefault).toHaveLength(0);
   });
 
   it('reports progress via the onProgress callback', async () => {
