@@ -475,4 +475,25 @@ describe('runDeepRebuildClustering', () => {
   it('returns an empty array for an empty input', async () => {
     expect(await runDeepRebuildClustering([])).toEqual([]);
   });
+
+  it('applies the SAME adaptive size-scaled threshold as incremental clustering, based on the CLUSTER\'S OWN real member count (regression test for a bug where this always scored against the flat baseline regardless of actual cluster size, confirmed in production as two clusters absorbing 60% of a 2915-face library)', async () => {
+    // Build up a large (150-member), tightly-identical cluster first.
+    const faces: ClusterDataFace[] = [];
+    for (let i = 0; i < 150; i++) {
+      faces.push({ id: i + 1, photoId: `p${i + 1}`, embedding: pad1024(0) });
+    }
+    // Then a borderline-similar face (diff of 9.4 -> ~0.55 similarity, comfortably above the
+    // flat 0.5 baseline but BELOW the fully-grown adaptive bar for a 150-member cluster, which
+    // saturates at 0.65 well before that size).
+    faces.push({ id: 1000, photoId: 'p-borderline', embedding: pad1024(9.4) });
+
+    const results = await runDeepRebuildClustering(faces);
+
+    expect(results).toHaveLength(2);
+    const bigCluster = results.find((r) => r.faceCount === 150);
+    const newCluster = results.find((r) => r.faceCount === 1);
+    expect(bigCluster).toBeDefined();
+    expect(newCluster).toBeDefined();
+    expect(newCluster?.addedFaceIds).toEqual([1000]);
+  });
 });

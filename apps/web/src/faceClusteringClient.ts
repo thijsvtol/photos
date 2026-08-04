@@ -367,8 +367,8 @@ export async function runClientSideClustering(
 // representativeness saturates quickly for a fixed real embedding distribution, and the exact
 // same `yieldPeriodically()` UX helper used elsewhere keeps the tab responsive during a large
 // pass (this is NOT a CPU-safety mechanism here, just avoids the tab looking frozen).
-const REP_SIZE = 8;
-const REP_MAX_MARGIN = 0.05;
+const REP_SIZE = 12;
+const REP_MAX_MARGIN = 0.1;
 
 interface DeepCluster {
   representatives: Float32Array[];
@@ -399,15 +399,35 @@ function addRepresentative(cluster: DeepCluster, embedding: Float32Array): void 
 /** Scores a candidate embedding against one cluster's representative sample. Returns null if
  *  the cluster has no representatives yet (shouldn't happen in practice — every cluster starts
  *  with its founding member as its first representative). */
-function scoreAgainstCluster(embedding: Float32Array, cluster: DeepCluster): { max: number; avg: number } {
+/** Scores a candidate embedding against one cluster's representative sample, against a
+ *  threshold that's ADAPTIVE to the cluster's real current size (see
+ *  effectiveThresholdForClusterSize()) — a previous version of this function/its caller always
+ *  scored against the FLAT baseline regardless of cluster size (a bug: `effectiveThresholdFor
+ *  ClusterSize(0)` was called with a hardcoded 0 instead of the cluster's real member count),
+ *  which let large clusters keep absorbing borderline matches exactly like the centroid-based
+ *  algorithm this was meant to replace — confirmed in production by two clusters (1217 and 526
+ *  faces, 60% of a 2915-face library) after a first deploy of the (buggy) representative-
+ *  sample algorithm. Also requires a MAJORITY of individual representatives (not just the
+ *  average) to independently clear the threshold — an average alone can be dragged above the
+ *  bar by one lucky near-duplicate representative even if most of the sample doesn't really
+ *  resemble the candidate, which is exactly the kind of single-outlier-driven false positive a
+ *  representative-sample scheme is supposed to avoid (unlike a centroid, which has no concept
+ *  of "how many members individually agree"). */
+function scoreAgainstCluster(
+  embedding: Float32Array,
+  cluster: DeepCluster,
+  threshold: number
+): { max: number; avg: number; agreeFraction: number } {
   let max = -Infinity;
   let sum = 0;
+  let agreeCount = 0;
   for (const rep of cluster.representatives) {
     const sim = humanSimilarity(embedding, rep);
     if (sim > max) max = sim;
     sum += sim;
+    if (sim >= threshold) agreeCount++;
   }
-  return { max, avg: sum / cluster.representatives.length };
+  return { max, avg: sum / cluster.representatives.length, agreeFraction: agreeCount / cluster.representatives.length };
 }
 
 /**
@@ -444,12 +464,20 @@ export async function runDeepRebuildClustering(
 
     let bestCluster: DeepCluster | null = null;
     let bestAvg = -Infinity;
-    const requiredBase = effectiveThresholdForClusterSize(0); // representative-based scoring isn't
-    // size-scaled the same way centroid matching is (there's no centroid to dilute), but reuse
-    // the same flat baseline for the "avg" condition, plus a fixed margin above it for "max".
     for (const cluster of clusters) {
-      const { max, avg } = scoreAgainstCluster(embedding, cluster);
-      if (max >= requiredBase + REP_MAX_MARGIN && avg >= requiredBase && avg > bestAvg) {
+      // Adaptive, size-scaled threshold based on this SPECIFIC cluster's real current member
+      // count (see effectiveThresholdForClusterSize()'s doc comment above) — a large,
+      // well-established cluster requires an increasingly confident match, same rationale as
+      // the incremental centroid-based algorithm, just applied against real representative
+      // members instead of a mutable average.
+      const requiredBase = effectiveThresholdForClusterSize(cluster.memberCount);
+      const { max, avg, agreeFraction } = scoreAgainstCluster(embedding, cluster, requiredBase);
+      if (
+        max >= requiredBase + REP_MAX_MARGIN &&
+        avg >= requiredBase &&
+        agreeFraction >= 0.5 &&
+        avg > bestAvg
+      ) {
         bestAvg = avg;
         bestCluster = cluster;
       }
