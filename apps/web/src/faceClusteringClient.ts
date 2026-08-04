@@ -23,106 +23,86 @@
 
 import type { ClusterDataFace, ClusterDataCluster, ClusterResult } from './api';
 
-// Human's default similarity() options: order=2 (Euclidean), multiplier=25, normalize the
-// resulting root-distance into a 0..1 "similarity" using a [min, max] = [0.2, 0.8] window
-// before clamping. See vladmandic/human's wiki/Embedding: "Similarity match above 50% can be
-// considered a match".
-const MATCH_MULTIPLIER = 25;
-const MATCH_MIN = 0.2;
-const MATCH_MAX = 0.8;
-
-// @vladmandic/human's FaceRes descriptor is always exactly 1024 numbers (see
-// faceValidation.ts's EXPECTED_EMBEDDING_LENGTH, kept in sync manually with the worker since
-// these are separate npm packages). Any face/cluster arriving from the Worker with a DIFFERENT
-// length is definitely NOT a valid embedding — see apps/worker/src/faceClustering.ts's
-// blobToFloat32Array()/top-of-file doc comment for the exact production incident (a BLOB-
-// reading bug once silently fed every clustering pass 4x-too-long "embeddings" that were
-// actually just raw bytes reinterpreted as garbage floats) this guards against. Filtering these
+// @vladmandic/human's FaceRes descriptor used to be 1024 numbers; as of 2026-08-04 the
+// embedding source is a purpose-built ArcFace ONNX recognition model (see faceDetection.ts's
+// doc comment) producing exactly 512 numbers instead. Any face/cluster arriving from the
+// Worker with a DIFFERENT length is definitely NOT a valid embedding (either a still-legacy
+// pre-switch row, or a genuine data-corruption bug like the historical BLOB-reading incident
+// documented in apps/worker/src/faceClustering.ts's blobToFloat32Array()). Filtering these
 // out here — the EARLIEST possible point, before any clustering math runs at all — means a
 // future recurrence of that class of bug produces an obvious, loud console warning and simply
 // skips the bad rows (leaving them unclustered for a later retry) instead of silently building
 // meaningless clusters from noise.
-const EXPECTED_EMBEDDING_LENGTH = 1024;
+const EXPECTED_EMBEDDING_LENGTH = 512;
 
 function isValidEmbeddingLength(embedding: number[]): boolean {
   return embedding.length === EXPECTED_EMBEDDING_LENGTH;
 }
 
 /** Threshold used by automatic clustering (assigning a face to an existing person with zero
- *  human review). REVERTED (2026-08-03) from 0.45 back to Human's own documented "0.5 = match"
- *  guidance, after production evidence showed 0.45 causes catastrophic over-merging: with a
- *  2915-face library, one single cluster grew to 2354 faces (81% of the ENTIRE library) and a
- *  second grew to 411 (94% combined, in just 2 of 22 clusters) — clearly not one real person's
- *  photos. Root cause is "centroid drift"/chaining, a known failure mode of incremental
- *  nearest-CENTROID clustering (see runClientSideClustering()'s doc comment below): once a
- *  cluster starts growing, its running-average centroid gradually blurs toward a generic
- *  "average face" that then satisfies a lenient threshold against even MORE unrelated people,
- *  which dilutes the centroid further, accepting still more people — a runaway snowball that
- *  gets exponentially worse the more lenient the threshold is. 0.45 was evidently past the
- *  tipping point for this to cascade; 0.5 (Human's own calibrated default) plus the centroid-
- *  drift cap added below should prevent it recurring. If real matches are still missed at 0.5,
- *  the "Find Merge Suggestions" human-reviewed tool (using the separate, more lenient
- *  DEFAULT_MERGE_SUGGESTION_THRESHOLD below) remains the safe way to catch them, since every
- *  suggestion there requires manual admin approval before merging — unlike automatic
- *  clustering, which must stay conservative precisely because nothing reviews its decisions. */
-export const SAME_PERSON_THRESHOLD = 0.5;
+ *  human review), now expressed as a COSINE similarity (range -1..1, though in practice ArcFace
+ *  embeddings of different real faces rarely score below ~0) instead of the old Euclidean-
+ *  based Human formula's 0..1 scale — these numbers are NOT directly comparable across the
+ *  model swap. 0.35 is a conservative starting point based on common ArcFace/InsightFace
+ *  verification-threshold guidance for cosine similarity on L2-normalized embeddings (typical
+ *  literature/LFW-calibrated thresholds for ResNet100-class ArcFace models cluster in the
+ *  0.25-0.4 range) — THIS HAS NOT BEEN EMPIRICALLY VALIDATED against this app's own photos
+ *  (no labeled ground truth available) and may need real-world tuning after deploy, same as
+ *  every previous threshold change in this feature's history. If real matches are still
+ *  missed, the "Find Merge Suggestions" human-reviewed tool (using the separate, more lenient
+ *  DEFAULT_MERGE_SUGGESTION_THRESHOLD below) remains the safe way to catch them. */
+export const SAME_PERSON_THRESHOLD = 0.35;
 
-/** Threshold used by merge SUGGESTIONS only — deliberately lower than SAME_PERSON_THRESHOLD.
- *  Every merge suggestion is manually reviewed by an admin before anything actually merges (one
- *  click to dismiss a false positive), whereas a false NEGATIVE (a real duplicate that never
- *  even gets suggested) is a silent, permanent gap with no way to discover it — so a much more
- *  lenient bar is safe and appropriate here, unlike for automatic clustering. This app's
- *  action-sports photos (helmets/goggles/odd angles) commonly score well below
- *  SAME_PERSON_THRESHOLD even for genuinely-matching faces. */
-export const DEFAULT_MERGE_SUGGESTION_THRESHOLD = 0.35;
+/** Threshold used by merge SUGGESTIONS only — deliberately lower than SAME_PERSON_THRESHOLD,
+ *  for the same asymmetric-risk reason as before (a false positive here just needs one click
+ *  to dismiss; a false negative is a silent, undiscoverable gap). */
+export const DEFAULT_MERGE_SUGGESTION_THRESHOLD = 0.2;
 
 /**
- * Minkowski distance between two descriptors (order=2 = Euclidean), ported from Human's
- * `distance()` — NOT square-rooted here (matches the upstream implementation, which takes the
- * root later inside `normalizeDistance`/`similarity`).
- *
- * IMPORTANT: returns `Number.POSITIVE_INFINITY` (never-a-match) if the two descriptors have
- * different lengths, rather than silently comparing only their first `Math.min(a.length,
- * b.length)` dimensions. This app switched face-embedding models mid-flight (face-api.js's
- * 128-dim descriptor -> @vladmandic/human's 1024-dim one, see faceDetection.ts's doc comment)
- * — any photo processed before the switch has a permanently-incompatible-shaped embedding
- * (different model, different training, each dimension means something different), so
- * comparing a 1024-dim descriptor against a 128-dim one by truncating both to the first 128
- * values does NOT produce a meaningful (if imprecise) similarity score — it produces a
- * comparison between two unrelated numeric spaces that can spuriously score as a "match" (or
- * not) essentially at random. Worse, if such a spurious match were ever accepted, the running-
- * average centroid update in runClientSideClustering() below indexes the embedding by
- * `newCentroid.length` (the EXISTING, correct-dimension cluster's length) — reading past the
- * end of a shorter legacy embedding produces `undefined`, and `undefined - number` is `NaN`,
- * permanently corrupting that cluster's centroid with `NaN` in every dimension beyond 128 (see
- * repo memory for the full incident writeup). Rejecting mismatched-length comparisons outright
- * (instead of a defensive silent truncation) prevents this class of corruption entirely — see
- * getLegacyFaceStats()/resetLegacyFaces() in apps/worker/src/faceClustering.ts for the
- * (separate, one-time) cleanup of data already corrupted before this fix existed.
+ * Cosine DISTANCE (1 - cosine similarity) between two embeddings — kept as a separate function
+ * (rather than only exposing similarity) for symmetry with the previous Euclidean-based API and
+ * because some callers/tests reason more naturally in "distance" terms. Returns
+ * `Number.POSITIVE_INFINITY` (never-a-match) if the two embeddings have different lengths,
+ * rather than silently comparing only their first `Math.min(a.length, b.length)` dimensions —
+ * this app has switched face-embedding models TWICE now (face-api.js's 128-dim -> Human's
+ * FaceRes 1024-dim -> ArcFace's 512-dim, see faceDetection.ts's doc comment), and any photo
+ * processed before a given switch has a permanently-incompatible-shaped embedding (different
+ * model, different training, each dimension means something different) — truncating both to a
+ * shared prefix would compare two unrelated numeric spaces and can spuriously score as a
+ * "match" (or corrupt a centroid with NaN once dimensions run out, see repo memory for the
+ * original incident this guard was written to prevent).
  */
 export function humanDistance(a: Float32Array, b: Float32Array): number {
   if (a.length !== b.length) return Number.POSITIVE_INFINITY;
-  let sum = 0;
+  return 1 - cosineSimilarityRaw(a, b);
+}
+
+function cosineSimilarityRaw(a: Float32Array, b: Float32Array): number {
+  let dot = 0;
+  let normA = 0;
+  let normB = 0;
   for (let i = 0; i < a.length; i++) {
-    const diff = a[i] - b[i];
-    sum += diff * diff;
+    dot += a[i] * b[i];
+    normA += a[i] * a[i];
+    normB += b[i] * b[i];
   }
-  return Math.round(100 * MATCH_MULTIPLIER * sum) / 100;
+  const denom = Math.sqrt(normA) * Math.sqrt(normB);
+  if (denom === 0) return 0; // a zero-length vector has no defined direction; never a match
+  return dot / denom;
 }
 
 /**
- * Normalized 0..1 similarity between two face descriptors, ported from Human's
- * `similarity()`/`normalizeDistance()`. 0 = no similarity, 1 = perfect match; per Human's own
- * docs, >=0.5 is considered a match. Returns 0 for descriptors of different lengths — see
- * humanDistance()'s doc comment above.
+ * Cosine similarity between two embeddings, in [-1, 1] (in practice ArcFace embeddings of
+ * different real people rarely score much below 0). Since faceEmbeddingOnnx.ts's
+ * `computeFaceEmbedding()` already L2-normalizes every stored embedding, this is mathematically
+ * just a dot product — dividing by the (both ~1) norms here anyway is a defense-in-depth
+ * safeguard against any embedding that somehow wasn't normalized (e.g. old/corrupted data),
+ * rather than assuming callers always hand in unit vectors. Returns 0 for embeddings of
+ * different lengths — see humanDistance()'s doc comment above.
  */
 export function humanSimilarity(a: Float32Array, b: Float32Array): number {
-  const dist = humanDistance(a, b);
-  if (dist === 0) return 1; // short-circuit for identical inputs
-  if (!Number.isFinite(dist)) return 0; // mismatched descriptor lengths — never a match
-  const root = Math.sqrt(dist);
-  const norm = (1 - root / 100 - MATCH_MIN) / (MATCH_MAX - MATCH_MIN);
-  return Math.round(100 * Math.max(Math.min(norm, 1), 0)) / 100;
+  if (a.length !== b.length) return 0;
+  return Math.round(10000 * cosineSimilarityRaw(a, b)) / 10000;
 }
 
 /** Yields to the event loop every `everyN` iterations of a long-running loop, so the browser
@@ -213,7 +193,7 @@ const CENTROID_FREEZE_SIZE = 40;
 // members.
 const THRESHOLD_GROWTH_START = 12; // clusters below this size use the flat baseline threshold
 const THRESHOLD_GROWTH_RATE = 0.003; // additional threshold required per member above the start
-const MAX_THRESHOLD_BOOST = 0.15; // hard ceiling on how much the bar can rise (0.5 -> 0.65 max)
+const MAX_THRESHOLD_BOOST = 0.15; // hard ceiling on how much the bar can rise (baseline -> baseline+0.15 max)
 
 function effectiveThresholdForClusterSize(count: number): number {
   const boost = Math.min(MAX_THRESHOLD_BOOST, THRESHOLD_GROWTH_RATE * Math.max(0, count - THRESHOLD_GROWTH_START));

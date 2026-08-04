@@ -42,8 +42,11 @@ vi.mock('../faceClustering', () => ({
 
 import peopleRouter from '../routes/admin/people';
 
-function makeEnv() {
-  return { DB: {} as unknown as D1Database } as any;
+function makeEnv(bucketGetImpl?: (key: string) => Promise<unknown>) {
+  return {
+    DB: {} as unknown as D1Database,
+    PHOTOS_BUCKET: { get: bucketGetImpl ?? (async () => null) } as any,
+  } as any;
 }
 
 beforeEach(() => {
@@ -242,6 +245,48 @@ describe('POST /admin/people/reset-clusters', () => {
     resetAllClustersMock.mockRejectedValue(new Error('D1 boom'));
 
     const res = await peopleRouter.request('http://localhost/reset-clusters', { method: 'POST' }, makeEnv());
+
+    expect(res.status).toBe(500);
+  });
+});
+
+describe('GET /admin/people/embedding-model', () => {
+  it('streams the R2 object with a long, immutable cache header', async () => {
+    const body = new Uint8Array([1, 2, 3]);
+    const env = makeEnv(async (key: string) => {
+      expect(key).toBe('models/arcface-r100-int8.onnx');
+      return { body, size: body.byteLength };
+    });
+
+    const res = await peopleRouter.request('http://localhost/embedding-model', {}, env);
+
+    expect(res.status).toBe(200);
+    expect(res.headers.get('Cache-Control')).toContain('immutable');
+    expect(res.headers.get('Content-Type')).toBe('application/octet-stream');
+  });
+
+  it('returns 404 if the model object is missing from R2', async () => {
+    const env = makeEnv(async () => null);
+
+    const res = await peopleRouter.request('http://localhost/embedding-model', {}, env);
+
+    expect(res.status).toBe(404);
+  });
+
+  it('rejects non-admin requests', async () => {
+    currentIsAdmin = false;
+
+    const res = await peopleRouter.request('http://localhost/embedding-model', {}, makeEnv());
+
+    expect(res.status).toBe(403);
+  });
+
+  it('returns 500 if R2 fetch throws', async () => {
+    const env = makeEnv(async () => {
+      throw new Error('R2 boom');
+    });
+
+    const res = await peopleRouter.request('http://localhost/embedding-model', {}, env);
 
     expect(res.status).toBe(500);
   });

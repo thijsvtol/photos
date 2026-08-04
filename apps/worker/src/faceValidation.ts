@@ -14,12 +14,12 @@ export interface RawFaceInput {
   bbox: { x: number; y: number; width: number; height: number };
 }
 
-// @vladmandic/human's FaceRes description model always produces a 1024-dim
-// descriptor (see vladmandic/human wiki: "each descriptor is 1024-member
-// array"). Was 128 when this app used face-api.js's FaceRecognitionNet.
-// Exported so faceClustering.ts can size its CPU-budget calculations off
-// the SAME constant instead of duplicating the magic number 1024.
-export const EXPECTED_EMBEDDING_LENGTH = 1024;
+// Face embeddings are computed client-side via a purpose-built ArcFace ONNX recognition model
+// (see apps/web/src/faceEmbeddingOnnx.ts), which always produces exactly 512 numbers. Was
+// 1024 (@vladmandic/human's FaceRes descriptor) until 2026-08-04, and 128 (face-api.js's
+// FaceRecognitionNet) before that. Exported so faceClustering.ts can size its CPU-budget
+// calculations off the SAME constant instead of duplicating the magic number.
+export const EXPECTED_EMBEDDING_LENGTH = 512;
 
 export function isValidFaceInput(face: unknown): face is RawFaceInput {
   if (!face || typeof face !== 'object') return false;

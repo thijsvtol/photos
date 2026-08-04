@@ -10,35 +10,35 @@ import { isValidFaceInput } from '../faceValidation';
 
 function validFace(overrides: Partial<{ embedding: unknown; bbox: unknown }> = {}) {
   return {
-    embedding: Array.from({ length: 1024 }, (_, i) => i / 1024),
+    embedding: Array.from({ length: 512 }, (_, i) => i / 512),
     bbox: { x: 0, y: 0, width: 100, height: 100 },
     ...overrides,
   };
 }
 
 describe('isValidFaceInput', () => {
-  it('accepts a well-formed face (1024-number embedding + numeric bbox)', () => {
+  it('accepts a well-formed face (512-number embedding + numeric bbox)', () => {
     expect(isValidFaceInput(validFace())).toBe(true);
   });
 
-  it('rejects an embedding that is not exactly 1024 numbers', () => {
+  it('rejects an embedding that is not exactly 512 numbers', () => {
     expect(isValidFaceInput(validFace({ embedding: [1, 2, 3] }))).toBe(false);
-    expect(isValidFaceInput(validFace({ embedding: Array.from({ length: 1025 }, () => 0) }))).toBe(false);
+    expect(isValidFaceInput(validFace({ embedding: Array.from({ length: 513 }, () => 0) }))).toBe(false);
     expect(isValidFaceInput(validFace({ embedding: [] }))).toBe(false);
   });
 
   it('rejects an embedding containing non-finite values', () => {
-    const embedding = Array.from({ length: 1024 }, () => 0);
+    const embedding = Array.from({ length: 512 }, () => 0);
     embedding[5] = NaN;
     expect(isValidFaceInput(validFace({ embedding }))).toBe(false);
 
-    const embeddingInfinity = Array.from({ length: 1024 }, () => 0);
+    const embeddingInfinity = Array.from({ length: 512 }, () => 0);
     embeddingInfinity[10] = Infinity;
     expect(isValidFaceInput(validFace({ embedding: embeddingInfinity }))).toBe(false);
   });
 
   it('rejects an embedding containing non-number entries', () => {
-    const embedding: unknown[] = Array.from({ length: 1024 }, () => 0);
+    const embedding: unknown[] = Array.from({ length: 512 }, () => 0);
     embedding[0] = 'not-a-number';
     expect(isValidFaceInput(validFace({ embedding }))).toBe(false);
   });

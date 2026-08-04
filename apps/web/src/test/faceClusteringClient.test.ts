@@ -17,61 +17,89 @@ import type { ClusterDataFace, ClusterDataCluster, ClusterResult } from '../api'
  * comment for why this moved out of the Worker entirely (repeated CPU-time-limit crashes).
  *
  * runClientSideClustering()/findClientSideMergeSuggestions() now filter out any embedding that
- * isn't exactly 1024 numbers long (see EXPECTED_EMBEDDING_LENGTH's doc comment in
- * faceClusteringClient.ts — a defense against the confirmed production incident where a BLOB-
- * reading bug once fed 4x-too-long garbage "embeddings" through the whole pipeline), so test
- * fixtures below use `pad1024()` to build realistic-length embeddings instead of short
- * illustrative arrays.
+ * isn't exactly 512 numbers long (the ArcFace ONNX embedding dimension, since 2026-08-04 — see
+ * EXPECTED_EMBEDDING_LENGTH's doc comment in faceClusteringClient.ts).
+ *
+ * IMPORTANT (2026-08-04): the similarity metric is now COSINE similarity (not the old Euclidean-
+ * distance-based Human formula), which is only meaningfully defined for NON-ZERO vectors and is
+ * invariant to magnitude (only DIRECTION matters). Test fixtures below use `unitVec(angle)` —
+ * a vector living in a 2D subspace ([cos(angle), sin(angle), 0, 0, ...]) of the full 512-dim
+ * space — so that two such vectors have an EXACT, easily-verified cosine similarity of
+ * `cos(angleA - angleB)`. `vecWithSimilarity(sim)` builds a vector whose similarity to
+ * `unitVec(0)` is exactly `sim`, which is used throughout to hit specific threshold values
+ * precisely instead of guessing at Euclidean diffs.
  */
-function pad1024(...values: number[]): number[] {
-  const padded = new Array(1024).fill(0);
+const DIM = 512;
+
+function unitVec(angle: number): number[] {
+  const v = new Array(DIM).fill(0);
+  v[0] = Math.cos(angle);
+  v[1] = Math.sin(angle);
+  return v;
+}
+
+/** A 512-dim vector whose cosine similarity to `unitVec(0)` is exactly `sim` (clamped to the
+ *  valid [-1, 1] range). */
+function vecWithSimilarity(sim: number): number[] {
+  const clamped = Math.max(-1, Math.min(1, sim));
+  return unitVec(Math.acos(clamped));
+}
+
+/** Pads a short, explicit list of raw coordinate values out to the full 512-length array
+ *  (zeros for the remainder) — used only where a test needs to inspect/verify EXACT numeric
+ *  centroid arithmetic (not just a pass/fail similarity threshold), so the actual coordinate
+ *  values matter, not just the resulting direction/angle. */
+function pad512(...values: number[]): number[] {
+  const padded = new Array(DIM).fill(0);
   values.forEach((v, i) => { padded[i] = v; });
   return padded;
 }
 
-describe('humanDistance / humanSimilarity', () => {
+describe('humanDistance / humanSimilarity (cosine similarity on ArcFace embeddings)', () => {
   it('humanDistance is zero for identical vectors', () => {
     const a = new Float32Array([1, 2, 3]);
     expect(humanDistance(a, a)).toBe(0);
   });
 
-  it("humanDistance matches Human's formula (multiplier(25) * sum-of-squared-diffs, rounded to 2 decimals)", () => {
-    const a = new Float32Array([0]);
-    const b = new Float32Array([1]);
-    expect(humanDistance(a, b)).toBe(25);
+  it('humanDistance is 1 - cosine similarity for two orthogonal vectors (cosine similarity 0)', () => {
+    const a = new Float32Array([1, 0]);
+    const b = new Float32Array([0, 1]);
+    expect(humanDistance(a, b)).toBeCloseTo(1, 5);
   });
 
-  it('humanSimilarity is 1 for identical vectors (short-circuit)', () => {
+  it('humanSimilarity is 1 for identical (or same-direction) vectors', () => {
     const a = new Float32Array([1, 2, 3]);
     expect(humanSimilarity(a, a)).toBe(1);
+    // Cosine similarity is magnitude-INVARIANT — a scaled copy still scores a perfect match.
+    const scaled = new Float32Array([2, 4, 6]);
+    expect(humanSimilarity(a, scaled)).toBe(1);
   });
 
-  it('humanSimilarity sits exactly at Human\'s documented 0.5 "match" boundary for a known distance', () => {
-    const a = new Float32Array([0]);
-    const b = new Float32Array([10]);
-    expect(humanSimilarity(a, b)).toBe(0.5);
-  });
-
-  it('SAME_PERSON_THRESHOLD matches Human\'s own documented "0.5 = match" guidance', () => {
-    expect(SAME_PERSON_THRESHOLD).toBe(0.5);
-    expect(SAME_PERSON_THRESHOLD).toBeGreaterThan(DEFAULT_MERGE_SUGGESTION_THRESHOLD);
-  });
-
-  it('humanSimilarity clamps to 0 for very dissimilar vectors', () => {
-    const a = new Float32Array([0]);
-    const b = new Float32Array([16]);
+  it('humanSimilarity is 0 for orthogonal vectors', () => {
+    const a = new Float32Array([1, 0]);
+    const b = new Float32Array([0, 1]);
     expect(humanSimilarity(a, b)).toBe(0);
   });
 
-  it('humanDistance is Infinity for descriptors of different lengths (never a truncated/silent comparison)', () => {
-    const legacy = new Float32Array(128); // pre-2026-08 face-api.js descriptor length
-    const current = new Float32Array(1024); // @vladmandic/human descriptor length
+  it('humanSimilarity is -1 (NOT clamped to 0) for exactly opposite vectors — an accurate cosine result, unlike the old Euclidean-based formula\'s 0..1 clamping', () => {
+    const a = new Float32Array([1, 0]);
+    const b = new Float32Array([-1, 0]);
+    expect(humanSimilarity(a, b)).toBe(-1);
+  });
+
+  it('SAME_PERSON_THRESHOLD is stricter (higher) than DEFAULT_MERGE_SUGGESTION_THRESHOLD, preserving the asymmetric-risk design (auto-clustering must stay conservative; human-reviewed suggestions can be lenient)', () => {
+    expect(SAME_PERSON_THRESHOLD).toBeGreaterThan(DEFAULT_MERGE_SUGGESTION_THRESHOLD);
+  });
+
+  it('humanDistance is Infinity for embeddings of different lengths (never a truncated/silent comparison)', () => {
+    const legacy = new Float32Array(256); // e.g. a stale/incompatible embedding shape
+    const current = new Float32Array(512); // current ArcFace embedding length
     expect(humanDistance(legacy, current)).toBe(Number.POSITIVE_INFINITY);
   });
 
-  it('humanSimilarity is 0 (never a match) for descriptors of different lengths, even if the overlapping prefix is identical', () => {
-    const legacy = new Float32Array(128).fill(1);
-    const current = new Float32Array(1024).fill(1); // first 128 values identical to `legacy`
+  it('humanSimilarity is 0 (never a match) for embeddings of different lengths, even if the overlapping prefix is identical', () => {
+    const legacy = new Float32Array(256).fill(1);
+    const current = new Float32Array(512).fill(1); // first 256 values identical to `legacy`
     expect(humanSimilarity(legacy, current)).toBe(0);
   });
 });
@@ -79,8 +107,8 @@ describe('humanDistance / humanSimilarity', () => {
 describe('runClientSideClustering', () => {
   it('groups two near-identical faces into the same brand-new person cluster', async () => {
     const faces: ClusterDataFace[] = [
-      { id: 1, photoId: 'photo-a', embedding: pad1024(1, 1, 1) },
-      { id: 2, photoId: 'photo-b', embedding: pad1024(1.01, 1.01, 1.01) },
+      { id: 1, photoId: 'photo-a', embedding: unitVec(0) },
+      { id: 2, photoId: 'photo-b', embedding: unitVec(0.001) }, // tiny angle -> similarity ~1
     ];
 
     const results = await runClientSideClustering(faces, []);
@@ -93,10 +121,9 @@ describe('runClientSideClustering', () => {
   });
 
   it('creates separate clusters for faces further apart than the same-person threshold', async () => {
-    const far = 16; // humanSimilarity() = 0 for a single-component diff of 16 — see math tests above.
     const faces: ClusterDataFace[] = [
-      { id: 1, photoId: 'photo-a', embedding: pad1024(0, 0, 0) },
-      { id: 2, photoId: 'photo-b', embedding: pad1024(far, 0, 0) },
+      { id: 1, photoId: 'photo-a', embedding: unitVec(0) },
+      { id: 2, photoId: 'photo-b', embedding: unitVec(Math.PI / 2) }, // orthogonal -> similarity 0
     ];
 
     const results = await runClientSideClustering(faces, []);
@@ -107,9 +134,9 @@ describe('runClientSideClustering', () => {
 
   it('assigns a new face to an existing cluster passed in from the server', async () => {
     const existingClusters: ClusterDataCluster[] = [
-      { id: 42, centroidEmbedding: pad1024(2, 2, 2), faceCount: 3 },
+      { id: 42, centroidEmbedding: unitVec(0), faceCount: 3 },
     ];
-    const faces: ClusterDataFace[] = [{ id: 1, photoId: 'photo-a', embedding: pad1024(2.01, 1.99, 2.0) }];
+    const faces: ClusterDataFace[] = [{ id: 1, photoId: 'photo-a', embedding: unitVec(0.001) }];
 
     const results = await runClientSideClustering(faces, existingClusters);
 
@@ -121,9 +148,9 @@ describe('runClientSideClustering', () => {
 
   it('lets a face join a brand-new cluster created earlier in the SAME pass', async () => {
     const faces: ClusterDataFace[] = [
-      { id: 1, photoId: 'photo-a', embedding: pad1024(5, 5, 5) },
-      { id: 2, photoId: 'photo-b', embedding: pad1024(5.01, 5.01, 5.01) },
-      { id: 3, photoId: 'photo-c', embedding: pad1024(5.02, 4.98, 5.0) },
+      { id: 1, photoId: 'photo-a', embedding: unitVec(0) },
+      { id: 2, photoId: 'photo-b', embedding: unitVec(0.001) },
+      { id: 3, photoId: 'photo-c', embedding: unitVec(-0.001) },
     ];
 
     const results = await runClientSideClustering(faces, []);
@@ -140,9 +167,9 @@ describe('runClientSideClustering', () => {
 
   it('does not include unchanged existing clusters in the results (only clusters that actually changed)', async () => {
     const existingClusters: ClusterDataCluster[] = [
-      { id: 1, centroidEmbedding: pad1024(0, 0, 0), faceCount: 1 }, // never matched, should be untouched
+      { id: 1, centroidEmbedding: unitVec(0), faceCount: 1 }, // never matched, should be untouched
     ];
-    const faces: ClusterDataFace[] = [{ id: 1, photoId: 'photo-a', embedding: pad1024(500, 500, 500) }]; // wildly different
+    const faces: ClusterDataFace[] = [{ id: 1, photoId: 'photo-a', embedding: unitVec(Math.PI) }]; // opposite direction
 
     const results = await runClientSideClustering(faces, existingClusters);
 
@@ -152,8 +179,8 @@ describe('runClientSideClustering', () => {
 
   it('reports progress via the onProgress callback', async () => {
     const faces: ClusterDataFace[] = [
-      { id: 1, photoId: 'photo-a', embedding: pad1024(1, 1, 1) },
-      { id: 2, photoId: 'photo-b', embedding: pad1024(2, 2, 2) },
+      { id: 1, photoId: 'photo-a', embedding: unitVec(0) },
+      { id: 2, photoId: 'photo-b', embedding: unitVec(0.001) },
     ];
     const calls: Array<[number, number]> = [];
 
@@ -162,10 +189,10 @@ describe('runClientSideClustering', () => {
     expect(calls).toEqual([[1, 2], [2, 2]]);
   });
 
-  it('filters out (and never uses) faces or clusters with a malformed (non-1024) embedding length', async () => {
+  it('filters out (and never uses) faces or clusters with a malformed (non-512) embedding length', async () => {
     const faces: ClusterDataFace[] = [
       { id: 1, photoId: 'photo-a', embedding: [1, 1, 1] }, // malformed — only 3 numbers
-      { id: 2, photoId: 'photo-b', embedding: pad1024(9, 9, 9) },
+      { id: 2, photoId: 'photo-b', embedding: unitVec(0) },
     ];
     const existingClusters: ClusterDataCluster[] = [
       { id: 5, centroidEmbedding: [1, 1], faceCount: 1 }, // malformed — only 2 numbers
@@ -183,48 +210,47 @@ describe('runClientSideClustering', () => {
 
   it('caps centroid-drift dilution so a large cluster keeps moving toward NEW faces instead of freezing into a stale average (regression test for the 2354-face runaway-merge incident)', async () => {
     // Simulate an existing, already-large (but not yet FROZEN, see CENTROID_FREEZE_SIZE=40)
-    // cluster whose centroid sits at [0,0,0,...] with 35 accumulated members — under the OLD
-    // unbounded running-average formula (`centroid += diff / newCount`), a single new face would
-    // only move the centroid by 1/36th of the difference, making it essentially immovable at
-    // this size. Under the capped formula, a new face should still move it by a fixed ~1/30
-    // weight.
+    // cluster centered at [10, 0, 0, ...] with 35 accumulated members — under the OLD unbounded
+    // running-average formula (`centroid += diff / newCount`), a single new face would only
+    // move the centroid by 1/36th of the difference. Under the capped formula, it should move
+    // by a fixed ~1/30 weight instead. Candidate face at [10, 3, 0, ...] has cosine similarity
+    // 100/(10*sqrt(109)) ≈ 0.958 to the cluster centroid — comfortably above SAME_PERSON_
+    // THRESHOLD (0.35), so it matches.
     const existingClusters: ClusterDataCluster[] = [
-      { id: 1, centroidEmbedding: pad1024(0, 0, 0), faceCount: 35 },
+      { id: 1, centroidEmbedding: pad512(10, 0, 0), faceCount: 35 },
     ];
-    // A face close enough to match (within SAME_PERSON_THRESHOLD) but clearly offset, so we can
-    // observe how far the centroid actually moved.
-    const faces: ClusterDataFace[] = [{ id: 999, photoId: 'photo-x', embedding: pad1024(3, 0, 0) }];
+    const faces: ClusterDataFace[] = [{ id: 999, photoId: 'photo-x', embedding: pad512(10, 3, 0) }];
 
     const results = await runClientSideClustering(faces, existingClusters);
 
     expect(results).toHaveLength(1);
-    // Capped weight = 1 / min(36, 30) = 1/30 -> centroid[0] moves from 0 to 3 * (1/30) = 0.1,
-    // NOT the old formula's 3 * (1/36) ≈ 0.0833.
-    expect(results[0].centroidEmbedding[0]).toBeCloseTo(0.1, 5);
+    // Capped weight = 1 / min(36, 30) = 1/30 -> centroid[1] moves from 0 to 3 * (1/30) = 0.1,
+    // NOT the old formula's 3 * (1/36) ≈ 0.0833. Dim 0 (already matching, 10 vs 10) stays 10.
+    expect(results[0].centroidEmbedding[0]).toBeCloseTo(10, 5);
+    expect(results[0].centroidEmbedding[1]).toBeCloseTo(0.1, 5);
   });
 
   it('FREEZES the centroid entirely once a cluster reaches CENTROID_FREEZE_SIZE (40), preventing unbounded long-term drift even at the capped rate (fix for a cluster still absorbing multiple different people despite the drift cap alone)', async () => {
     const existingClusters: ClusterDataCluster[] = [
-      { id: 1, centroidEmbedding: pad1024(0, 0, 0), faceCount: 40 },
+      { id: 1, centroidEmbedding: pad512(10, 0, 0), faceCount: 40 },
     ];
-    const faces: ClusterDataFace[] = [{ id: 999, photoId: 'photo-x', embedding: pad1024(3, 0, 0) }];
+    const faces: ClusterDataFace[] = [{ id: 999, photoId: 'photo-x', embedding: pad512(10, 3, 0) }];
 
     const results = await runClientSideClustering(faces, existingClusters);
 
     expect(results).toHaveLength(1);
-    // Centroid must NOT move at all once frozen — still exactly 0, not 3 * (1/30) = 0.1.
-    expect(results[0].centroidEmbedding[0]).toBeCloseTo(0, 5);
+    // Centroid must NOT move at all once frozen — dim 1 stays exactly 0, not 3 * (1/30) = 0.1.
+    expect(results[0].centroidEmbedding[1]).toBeCloseTo(0, 5);
     expect(results[0].faceCount).toBe(41);
   });
 
   it('a small/new cluster still matches at the flat baseline threshold (no behavior change for the common case)', async () => {
-    // A single-dimension diff of 9.4 scores ~0.55 similarity — above the flat baseline
-    // SAME_PERSON_THRESHOLD (0.5), so a small cluster (below THRESHOLD_GROWTH_START=12) should
-    // still accept it exactly as before this fix.
+    // similarity 0.45 is comfortably above the flat baseline SAME_PERSON_THRESHOLD (0.35), so a
+    // small cluster (below THRESHOLD_GROWTH_START=12) should accept it.
     const existingClusters: ClusterDataCluster[] = [
-      { id: 1, centroidEmbedding: pad1024(0), faceCount: 10 },
+      { id: 1, centroidEmbedding: unitVec(0), faceCount: 10 },
     ];
-    const faces: ClusterDataFace[] = [{ id: 999, photoId: 'photo-x', embedding: pad1024(9.4) }];
+    const faces: ClusterDataFace[] = [{ id: 999, photoId: 'photo-x', embedding: vecWithSimilarity(0.45) }];
 
     const results = await runClientSideClustering(faces, existingClusters);
 
@@ -233,15 +259,14 @@ describe('runClientSideClustering', () => {
   });
 
   it('a large, well-established cluster requires a MORE CONFIDENT match, rejecting the same borderline similarity a small cluster would accept (fix for the 2467-face runaway-merge incident, which a flat hard cap alone did not solve)', async () => {
-    // Same ~0.55-similarity face as above, but this time against an already-large (150-member)
-    // cluster — at that size the adaptive threshold has risen to its 0.6 ceiling
-    // (THRESHOLD_GROWTH_START=12, THRESHOLD_GROWTH_RATE=0.003, MAX_THRESHOLD_BOOST=0.15 -> fully
-    // saturated well before 150 members), so this borderline match must now be REJECTED,
-    // starting a new cluster instead of further diluting the large one.
+    // Same 0.45 similarity as above, but this time against an already-large (150-member)
+    // cluster — at that size the adaptive threshold has risen to its ceiling (baseline 0.35 +
+    // MAX_THRESHOLD_BOOST 0.15 = 0.5), so 0.45 must now be REJECTED, starting a new cluster
+    // instead of further diluting the large one.
     const existingClusters: ClusterDataCluster[] = [
-      { id: 1, centroidEmbedding: pad1024(0), faceCount: 150 },
+      { id: 1, centroidEmbedding: unitVec(0), faceCount: 150 },
     ];
-    const faces: ClusterDataFace[] = [{ id: 999, photoId: 'photo-x', embedding: pad1024(9.4) }];
+    const faces: ClusterDataFace[] = [{ id: 999, photoId: 'photo-x', embedding: vecWithSimilarity(0.45) }];
 
     const results = await runClientSideClustering(faces, existingClusters);
 
@@ -250,15 +275,14 @@ describe('runClientSideClustering', () => {
   });
 
   it('lets a genuinely large, legitimate person (200+ photos) keep growing when the match is confidently ABOVE the raised bar — the whole point of replacing the old flat 60-face hard cap', async () => {
-    // A clearly-matching (near-identical) face should still join even a very large cluster,
-    // since 0.5+diff-derived-near-1.0 similarity comfortably clears the raised (but capped at
-    // 0.65) threshold — unlike the old flat MAX_AUTO_CLUSTER_SIZE=60 cap, which would have
-    // rejected this unconditionally purely based on size, incorrectly splitting a real
-    // recurring person (e.g. the photographer themselves) into multiple groups.
+    // A clearly-matching (similarity 0.9) face should still join even a very large cluster,
+    // since it comfortably clears the raised (but capped at 0.5) threshold — unlike the old
+    // flat MAX_AUTO_CLUSTER_SIZE=60 cap, which would have rejected this unconditionally purely
+    // based on size, incorrectly splitting a real recurring person into multiple groups.
     const existingClusters: ClusterDataCluster[] = [
-      { id: 1, centroidEmbedding: pad1024(0), faceCount: 250 },
+      { id: 1, centroidEmbedding: unitVec(0), faceCount: 250 },
     ];
-    const faces: ClusterDataFace[] = [{ id: 999, photoId: 'photo-x', embedding: pad1024(0.01) }]; // near-identical
+    const faces: ClusterDataFace[] = [{ id: 999, photoId: 'photo-x', embedding: vecWithSimilarity(0.9) }];
 
     const results = await runClientSideClustering(faces, existingClusters);
 
@@ -271,9 +295,9 @@ describe('runClientSideClustering', () => {
 describe('findClientSideMergeSuggestions', () => {
   it('suggests a pair of clusters whose centroids are near-identical, but not a far-apart third cluster', async () => {
     const clusters: ClusterDataCluster[] = [
-      { id: 1, centroidEmbedding: pad1024(1, 1, 1), faceCount: 1 },
-      { id: 2, centroidEmbedding: pad1024(1.01, 1.01, 1.01), faceCount: 1 },
-      { id: 3, centroidEmbedding: pad1024(50, 50, 50), faceCount: 1 },
+      { id: 1, centroidEmbedding: unitVec(0), faceCount: 1 },
+      { id: 2, centroidEmbedding: unitVec(0.001), faceCount: 1 }, // near-identical direction
+      { id: 3, centroidEmbedding: unitVec(Math.PI), faceCount: 1 }, // opposite direction
     ];
 
     const suggestions = await findClientSideMergeSuggestions(clusters);
@@ -285,8 +309,8 @@ describe('findClientSideMergeSuggestions', () => {
 
   it('only ever reports a pair once, in (lower id, higher id) order', async () => {
     const clusters: ClusterDataCluster[] = [
-      { id: 1, centroidEmbedding: pad1024(1, 1, 1), faceCount: 1 },
-      { id: 2, centroidEmbedding: pad1024(1.01, 1.01, 1.01), faceCount: 1 },
+      { id: 1, centroidEmbedding: unitVec(0), faceCount: 1 },
+      { id: 2, centroidEmbedding: unitVec(0.001), faceCount: 1 },
     ];
 
     const suggestions = await findClientSideMergeSuggestions(clusters);
@@ -297,17 +321,16 @@ describe('findClientSideMergeSuggestions', () => {
 
   it('returns an empty array for an empty or single-cluster library', async () => {
     expect(await findClientSideMergeSuggestions([])).toEqual([]);
-    expect(await findClientSideMergeSuggestions([{ id: 1, centroidEmbedding: pad1024(1), faceCount: 1 }])).toEqual([]);
+    expect(await findClientSideMergeSuggestions([{ id: 1, centroidEmbedding: unitVec(0), faceCount: 1 }])).toEqual([]);
   });
 
   it('surfaces a pair scoring between the lenient default threshold and the stricter auto-merge threshold', async () => {
-    // A diff of 6.5 across all 3 dims scores 0.4 similarity — below SAME_PERSON_THRESHOLD
-    // (0.5, which automatic clustering uses) but at/above DEFAULT_MERGE_SUGGESTION_THRESHOLD
-    // (0.35, used only for human-reviewed suggestions) — this is exactly the gap this feature
-    // exists to catch (see faceClusteringClient.ts's doc comment on the two thresholds).
+    // similarity 0.28 is below SAME_PERSON_THRESHOLD (0.35, which automatic clustering uses)
+    // but at/above DEFAULT_MERGE_SUGGESTION_THRESHOLD (0.2, used only for human-reviewed
+    // suggestions) — exactly the gap this feature exists to catch.
     const clusters: ClusterDataCluster[] = [
-      { id: 1, centroidEmbedding: pad1024(0, 0, 0), faceCount: 1 },
-      { id: 2, centroidEmbedding: pad1024(6.5, 6.5, 6.5), faceCount: 1 },
+      { id: 1, centroidEmbedding: unitVec(0), faceCount: 1 },
+      { id: 2, centroidEmbedding: vecWithSimilarity(0.28), faceCount: 1 },
     ];
 
     const atDefault = await findClientSideMergeSuggestions(clusters, DEFAULT_MERGE_SUGGESTION_THRESHOLD);
@@ -319,9 +342,9 @@ describe('findClientSideMergeSuggestions', () => {
 
   it('reports progress via the onProgress callback', async () => {
     const clusters: ClusterDataCluster[] = [
-      { id: 1, centroidEmbedding: pad1024(0, 0, 0), faceCount: 1 },
-      { id: 2, centroidEmbedding: pad1024(100, 100, 100), faceCount: 1 },
-      { id: 3, centroidEmbedding: pad1024(200, 200, 200), faceCount: 1 },
+      { id: 1, centroidEmbedding: unitVec(0), faceCount: 1 },
+      { id: 2, centroidEmbedding: unitVec(Math.PI / 2), faceCount: 1 },
+      { id: 3, centroidEmbedding: unitVec(Math.PI), faceCount: 1 },
     ];
     const calls: Array<[number, number]> = [];
 
@@ -333,10 +356,10 @@ describe('findClientSideMergeSuggestions', () => {
     expect(calls).toEqual([[1, 3], [2, 3], [3, 3]]);
   });
 
-  it('ignores (never compares against) any cluster with a malformed (non-1024) centroid length', async () => {
+  it('ignores (never compares against) any cluster with a malformed (non-512) centroid length', async () => {
     const clusters: ClusterDataCluster[] = [
-      { id: 1, centroidEmbedding: pad1024(1, 1, 1), faceCount: 1 },
-      { id: 2, centroidEmbedding: pad1024(1.01, 1.01, 1.01), faceCount: 1 },
+      { id: 1, centroidEmbedding: unitVec(0), faceCount: 1 },
+      { id: 2, centroidEmbedding: unitVec(0.001), faceCount: 1 },
       { id: 3, centroidEmbedding: [1, 1, 1], faceCount: 1 }, // malformed — only 3 numbers
     ];
 
@@ -411,10 +434,10 @@ describe('chunkClusteringResultsForApply', () => {
 describe('runDeepRebuildClustering', () => {
   it('groups several near-identical faces of the same identity into one cluster', async () => {
     const faces: ClusterDataFace[] = [
-      { id: 1, photoId: 'p1', embedding: pad1024(0) },
-      { id: 2, photoId: 'p2', embedding: pad1024(0) },
-      { id: 3, photoId: 'p3', embedding: pad1024(1) },
-      { id: 4, photoId: 'p4', embedding: pad1024(-1) },
+      { id: 1, photoId: 'p1', embedding: unitVec(0) },
+      { id: 2, photoId: 'p2', embedding: unitVec(0.001) },
+      { id: 3, photoId: 'p3', embedding: unitVec(0.002) },
+      { id: 4, photoId: 'p4', embedding: unitVec(-0.001) },
     ];
 
     const results = await runDeepRebuildClustering(faces);
@@ -425,11 +448,10 @@ describe('runDeepRebuildClustering', () => {
   });
 
   it('keeps two different identities in separate clusters (the class of bug centroid-based matching was vulnerable to)', async () => {
-    // A single-dimension diff of 15 scores similarity around 0.08 (well below both the 0.5
-    // average bar and the 0.55 max-representative bar) — a clearly different identity.
+    // Orthogonal vectors -> similarity 0, well below both the avg and max bars.
     const faces: ClusterDataFace[] = [
-      { id: 1, photoId: 'p1', embedding: pad1024(0) },
-      { id: 2, photoId: 'p2', embedding: pad1024(15) },
+      { id: 1, photoId: 'p1', embedding: unitVec(0) },
+      { id: 2, photoId: 'p2', embedding: unitVec(Math.PI / 2) },
     ];
 
     const results = await runDeepRebuildClustering(faces);
@@ -440,9 +462,9 @@ describe('runDeepRebuildClustering', () => {
 
   it('rejects a face whose similarity to a clusters real representative members is below the required bar, instead of silently accepting it', async () => {
     const faces: ClusterDataFace[] = [
-      { id: 1, photoId: 'p1', embedding: pad1024(0) },
-      { id: 2, photoId: 'p2', embedding: pad1024(0) },
-      { id: 3, photoId: 'p3', embedding: pad1024(15) }, // similarity ~0.08 to the cluster above
+      { id: 1, photoId: 'p1', embedding: unitVec(0) },
+      { id: 2, photoId: 'p2', embedding: unitVec(0.001) },
+      { id: 3, photoId: 'p3', embedding: unitVec(Math.PI / 2) }, // orthogonal to the cluster above
     ];
 
     const results = await runDeepRebuildClustering(faces);
@@ -454,8 +476,8 @@ describe('runDeepRebuildClustering', () => {
 
   it('filters out faces with a malformed embedding length before clustering, matching the existing safety guard', async () => {
     const faces: ClusterDataFace[] = [
-      { id: 1, photoId: 'p1', embedding: pad1024(0) },
-      { id: 2, photoId: 'p2', embedding: [1, 2, 3] }, // malformed — not 1024 long
+      { id: 1, photoId: 'p1', embedding: unitVec(0) },
+      { id: 2, photoId: 'p2', embedding: [1, 2, 3] }, // malformed — not 512 long
     ];
 
     const results = await runDeepRebuildClustering(faces);
@@ -465,7 +487,7 @@ describe('runDeepRebuildClustering', () => {
   });
 
   it('returns clusterId: null for every result (caller is expected to reset all clusters before running a deep rebuild)', async () => {
-    const faces: ClusterDataFace[] = [{ id: 1, photoId: 'p1', embedding: pad1024(0) }];
+    const faces: ClusterDataFace[] = [{ id: 1, photoId: 'p1', embedding: unitVec(0) }];
 
     const results = await runDeepRebuildClustering(faces);
 
@@ -480,12 +502,11 @@ describe('runDeepRebuildClustering', () => {
     // Build up a large (150-member), tightly-identical cluster first.
     const faces: ClusterDataFace[] = [];
     for (let i = 0; i < 150; i++) {
-      faces.push({ id: i + 1, photoId: `p${i + 1}`, embedding: pad1024(0) });
+      faces.push({ id: i + 1, photoId: `p${i + 1}`, embedding: unitVec(0) });
     }
-    // Then a borderline-similar face (diff of 9.4 -> ~0.55 similarity, comfortably above the
-    // flat 0.5 baseline but BELOW the fully-grown adaptive bar for a 150-member cluster, which
-    // saturates at 0.65 well before that size).
-    faces.push({ id: 1000, photoId: 'p-borderline', embedding: pad1024(9.4) });
+    // Then a borderline face (similarity 0.45): comfortably above the flat baseline (0.35) but
+    // BELOW the fully-grown adaptive bar for a 150-member cluster (baseline + 0.15 boost = 0.5).
+    faces.push({ id: 1000, photoId: 'p-borderline', embedding: vecWithSimilarity(0.45) });
 
     const results = await runDeepRebuildClustering(faces);
 

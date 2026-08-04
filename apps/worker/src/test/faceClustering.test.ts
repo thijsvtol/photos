@@ -241,17 +241,18 @@ function embeddingOf(...values: number[]): ArrayBuffer {
 }
 
 // applyClusteringResults() now hard-rejects any centroidEmbedding that isn't exactly
-// EXPECTED_EMBEDDING_LENGTH (1024) — see faceClustering.ts's top-of-file doc comment for the
-// production incident this guards against. Pads a short, easy-to-read list of values out to
-// the full 1024-length array (zeros for the remainder) so these tests can keep using small,
+// EXPECTED_EMBEDDING_LENGTH (512, the ArcFace ONNX embedding dimension — was 1024 for Human's
+// FaceRes descriptor before 2026-08-04) — see faceClustering.ts's top-of-file doc comment for
+// the production incident this guards against. Pads a short, easy-to-read list of values out
+// to the full 512-length array (zeros for the remainder) so these tests can keep using small,
 // readable numbers while still passing the length guard.
 function resultCentroidOf(...values: number[]): number[] {
-  const padded = new Array(1024).fill(0);
+  const padded = new Array(512).fill(0);
   values.forEach((v, i) => { padded[i] = v; });
   return padded;
 }
 
-// Same padding idea as resultCentroidOf(), but returning a real 1024-float ArrayBuffer BLOB —
+// Same padding idea as resultCentroidOf(), but returning a real 512-float ArrayBuffer BLOB —
 // used for mergeClusters()/assignPhotosToPerson() tests, which also require exactly
 // EXPECTED_EMBEDDING_LENGTH-shaped stored data.
 function embedding1024Of(...values: number[]): ArrayBuffer {
@@ -742,11 +743,11 @@ describe('getLegacyFaceStats', () => {
   it('counts legacy-dimension faces and clusters separately', async () => {
     const db = new FakeFaceClusteringDb();
     db.faces = [
-      { id: 1, photo_id: 'photo-a', embedding: embeddingOf(...Array(1024).fill(0)), person_id: null },
+      { id: 1, photo_id: 'photo-a', embedding: embeddingOf(...Array(512).fill(0)), person_id: null },
       { id: 2, photo_id: 'photo-b', embedding: legacyEmbedding(), person_id: null },
     ];
     db.clusters = [
-      { id: 1, centroid_embedding: embeddingOf(...Array(1024).fill(0)), face_count: 1 },
+      { id: 1, centroid_embedding: embeddingOf(...Array(512).fill(0)), face_count: 1 },
       { id: 2, centroid_embedding: legacyEmbedding(), face_count: 1 },
     ];
 
@@ -757,18 +758,18 @@ describe('getLegacyFaceStats', () => {
 
   it('returns all zeros for a fully up-to-date library', async () => {
     const db = new FakeFaceClusteringDb();
-    db.faces = [{ id: 1, photo_id: 'photo-a', embedding: embeddingOf(...Array(1024).fill(0)), person_id: null }];
-    db.clusters = [{ id: 1, centroid_embedding: embeddingOf(...Array(1024).fill(0)), face_count: 1 }];
+    db.faces = [{ id: 1, photo_id: 'photo-a', embedding: embeddingOf(...Array(512).fill(0)), person_id: null }];
+    db.clusters = [{ id: 1, centroid_embedding: embeddingOf(...Array(512).fill(0)), face_count: 1 }];
 
     expect(await getLegacyFaceStats(makeEnv(db))).toEqual({ legacyFaces: 0, legacyClusters: 0, corruptedClusters: 0 });
   });
 
   it('separately counts clusters whose centroid is the CORRECT byte length but contains NaN (corrupted by a past truncated-comparison merge)', async () => {
     const db = new FakeFaceClusteringDb();
-    const corrupted = new Float32Array(1024).fill(0);
-    corrupted[500] = NaN; // simulates the dimension-mismatch-update bug described in faceClustering.ts
+    const corrupted = new Float32Array(512).fill(0);
+    corrupted[300] = NaN; // simulates the dimension-mismatch-update bug described in faceClustering.ts
     db.clusters = [
-      { id: 1, centroid_embedding: embeddingOf(...Array(1024).fill(0)), face_count: 1 }, // healthy
+      { id: 1, centroid_embedding: embeddingOf(...Array(512).fill(0)), face_count: 1 }, // healthy
       { id: 2, centroid_embedding: corrupted.buffer, face_count: 3 }, // corrupted, but right length
     ];
 
@@ -787,13 +788,13 @@ describe('resetLegacyFaces', () => {
     ];
     db.clusters = [
       { id: 1, centroid_embedding: legacyEmbedding(), face_count: 2 }, // legacy cluster
-      { id: 2, centroid_embedding: embeddingOf(...Array(1024).fill(0)), face_count: 1 }, // current cluster
+      { id: 2, centroid_embedding: embeddingOf(...Array(512).fill(0)), face_count: 1 }, // current cluster
     ];
     db.faces = [
       { id: 1, photo_id: 'photo-legacy', embedding: legacyEmbedding(), person_id: 1 },
       // A current-model face that was incorrectly truncated-matched into the legacy cluster.
-      { id: 2, photo_id: 'photo-current', embedding: embeddingOf(...Array(1024).fill(0)), person_id: 1 },
-      { id: 3, photo_id: 'photo-current', embedding: embeddingOf(...Array(1024).fill(0)), person_id: 2 },
+      { id: 2, photo_id: 'photo-current', embedding: embeddingOf(...Array(512).fill(0)), person_id: 1 },
+      { id: 3, photo_id: 'photo-current', embedding: embeddingOf(...Array(512).fill(0)), person_id: 2 },
     ];
 
     const result = await resetLegacyFaces(makeEnv(db));
@@ -814,8 +815,8 @@ describe('resetLegacyFaces', () => {
 
   it('is a no-op on an already-clean library', async () => {
     const db = new FakeFaceClusteringDb();
-    db.clusters = [{ id: 1, centroid_embedding: embeddingOf(...Array(1024).fill(0)), face_count: 1 }];
-    db.faces = [{ id: 1, photo_id: 'photo-a', embedding: embeddingOf(...Array(1024).fill(0)), person_id: 1 }];
+    db.clusters = [{ id: 1, centroid_embedding: embeddingOf(...Array(512).fill(0)), face_count: 1 }];
+    db.faces = [{ id: 1, photo_id: 'photo-a', embedding: embeddingOf(...Array(512).fill(0)), person_id: 1 }];
 
     const result = await resetLegacyFaces(makeEnv(db));
 
@@ -826,19 +827,19 @@ describe('resetLegacyFaces', () => {
 
   it('also cleans up a NaN-corrupted cluster (correct byte length, but a bad float from a past truncated-comparison merge), unassigning ALL its member faces', async () => {
     const db = new FakeFaceClusteringDb();
-    const corrupted = new Float32Array(1024).fill(0);
-    corrupted[999] = NaN;
+    const corrupted = new Float32Array(512).fill(0);
+    corrupted[400] = NaN;
     db.photos = [{ id: 'photo-current', faces_processed_at: '2026-08-01' }];
     db.clusters = [
-      { id: 1, centroid_embedding: embeddingOf(...Array(1024).fill(0)), face_count: 1 }, // healthy, untouched
+      { id: 1, centroid_embedding: embeddingOf(...Array(512).fill(0)), face_count: 1 }, // healthy, untouched
       { id: 2, centroid_embedding: corrupted.buffer, face_count: 2 }, // corrupted
     ];
     db.faces = [
-      { id: 1, photo_id: 'photo-current', embedding: embeddingOf(...Array(1024).fill(0)), person_id: 1 },
+      { id: 1, photo_id: 'photo-current', embedding: embeddingOf(...Array(512).fill(0)), person_id: 1 },
       // Both members of the corrupted cluster are perfectly valid-dimension faces — only the
       // cluster's grouping/centroid is untrustworthy, so both get unassigned (not deleted).
-      { id: 2, photo_id: 'photo-current', embedding: embeddingOf(...Array(1024).fill(1)), person_id: 2 },
-      { id: 3, photo_id: 'photo-current', embedding: embeddingOf(...Array(1024).fill(2)), person_id: 2 },
+      { id: 2, photo_id: 'photo-current', embedding: embeddingOf(...Array(512).fill(1)), person_id: 2 },
+      { id: 3, photo_id: 'photo-current', embedding: embeddingOf(...Array(512).fill(2)), person_id: 2 },
     ];
 
     const result = await resetLegacyFaces(makeEnv(db));

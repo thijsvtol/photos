@@ -33,11 +33,15 @@ describe('computeRetryScale', () => {
 describe('detectFaces retry-on-empty-result behavior', () => {
   const detectMock = vi.fn();
   const loadMock = vi.fn().mockResolvedValue(undefined);
+  const alignFaceMock = vi.fn().mockReturnValue('fake-aligned-canvas');
+  const computeFaceEmbeddingMock = vi.fn().mockResolvedValue([0.1, 0.2, 0.3]);
 
   beforeEach(() => {
     vi.resetModules();
     detectMock.mockReset();
     loadMock.mockClear();
+    alignFaceMock.mockClear();
+    computeFaceEmbeddingMock.mockClear();
 
     vi.doMock('@vladmandic/human', () => ({
       Human: class {
@@ -45,6 +49,12 @@ describe('detectFaces retry-on-empty-result behavior', () => {
         detect = detectMock;
       },
     }));
+    // Human's own embedding is no longer used (see faceDetection.ts's doc comment) —
+    // detection just needs to produce a bbox + mesh; alignment/embedding are mocked out
+    // separately below since they depend on real canvas pixel data + ONNX inference, neither
+    // available in jsdom.
+    vi.doMock('../faceAlignment', () => ({ alignFace: alignFaceMock }));
+    vi.doMock('../faceEmbeddingOnnx', () => ({ computeFaceEmbedding: computeFaceEmbeddingMock }));
 
     // jsdom's <img> never actually loads a real image, so make src assignment
     // synchronously fire onload (like a cached/instant local image) and give it fake
@@ -69,7 +79,7 @@ describe('detectFaces retry-on-empty-result behavior', () => {
   function faceResult(count: number) {
     return {
       face: Array.from({ length: count }, (_, i) => ({
-        embedding: [i + 1, i + 2, i + 3],
+        mesh: [[i, i, 0]], // presence is all detectAndEmbedFaces() checks; contents are opaque
         box: [0, 0, 10, 10],
       })),
     };
@@ -115,5 +125,40 @@ describe('detectFaces retry-on-empty-result behavior', () => {
     const faces = await detectFaces('blob://fake.jpg');
 
     expect(faces).toEqual([]);
+  });
+
+  it('aligns and embeds each detected face via the ArcFace pipeline instead of using a Human-provided embedding', async () => {
+    detectMock.mockResolvedValue(faceResult(1));
+    const { detectFaces } = await import('../faceDetection');
+
+    const faces = await detectFaces('blob://fake.jpg');
+
+    expect(faces).toEqual([{ embedding: [0.1, 0.2, 0.3], bbox: { x: 0, y: 0, width: 10, height: 10 } }]);
+    expect(alignFaceMock).toHaveBeenCalledTimes(1);
+    expect(computeFaceEmbeddingMock).toHaveBeenCalledWith('fake-aligned-canvas');
+  });
+
+  it('skips a detected face with no mesh landmarks (alignment is impossible without them) instead of throwing', async () => {
+    detectMock.mockResolvedValue({ face: [{ box: [0, 0, 10, 10] }] }); // no `mesh` property
+    const { detectFaces } = await import('../faceDetection');
+
+    const faces = await detectFaces('blob://fake.jpg');
+
+    expect(faces).toEqual([]);
+    expect(alignFaceMock).not.toHaveBeenCalled();
+  });
+
+  it('skips a face whose alignment/embedding throws, without failing the whole detection pass', async () => {
+    alignFaceMock.mockImplementationOnce(() => {
+      throw new Error('alignment boom');
+    });
+    // Two faces in one pass: the first's alignment throws, the second succeeds normally —
+    // proves one bad face doesn't abort/skip the rest of the same detection pass.
+    detectMock.mockResolvedValue(faceResult(2));
+    const { detectFaces } = await import('../faceDetection');
+
+    const faces = await detectFaces('blob://fake.jpg');
+
+    expect(faces).toEqual([{ embedding: [0.1, 0.2, 0.3], bbox: { x: 0, y: 0, width: 10, height: 10 } }]);
   });
 });

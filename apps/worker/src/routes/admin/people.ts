@@ -130,6 +130,40 @@ app.post('/reset-clusters', async (c) => {
 });
 
 /**
+ * GET /people/embedding-model
+ *
+ * Streams the face-recognition ONNX model (ArcFace ResNet100, int8-quantized, ~63MB) used
+ * client-side by apps/web/src/faceEmbeddingOnnx.ts to compute proper face-recognition
+ * embeddings (replacing @vladmandic/human's general-purpose FaceRes descriptor, which wasn't
+ * trained to discriminate between different identities — see repo memory / faceClusteringClient.ts's
+ * top-of-file doc comment for the full saga this was ultimately needed to fix). Hosted in R2
+ * (not as a Cloudflare Pages static asset) because a single Pages asset is capped at 25MiB —
+ * see this app's photo-storage architecture for the same reasoning. Long, immutable cache
+ * headers since the model file at this key never changes without a deploy (a version bump would
+ * use a new R2 key, not overwrite this one, to avoid ever serving a half-cached mixed version).
+ * Admin-only (same as every other /admin/people/* route) purely because it's only ever needed
+ * by the admin-only People page — not because the model itself is sensitive.
+ */
+app.get('/embedding-model', async (c) => {
+  try {
+    const object = await c.env.PHOTOS_BUCKET.get('models/arcface-r100-int8.onnx');
+    if (!object) {
+      return c.json({ error: 'Model not found' }, 404);
+    }
+    return new Response(object.body, {
+      headers: {
+        'Content-Type': 'application/octet-stream',
+        'Content-Length': String(object.size),
+        'Cache-Control': 'public, max-age=31536000, immutable',
+      },
+    });
+  } catch (error) {
+    console.error('Error fetching embedding model:', error);
+    return c.json({ error: 'Failed to fetch embedding model' }, 500);
+  }
+});
+
+/**
  * GET /people
  * List all named + unnamed person clusters with a cover photo + face count.
  * Clusters with only 1 face are hidden by default (mostly noise/one-offs)

@@ -16,13 +16,14 @@
  * detected as faces by ANY off-the-shelf face model — that's a hard
  * ceiling, not a config issue.
  *
- * Human's face descriptor ("embedding") is a 1024-element array (NOT the
- * 128-dim face-api.js used) — see faceValidation.ts (worker) which validates
- * this length, and faceClustering.ts (worker) which uses Human's own
- * documented distance/similarity formula (ported from
- * vladmandic/human/src/face/match.ts, MIT licensed) so the "same person"
- * threshold matches the library author's own guidance rather than a
- * guessed number.
+ * Human's face descriptor is NO LONGER USED as the clustering embedding (2026-08-04) — it
+ * was found to be insufficiently discriminative between different identities for this app's
+ * content (see faceClusteringClient.ts's top-of-file doc comment for the full saga). Human is
+ * now used ONLY for detection (bounding box + 468-point FaceMesh landmarks); the actual
+ * embedding comes from a purpose-built ArcFace ResNet100 face-RECOGNITION model run via
+ * onnxruntime-web (see faceAlignment.ts for the 112x112 landmark-based alignment crop, and
+ * faceEmbeddingOnnx.ts for the ONNX inference + L2-normalization), producing a 512-dim
+ * embedding instead of Human's previous 1024-dim descriptor.
  *
  * @vladmandic/human (which bundles @tensorflow/tfjs) is loaded via a
  * DYNAMIC import, not a static one — this app's public gallery is viewed by
@@ -43,6 +44,9 @@
  * unused modules means their (much larger) models are never downloaded.
  */
 
+import { alignFace } from './faceAlignment';
+import { computeFaceEmbedding } from './faceEmbeddingOnnx';
+
 const MODEL_URL = '/models';
 
 let humanInstancePromise: Promise<import('@vladmandic/human').Human> | null = null;
@@ -57,7 +61,7 @@ function loadHuman(): Promise<import('@vladmandic/human').Human> {
           enabled: true,
           detector: { rotation: true, return: true },
           mesh: { enabled: true },
-          description: { enabled: true },
+          description: { enabled: false },
           iris: { enabled: false },
           emotion: { enabled: false },
           antispoof: { enabled: false },
@@ -77,7 +81,10 @@ function loadHuman(): Promise<import('@vladmandic/human').Human> {
 }
 
 export interface DetectedFace {
-  /** 1024-dim face descriptor from Human's FaceRes description model. */
+  /** 512-dim L2-normalized ArcFace embedding (see faceEmbeddingOnnx.ts) — replaced Human's
+   *  1024-dim FaceRes descriptor (2026-08-04), which wasn't discriminative enough between
+   *  different identities for this app's content (see faceClusteringClient.ts's doc comment
+   *  for the full saga this was ultimately needed to fix). */
   embedding: number[];
   bbox: { x: number; y: number; width: number; height: number };
 }
@@ -85,16 +92,28 @@ export interface DetectedFace {
 type HumanInstance = import('@vladmandic/human').Human;
 type DetectInput = HTMLImageElement | HTMLCanvasElement;
 
-function mapResultToFaces(result: Awaited<ReturnType<HumanInstance['detect']>>): DetectedFace[] {
-  return result.face
-    .filter((face) => Array.isArray(face.embedding) && face.embedding.length > 0)
-    .map((face) => {
-      const [x, y, width, height] = face.box;
-      return {
-        embedding: face.embedding as number[],
-        bbox: { x, y, width, height },
-      };
-    });
+/**
+ * Runs Human purely for face DETECTION (bounding box + 468-point FaceMesh landmarks) — Human's
+ * own face descriptor is no longer used at all; the real embedding comes from the ArcFace ONNX
+ * model instead (see faceAlignment.ts + faceEmbeddingOnnx.ts), which is computed separately
+ * per detected face using the ORIGINAL image pixels (not Human's internal, possibly
+ * downscaled, detector input) for the best possible alignment crop quality.
+ */
+async function detectAndEmbedFaces(human: HumanInstance, input: DetectInput): Promise<DetectedFace[]> {
+  const result = await human.detect(input);
+  const faces: DetectedFace[] = [];
+  for (const face of result.face) {
+    if (!face.mesh || face.mesh.length === 0) continue; // alignment needs mesh landmarks
+    const [x, y, width, height] = face.box;
+    try {
+      const aligned = alignFace(input, face.mesh as Array<[number, number, number]>);
+      const embedding = await computeFaceEmbedding(aligned);
+      faces.push({ embedding, bbox: { x, y, width, height } });
+    } catch (err) {
+      console.warn('[faceDetection] Failed to align/embed a detected face:', err);
+    }
+  }
+  return faces;
 }
 
 // Retry pass multiplier/enhancement applied ONLY when the first (fast, unmodified) detection
@@ -167,7 +186,7 @@ export async function detectFaces(imageUrl: string): Promise<DetectedFace[]> {
       img.src = imageUrl;
     });
 
-    const detect = async (input: DetectInput) => mapResultToFaces(await human.detect(input));
+    const detect = async (input: DetectInput) => detectAndEmbedFaces(human, input);
 
     const faces = await detect(img);
     if (faces.length > 0) return faces;
