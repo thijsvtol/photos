@@ -635,6 +635,24 @@ export const resetAllClusters = async (): Promise<{ facesUnassigned: number; clu
   return response.data;
 };
 
+/** Fetches the ArcFace ONNX face-recognition model binary (see apps/web/src/faceEmbeddingOnnx.ts)
+ *  via the SHARED `api` axios instance rather than a raw `fetch()` — critical because a raw
+ *  fetch bypasses this app's auth entirely: native (Capacitor) admin sessions authenticate via a
+ *  Bearer token added by `api`'s request interceptor (there is no cookie to send), and even on
+ *  web, `api`'s baseURL/getAdminHeaders() must be used for consistency with every other admin
+ *  endpoint. Fixed 2026-08-04 after "Scan Library for Faces" silently marked every photo as
+ *  processed with ZERO faces found — every embedding computation was failing (model fetch
+ *  401ing) but `faceDetection.ts`'s per-face try/catch swallowed the error into an empty face
+ *  list, which `faceBackfill.ts` then (correctly, for a DIFFERENT reason — see its own doc
+ *  comment) persisted as "checked, 0 faces" instead of surfacing the failure. */
+export const getEmbeddingModelBuffer = async (): Promise<ArrayBuffer> => {
+  const response = await api.get<ArrayBuffer>('/admin/people/embedding-model', {
+    headers: getAdminHeaders(),
+    responseType: 'arraybuffer',
+  });
+  return response.data;
+};
+
 export const getPerson = async (personId: number): Promise<{ person: Person; photos: PersonPhoto[] }> => {
   const response = await api.get<{ person: Person; photos: PersonPhoto[] }>(`/admin/people/${personId}`, {
     headers: getAdminHeaders(),

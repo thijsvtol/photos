@@ -15,7 +15,13 @@
  * non-commercial research use (this app is a personal/non-commercial gallery). Too large for a
  * Cloudflare Pages static asset (25MiB per-file limit) — hosted in R2 and served via the
  * admin-only `GET /api/admin/people/embedding-model` Worker route (see faceClustering.ts's
- * doc comment / people.ts route).
+ * doc comment / people.ts route), fetched here through `api.ts`'s `getEmbeddingModelBuffer()`
+ * (the SHARED axios instance) rather than a raw `fetch()` — a raw fetch bypasses this app's
+ * auth entirely (native/Capacitor admin sessions authenticate via a Bearer token added by an
+ * axios request interceptor, not a cookie), which silently 401'd on every single face and was
+ * swallowed by faceDetection.ts's per-face try/catch, making "Scan Library for Faces" appear to
+ * run successfully while actually finding zero faces for every photo (confirmed in production:
+ * 6415 photos marked faces_processed_at, 0 rows in photo_faces).
  *
  * Input: a 112x112 aligned face crop (see faceAlignment.ts) — the model expects raw RGB pixel
  * values (0..255, NOT normalized to 0..1 or mean-subtracted) in NCHW layout, exactly matching
@@ -35,20 +41,18 @@
 
 let sessionPromise: Promise<import('onnxruntime-web').InferenceSession> | null = null;
 
-const MODEL_URL = '/api/admin/people/embedding-model';
 const EMBEDDING_DIM = 512;
 
 async function loadSession(): Promise<import('onnxruntime-web').InferenceSession> {
   if (!sessionPromise) {
     sessionPromise = (async () => {
-      const ort = await import('onnxruntime-web');
+      const [ort, { getEmbeddingModelBuffer }] = await Promise.all([
+        import('onnxruntime-web'),
+        import('./api'),
+      ]);
       ort.env.wasm.wasmPaths = 'https://cdn.jsdelivr.net/npm/onnxruntime-web/dist/';
 
-      const response = await fetch(MODEL_URL, { credentials: 'include' });
-      if (!response.ok) {
-        throw new Error(`Failed to fetch face-recognition model: ${response.status}`);
-      }
-      const modelBuffer = await response.arrayBuffer();
+      const modelBuffer = await getEmbeddingModelBuffer();
       return ort.InferenceSession.create(modelBuffer, { executionProviders: ['wasm'] });
     })();
   }

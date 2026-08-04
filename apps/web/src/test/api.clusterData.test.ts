@@ -186,3 +186,29 @@ describe('resetAllClusters', () => {
     expect(postMock).toHaveBeenCalledWith('/admin/people/reset-clusters', {}, expect.anything());
   });
 });
+
+/**
+ * Regression tests for getEmbeddingModelBuffer() (2026-08-04) — added after "Scan Library for
+ * Faces" silently marked every photo as processed with ZERO faces found, root-caused to
+ * faceEmbeddingOnnx.ts using a raw `fetch()` (which bypasses this app's auth entirely — native
+ * admin sessions authenticate via a Bearer token added by an axios request interceptor, not a
+ * cookie) instead of the shared `api` axios instance. This must go through the SAME `api`
+ * instance (with admin headers + native bearer-token interceptor) as every other admin
+ * endpoint, and must request `responseType: 'arraybuffer'` since the model is a binary ONNX
+ * file, not JSON.
+ */
+describe('getEmbeddingModelBuffer', () => {
+  it('GETs /admin/people/embedding-model as an arraybuffer through the shared api instance with admin headers', async () => {
+    const modelBuffer = new ArrayBuffer(8);
+    getMock.mockResolvedValueOnce({ data: modelBuffer });
+
+    const { getEmbeddingModelBuffer } = await import('../api');
+    const result = await getEmbeddingModelBuffer();
+
+    expect(result).toBe(modelBuffer);
+    expect(getMock).toHaveBeenCalledWith(
+      '/admin/people/embedding-model',
+      expect.objectContaining({ responseType: 'arraybuffer', headers: expect.anything() })
+    );
+  });
+});
