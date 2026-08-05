@@ -269,17 +269,36 @@ const PhotoDetail: React.FC = () => {
 
   // Update photo when photoId changes in URL (for browser back/forward)
   useEffect(() => {
-    if (photoId && allPhotos.length > 0) {
-      const index = photosToUse.findIndex(p => p.id === photoId);
-      if (index >= 0 && index !== currentIndex) {
-        setCurrentIndex(index);
-        const photoInList = photosToUse[index];
-        if (photoInList) {
-          setPhoto(photoInList);
-          setImageLoaded(false); // Reset for new image
-        }
-      }
-    }
+    if (!photoId || allPhotos.length === 0) return;
+
+    const index = photosToUse.findIndex(p => p.id === photoId);
+    if (index < 0 || index === currentIndex) return;
+
+    setCurrentIndex(index);
+    const photoInList = photosToUse[index];
+    if (!photoInList) return;
+
+    // The gallery list never includes `.people` (see Photo.people's doc comment in types.ts),
+    // so navigating between photos (swipe/next/prev) would otherwise show "No one tagged yet"
+    // for every photo except the very first one loaded. Fetch the single-photo detail in the
+    // background to pick up its real people list once ready, guarded by `cancelled` so a fast
+    // swipe-through doesn't attach a stale response to whatever photo is showing by the time it
+    // resolves.
+    setPhoto(photoInList);
+    setImageLoaded(false); // Reset for new image
+
+    let cancelled = false;
+    getPhoto(slug!, photoId).then((fullPhoto) => {
+      if (cancelled) return;
+      setPhoto((prev) => (prev && prev.id === photoId ? { ...prev, people: fullPhoto.people } : prev));
+    }).catch(() => {
+      // Best-effort only — the photo itself is already showing from the list; a failed
+      // people fetch just means the People section stays empty until the next load.
+    });
+
+    return () => {
+      cancelled = true;
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [photoId, allPhotos, displayPhotos]);
 
@@ -510,9 +529,13 @@ const PhotoDetail: React.FC = () => {
         const index = photosToUse.findIndex(p => p.id === photoId);
         setCurrentIndex(index);
         
-        // Update photo with the version from allPhotos which includes all EXIF data
+        // Update photo with the version from allPhotos which includes all EXIF data.
+        // The gallery list endpoint never includes `.people` (only the single-photo detail
+        // fetch above does — see api.ts's Photo.people doc comment), so carry it over from
+        // photoData rather than letting this overwrite silently drop it (previously caused
+        // "No one tagged yet" to show for a photo that DOES have tagged people).
         if (index >= 0 && photosToUse[index]) {
-          setPhoto(photosToUse[index]);
+          setPhoto({ ...photosToUse[index], people: photoData.people });
         }
         
         // Track photo view

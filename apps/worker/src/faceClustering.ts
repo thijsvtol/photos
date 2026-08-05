@@ -709,3 +709,41 @@ export async function setManualPhotoPersonTags(env: Env, photoId: string, person
   }
 }
 
+// Cloudflare D1 caps bound parameters per statement; used below to keep each bulk-tag INSERT
+// well under that limit even for a large multi-select + multi-person combination.
+const BULK_TAG_CHUNK_SIZE = 90;
+
+/**
+ * ADDS (never replaces or removes) one or more people as manually-tagged on every given photo —
+ * used by the gallery's multi-select "Tag people" bulk action, where an admin/editor selects a
+ * batch of photos (e.g. everyone at a group event) and tags one or more people across all of
+ * them at once. Deliberately additive rather than a bulk version of setManualPhotoPersonTags()'s
+ * replace-the-whole-set behavior: a bulk action must never silently wipe out tags a photo
+ * already had from a previous, unrelated tagging pass (e.g. one photo in the batch already had
+ * someone else tagged individually on PhotoDetail) just because it happened to also be part of
+ * this selection. `INSERT OR IGNORE` naturally no-ops any (photo, person) pair already tagged,
+ * so this is safe to call repeatedly / on overlapping selections.
+ */
+export async function addManualPhotoPersonTags(env: Env, photoIds: string[], personIds: number[]): Promise<void> {
+  const uniquePhotoIds = [...new Set(photoIds)];
+  const uniquePersonIds = [...new Set(personIds)];
+  if (uniquePhotoIds.length === 0 || uniquePersonIds.length === 0) return;
+
+  const pairs: [string, number][] = [];
+  for (const photoId of uniquePhotoIds) {
+    for (const personId of uniquePersonIds) {
+      pairs.push([photoId, personId]);
+    }
+  }
+
+  for (const pairChunk of chunk(pairs, BULK_TAG_CHUNK_SIZE)) {
+    if (pairChunk.length === 0) continue;
+    const statements = pairChunk.map(([photoId, personId]) =>
+      env.DB
+        .prepare('INSERT OR IGNORE INTO photo_person_tags (photo_id, person_id) VALUES (?, ?)')
+        .bind(photoId, personId)
+    );
+    await env.DB.batch(statements);
+  }
+}
+
