@@ -49,8 +49,8 @@ function createFakeEnv(people: FakePerson[], photos: FakePhoto[]) {
           return null as T | null;
         },
         async all() {
-          if (query.includes('FROM photo_faces f')) {
-            const [personId] = boundArgs as [number];
+          if (query.includes('FROM photos p') && query.includes('photo_person_tags')) {
+            const [personId] = boundArgs as [number, number];
             const results = photos.filter((p) => p.person_id === personId && p.deleted_at === null);
             return { results };
           }

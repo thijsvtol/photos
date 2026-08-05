@@ -45,6 +45,13 @@ const EventGallery: React.FC = () => {
   const [sortBy, setSortBy] = useState('date_desc');
   const [searchQuery, setSearchQuery] = useState('');
   const [mediaTypeFilter, setMediaTypeFilter] = useState<'all' | 'photos' | 'videos'>('all');
+  // People filter (admin-only, see SearchPage.tsx for why full names are gated to admins) —
+  // requires ALL selected people to be in a photo (see the worker route's doc comment for why
+  // AND, not OR, is the right default for multi-select). Reuses the same `namedPeople` list
+  // fetched (lazily, below) for the "Tag people" bulk action.
+  const [peopleFilterIds, setPeopleFilterIds] = useState<Set<number>>(new Set());
+  const [showGalleryPeoplePicker, setShowGalleryPeoplePicker] = useState(false);
+  const [galleryPeopleSearchQuery, setGalleryPeopleSearchQuery] = useState('');
   const [userFavorites, setUserFavorites] = useState<Set<string>>(new Set());
   const [deleting, setDeleting] = useState(false);
   const [copying, setCopying] = useState(false);
@@ -233,7 +240,7 @@ const EventGallery: React.FC = () => {
       // If event doesn't require password, load photos immediately
       if (!eventData.requires_password) {
         try {
-          const photoData = await getPhotos(slug!, sortBy);
+          const photoData = await getPhotos(slug!, sortBy, Array.from(peopleFilterIds));
           setPhotos(photoData);
           setAuthenticated(true);
         } catch (err) {
@@ -242,7 +249,7 @@ const EventGallery: React.FC = () => {
       } else {
         // Try to load photos (will succeed if already authenticated)
         try {
-          const photoData = await getPhotos(slug!, sortBy);
+          const photoData = await getPhotos(slug!, sortBy, Array.from(peopleFilterIds));
           setPhotos(photoData);
           setAuthenticated(true);
         } catch {
@@ -268,7 +275,7 @@ const EventGallery: React.FC = () => {
 
   const loadPhotos = async () => {
     try {
-      const photoData = await getPhotos(slug!, sortBy);
+      const photoData = await getPhotos(slug!, sortBy, Array.from(peopleFilterIds));
       setPhotos(photoData);
     } catch (err) {
       console.error(err);
@@ -320,13 +327,20 @@ const EventGallery: React.FC = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [queueItems, authenticated]);
 
-  // Reload photos when sort changes
+  // Reload photos when sort or people filter changes
   useEffect(() => {
     if (authenticated && slug) {
       loadPhotos();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sortBy]);
+  }, [sortBy, peopleFilterIds]);
+
+  // Eagerly load the named-people list for admins (used by both the gallery's people filter and
+  // the multi-select "Tag people" bulk action) so the filter picker opens instantly.
+  useEffect(() => {
+    if (!isAdmin) return;
+    getNamedPeople().then(setNamedPeople).catch((err) => console.error('Failed to load people list', err));
+  }, [isAdmin]);
 
   const toggleFavorite = async (photoId: string, isFavorited: boolean) => {
     // Require authentication for favorites
@@ -483,6 +497,18 @@ const EventGallery: React.FC = () => {
       await haptics.error();
       toast.showError('Failed to update photo location. Please try again.');
     }
+  };
+
+  const handleToggleGalleryPersonFilter = (personId: number) => {
+    setPeopleFilterIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(personId)) {
+        next.delete(personId);
+      } else {
+        next.add(personId);
+      }
+      return next;
+    });
   };
 
   const handleOpenPeopleTagPicker = async () => {
@@ -1468,6 +1494,76 @@ const EventGallery: React.FC = () => {
           )}
         </div>
 
+        {/* People filter (admin-only — see SearchPage.tsx for why full names aren't shown to
+            everyone) — filters this event's gallery to photos containing every selected person. */}
+        {isAdmin && (
+          <div className="mb-4">
+            <div className="flex flex-wrap items-center gap-2">
+              {namedPeople.filter((p) => peopleFilterIds.has(p.id)).map((p) => (
+                <span
+                  key={p.id}
+                  className="flex items-center gap-1 pl-3 pr-1.5 py-1 bg-blue-100 dark:bg-blue-900/40 text-blue-800 dark:text-blue-300 text-sm rounded-full"
+                >
+                  {p.name}
+                  <button
+                    onClick={() => handleToggleGalleryPersonFilter(p.id)}
+                    className="p-0.5 rounded-full hover:bg-blue-200 dark:hover:bg-blue-800 transition"
+                    aria-label={`Remove ${p.name} filter`}
+                  >
+                    <X className="w-3.5 h-3.5" />
+                  </button>
+                </span>
+              ))}
+              <button
+                onClick={() => setShowGalleryPeoplePicker((v) => !v)}
+                className="flex items-center gap-1.5 px-3 py-1.5 text-sm bg-gray-100 dark:bg-gray-800 text-gray-700 dark:text-gray-300 rounded-full hover:bg-gray-200 dark:hover:bg-gray-700 transition"
+              >
+                <Users className="w-4 h-4" /> {peopleFilterIds.size > 0 ? 'Edit people filter' : 'Filter by people'}
+              </button>
+            </div>
+            {showGalleryPeoplePicker && (
+              <div className="mt-2 max-w-sm bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow p-3">
+                <p className="text-xs text-gray-500 dark:text-gray-400 mb-2">
+                  Selecting multiple people only shows photos where they're all together.
+                </p>
+                <input
+                  type="text"
+                  value={galleryPeopleSearchQuery}
+                  onChange={(e) => setGalleryPeopleSearchQuery(e.target.value)}
+                  placeholder="Search people…"
+                  className="w-full mb-2 px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white rounded-lg placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  autoFocus
+                />
+                <div className="max-h-56 overflow-y-auto space-y-1">
+                  {namedPeople.length === 0 ? (
+                    <p className="text-sm text-gray-500 dark:text-gray-400 py-2 text-center">No named people yet.</p>
+                  ) : (
+                    namedPeople
+                      .filter((p) => p.name.toLowerCase().includes(galleryPeopleSearchQuery.trim().toLowerCase()))
+                      .map((p) => {
+                        const selected = peopleFilterIds.has(p.id);
+                        return (
+                          <button
+                            key={p.id}
+                            onClick={() => handleToggleGalleryPersonFilter(p.id)}
+                            className={`w-full flex items-center justify-between gap-2 px-3 py-2 rounded-lg text-sm text-left transition ${
+                              selected
+                                ? 'bg-blue-600 text-white'
+                                : 'bg-gray-50 dark:bg-gray-700/60 text-gray-800 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700'
+                            }`}
+                          >
+                            <span>{p.name}</span>
+                            {selected && <Check className="w-4 h-4 shrink-0" />}
+                          </button>
+                        );
+                      })
+                  )}
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
         {/* Sort & Filter Options - Mobile optimized */}
         <GallerySortFilter
           sortBy={sortBy}
@@ -1604,7 +1700,7 @@ const EventGallery: React.FC = () => {
                     photos={datePhotos}
                     slug={slug!}
                     targetRowHeight={targetRowHeight}
-                    spacing={8}
+                    spacing={4}
                     selectedPhotos={selectedPhotos}
                     forceControlsVisible={selectedPhotos.size > 0}
                     userFavorites={userFavorites}
@@ -1626,7 +1722,7 @@ const EventGallery: React.FC = () => {
               photos={visibleSingleDatePhotos}
               slug={slug!}
               targetRowHeight={targetRowHeight}
-              spacing={8}
+              spacing={4}
               selectedPhotos={selectedPhotos}
               forceControlsVisible={selectedPhotos.size > 0}
               userFavorites={userFavorites}

@@ -230,12 +230,18 @@ app.get('/api/events/:slug', optionalAuth, async (c) => {
 /**
  * GET /api/events/:slug/photos
  * Returns photos for an event (requires authentication if password protected)
- * Supports query params: sort (date_asc, date_desc, name_asc, name_desc)
+ * Supports query params: sort (date_asc, date_desc, name_asc, name_desc), people (comma-
+ * separated person_clusters ids — requires the photo to contain EVERY given person, same AND
+ * semantics and same auto-detected-∪-manually-tagged union as GET /api/search's `people` param).
  */
 app.get('/api/events/:slug/photos', optionalAuth, async (c) => {
   const slug = c.req.param('slug')!;
   if (!isValidSlug(slug)) return c.json({ error: 'Invalid slug format' }, 400);
   const sort = c.req.query('sort') || 'date_desc';
+  const peopleParam = (c.req.query('people') || '').trim();
+  const personIds = peopleParam
+    ? [...new Set(peopleParam.split(',').map((s) => parseInt(s, 10)).filter((n) => Number.isFinite(n)))]
+    : [];
   
   try {
     const user = getUser(c);
@@ -304,6 +310,18 @@ app.get('/api/events/:slug/photos', optionalAuth, async (c) => {
     // only fall back to the local part of the email (before '@') — never
     // the full address. Also covers legacy rows where uploaded_by stored a
     // first name instead of an email (no '@', so the CASE falls through as-is).
+    const peopleFilterClause = personIds.length > 0
+      ? `AND p.id IN (
+          SELECT photo_id FROM (
+            SELECT photo_id, person_id FROM photo_faces WHERE person_id IN (${personIds.map(() => '?').join(',')})
+            UNION
+            SELECT photo_id, person_id FROM photo_person_tags WHERE person_id IN (${personIds.map(() => '?').join(',')})
+          )
+          GROUP BY photo_id
+          HAVING COUNT(DISTINCT person_id) = ?
+        )`
+      : '';
+
     const query = `
       SELECT p.*, COALESCE(
         u.name,
@@ -315,12 +333,18 @@ app.get('/api/events/:slug/photos', optionalAuth, async (c) => {
       FROM photos p
       LEFT JOIN users u ON p.uploaded_by = u.email
       WHERE p.event_id = ? AND p.upload_complete = 1 AND p.deleted_at IS NULL AND ${PREVIEW_READY_CLAUSE}
+      ${peopleFilterClause}
       ORDER BY ${orderBy}
     `;
-    
+
+    const bindArgs: (string | number)[] = [event.id];
+    if (personIds.length > 0) {
+      bindArgs.push(...personIds, ...personIds, personIds.length);
+    }
+
     const photos = await c.env.DB
       .prepare(query)
-      .bind(event.id)
+      .bind(...bindArgs)
       .all<Photo>();
     
     return c.json({ photos: photos.results || [] });
@@ -682,7 +706,7 @@ app.get('/api/memories', optionalAuth, async (c) => {
 });
 
 /**
- * GET /api/search?q=...
+ * GET /api/search?q=...&people=1,2,3
  * Unified search across every event the caller can access: matches
  * filename/city (FTS5, instant, always available) plus AI-generated
  * caption/tags text (also indexed in the same FTS5 table). If a Workers AI
@@ -693,11 +717,26 @@ app.get('/api/memories', optionalAuth, async (c) => {
  * similarity over a modest FTS-prefiltered candidate set, fine at
  * personal/family-gallery scale — see repo cost-governance notes for why
  * this avoids Vectorize/paid vector DBs).
+ *
+ * `people` is an optional comma-separated list of person_clusters ids (see
+ * apps/admin/people). Photos are required to contain EVERY given person, not
+ * just any of them (an admin picking 2 people almost always means "show me
+ * the photos of the two of them together", not "either of them") — combines
+ * BOTH ways a person can be attached to a photo (automatically-detected
+ * photo_faces AND manual photo_person_tags, same union used elsewhere in
+ * this feature, e.g. getPhotoPeople() in faceClustering.ts) since either
+ * alone would miss real matches. `q` and `people` can be combined (both
+ * filters apply) or `people` can be used alone with no text query.
  */
 app.get('/api/search', optionalAuth, async (c) => {
   try {
     const query = (c.req.query('q') || '').trim();
-    if (!query) {
+    const peopleParam = (c.req.query('people') || '').trim();
+    const personIds = peopleParam
+      ? [...new Set(peopleParam.split(',').map((s) => parseInt(s, 10)).filter((n) => Number.isFinite(n)))]
+      : [];
+
+    if (!query && personIds.length === 0) {
       return c.json({ photos: [] });
     }
 
@@ -729,6 +768,31 @@ app.get('/api/search', optionalAuth, async (c) => {
     const eventMap = new Map<number, { slug: string; name: string }>();
     for (const e of events.results) {
       eventMap.set(e.id, { slug: e.slug, name: e.name });
+    }
+
+    // Resolve the people filter to a concrete set of photo ids FIRST (before FTS/embedding
+    // work below) — a photo must contain every given person (AND, not OR), found by unioning
+    // photo_faces + photo_person_tags per person then requiring COUNT(DISTINCT person_id) to
+    // equal the number of people asked for.
+    let peopleFilteredPhotoIds: Set<string> | null = null;
+    if (personIds.length > 0) {
+      const personPlaceholders = personIds.map(() => '?').join(',');
+      const matchRows = await c.env.DB
+        .prepare(`
+          SELECT photo_id FROM (
+            SELECT photo_id, person_id FROM photo_faces WHERE person_id IN (${personPlaceholders})
+            UNION
+            SELECT photo_id, person_id FROM photo_person_tags WHERE person_id IN (${personPlaceholders})
+          )
+          GROUP BY photo_id
+          HAVING COUNT(DISTINCT person_id) = ?
+        `)
+        .bind(...personIds, ...personIds, personIds.length)
+        .all<{ photo_id: string }>();
+      peopleFilteredPhotoIds = new Set((matchRows.results || []).map((r) => r.photo_id));
+      if (peopleFilteredPhotoIds.size === 0) {
+        return c.json({ photos: [] });
+      }
     }
 
     // FTS5 full-text match against filename/caption/tags/city. Each term is
@@ -763,6 +827,35 @@ app.get('/api/search', optionalAuth, async (c) => {
         .bind(ftsQuery, ...eventIds)
         .all<Photo & { event_id: number; embedding: ArrayBuffer | null }>();
       candidateRows = result.results || [];
+      if (peopleFilteredPhotoIds) {
+        candidateRows = candidateRows.filter((p) => peopleFilteredPhotoIds!.has(p.id));
+      }
+    } else if (peopleFilteredPhotoIds) {
+      // People-only search (no text query) — pull candidates directly, restricted to the
+      // people-filtered photo id set. Chunked (D1 caps bound parameters per statement) since a
+      // frequently-photographed person can easily appear in more photos than fit in one IN().
+      const idsArray = Array.from(peopleFilteredPhotoIds);
+      const PHOTO_ID_CHUNK_SIZE = 80; // leaves room for eventIds' own placeholders in the same statement
+      for (let i = 0; i < idsArray.length; i += PHOTO_ID_CHUNK_SIZE) {
+        const idChunk = idsArray.slice(i, i + PHOTO_ID_CHUNK_SIZE);
+        const idPlaceholders = idChunk.map(() => '?').join(',');
+        const result = await c.env.DB
+          .prepare(`
+            SELECT p.id, p.event_id, p.original_filename, p.file_type, p.capture_time,
+                   p.width, p.height, p.blur_placeholder, p.cache_version, p.ai_caption,
+                   p.embedding
+            FROM photos p
+            WHERE p.id IN (${idPlaceholders})
+              AND p.event_id IN (${placeholders})
+              AND p.upload_complete = 1
+              AND p.deleted_at IS NULL
+          `)
+          .bind(...idChunk, ...eventIds)
+          .all<Photo & { event_id: number; embedding: ArrayBuffer | null }>();
+        candidateRows.push(...(result.results || []));
+      }
+      candidateRows.sort((a, b) => (a.capture_time < b.capture_time ? 1 : -1));
+      candidateRows = candidateRows.slice(0, 300);
     }
 
     // Optional semantic re-rank: only meaningful for longer, sentence-like

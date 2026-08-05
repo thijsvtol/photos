@@ -1,8 +1,8 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { Users, ScanFace, Loader2, Sparkles, Eye, EyeOff, GitMerge, X, Check } from 'lucide-react';
+import { Users, ScanFace, Loader2, Sparkles, Eye, EyeOff, GitMerge, X, Check, GraduationCap, Search, ArrowUpDown } from 'lucide-react';
 import Navbar from '../components/Navbar';
-import { getPeople, getPreviewUrl, getFullClusterData, getAllFacesForDeepRebuild, applyClusteringResults, resetAllClusters, mergePeople, getLegacyFaceStats, resetLegacyFaces } from '../api';
+import { getPeople, getPreviewUrl, getFullClusterData, getAllFacesForDeepRebuild, applyClusteringResults, resetAllClusters, mergePeople, getLegacyFaceStats, resetLegacyFaces, learnFromManualTags } from '../api';
 import type { Person, LegacyFaceStats } from '../api';
 import { runBackfillScan } from '../faceBackfill';
 import type { BackfillProgress } from '../faceBackfill';
@@ -60,10 +60,22 @@ const AdminPeople: React.FC = () => {
   // people who obviously do recur in the library.
   const [legacyStats, setLegacyStats] = useState<LegacyFaceStats | null>(null);
   const [fixingLegacy, setFixingLegacy] = useState(false);
+  // "Learn from tags" — lets manual photo tagging (which bypasses clustering entirely) directly
+  // teach the model, without a full rebuild. See learnFromManualTags()'s doc comment in
+  // apps/worker/src/faceClustering.ts for exactly what it does/why it's conservative.
+  const [learningFromTags, setLearningFromTags] = useState(false);
+  const [learnResult, setLearnResult] = useState<{ personsUpdated: number; facesAssigned: number } | null>(null);
+  // Name search + sort — the list has no pagination, so for a library with many named people
+  // finding a specific one by scrolling/scanning wasn't practical.
+  const [nameFilter, setNameFilter] = useState('');
+  const [sortBy, setSortBy] = useState<'photos' | 'name'>('photos');
 
-  const multiPhotoPeople = allPeople.filter((p) => p.face_count >= 2);
+  const multiPhotoPeople = allPeople.filter((p) => p.photo_count >= 2);
   const singlesCount = allPeople.length - multiPhotoPeople.length;
-  const people = showSingles ? allPeople : multiPhotoPeople;
+  const visiblePeople = showSingles ? allPeople : multiPhotoPeople;
+  const people = visiblePeople
+    .filter((p) => !nameFilter.trim() || (p.name || 'Unnamed').toLowerCase().includes(nameFilter.trim().toLowerCase()))
+    .sort((a, b) => (sortBy === 'name' ? (a.name || 'Unnamed').localeCompare(b.name || 'Unnamed') : b.photo_count - a.photo_count));
 
   useEffect(() => {
     loadData();
@@ -97,6 +109,21 @@ const AdminPeople: React.FC = () => {
       console.error(err);
     } finally {
       setFixingLegacy(false);
+    }
+  };
+
+  const handleLearnFromTags = async () => {
+    setLearningFromTags(true);
+    setLearnResult(null);
+    try {
+      const result = await learnFromManualTags();
+      setLearnResult(result);
+      await loadData();
+    } catch (err) {
+      setError('Failed to learn from manual tags');
+      console.error(err);
+    } finally {
+      setLearningFromTags(false);
     }
   };
 
@@ -285,7 +312,7 @@ const AdminPeople: React.FC = () => {
     }
     // Merge into whichever cluster already has more photos, so the surviving cover photo/name
     // (if named) is the more established one.
-    const [target, source] = personA.face_count >= personB.face_count ? [personA, personB] : [personB, personA];
+    const [target, source] = personA.photo_count >= personB.photo_count ? [personA, personB] : [personB, personA];
     const key = suggestionKey(suggestion);
     try {
       setMergingKey(key);
@@ -328,6 +355,7 @@ const AdminPeople: React.FC = () => {
               <button
                 onClick={handleScanLibrary}
                 className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition flex items-center gap-2"
+                title="Detect faces in photos uploaded before this feature existed (runs in your browser; new uploads are processed automatically)"
               >
                 <ScanFace className="w-4 h-4" /> Scan Library for Faces
               </button>
@@ -342,6 +370,7 @@ const AdminPeople: React.FC = () => {
               ) : (
                 <button
                   onClick={handleClusterNow}
+                  title="Group newly-detected faces into named people (only looks at not-yet-clustered faces)"
                   className="px-4 py-2 bg-gray-200 dark:bg-gray-700 text-gray-800 dark:text-gray-200 rounded-lg hover:bg-gray-300 dark:hover:bg-gray-600 transition flex items-center gap-2"
                 >
                   <Sparkles className="w-4 h-4" /> Cluster Now
@@ -358,7 +387,7 @@ const AdminPeople: React.FC = () => {
               ) : (
                 <button
                   onClick={handleDeepRebuild}
-                  title="Discards all current groupings and rebuilds everyone from scratch with a stronger, drift-free matching algorithm"
+                  title="Discards ALL current groupings and rebuilds everyone from scratch with a stronger, drift-free matching algorithm"
                   className="px-4 py-2 bg-gray-200 dark:bg-gray-700 text-gray-800 dark:text-gray-200 rounded-lg hover:bg-gray-300 dark:hover:bg-gray-600 transition flex items-center gap-2"
                 >
                   <Sparkles className="w-4 h-4" /> Rebuild All (Deep)
@@ -367,6 +396,7 @@ const AdminPeople: React.FC = () => {
               {singlesCount > 0 && (
                 <button
                   onClick={() => setShowSingles((v) => !v)}
+                  title="Groups with only one photo so far are hidden by default — they usually just haven't been matched to more photos of that person yet"
                   className="px-4 py-2 bg-gray-200 dark:bg-gray-700 text-gray-800 dark:text-gray-200 rounded-lg hover:bg-gray-300 dark:hover:bg-gray-600 transition flex items-center gap-2"
                 >
                   {showSingles ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
@@ -384,26 +414,63 @@ const AdminPeople: React.FC = () => {
               ) : (
                 <button
                   onClick={handleFindMergeSuggestions}
+                  title="Scan every pair of groups for likely-same-person matches that clustering never got the chance to merge automatically"
                   className="px-4 py-2 bg-gray-200 dark:bg-gray-700 text-gray-800 dark:text-gray-200 rounded-lg hover:bg-gray-300 dark:hover:bg-gray-600 transition flex items-center gap-2"
                 >
                   <GitMerge className="w-4 h-4" /> Find Merge Suggestions
                 </button>
               )}
+              {learningFromTags ? (
+                <button
+                  disabled
+                  className="px-4 py-2 bg-gray-300 text-gray-700 rounded-lg flex items-center gap-2 cursor-wait"
+                >
+                  <Loader2 className="w-4 h-4 animate-spin" /> Learning…
+                </button>
+              ) : (
+                <button
+                  onClick={handleLearnFromTags}
+                  title="Teach the model from photos you've manually tagged — assigns any now-unambiguous detected face to the person that photo was tagged with, so future scans recognize them better"
+                  className="px-4 py-2 bg-gray-200 dark:bg-gray-700 text-gray-800 dark:text-gray-200 rounded-lg hover:bg-gray-300 dark:hover:bg-gray-600 transition flex items-center gap-2"
+                >
+                  <GraduationCap className="w-4 h-4" /> Learn from Tags
+                </button>
+              )}
             </div>
           )}
         </div>
-        <p className="text-gray-600 dark:text-gray-400 mb-8">
-          Faces are detected client-side (in your browser) as photos are uploaded. Photos uploaded
-          before this feature existed aren't processed automatically — use "Scan Library for Faces"
-          to backfill them (this runs in your browser and may take a while for large libraries; you
-          can stop and resume anytime). Groups with only one photo are hidden by default (often the
-          same person just hasn't been matched to another photo of them YET — clustering improves
-          as more of their photos get grouped). Detected faces are grouped into named people by
-          "Cluster Now" — this runs entirely in your browser (not on the server), so it can group
-          your whole library in one go, even with thousands of photos. "Find Merge Suggestions"
-          sweeps the whole library for groups that are likely the same person but never got merged
-          automatically, and lets you merge them with one click.
+        <p className="text-gray-600 dark:text-gray-400 mb-4 text-sm">
+          New uploads are detected automatically. Hover any button above for what it does —
+          in short: scan old photos, group detected faces into people, and find duplicate
+          groups to merge.
         </p>
+
+        <div className="flex flex-wrap items-center gap-2 mb-8">
+          <div className="relative flex-1 min-w-[200px] max-w-xs">
+            <Search className="w-4 h-4 text-gray-400 absolute left-3 top-1/2 -translate-y-1/2" />
+            <input
+              type="text"
+              value={nameFilter}
+              onChange={(e) => setNameFilter(e.target.value)}
+              placeholder="Search people by name…"
+              className="w-full pl-9 pr-3 py-2 text-sm bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-700 text-gray-900 dark:text-white rounded-lg placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500"
+            />
+          </div>
+          <button
+            onClick={() => setSortBy((s) => (s === 'photos' ? 'name' : 'photos'))}
+            className="px-3 py-2 text-sm bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-700 text-gray-700 dark:text-gray-300 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 transition flex items-center gap-1.5"
+          >
+            <ArrowUpDown className="w-4 h-4" /> Sort: {sortBy === 'photos' ? 'Most photos' : 'Name (A-Z)'}
+          </button>
+        </div>
+
+        {learnResult && (
+          <div className="mb-8 bg-blue-50 dark:bg-blue-950/40 border border-blue-200 dark:border-blue-800 text-blue-800 dark:text-blue-300 px-4 py-3 rounded-lg text-sm">
+            {learnResult.facesAssigned > 0
+              ? `Learned from your tags: ${learnResult.facesAssigned} face${learnResult.facesAssigned === 1 ? '' : 's'} assigned across ${learnResult.personsUpdated} person${learnResult.personsUpdated === 1 ? '' : 's'}.`
+              : 'Nothing new to learn right now — either every tagged photo is already fully matched, or a photo has multiple tags/faces that are too ambiguous to learn from automatically.'}
+          </div>
+        )}
 
         {error && (
           <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded mb-4">
@@ -505,7 +572,7 @@ const AdminPeople: React.FC = () => {
                           </div>
                           <div className="text-sm">
                             <p className="font-medium text-gray-900 dark:text-white">{person.name || 'Unnamed'}</p>
-                            <p className="text-xs text-gray-500">{person.face_count} photo{person.face_count === 1 ? '' : 's'}</p>
+                            <p className="text-xs text-gray-500 dark:text-gray-400">{person.photo_count} photo{person.photo_count === 1 ? '' : 's'}</p>
                           </div>
                         </div>
                       ))}
@@ -580,7 +647,7 @@ const AdminPeople: React.FC = () => {
                 <p className="mt-2 text-sm font-medium text-gray-900 dark:text-white truncate">
                   {person.name || 'Unnamed'}
                 </p>
-                <p className="text-xs text-gray-500">{person.face_count} photo{person.face_count === 1 ? '' : 's'}</p>
+                <p className="text-xs text-gray-500 dark:text-gray-400">{person.photo_count} photo{person.photo_count === 1 ? '' : 's'}</p>
               </Link>
             ))}
           </div>

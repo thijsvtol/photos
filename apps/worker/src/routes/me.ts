@@ -42,13 +42,17 @@ app.get('/api/me/photos', requireAuth, async (c) => {
       .prepare(`
         SELECT DISTINCT p.id, p.original_filename, p.file_type, p.capture_time, p.blur_placeholder,
                p.cache_version, p.width, p.height, e.slug as event_slug, e.name as event_name
-        FROM photo_faces f
-        JOIN photos p ON f.photo_id = p.id
+        FROM photos p
         JOIN events e ON p.event_id = e.id
-        WHERE f.person_id = ? AND p.deleted_at IS NULL
+        WHERE p.deleted_at IS NULL
+          AND p.id IN (
+            SELECT photo_id FROM photo_faces WHERE person_id = ?
+            UNION
+            SELECT photo_id FROM photo_person_tags WHERE person_id = ?
+          )
         ORDER BY p.capture_time DESC
       `)
-      .bind(person.id)
+      .bind(person.id, person.id)
       .all();
 
     return c.json({

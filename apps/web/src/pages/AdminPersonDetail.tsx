@@ -269,7 +269,7 @@ const AdminPersonDetail: React.FC = () => {
                     value={nameInput}
                     onChange={(e) => setNameInput(e.target.value)}
                     placeholder="Full name (e.g. Jane Doe)"
-                    className="text-2xl font-bold px-2 py-1 border rounded-lg"
+                    className="text-2xl font-bold px-2 py-1 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white rounded-lg"
                     autoFocus
                     onKeyDown={(e) => e.key === 'Enter' && handleSaveName()}
                   />
@@ -283,7 +283,7 @@ const AdminPersonDetail: React.FC = () => {
               ) : (
                 <div className="flex items-center gap-2">
                   <h1 className="text-4xl font-bold text-gray-900 dark:text-white">{person.name || 'Unnamed'}</h1>
-                  <button onClick={() => setEditingName(true)} className="p-2 text-gray-500 hover:text-gray-700">
+                  <button onClick={() => setEditingName(true)} className="p-2 text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200">
                     <Pencil className="w-4 h-4" />
                   </button>
                 </div>
@@ -297,7 +297,7 @@ const AdminPersonDetail: React.FC = () => {
             </button>
           </div>
         )}
-        <p className="text-sm text-gray-500 mb-2">
+        <p className="text-sm text-gray-500 dark:text-gray-400 mb-2">
           Full name is admin-only — if this person's account is linked below, they'll only ever
           see their first name on the Timeline's "Just me" filter toggle.
         </p>
@@ -332,17 +332,17 @@ const AdminPersonDetail: React.FC = () => {
                     placeholder="Search by name…"
                     disabled={combining}
                     autoFocus
-                    className="w-full max-w-sm px-3 py-2 border rounded-lg text-sm"
+                    className="w-full max-w-sm px-3 py-2 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white rounded-lg text-sm"
                   />
                   <button
                     onClick={() => { setShowCombine(false); setCombineSearch(''); setCombineError(null); }}
-                    className="px-3 py-1.5 text-sm bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300 transition"
+                    className="px-3 py-1.5 text-sm bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-200 rounded-lg hover:bg-gray-300 dark:hover:bg-gray-600 transition"
                   >
                     Cancel
                   </button>
                 </div>
                 {allPeople === null ? (
-                  <p className="text-sm text-gray-500 mt-2">Loading people…</p>
+                  <p className="text-sm text-gray-500 dark:text-gray-400 mt-2">Loading people…</p>
                 ) : (
                   <ul className="mt-2 max-h-64 overflow-y-auto border rounded-lg divide-y dark:divide-gray-700">
                     {allPeople
@@ -357,13 +357,13 @@ const AdminPersonDetail: React.FC = () => {
                             className="w-full text-left px-3 py-2 text-sm hover:bg-gray-100 dark:hover:bg-gray-700 flex items-center justify-between disabled:opacity-50"
                           >
                             <span>{p.name || 'Unnamed'}</span>
-                            <span className="text-xs text-gray-500">{p.face_count} photo{p.face_count === 1 ? '' : 's'}</span>
+                            <span className="text-xs text-gray-500 dark:text-gray-400">{p.photo_count} photo{p.photo_count === 1 ? '' : 's'}</span>
                           </button>
                         </li>
                       ))}
                   </ul>
                 )}
-                {combineError && <p className="text-sm text-red-600 mt-2">{combineError}</p>}
+                {combineError && <p className="text-sm text-red-600 dark:text-red-400 mt-2">{combineError}</p>}
               </div>
             )}
           </div>
@@ -384,7 +384,7 @@ const AdminPersonDetail: React.FC = () => {
                 <button
                   onClick={handleUnlinkAccount}
                   disabled={linking}
-                  className="px-3 py-1.5 text-sm bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300 transition disabled:opacity-50"
+                  className="px-3 py-1.5 text-sm bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-200 rounded-lg hover:bg-gray-300 dark:hover:bg-gray-600 transition disabled:opacity-50"
                 >
                   Unlink
                 </button>
@@ -401,7 +401,7 @@ const AdminPersonDetail: React.FC = () => {
                   onChange={(e) => handleLinkEmailChange(e.target.value)}
                   placeholder="Search by email…"
                   disabled={linking}
-                  className="w-full max-w-sm px-3 py-2 border rounded-lg text-sm"
+                  className="w-full max-w-sm px-3 py-2 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white rounded-lg text-sm"
                 />
                 {linkSuggestions.length > 0 && (
                   <ul className="absolute z-10 mt-1 w-full max-w-sm bg-white dark:bg-gray-700 border rounded-lg shadow-lg">
@@ -417,14 +417,14 @@ const AdminPersonDetail: React.FC = () => {
                     ))}
                   </ul>
                 )}
-                {linkError && <p className="text-sm text-red-600 mt-2">{linkError}</p>}
+                {linkError && <p className="text-sm text-red-600 dark:text-red-400 mt-2">{linkError}</p>}
               </div>
             )}
           </div>
         )}
 
         <p className="text-sm text-gray-500 mb-6">{photos.length} photo{photos.length === 1 ? '' : 's'}</p>
-        {removeError && <p className="text-sm text-red-600 mb-4">{removeError}</p>}
+        {removeError && <p className="text-sm text-red-600 dark:text-red-400 mb-4">{removeError}</p>}
 
         {photos.length === 0 ? (
           <div className="text-center py-12 bg-white dark:bg-gray-800 rounded-lg shadow">
@@ -516,10 +516,10 @@ const AdminPersonDetail: React.FC = () => {
 
         {confirmingDelete && (
           <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
-            <div className="bg-white rounded-lg shadow-xl max-w-md w-full">
+            <div className="bg-white dark:bg-gray-800 rounded-lg shadow-xl max-w-md w-full">
               <div className="p-6">
-                <h2 className="text-2xl font-bold mb-4 text-red-600">Delete Person</h2>
-                <p className="mb-4 text-gray-700">
+                <h2 className="text-2xl font-bold mb-4 text-red-600 dark:text-red-400">Delete Person</h2>
+                <p className="mb-4 text-gray-700 dark:text-gray-300">
                   Delete this person group? Their faces will be un-grouped (not deleted) and may be
                   re-clustered automatically later.
                 </p>
@@ -532,7 +532,7 @@ const AdminPersonDetail: React.FC = () => {
                   </button>
                   <button
                     onClick={() => setConfirmingDelete(false)}
-                    className="flex-1 px-4 py-2 bg-gray-300 text-gray-700 rounded-lg hover:bg-gray-400 transition"
+                    className="flex-1 px-4 py-2 bg-gray-300 dark:bg-gray-700 text-gray-700 dark:text-gray-200 rounded-lg hover:bg-gray-400 dark:hover:bg-gray-600 transition"
                   >
                     Cancel
                   </button>

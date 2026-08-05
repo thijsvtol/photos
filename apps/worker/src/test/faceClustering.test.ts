@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { getClusterData, applyClusteringResults, countUnclusteredFaces, getLegacyFaceStats, resetLegacyFaces, blobToFloat32Array, mergeClusters, assignPhotosToPerson, resetAllClusters } from '../faceClustering';
+import { getClusterData, applyClusteringResults, countUnclusteredFaces, getLegacyFaceStats, resetLegacyFaces, blobToFloat32Array, mergeClusters, assignPhotosToPerson, resetAllClusters, learnFromManualTags } from '../faceClustering';
 import type { Env } from '../types';
 
 /**
@@ -40,6 +40,20 @@ class FakeFaceClusteringDb {
         return stmt;
       },
       async all<T>() {
+        if (query.includes('SELECT t.photo_id, t.person_id') && query.includes('FROM photo_person_tags t')) {
+          // Replicates the real SQL's correlated-subquery filter: only photos with exactly one
+          // manual tag AND exactly one still-unclustered detected face.
+          const tagCountByPhoto = new Map<string, number>();
+          for (const t of db.personTags) tagCountByPhoto.set(t.photo_id, (tagCountByPhoto.get(t.photo_id) || 0) + 1);
+          const unclusteredCountByPhoto = new Map<string, number>();
+          for (const f of db.faces) {
+            if (f.person_id === null) unclusteredCountByPhoto.set(f.photo_id, (unclusteredCountByPhoto.get(f.photo_id) || 0) + 1);
+          }
+          const results = db.personTags
+            .filter((t) => (tagCountByPhoto.get(t.photo_id) || 0) === 1 && (unclusteredCountByPhoto.get(t.photo_id) || 0) === 1)
+            .map((t) => ({ photo_id: t.photo_id, person_id: t.person_id }));
+          return { results: results as T[] };
+        }
         if (query.includes('SELECT id, centroid_embedding, face_count, name, linked_user_email FROM person_clusters WHERE id IN')) {
           const ids = boundArgs as number[];
           const results = db.clusters
@@ -858,6 +872,91 @@ describe('assignPhotosToPerson', () => {
     db.faces = [{ id: 1, photo_id: 'photo-a', embedding: embedding1024Of(0, 0, 0), person_id: null }];
 
     await expect(assignPhotosToPerson(makeEnv(db), 999, ['photo-a'])).rejects.toThrow();
+  });
+});
+
+describe('learnFromManualTags', () => {
+  it('assigns the sole unclustered face on a singly-tagged photo to the tagged person', async () => {
+    const db = new FakeFaceClusteringDb();
+    db.clusters = [{ id: 1, centroid_embedding: embedding1024Of(0, 0, 0), face_count: 1 }];
+    db.faces = [
+      { id: 1, photo_id: 'photo-existing', embedding: embedding1024Of(0, 0, 0), person_id: 1 },
+      { id: 2, photo_id: 'photo-tagged', embedding: embedding1024Of(3, 0, 0), person_id: null },
+    ];
+    db.personTags = [{ photo_id: 'photo-tagged', person_id: 1 }];
+
+    const { personsUpdated, facesAssigned } = await learnFromManualTags(makeEnv(db));
+
+    expect(personsUpdated).toBe(1);
+    expect(facesAssigned).toBe(1);
+    expect(db.faces.find((f) => f.id === 2)?.person_id).toBe(1);
+  });
+
+  it('skips a photo with multiple manual tags (ambiguous which tag matches which face)', async () => {
+    const db = new FakeFaceClusteringDb();
+    db.clusters = [
+      { id: 1, centroid_embedding: embedding1024Of(0, 0, 0), face_count: 1 },
+      { id: 2, centroid_embedding: embedding1024Of(9, 0, 0), face_count: 1 },
+    ];
+    db.faces = [
+      { id: 1, photo_id: 'photo-existing', embedding: embedding1024Of(0, 0, 0), person_id: 1 },
+      { id: 2, photo_id: 'photo-group', embedding: embedding1024Of(3, 0, 0), person_id: null },
+    ];
+    db.personTags = [
+      { photo_id: 'photo-group', person_id: 1 },
+      { photo_id: 'photo-group', person_id: 2 },
+    ];
+
+    const { personsUpdated, facesAssigned } = await learnFromManualTags(makeEnv(db));
+
+    expect(personsUpdated).toBe(0);
+    expect(facesAssigned).toBe(0);
+    expect(db.faces.find((f) => f.id === 2)?.person_id).toBeNull();
+  });
+
+  it('skips a photo with multiple unclustered faces (ambiguous which face matches the tag)', async () => {
+    const db = new FakeFaceClusteringDb();
+    db.clusters = [{ id: 1, centroid_embedding: embedding1024Of(0, 0, 0), face_count: 1 }];
+    db.faces = [
+      { id: 1, photo_id: 'photo-existing', embedding: embedding1024Of(0, 0, 0), person_id: 1 },
+      { id: 2, photo_id: 'photo-group', embedding: embedding1024Of(3, 0, 0), person_id: null },
+      { id: 3, photo_id: 'photo-group', embedding: embedding1024Of(4, 0, 0), person_id: null },
+    ];
+    db.personTags = [{ photo_id: 'photo-group', person_id: 1 }];
+
+    const { facesAssigned } = await learnFromManualTags(makeEnv(db));
+
+    expect(facesAssigned).toBe(0);
+    expect(db.faces.find((f) => f.id === 2)?.person_id).toBeNull();
+    expect(db.faces.find((f) => f.id === 3)?.person_id).toBeNull();
+  });
+
+  it('is a no-op when there are no manual tags at all', async () => {
+    const db = new FakeFaceClusteringDb();
+    db.faces = [{ id: 1, photo_id: 'photo-a', embedding: embedding1024Of(0, 0, 0), person_id: null }];
+
+    const result = await learnFromManualTags(makeEnv(db));
+
+    expect(result).toEqual({ personsUpdated: 0, facesAssigned: 0 });
+  });
+
+  it('processes multiple qualifying photos for the same person in one call', async () => {
+    const db = new FakeFaceClusteringDb();
+    db.clusters = [{ id: 1, centroid_embedding: embedding1024Of(0, 0, 0), face_count: 1 }];
+    db.faces = [
+      { id: 1, photo_id: 'photo-existing', embedding: embedding1024Of(0, 0, 0), person_id: 1 },
+      { id: 2, photo_id: 'photo-tagged-a', embedding: embedding1024Of(1, 0, 0), person_id: null },
+      { id: 3, photo_id: 'photo-tagged-b', embedding: embedding1024Of(1, 0, 0), person_id: null },
+    ];
+    db.personTags = [
+      { photo_id: 'photo-tagged-a', person_id: 1 },
+      { photo_id: 'photo-tagged-b', person_id: 1 },
+    ];
+
+    const { personsUpdated, facesAssigned } = await learnFromManualTags(makeEnv(db));
+
+    expect(personsUpdated).toBe(1);
+    expect(facesAssigned).toBe(2);
   });
 });
 

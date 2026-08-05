@@ -77,7 +77,12 @@ const JustifiedGridInner: React.FC<JustifiedGridProps> = ({
       photos={albumPhotos}
       targetRowHeight={targetRowHeight}
       spacing={spacing}
-      rowConstraints={{ minPhotos: 1, maxPhotos: 6, singleRowMaxHeight: targetRowHeight * 1.5 }}
+      // singleRowMaxHeight caps how much taller a lone/last-row photo can get relative to the
+      // rest of the grid (a row with fewer photos than fit stretches to fill the row width,
+      // which otherwise inflates its height well past its neighbors) — kept close to 1x so
+      // photos stay visually aligned with the rows around them instead of one row suddenly
+      // looming much larger.
+      rowConstraints={{ minPhotos: 1, maxPhotos: 6, singleRowMaxHeight: targetRowHeight * 1.2 }}
       render={{
         wrapper: ({ children, style }, { photo: albumPhoto }) => {
           const photo = (albumPhoto as AlbumPhoto).photo;

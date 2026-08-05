@@ -1,32 +1,56 @@
 import React, { useEffect, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
-import { Search } from 'lucide-react';
+import { Search, Users, X, Check } from 'lucide-react';
 import Navbar from '../components/Navbar';
 import Footer from '../components/Footer';
-import { searchPhotos, getPreviewUrl } from '../api';
-import type { SearchResultPhoto } from '../api';
+import { searchPhotos, getPreviewUrl, getNamedPeople } from '../api';
+import type { SearchResultPhoto, NamedPerson } from '../api';
+import { useAuth } from '../contexts/AuthContext';
 
 const SearchPage: React.FC = () => {
+  const { user } = useAuth();
   const [searchParams, setSearchParams] = useSearchParams();
   const initialQuery = searchParams.get('q') || '';
+  const initialPeople = (searchParams.get('people') || '')
+    .split(',')
+    .map((s) => parseInt(s, 10))
+    .filter((n) => Number.isFinite(n));
   const [query, setQuery] = useState(initialQuery);
   const [results, setResults] = useState<SearchResultPhoto[]>([]);
   const [loading, setLoading] = useState(false);
   const [searched, setSearched] = useState(false);
 
+  // People filter — lets an admin/editor find photos containing specific people (AND, not OR,
+  // when multiple are picked: "show me photos of the two of them together" is what picking two
+  // people almost always means). See searchPhotos()'s doc comment for the API shape.
+  const [namedPeople, setNamedPeople] = useState<NamedPerson[]>([]);
+  const [selectedPersonIds, setSelectedPersonIds] = useState<Set<number>>(new Set(initialPeople));
+  const [showPeoplePicker, setShowPeoplePicker] = useState(false);
+  const [peopleSearchQuery, setPeopleSearchQuery] = useState('');
+
   useEffect(() => {
-    if (initialQuery) {
-      void runSearch(initialQuery);
+    // Named people (full names) are admin-only data elsewhere in this app (see the "Full name
+    // is admin-only" note on the person detail page) — only offer this filter to admins, rather
+    // than exposing everyone's full name to any visitor via a public search filter.
+    if (!user?.isAdmin) return;
+    getNamedPeople().catch((err) => console.error('Failed to load people list', err)).then((people) => {
+      if (people) setNamedPeople(people);
+    });
+  }, [user?.isAdmin]);
+
+  useEffect(() => {
+    if (initialQuery || initialPeople.length > 0) {
+      void runSearch(initialQuery, new Set(initialPeople));
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [initialQuery]);
 
-  const runSearch = async (q: string) => {
-    if (!q.trim()) return;
+  const runSearch = async (q: string, personIds: Set<number>) => {
+    if (!q.trim() && personIds.size === 0) return;
     setLoading(true);
     setSearched(true);
     try {
-      const photos = await searchPhotos(q.trim());
+      const photos = await searchPhotos(q.trim(), 60, Array.from(personIds));
       setResults(photos);
     } catch (err) {
       console.error('Search failed:', err);
@@ -36,17 +60,39 @@ const SearchPage: React.FC = () => {
     }
   };
 
+  const updateUrlAndSearch = (q: string, personIds: Set<number>) => {
+    const params: Record<string, string> = {};
+    if (q.trim()) params.q = q.trim();
+    if (personIds.size > 0) params.people = Array.from(personIds).join(',');
+    setSearchParams(params);
+    void runSearch(q, personIds);
+  };
+
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    setSearchParams(query.trim() ? { q: query.trim() } : {});
-    void runSearch(query);
+    updateUrlAndSearch(query, selectedPersonIds);
   };
+
+  const handleTogglePerson = (personId: number) => {
+    setSelectedPersonIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(personId)) {
+        next.delete(personId);
+      } else {
+        next.add(personId);
+      }
+      updateUrlAndSearch(query, next);
+      return next;
+    });
+  };
+
+  const selectedPeople = namedPeople.filter((p) => selectedPersonIds.has(p.id));
 
   return (
     <div className="min-h-screen bg-gray-50 dark:bg-gray-900 flex flex-col">
       <Navbar />
       <div className="max-w-7xl mx-auto px-3 sm:px-4 lg:px-8 py-8 flex-grow w-full">
-        <form onSubmit={handleSubmit} className="mb-8 flex gap-2">
+        <form onSubmit={handleSubmit} className="mb-4 flex gap-2">
           <div className="relative flex-1">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
             <input
@@ -62,6 +108,78 @@ const SearchPage: React.FC = () => {
             Search
           </button>
         </form>
+
+        <div className="mb-8">
+          {user?.isAdmin && (
+            <>
+              <div className="flex flex-wrap items-center gap-2">
+                {selectedPeople.map((p) => (
+                  <span
+                    key={p.id}
+                    className="flex items-center gap-1 pl-3 pr-1.5 py-1 bg-blue-100 dark:bg-blue-900/40 text-blue-800 dark:text-blue-300 text-sm rounded-full"
+                  >
+                    {p.name}
+                    <button
+                      onClick={() => handleTogglePerson(p.id)}
+                      className="p-0.5 rounded-full hover:bg-blue-200 dark:hover:bg-blue-800 transition"
+                      aria-label={`Remove ${p.name} filter`}
+                    >
+                      <X className="w-3.5 h-3.5" />
+                    </button>
+                  </span>
+                ))}
+                <button
+                  onClick={() => setShowPeoplePicker((v) => !v)}
+                  className="flex items-center gap-1.5 px-3 py-1.5 text-sm bg-gray-100 dark:bg-gray-800 text-gray-700 dark:text-gray-300 rounded-full hover:bg-gray-200 dark:hover:bg-gray-700 transition"
+                >
+                  <Users className="w-4 h-4" /> {selectedPeople.length > 0 ? 'Edit people filter' : 'Filter by people'}
+                </button>
+              </div>
+
+              {showPeoplePicker && (
+                <div className="mt-2 max-w-sm bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow p-3">
+                  <p className="text-xs text-gray-500 dark:text-gray-400 mb-2">
+                    Selecting multiple people only shows photos where they're all together.
+                  </p>
+                  <input
+                    type="text"
+                    value={peopleSearchQuery}
+                    onChange={(e) => setPeopleSearchQuery(e.target.value)}
+                    placeholder="Search people…"
+                    className="w-full mb-2 px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white rounded-lg placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    autoFocus
+                  />
+                  <div className="max-h-56 overflow-y-auto space-y-1">
+                    {namedPeople.length === 0 ? (
+                      <p className="text-sm text-gray-500 dark:text-gray-400 py-2 text-center">No named people yet.</p>
+                    ) : (
+                      namedPeople
+                        .filter((p) => p.name.toLowerCase().includes(peopleSearchQuery.trim().toLowerCase()))
+                        .map((p) => {
+                          const selected = selectedPersonIds.has(p.id);
+                          return (
+                            <button
+                              key={p.id}
+                              onClick={() => handleTogglePerson(p.id)}
+                              className={`w-full flex items-center justify-between gap-2 px-3 py-2 rounded-lg text-sm text-left transition ${
+                                selected
+                                  ? 'bg-blue-600 text-white'
+                                  : 'bg-gray-50 dark:bg-gray-700/60 text-gray-800 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700'
+                              }`}
+                            >
+                              <span>{p.name}</span>
+                              {selected && <Check className="w-4 h-4 shrink-0" />}
+                            </button>
+                          );
+                        })
+                    )}
+                  </div>
+                </div>
+              )}
+            </>
+          )}
+        </div>
+
 
         {loading ? (
           <div className="text-center py-12">

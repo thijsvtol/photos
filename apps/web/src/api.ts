@@ -215,9 +215,10 @@ export const adminLogout = async (): Promise<void> => {
   localStorage.removeItem('isAdmin');
 };
 
-export const getPhotos = async (slug: string, sort?: string): Promise<Photo[]> => {
+export const getPhotos = async (slug: string, sort?: string, personIds?: number[]): Promise<Photo[]> => {
   const params = new URLSearchParams();
   if (sort) params.append('sort', sort);
+  if (personIds && personIds.length > 0) params.append('people', personIds.join(','));
   
   const response = await api.get<{ photos: Photo[] }>(`/events/${slug}/photos?${params.toString()}`);
   return response.data.photos;
@@ -404,9 +405,19 @@ export interface SearchResultPhoto extends Photo {
   ai_caption?: string | null;
 }
 
-/** Unified search across all accessible events — filename/city/AI caption text, semantically re-ranked when possible. */
-export const searchPhotos = async (query: string, limit: number = 60): Promise<SearchResultPhoto[]> => {
-  const response = await api.get<{ photos: SearchResultPhoto[] }>('/search', { params: { q: query, limit } });
+/** Unified search across all accessible events — filename/city/AI caption text, semantically
+ *  re-ranked when possible. `personIds` (optional) requires the photo to contain EVERY given
+ *  person (not just any of them) — see the worker route's doc comment in routes/public.ts for
+ *  why AND, not OR, is the right default. Can be used alone (no `query`) for a pure people
+ *  search, or combined with a text query. */
+export const searchPhotos = async (query: string, limit: number = 60, personIds?: number[]): Promise<SearchResultPhoto[]> => {
+  const response = await api.get<{ photos: SearchResultPhoto[] }>('/search', {
+    params: {
+      q: query,
+      limit,
+      ...(personIds && personIds.length > 0 ? { people: personIds.join(',') } : {}),
+    },
+  });
   return response.data.photos;
 };
 
@@ -446,6 +457,11 @@ export interface Person {
   id: number;
   name: string | null;
   face_count: number;
+  /** DISTINCT photo count (auto-detected faces ∪ manual photo_person_tags) — use this for any
+   *  "X photos" display; face_count is a raw photo_faces ROW count (can double-count a person
+   *  appearing twice in one photo, and never includes manually-tagged photos) used internally
+   *  for centroid-averaging weight, not a reliable photo count. */
+  photo_count: number;
   cover_photo_id?: string | null;
   cover_file_type?: string | null;
   cover_cache_version?: number | null;
@@ -697,6 +713,18 @@ export const assignPhotosToPerson = async (personId: number, photoIds: string[])
 
 export const deletePerson = async (personId: number): Promise<void> => {
   await api.delete(`/admin/people/${personId}`, { headers: getAdminHeaders() });
+};
+
+/** Lets manual photo tagging directly improve future automatic clustering — see
+ *  learnFromManualTags()'s doc comment in apps/worker/src/faceClustering.ts. Safe to run
+ *  repeatedly (a no-op once no qualifying tag/face pairs remain). */
+export const learnFromManualTags = async (): Promise<{ personsUpdated: number; facesAssigned: number }> => {
+  const response = await api.post<{ success: boolean; personsUpdated: number; facesAssigned: number }>(
+    '/admin/people/learn-from-tags',
+    undefined,
+    { headers: getAdminHeaders() }
+  );
+  return { personsUpdated: response.data.personsUpdated, facesAssigned: response.data.facesAssigned };
 };
 
 /** Lightweight list of every NAMED person (regardless of face_count) — used to populate the

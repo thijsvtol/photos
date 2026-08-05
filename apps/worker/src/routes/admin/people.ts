@@ -1,7 +1,7 @@
 import { Hono } from 'hono';
 import type { Env, User } from '../../types';
 import { requireAdmin } from '../../auth';
-import { getClusterData, applyClusteringResults, countUnclusteredFaces, getLegacyFaceStats, resetLegacyFaces, mergeClusters, assignPhotosToPerson, resetAllClusters } from '../../faceClustering';
+import { getClusterData, applyClusteringResults, countUnclusteredFaces, getLegacyFaceStats, resetLegacyFaces, mergeClusters, assignPhotosToPerson, resetAllClusters, learnFromManualTags } from '../../faceClustering';
 import type { ClusterResult } from '../../faceClustering';
 
 type Variables = {
@@ -193,13 +193,28 @@ app.get('/', async (c) => {
     const includeSingles = c.req.query('includeSingles') === '1';
     const minFaces = includeSingles ? 1 : 2;
 
+    // `pc.face_count` is a running COUNT of photo_faces ROWS assigned to this person — used
+    // internally as the weight for centroid averaging (see mergeClusters()/assignPhotosToPerson()
+    // in faceClustering.ts), NOT a count of distinct photos. It can legitimately exceed the real
+    // photo count (the same person detected twice in one photo counts twice) and never includes
+    // manually-tagged photos (photo_person_tags) at all — both caused the admin-visible "X
+    // photos" figure here to disagree with what the person's detail page actually shows. computed
+    // `photo_count` below is the real, DISTINCT-photo figure (auto-detected ∪ manually tagged),
+    // matching exactly what GET /people/:personId returns, and is what the UI now displays.
     const people = await c.env.DB
       .prepare(`
         SELECT pc.id, pc.name, pc.face_count, pc.created_at, pc.updated_at,
                pc.cover_photo_id, pc.linked_user_email,
                u.name as linked_user_name,
                p.file_type as cover_file_type, p.cache_version as cover_cache_version,
-               e.slug as cover_event_slug
+               e.slug as cover_event_slug,
+               (
+                 SELECT COUNT(*) FROM (
+                   SELECT photo_id FROM photo_faces WHERE person_id = pc.id
+                   UNION
+                   SELECT photo_id FROM photo_person_tags WHERE person_id = pc.id
+                 )
+               ) as photo_count
         FROM person_clusters pc
         LEFT JOIN photos p ON pc.cover_photo_id = p.id
         LEFT JOIN events e ON p.event_id = e.id
@@ -219,7 +234,8 @@ app.get('/', async (c) => {
 
 /**
  * GET /people/:personId
- * Returns the person's details plus every photo containing their face.
+ * Returns the person's details plus every photo containing their face OR manual tag (see
+ * photo_count's doc comment above for why both sources must be combined).
  */
 app.get('/:personId', async (c) => {
   try {
@@ -245,13 +261,17 @@ app.get('/:personId', async (c) => {
       .prepare(`
         SELECT DISTINCT p.id, p.original_filename, p.file_type, p.capture_time, p.blur_placeholder,
                p.cache_version, p.width, p.height, e.slug as event_slug, e.name as event_name
-        FROM photo_faces f
-        JOIN photos p ON f.photo_id = p.id
+        FROM photos p
         JOIN events e ON p.event_id = e.id
-        WHERE f.person_id = ? AND p.deleted_at IS NULL
+        WHERE p.deleted_at IS NULL
+          AND p.id IN (
+            SELECT photo_id FROM photo_faces WHERE person_id = ?
+            UNION
+            SELECT photo_id FROM photo_person_tags WHERE person_id = ?
+          )
         ORDER BY p.capture_time DESC
       `)
-      .bind(personId)
+      .bind(personId, personId)
       .all();
 
     return c.json({ person, photos: photos.results || [] });
@@ -369,6 +389,24 @@ app.post('/merge', async (c) => {
   } catch (error) {
     console.error('Error merging people:', error);
     return c.json({ error: 'Failed to merge people' }, 500);
+  }
+});
+
+/**
+ * POST /people/learn-from-tags
+ * See learnFromManualTags()'s doc comment in faceClustering.ts — lets manual photo tagging
+ * (photo_person_tags) directly improve future automatic clustering by assigning any now-
+ * unambiguous still-unclustered detected face to the person a photo was manually tagged with,
+ * without requiring a full "Rebuild All (Deep)" pass. Safe to run repeatedly (a no-op once no
+ * qualifying tag/face pairs remain).
+ */
+app.post('/learn-from-tags', async (c) => {
+  try {
+    const result = await learnFromManualTags(c.env);
+    return c.json({ success: true, ...result });
+  } catch (error) {
+    console.error('Error learning from manual tags:', error);
+    return c.json({ error: 'Failed to learn from manual tags' }, 500);
   }
 });
 

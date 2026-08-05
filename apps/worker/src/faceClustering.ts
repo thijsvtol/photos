@@ -829,3 +829,60 @@ export async function removePersonFromPhoto(env: Env, photoId: string, personId:
   }
 }
 
+/**
+ * "Learn from manual tags" — lets the admin's own hard-won corrections (manually merging
+ * duplicate people, manually tagging photos face-detection missed) actually improve FUTURE
+ * automatic clustering, without needing a full "Rebuild All (Deep)" pass. Manual merges already
+ * do this automatically (mergeClusters() folds the merged centroids together). Manual
+ * photo_person_tags, however, are stored in a completely separate table (see migration 026's
+ * doc comment) that clustering never reads — a tagged photo whose face was simply never
+ * detected/clustered stays permanently "unlearned" unless something explicitly teaches it.
+ *
+ * This finds every (photo, person) manual tag where that SAME photo also has exactly one
+ * still-UNCLUSTERED detected face (photo_faces.person_id IS NULL) and — ONLY when there is
+ * exactly one manual tag AND exactly one unclustered face on that photo — treats that as an
+ * unambiguous "this face IS this person" signal and assigns it via the same drift-safe
+ * incorporateEmbedding() math as assignPhotosToPerson(). Deliberately conservative: a photo with
+ * multiple tagged people and/or multiple unclustered faces is skipped entirely rather than
+ * guessing which face belongs to which tag (a wrong guess would actively corrupt that person's
+ * centroid, worse than doing nothing).
+ */
+export async function learnFromManualTags(env: Env): Promise<{ personsUpdated: number; facesAssigned: number }> {
+  const { results: tagRows } = await env.DB
+    .prepare(`
+      SELECT t.photo_id, t.person_id
+      FROM photo_person_tags t
+      WHERE (SELECT COUNT(*) FROM photo_person_tags t2 WHERE t2.photo_id = t.photo_id) = 1
+        AND (SELECT COUNT(*) FROM photo_faces f WHERE f.photo_id = t.photo_id AND f.person_id IS NULL) = 1
+    `)
+    .all<{ photo_id: string; person_id: number }>();
+
+  const photoIdsByPerson = new Map<number, Set<string>>();
+  for (const row of tagRows || []) {
+    if (!photoIdsByPerson.has(row.person_id)) {
+      photoIdsByPerson.set(row.person_id, new Set());
+    }
+    photoIdsByPerson.get(row.person_id)!.add(row.photo_id);
+  }
+
+  let personsUpdated = 0;
+  let facesAssigned = 0;
+  for (const [personId, photoIdSet] of photoIdsByPerson) {
+    // assignPhotosToPerson() caps itself at MAX_MANUAL_ASSIGN_FACES per call (a safety limit
+    // meant for routine one-photo-at-a-time corrections, not bulk learning) — chunk so a
+    // person with many qualifying tagged photos still gets ALL of them learned, just across
+    // several calls instead of silently truncating at 40.
+    for (const photoIdChunk of chunk(Array.from(photoIdSet), MAX_MANUAL_ASSIGN_FACES)) {
+      const { assigned } = await assignPhotosToPerson(env, personId, photoIdChunk);
+      if (assigned > 0) {
+        facesAssigned += assigned;
+      }
+    }
+    if (photoIdSet.size > 0) {
+      personsUpdated++;
+    }
+  }
+
+  return { personsUpdated, facesAssigned };
+}
+
