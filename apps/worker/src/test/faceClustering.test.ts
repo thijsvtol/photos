@@ -28,6 +28,7 @@ class FakeFaceClusteringDb {
   faces: FaceRow[] = [];
   clusters: ClusterRow[] = [];
   photos: { id: string; faces_processed_at: string | null }[] = [];
+  personTags: { photo_id: string; person_id: number }[] = [];
   private nextClusterId = 1;
 
   prepare(query: string) {
@@ -215,6 +216,21 @@ class FakeFaceClusteringDb {
           for (const face of db.faces) {
             if (face.person_id !== null && clusterIds.includes(face.person_id)) {
               face.person_id = null;
+            }
+          }
+        }
+        if (query.includes('DELETE FROM photo_person_tags') && query.includes('WHERE person_id IN')) {
+          const [...args] = boundArgs as [...number[], number];
+          const targetPersonId = args[args.length - 1] as number;
+          const sourceIds = args.slice(0, -1) as number[];
+          const targetPhotoIds = new Set(db.personTags.filter((t) => t.person_id === targetPersonId).map((t) => t.photo_id));
+          db.personTags = db.personTags.filter((t) => !(sourceIds.includes(t.person_id) && targetPhotoIds.has(t.photo_id)));
+        }
+        if (query.includes('UPDATE photo_person_tags SET person_id = ? WHERE person_id IN')) {
+          const [newPersonId, ...oldPersonIds] = boundArgs as [number, ...number[]];
+          for (const tag of db.personTags) {
+            if (oldPersonIds.includes(tag.person_id)) {
+              tag.person_id = newPersonId;
             }
           }
         }
@@ -671,6 +687,69 @@ describe('mergeClusters', () => {
 
     expect(db.clusters[0].name).toBeNull();
     expect(db.clusters[0].linked_user_email).toBeNull();
+  });
+
+  it('succeeds (no unique-constraint conflict) when carrying over a source\'s linked_user_email onto an unlinked target — regression test for a real production 500', async () => {
+    // Confirmed production bug (2026-08-05): idx_person_clusters_linked_user_email is a UNIQUE
+    // index on linked_user_email. The target's row was previously updated to the source's email
+    // BEFORE the source row was deleted, so both rows briefly held the same non-null email,
+    // violating the unique index and failing the whole merge with a genuine D1
+    // SQLITE_CONSTRAINT error (surfaced to the admin as an opaque 500). Deleting the source
+    // first (before writing its email onto the target) avoids ever having two rows share a
+    // value at once.
+    const db = new FakeFaceClusteringDb();
+    db.clusters = [
+      { id: 1, centroid_embedding: embedding1024Of(0, 0, 0), face_count: 1, name: null, linked_user_email: null },
+      { id: 2, centroid_embedding: embedding1024Of(10, 0, 0), face_count: 1, name: 'Bob', linked_user_email: 'bob@example.com' },
+    ];
+    db.faces = [
+      { id: 1, photo_id: 'photo-a', embedding: embedding1024Of(0, 0, 0), person_id: 1 },
+      { id: 2, photo_id: 'photo-b', embedding: embedding1024Of(10, 0, 0), person_id: 2 },
+    ];
+
+    await expect(mergeClusters(makeEnv(db), 1, [2])).resolves.toEqual({ facesMoved: 2 });
+
+    expect(db.clusters).toHaveLength(1);
+    expect(db.clusters[0].linked_user_email).toBe('bob@example.com');
+  });
+
+  it('moves a source\'s manual photo tags to the target instead of silently losing them', async () => {
+    const db = new FakeFaceClusteringDb();
+    db.clusters = [
+      { id: 1, centroid_embedding: embedding1024Of(0, 0, 0), face_count: 1 },
+      { id: 2, centroid_embedding: embedding1024Of(10, 0, 0), face_count: 1 },
+    ];
+    db.faces = [
+      { id: 1, photo_id: 'photo-a', embedding: embedding1024Of(0, 0, 0), person_id: 1 },
+      { id: 2, photo_id: 'photo-b', embedding: embedding1024Of(10, 0, 0), person_id: 2 },
+    ];
+    db.personTags = [{ photo_id: 'photo-c', person_id: 2 }];
+
+    await mergeClusters(makeEnv(db), 1, [2]);
+
+    expect(db.personTags).toEqual([{ photo_id: 'photo-c', person_id: 1 }]);
+  });
+
+  it('drops a source\'s duplicate manual tag (same photo already tagged to the target) rather than erroring', async () => {
+    const db = new FakeFaceClusteringDb();
+    db.clusters = [
+      { id: 1, centroid_embedding: embedding1024Of(0, 0, 0), face_count: 1 },
+      { id: 2, centroid_embedding: embedding1024Of(10, 0, 0), face_count: 1 },
+    ];
+    db.faces = [
+      { id: 1, photo_id: 'photo-a', embedding: embedding1024Of(0, 0, 0), person_id: 1 },
+      { id: 2, photo_id: 'photo-b', embedding: embedding1024Of(10, 0, 0), person_id: 2 },
+    ];
+    // Same photo already tagged to BOTH the target and the source — merging must not attempt to
+    // create a second (photo-x, target) row (photo_person_tags' PK is (photo_id, person_id)).
+    db.personTags = [
+      { photo_id: 'photo-x', person_id: 1 },
+      { photo_id: 'photo-x', person_id: 2 },
+    ];
+
+    await mergeClusters(makeEnv(db), 1, [2]);
+
+    expect(db.personTags).toEqual([{ photo_id: 'photo-x', person_id: 1 }]);
   });
 });
 

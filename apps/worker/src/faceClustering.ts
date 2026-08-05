@@ -429,6 +429,36 @@ export async function mergeClusters(env: Env, targetPersonId: number, sourcePers
     .bind(targetPersonId, ...idsToMerge)
     .run();
 
+  // Move manual photo tags (photo_person_tags) from the sources to the target too — without
+  // this, a source cluster's manual tags would simply be lost (photo_person_tags.person_id has
+  // ON DELETE CASCADE, so deleting the source row below would silently delete its tag rows
+  // rather than reassigning them). First remove any (photo, source) tag whose photo ALREADY has
+  // a (photo, target) tag, since photo_person_tags's primary key is (photo_id, person_id) and
+  // the UPDATE below would otherwise try to create a duplicate for that photo.
+  await env.DB
+    .prepare(`
+      DELETE FROM photo_person_tags
+      WHERE person_id IN (${placeholders})
+        AND photo_id IN (SELECT photo_id FROM photo_person_tags WHERE person_id = ?)
+    `)
+    .bind(...idsToMerge, targetPersonId)
+    .run();
+  await env.DB
+    .prepare(`UPDATE photo_person_tags SET person_id = ? WHERE person_id IN (${placeholders})`)
+    .bind(targetPersonId, ...idsToMerge)
+    .run();
+
+  // Delete the source clusters BEFORE writing the resolved name/linked_user_email onto the
+  // target — idx_person_clusters_linked_user_email is a UNIQUE index on linked_user_email, and
+  // if a source cluster's email is being carried over to the target (see resolvedLinkedUserEmail
+  // above), updating the target FIRST would briefly leave TWO rows (target + not-yet-deleted
+  // source) with the SAME non-null linked_user_email, violating that unique constraint and
+  // failing the whole merge with a 500 — this bit production (confirmed via a genuine
+  // SQLITE_CONSTRAINT error from D1) shortly after the name/email carry-over behavior was
+  // added. Deleting the source row first removes the conflict before the target ever holds the
+  // duplicate value.
+  await env.DB.prepare(`DELETE FROM person_clusters WHERE id IN (${placeholders})`).bind(...idsToMerge).run();
+
   const countRow = await env.DB
     .prepare('SELECT COUNT(*) as count FROM photo_faces WHERE person_id = ?')
     .bind(targetPersonId)
@@ -438,8 +468,6 @@ export async function mergeClusters(env: Env, targetPersonId: number, sourcePers
     .prepare("UPDATE person_clusters SET centroid_embedding = ?, face_count = ?, name = ?, linked_user_email = ?, updated_at = datetime('now') WHERE id = ?")
     .bind(newCentroid.buffer, countRow?.count || 0, resolvedName, resolvedLinkedUserEmail, targetPersonId)
     .run();
-
-  await env.DB.prepare(`DELETE FROM person_clusters WHERE id IN (${placeholders})`).bind(...idsToMerge).run();
 
   return { facesMoved: countRow?.count || 0 };
 }
