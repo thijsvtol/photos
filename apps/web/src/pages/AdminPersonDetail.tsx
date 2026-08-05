@@ -1,8 +1,8 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
-import { Users, Pencil, Trash2, Check, X, UserPlus, GitMerge, MoveRight } from 'lucide-react';
+import { Users, Pencil, Trash2, Check, X, UserPlus, GitMerge, MoveRight, UserMinus } from 'lucide-react';
 import Navbar from '../components/Navbar';
-import { getPerson, updatePerson, deletePerson, getPreviewUrl, searchUsers, getPeople, mergePeople, assignPhotosToPerson } from '../api';
+import { getPerson, updatePerson, deletePerson, getPreviewUrl, searchUsers, getPeople, mergePeople, assignPhotosToPerson, removePersonFromPhoto } from '../api';
 import type { Person, PersonPhoto } from '../api';
 
 const AdminPersonDetail: React.FC = () => {
@@ -38,6 +38,14 @@ const AdminPersonDetail: React.FC = () => {
   const [moveSearch, setMoveSearch] = useState('');
   const [moveError, setMoveError] = useState<string | null>(null);
   const [moving, setMoving] = useState(false);
+
+  // "Remove" — unattaches this person from a single photo entirely (both an automatically-
+  // detected face assignment and any manual tag — see removePersonFromPhoto()'s doc comment in
+  // apps/worker/src/faceClustering.ts), for a photo that doesn't actually contain this person
+  // (a false-positive clustering/tagging mistake), as opposed to "Move to…" which reassigns it
+  // to a DIFFERENT person.
+  const [removingPhotoId, setRemovingPhotoId] = useState<string | null>(null);
+  const [removeError, setRemoveError] = useState<string | null>(null);
 
   useEffect(() => {
     if (personId) loadData();
@@ -207,6 +215,23 @@ const AdminPersonDetail: React.FC = () => {
       console.error(err);
     } finally {
       setMoving(false);
+    }
+  };
+
+  const handleRemovePhoto = async (photoId: string) => {
+    if (!person) return;
+    try {
+      setRemovingPhotoId(photoId);
+      setRemoveError(null);
+      await removePersonFromPhoto(photoId, person.id);
+      // Same as "Move to…" above — this photo no longer belongs to the current person, so drop
+      // it from the list locally instead of a full reload.
+      setPhotos((prev) => prev.filter((p) => p.id !== photoId));
+    } catch (err) {
+      setRemoveError('Failed to remove photo from this person');
+      console.error(err);
+    } finally {
+      setRemovingPhotoId(null);
     }
   };
 
@@ -399,6 +424,7 @@ const AdminPersonDetail: React.FC = () => {
         )}
 
         <p className="text-sm text-gray-500 mb-6">{photos.length} photo{photos.length === 1 ? '' : 's'}</p>
+        {removeError && <p className="text-sm text-red-600 mb-4">{removeError}</p>}
 
         {photos.length === 0 ? (
           <div className="text-center py-12 bg-white dark:bg-gray-800 rounded-lg shadow">
@@ -430,6 +456,14 @@ const AdminPersonDetail: React.FC = () => {
                     className="px-2 py-1 bg-gray-700 text-white rounded text-xs flex items-center gap-1"
                   >
                     <MoveRight className="w-3 h-3" /> Move to…
+                  </button>
+                  <button
+                    onClick={() => handleRemovePhoto(photo.id)}
+                    disabled={removingPhotoId === photo.id}
+                    title="Remove this photo from this person (not the same person)"
+                    className="px-2 py-1 bg-red-600 text-white rounded text-xs flex items-center gap-1 disabled:opacity-50"
+                  >
+                    <UserMinus className="w-3 h-3" /> {removingPhotoId === photo.id ? 'Removing…' : 'Remove'}
                   </button>
                 </div>
                 {movingPhotoId === photo.id && (
