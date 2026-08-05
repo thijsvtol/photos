@@ -72,75 +72,141 @@ function OverscanDebugOverlay({ stage }: { stage: { w: number; h: number } }) {
 
   return (
     <div
-      className="z-[9999] pointer-events-none"
-      style={{ position: 'fixed', left: 0, top: 0, width: stage.w, height: stage.h }}
+      style={{
+        position: 'fixed',
+        left: 0,
+        top: 0,
+        width: stage.w,
+        height: stage.h,
+        zIndex: 9999,
+        pointerEvents: 'none',
+      }}
     >
       {OVERSCAN_GUIDES.map(({ pct, color }) => (
         <div
           key={pct}
-          className="absolute flex items-start justify-start"
-          style={{ inset: `${pct}%`, border: `2px solid ${color}` }}
+          style={{
+            position: 'absolute',
+            // Individual offsets rather than the `inset` shorthand, which
+            // needs a newer engine than the Cast receiver runtime provides.
+            top: `${pct}%`,
+            left: `${pct}%`,
+            right: `${pct}%`,
+            bottom: `${pct}%`,
+            border: `2px solid ${color}`,
+          }}
         >
           <span
-            className="text-base font-mono font-bold px-1.5 py-0.5"
-            style={{ color: '#000', backgroundColor: color }}
+            style={{
+              position: 'absolute',
+              top: 0,
+              left: 0,
+              color: '#000',
+              backgroundColor: color,
+              font: 'bold 16px monospace',
+              padding: '2px 6px',
+            }}
           >
             {pct}%
           </span>
         </div>
       ))}
-      {/* Corner markers. If the TV only shows one of these, the visible area
-          is an off-centre crop of a larger layout — which tells us far more
-          than the ring numbers do. */}
-      {CORNER_MARKERS.map(({ label, cls }) => (
+      {CORNER_MARKERS.map(({ label, pos }) => (
         <div
           key={label}
-          className={`absolute ${cls} bg-white text-black font-mono font-bold text-3xl px-3 py-1`}
+          style={{
+            position: 'absolute',
+            ...pos,
+            backgroundColor: '#fff',
+            color: '#000',
+            font: 'bold 30px monospace',
+            padding: '4px 12px',
+          }}
         >
           {label}
         </div>
       ))}
-      {/* The readout is tiled across nine positions rather than centred once,
-          because on a mismatched viewport the centre of the page can fall
-          entirely outside what the TV displays — as it did on the first
-          attempt, where nothing at all was visible. At least one copy should
-          land in view wherever the crop happens to sit. */}
-      {READOUT_POSITIONS.map((cls) => (
+      {READOUT_POSITIONS.map((pos, i) => (
         <div
-          key={cls}
-          className={`absolute ${cls} bg-black/85 text-white font-mono text-base leading-snug px-4 py-3 rounded-lg`}
+          key={i}
+          style={{
+            position: 'absolute',
+            ...pos,
+            backgroundColor: 'rgba(0,0,0,0.85)',
+            color: '#fff',
+            font: '16px/1.35 monospace',
+            padding: '12px 16px',
+            borderRadius: 8,
+            whiteSpace: 'pre',
+          }}
         >
-          <div>inner&nbsp;&nbsp;{metrics.innerW} x {metrics.innerH}</div>
-          <div>client&nbsp;{metrics.clientW} x {metrics.clientH}</div>
-          <div>visual {metrics.visualW} x {metrics.visualH}</div>
-          <div>vscale {metrics.visualScale}</div>
-          <div>voff&nbsp;&nbsp;&nbsp;{metrics.visualOffX} , {metrics.visualOffY}</div>
-          <div>screen {metrics.screenW} x {metrics.screenH}</div>
-          <div>dpr&nbsp;&nbsp;&nbsp;&nbsp;{metrics.dpr}</div>
+          {`inner  ${metrics.innerW} x ${metrics.innerH}\n`}
+          {`client ${metrics.clientW} x ${metrics.clientH}\n`}
+          {`visual ${metrics.visualW} x ${metrics.visualH}\n`}
+          {`vscale ${metrics.visualScale}\n`}
+          {`voff   ${metrics.visualOffX} , ${metrics.visualOffY}\n`}
+          {`screen ${metrics.screenW} x ${metrics.screenH}\n`}
+          {`dpr    ${metrics.dpr}`}
         </div>
       ))}
     </div>
   );
 }
 
-const CORNER_MARKERS = [
-  { label: 'TL', cls: 'top-0 left-0' },
-  { label: 'TR', cls: 'top-0 right-0' },
-  { label: 'BL', cls: 'bottom-0 left-0' },
-  { label: 'BR', cls: 'bottom-0 right-0' },
+const CORNER_MARKERS: Array<{ label: string; pos: React.CSSProperties }> = [
+  { label: 'TL', pos: { top: 0, left: 0 } },
+  { label: 'TR', pos: { top: 0, right: 0 } },
+  { label: 'BL', pos: { bottom: 0, left: 0 } },
+  { label: 'BR', pos: { bottom: 0, right: 0 } },
 ];
 
-const READOUT_POSITIONS = [
-  'top-[6%] left-[6%]',
-  'top-[6%] left-1/2 -translate-x-1/2',
-  'top-[6%] right-[6%]',
-  'top-1/2 left-[6%] -translate-y-1/2',
-  'top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2',
-  'top-1/2 right-[6%] -translate-y-1/2',
-  'bottom-[6%] left-[6%]',
-  'bottom-[6%] left-1/2 -translate-x-1/2',
-  'bottom-[6%] right-[6%]',
+const READOUT_POSITIONS: React.CSSProperties[] = [
+  { top: '6%', left: '6%' },
+  { top: '6%', right: '6%' },
+  { top: '42%', left: '38%' },
+  { bottom: '6%', left: '6%' },
+  { bottom: '6%', right: '6%' },
 ];
+
+/**
+ * This page styles itself with inline styles and the plain stylesheet below,
+ * deliberately using none of the app's Tailwind utility classes.
+ *
+ * Tailwind v4 emits every utility inside `@layer`, and colours as `oklch()`.
+ * The Google TV Cast receiver runs an engine old enough to support neither —
+ * and a browser that doesn't know an at-rule discards the at-rule *and its
+ * entire contents*, so the whole utility set silently evaporated there while
+ * inline styles kept working. That's what produced the original bug report:
+ * with `max-w-full max-h-full` doing nothing, photos rendered at their full
+ * intrinsic resolution (several thousand pixels), which expanded the document
+ * far past the display and left the TV showing a magnified top-left corner.
+ * The Nest Hub, on a newer engine, was unaffected throughout.
+ *
+ * So: no utility classes on this route. Keep it that way — it also means the
+ * receiver still renders correctly if the app's CSS chunk fails to load at
+ * all, which on a TV nobody can inspect is worth a lot.
+ */
+const RECEIVER_KEYFRAMES = `
+@keyframes castFadeIn { from { opacity: 0 } to { opacity: 1 } }
+@keyframes castSpin { to { transform: rotate(360deg) } }
+`;
+
+function ReceiverStyles() {
+  return <style>{RECEIVER_KEYFRAMES}</style>;
+}
+
+/** Centre a child without relying on flexbox gap/utility classes. */
+const CENTRED: React.CSSProperties = {
+  position: 'absolute',
+  left: 0,
+  top: 0,
+  width: '100%',
+  height: '100%',
+  display: 'flex',
+  alignItems: 'center',
+  justifyContent: 'center',
+  textAlign: 'center',
+};
 
 function readMetrics() {
   const vv = window.visualViewport;
@@ -438,8 +504,6 @@ export default function CastReceiver() {
     };
   }, [displayedItem?.url, displayedItem?.type]);
 
-  // Explicit pixel dimensions rather than `inset-0`, and `overflow-hidden` so
-  // nothing inside can ever paint outside the stage — see useStageSize.
   const stageStyle: React.CSSProperties = {
     position: 'fixed',
     left: 0,
@@ -447,39 +511,63 @@ export default function CastReceiver() {
     width: stage.w,
     height: stage.h,
     overflow: 'hidden',
+    backgroundColor: '#000',
   };
+  // Absolutely positioned and sized to the whole stage, with object-fit doing
+  // the letterboxing. Not `max-width`/`max-height` on an auto-sized element:
+  // that leaves the box dependent on the image's intrinsic size, which is
+  // what let a multi-thousand-pixel photo expand the document in the first
+  // place. A fixed box plus object-fit can't do that whatever the source is.
   const mediaStyle: React.CSSProperties = {
-    maxWidth: stage.w,
-    maxHeight: stage.h,
+    position: 'absolute',
+    left: 0,
+    top: 0,
+    width: stage.w,
+    height: stage.h,
+    objectFit: 'contain',
+    zIndex: 1,
+    animation: 'castFadeIn 0.3s ease-in-out',
   };
 
   if (!displayedItem) {
     return (
-      <div style={stageStyle} className="bg-black flex items-center justify-center">
-        <p className="text-white/60 text-2xl font-light">Ready to cast</p>
+      <div style={stageStyle}>
+        <ReceiverStyles />
+        <div style={{ ...CENTRED, color: 'rgba(255,255,255,0.6)', font: '300 24px sans-serif' }}>
+          Ready to cast
+        </div>
         {debug && <OverscanDebugOverlay stage={stage} />}
       </div>
     );
   }
 
   return (
-    <div style={stageStyle} className="bg-black flex items-center justify-center">
-      {/* Blurred backdrop — fills the letterbox bars left by object-contain
-          with a scaled, blurred copy of the same photo, so a 3:2 photo on a
-          16:9 TV doesn't read as half-empty. Deliberately photos only: a
-          second <video> element would double the decode load on the
-          Chromecast's hardware pipeline for a purely cosmetic effect.
-          scale-110 hides the transparent edges the blur would otherwise
-          feather in. The foreground below needs `relative` so it paints on
-          top of this positioned element. */}
+    <div style={stageStyle}>
+      <ReceiverStyles />
+      {/* Blurred backdrop — fills the letterbox bars left by object-fit:
+          contain with a scaled, blurred copy of the same photo, so a 3:2
+          photo on a 16:9 TV doesn't read as half-empty. Deliberately photos
+          only: a second <video> element would double the decode load on the
+          Chromecast's hardware pipeline for a purely cosmetic effect. The
+          scale hides the transparent edges the blur would otherwise feather
+          in. zIndex keeps it behind the foreground regardless of DOM order. */}
       {displayedItem.type === 'photo' && (
         <img
           key={`backdrop-${displayedItem.url}`}
           src={displayedItem.url}
           alt=""
           aria-hidden="true"
-          style={{ position: 'absolute', left: 0, top: 0, width: stage.w, height: stage.h }}
-          className="object-cover scale-110 blur-2xl brightness-50"
+          style={{
+            position: 'absolute',
+            left: 0,
+            top: 0,
+            width: stage.w,
+            height: stage.h,
+            objectFit: 'cover',
+            transform: 'scale(1.1)',
+            filter: 'blur(40px) brightness(0.5)',
+            zIndex: 0,
+          }}
         />
       )}
       {displayedItem.type === 'video' ? (
@@ -490,7 +578,6 @@ export default function CastReceiver() {
           controls={false}
           preload="auto"
           style={mediaStyle}
-          className="relative object-contain animate-fadeIn"
           onPlaying={() => {
             videoStartedRef.current = true;
             if (videoStallTimerRef.current) {
@@ -528,26 +615,57 @@ export default function CastReceiver() {
           src={displayedItem.url}
           alt={displayedItem.title || ''}
           style={mediaStyle}
-          className="relative object-contain animate-fadeIn"
         />
       )}
       {/* Buffering spinner — shown while a (usually large) video hasn't
           rendered its first frame yet, instead of a bare black screen. */}
       {displayedItem.type === 'video' && videoBuffering && !videoError && (
-        <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-          <div className="w-16 h-16 border-4 border-white/30 border-t-white rounded-full animate-spin" />
+        <div style={{ ...CENTRED, zIndex: 2, pointerEvents: 'none' }}>
+          <div
+            style={{
+              width: 64,
+              height: 64,
+              border: '4px solid rgba(255,255,255,0.3)',
+              borderTopColor: '#fff',
+              borderRadius: '50%',
+              animation: 'castSpin 1s linear infinite',
+            }}
+          />
         </div>
       )}
       {displayedItem.type === 'video' && videoError && (
-        <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 text-white/80">
-          <p className="text-lg font-light">This video couldn't be loaded</p>
+        <div
+          style={{
+            ...CENTRED,
+            zIndex: 2,
+            flexDirection: 'column',
+            color: 'rgba(255,255,255,0.8)',
+          }}
+        >
+          <p style={{ font: '300 18px sans-serif', margin: 0 }}>
+            This video couldn't be loaded
+          </p>
           {videoErrorDetail && (
-            <p className="text-xs text-white/40 font-mono">{videoErrorDetail}</p>
+            <p style={{ font: '12px monospace', color: 'rgba(255,255,255,0.4)', marginTop: 12 }}>
+              {videoErrorDetail}
+            </p>
           )}
         </div>
       )}
       {displayedItem.title && (
-        <div className="absolute bottom-8 left-0 right-0 text-center text-white/80 text-lg font-light drop-shadow">
+        <div
+          style={{
+            position: 'absolute',
+            bottom: 32,
+            left: 0,
+            right: 0,
+            zIndex: 2,
+            textAlign: 'center',
+            color: 'rgba(255,255,255,0.8)',
+            font: '300 18px sans-serif',
+            textShadow: '0 1px 3px rgba(0,0,0,0.6)',
+          }}
+        >
           {displayedItem.title}
         </div>
       )}
