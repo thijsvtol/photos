@@ -84,7 +84,7 @@ const JustifiedGridInner: React.FC<JustifiedGridProps> = ({
       // looming much larger.
       rowConstraints={{ minPhotos: 1, maxPhotos: 6, singleRowMaxHeight: targetRowHeight * 1.2 }}
       render={{
-        wrapper: ({ children, style }, { photo: albumPhoto }) => {
+        wrapper: ({ children, style, className }, { photo: albumPhoto }) => {
           const photo = (albumPhoto as AlbumPhoto).photo;
           return (
             <PhotoOverlay
@@ -92,6 +92,7 @@ const JustifiedGridInner: React.FC<JustifiedGridProps> = ({
               photo={photo}
               slug={slug}
               style={style}
+              wrapperClassName={className}
               isSelected={selectedPhotos.has(photo.id)}
               isFavorited={userFavorites.has(photo.id)}
               forceControlsVisible={forceControlsVisible}
@@ -142,6 +143,15 @@ interface PhotoOverlayProps {
   photo: Photo;
   slug: string;
   style?: React.CSSProperties;
+  /** The `className` react-photo-album computes for this wrapper (e.g.
+   *  `react-photo-album--photo`) — MUST be applied to our custom wrapper div, since the
+   *  library's actual per-photo width/padding/spacing come from CSS rules keyed on that class
+   *  reading CSS custom properties set in `style` (see node_modules/react-photo-album/dist/
+   *  styles/rows.css), not from any raw pixel value in `style` itself. Dropping this class
+   *  (as an earlier version of this component did) left every photo with no computed width at
+   *  all, causing them to render with no visible gap between them regardless of the `spacing`
+   *  prop passed to <RowsPhotoAlbum>. */
+  wrapperClassName?: string;
   isSelected: boolean;
   isFavorited: boolean;
   forceControlsVisible: boolean;
@@ -159,6 +169,7 @@ const PhotoOverlayInner: React.FC<PhotoOverlayProps> = ({
   photo,
   slug,
   style,
+  wrapperClassName,
   isSelected,
   isFavorited,
   forceControlsVisible,
@@ -228,7 +239,7 @@ const PhotoOverlayInner: React.FC<PhotoOverlayProps> = ({
     <div
       data-photo-card="true"
       data-photo-id={photo.id}
-      className="relative group overflow-hidden rounded-lg md:rounded-xl ring-1 ring-black/5 dark:ring-white/5"
+      className={`relative group overflow-hidden rounded-lg md:rounded-xl ring-1 ring-black/5 dark:ring-white/5 ${wrapperClassName || ''}`}
       style={style}
     >
       <Link

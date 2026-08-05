@@ -706,6 +706,33 @@ app.get('/api/memories', optionalAuth, async (c) => {
 });
 
 /**
+ * GET /api/people/named
+ * Lightweight list of every NAMED person (id + name only) for the public Search page's people
+ * filter — deliberately public/unauthenticated (unlike /admin/people, which is admin-gated and
+ * returns much more, e.g. face_count/linked accounts/cover photos): this app's only use of a
+ * person's name elsewhere is as admin-only detail-page/edit data, but the filter itself is a
+ * normal visitor-facing feature (like filtering by tag or city), so exposing just the name list
+ * (not who they're linked to, not their face data) here is intentional and safe for anyone to
+ * see and use, matching the request that this filter "was meant for everyone".
+ */
+app.get('/api/people/named', async (c) => {
+  try {
+    const people = await c.env.DB
+      .prepare(`
+        SELECT id, name
+        FROM person_clusters
+        WHERE name IS NOT NULL
+        ORDER BY name COLLATE NOCASE
+      `)
+      .all<{ id: number; name: string }>();
+    return c.json({ people: people.results || [] });
+  } catch (error) {
+    console.error('Error fetching named people:', error);
+    return c.json({ error: 'Failed to fetch named people' }, 500);
+  }
+});
+
+/**
  * GET /api/search?q=...&people=1,2,3
  * Unified search across every event the caller can access: matches
  * filename/city (FTS5, instant, always available) plus AI-generated

@@ -3,12 +3,10 @@ import { Link, useSearchParams } from 'react-router-dom';
 import { Search, Users, X, Check } from 'lucide-react';
 import Navbar from '../components/Navbar';
 import Footer from '../components/Footer';
-import { searchPhotos, getPreviewUrl, getNamedPeople } from '../api';
-import type { SearchResultPhoto, NamedPerson } from '../api';
-import { useAuth } from '../contexts/AuthContext';
+import { searchPhotos, getPreviewUrl, getPublicNamedPeople } from '../api';
+import type { SearchResultPhoto, PublicNamedPerson } from '../api';
 
 const SearchPage: React.FC = () => {
-  const { user } = useAuth();
   const [searchParams, setSearchParams] = useSearchParams();
   const initialQuery = searchParams.get('q') || '';
   const initialPeople = (searchParams.get('people') || '')
@@ -20,23 +18,19 @@ const SearchPage: React.FC = () => {
   const [loading, setLoading] = useState(false);
   const [searched, setSearched] = useState(false);
 
-  // People filter — lets an admin/editor find photos containing specific people (AND, not OR,
-  // when multiple are picked: "show me photos of the two of them together" is what picking two
-  // people almost always means). See searchPhotos()'s doc comment for the API shape.
-  const [namedPeople, setNamedPeople] = useState<NamedPerson[]>([]);
+  // People filter — lets anyone find photos containing specific people (AND, not OR, when
+  // multiple are picked: "show me photos of the two of them together" is what picking two
+  // people almost always means). See searchPhotos()'s doc comment for the API shape, and
+  // getPublicNamedPeople()'s doc comment for why this list is public (name-only, no face
+  // data/linked accounts), unlike the admin "Tag people" picker's fuller getNamedPeople().
+  const [namedPeople, setNamedPeople] = useState<PublicNamedPerson[]>([]);
   const [selectedPersonIds, setSelectedPersonIds] = useState<Set<number>>(new Set(initialPeople));
   const [showPeoplePicker, setShowPeoplePicker] = useState(false);
   const [peopleSearchQuery, setPeopleSearchQuery] = useState('');
 
   useEffect(() => {
-    // Named people (full names) are admin-only data elsewhere in this app (see the "Full name
-    // is admin-only" note on the person detail page) — only offer this filter to admins, rather
-    // than exposing everyone's full name to any visitor via a public search filter.
-    if (!user?.isAdmin) return;
-    getNamedPeople().catch((err) => console.error('Failed to load people list', err)).then((people) => {
-      if (people) setNamedPeople(people);
-    });
-  }, [user?.isAdmin]);
+    getPublicNamedPeople().then(setNamedPeople).catch((err) => console.error('Failed to load people list', err));
+  }, []);
 
   useEffect(() => {
     if (initialQuery || initialPeople.length > 0) {
@@ -110,9 +104,7 @@ const SearchPage: React.FC = () => {
         </form>
 
         <div className="mb-8">
-          {user?.isAdmin && (
-            <>
-              <div className="flex flex-wrap items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
                 {selectedPeople.map((p) => (
                   <span
                     key={p.id}
@@ -134,9 +126,9 @@ const SearchPage: React.FC = () => {
                 >
                   <Users className="w-4 h-4" /> {selectedPeople.length > 0 ? 'Edit people filter' : 'Filter by people'}
                 </button>
-              </div>
+          </div>
 
-              {showPeoplePicker && (
+          {showPeoplePicker && (
                 <div className="mt-2 max-w-sm bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow p-3">
                   <p className="text-xs text-gray-500 dark:text-gray-400 mb-2">
                     Selecting multiple people only shows photos where they're all together.
@@ -175,11 +167,8 @@ const SearchPage: React.FC = () => {
                     )}
                   </div>
                 </div>
-              )}
-            </>
           )}
         </div>
-
 
         {loading ? (
           <div className="text-center py-12">
@@ -188,9 +177,23 @@ const SearchPage: React.FC = () => {
         ) : searched && results.length === 0 ? (
           <div className="text-center py-12">
             <p className="text-gray-600 dark:text-gray-400">
-              No photos found for "{query}". Search covers filenames, locations, and
-              AI-generated descriptions (descriptions are added gradually in the background,
-              so very recently uploaded photos may not be searchable by content yet).
+              {query.trim() ? (
+                <>
+                  No photos found for "{query}"
+                  {selectedPeople.length > 0 && <> with {selectedPeople.map((p) => p.name).join(' and ')}</>}. Search
+                  covers filenames, locations, and AI-generated descriptions (descriptions are added
+                  gradually in the background, so very recently uploaded photos may not be searchable
+                  by content yet).
+                </>
+              ) : selectedPeople.length > 0 ? (
+                <>
+                  No photos found with {selectedPeople.map((p) => p.name).join(' and ')}
+                  {selectedPeople.length > 1 ? ' together' : ''}. This only searches photos in
+                  events you have access to.
+                </>
+              ) : (
+                'No photos found.'
+              )}
             </p>
           </div>
         ) : results.length > 0 ? (

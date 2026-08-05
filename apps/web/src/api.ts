@@ -743,6 +743,20 @@ export const getNamedPeople = async (): Promise<NamedPerson[]> => {
   return response.data.people;
 };
 
+/** Public (unauthenticated) lightweight list of every NAMED person, id + name only — used by
+ *  the Search page's people filter, which (unlike the "Tag people" picker above) is a normal
+ *  visitor-facing feature meant for everyone, not just admins — see the worker route's doc
+ *  comment in routes/public.ts for why exposing just names here (not face data/linked
+ *  accounts/face_count) is intentional and safe. */
+export interface PublicNamedPerson {
+  id: number;
+  name: string;
+}
+export const getPublicNamedPeople = async (): Promise<PublicNamedPerson[]> => {
+  const response = await api.get<{ people: PublicNamedPerson[] }>('/people/named');
+  return response.data.people;
+};
+
 /** Replaces the full set of manually-tagged people on a photo (in addition to whichever people
  *  automatic face detection already found — see setManualPhotoPersonTags()'s doc comment in
  *  apps/worker/src/faceClustering.ts). Returns the photo's complete up-to-date people list
