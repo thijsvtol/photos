@@ -61,7 +61,7 @@ dependencies {
     // Google Cast SDK (native sender) — backs plugins/CastPlugin.java. The
     // `mediarouter` artifact provides the standard "Cast to" device chooser
     // dialog used by CastPlugin.startDiscovery().
-    implementation "com.google.android.gms:play-services-cast-framework:21.4.0"
+    implementation "com.google.android.gms:play-services-cast-framework:22.3.1"
     implementation "androidx.mediarouter:mediarouter:1.7.0"
 }
 
