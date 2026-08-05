@@ -375,18 +375,26 @@ export async function mergeClusters(env: Env, targetPersonId: number, sourcePers
   }
 
   const target = await env.DB
-    .prepare('SELECT centroid_embedding, face_count FROM person_clusters WHERE id = ?')
+    .prepare('SELECT centroid_embedding, face_count, name, linked_user_email FROM person_clusters WHERE id = ?')
     .bind(targetPersonId)
-    .first<{ centroid_embedding: ArrayBuffer; face_count: number }>();
+    .first<{ centroid_embedding: ArrayBuffer; face_count: number; name: string | null; linked_user_email: string | null }>();
   if (!target) {
     throw new Error(`Person ${targetPersonId} not found`);
   }
 
   const placeholders = idsToMerge.map(() => '?').join(',');
   const { results: sourceRows } = await env.DB
-    .prepare(`SELECT id, centroid_embedding, face_count FROM person_clusters WHERE id IN (${placeholders})`)
+    .prepare(`SELECT id, centroid_embedding, face_count, name, linked_user_email FROM person_clusters WHERE id IN (${placeholders})`)
     .bind(...idsToMerge)
-    .all<{ id: number; centroid_embedding: ArrayBuffer; face_count: number }>();
+    .all<{ id: number; centroid_embedding: ArrayBuffer; face_count: number; name: string | null; linked_user_email: string | null }>();
+
+  // Which surviving name/linked account to keep after the merge: prefer the target's own value
+  // if it already has one (e.g. merging a stray "Unnamed" duplicate into an already-named
+  // person shouldn't blank it out), otherwise fall back to the first source that has one set —
+  // this is what lets an admin merge an "Unnamed" group into a named one (or vice versa)
+  // without having to separately re-type the name/email afterward.
+  const resolvedName = target.name ?? sourceRows?.find((s) => s.name)?.name ?? null;
+  const resolvedLinkedUserEmail = target.linked_user_email ?? sourceRows?.find((s) => s.linked_user_email)?.linked_user_email ?? null;
 
   const targetCentroid = blobToFloat32Array(target.centroid_embedding);
   const weightedSum = new Float64Array(targetCentroid.length);
@@ -427,8 +435,8 @@ export async function mergeClusters(env: Env, targetPersonId: number, sourcePers
     .first<{ count: number }>();
 
   await env.DB
-    .prepare("UPDATE person_clusters SET centroid_embedding = ?, face_count = ?, updated_at = datetime('now') WHERE id = ?")
-    .bind(newCentroid.buffer, countRow?.count || 0, targetPersonId)
+    .prepare("UPDATE person_clusters SET centroid_embedding = ?, face_count = ?, name = ?, linked_user_email = ?, updated_at = datetime('now') WHERE id = ?")
+    .bind(newCentroid.buffer, countRow?.count || 0, resolvedName, resolvedLinkedUserEmail, targetPersonId)
     .run();
 
   await env.DB.prepare(`DELETE FROM person_clusters WHERE id IN (${placeholders})`).bind(...idsToMerge).run();
@@ -648,3 +656,56 @@ export async function resetLegacyFaces(env: Env): Promise<{ facesReset: number; 
 
   return { facesReset: legacyPhotoIds.length, clustersRemoved: legacyClusterIds.length };
 }
+
+/** A single named person tagged on a photo, for display (e.g. PhotoDetail's Info sheet). */
+export interface PhotoPerson {
+  id: number;
+  name: string;
+}
+
+/**
+ * Returns every NAMED person appearing on a photo, combining both sources of "this person is in
+ * this photo": automatically detected faces (photo_faces.person_id) AND manual admin tags
+ * (photo_person_tags — see migration 026's doc comment for why manual tags are a separate table
+ * rather than fake photo_faces rows). Deliberately excludes still-unnamed clusters (an
+ * un-reviewed automatic grouping isn't a meaningful "who is this" answer for a viewer to see),
+ * and de-duplicates a person appearing via both an automatic face AND a manual tag on the same
+ * photo into a single entry.
+ */
+export async function getPhotoPeople(env: Env, photoId: string): Promise<PhotoPerson[]> {
+  const { results } = await env.DB
+    .prepare(`
+      SELECT DISTINCT pc.id, pc.name
+      FROM person_clusters pc
+      WHERE pc.name IS NOT NULL
+        AND pc.id IN (
+          SELECT person_id FROM photo_faces WHERE photo_id = ? AND person_id IS NOT NULL
+          UNION
+          SELECT person_id FROM photo_person_tags WHERE photo_id = ?
+        )
+      ORDER BY pc.name COLLATE NOCASE
+    `)
+    .bind(photoId, photoId)
+    .all<PhotoPerson>();
+  return results || [];
+}
+
+/**
+ * Replaces the full set of MANUALLY tagged people on a photo (photo_person_tags only — never
+ * touches photo_faces/automatic detections). Used by the admin "Tag people" editor on
+ * PhotoDetail, which always submits the complete desired set rather than one-at-a-time add/
+ * remove calls, so a plain delete-then-insert is simplest and avoids any drift between the UI's
+ * local state and the stored rows.
+ */
+export async function setManualPhotoPersonTags(env: Env, photoId: string, personIds: number[]): Promise<void> {
+  await env.DB.prepare('DELETE FROM photo_person_tags WHERE photo_id = ?').bind(photoId).run();
+
+  const uniqueIds = [...new Set(personIds)];
+  for (const id of uniqueIds) {
+    await env.DB
+      .prepare('INSERT INTO photo_person_tags (photo_id, person_id) VALUES (?, ?)')
+      .bind(photoId, id)
+      .run();
+  }
+}
+

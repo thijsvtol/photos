@@ -1,12 +1,13 @@
 import React, { useEffect, useState, useRef, useCallback, lazy, Suspense } from 'react';
 import { useParams, Link, useNavigate, useLocation } from 'react-router-dom';
-import { Maximize, Minimize, Share2, X, Heart, Play, Pause, Pencil, MoreVertical, Star, Trash2, ArrowLeft, Download, Info, Volume2, VolumeX } from 'lucide-react';
+import { Maximize, Minimize, Share2, X, Heart, Play, Pause, Pencil, MoreVertical, Star, Trash2, ArrowLeft, Download, Info, Volume2, VolumeX, Users, Check } from 'lucide-react';
 
 import SEO from '../components/SEO';
 import EditorErrorBoundary from '../components/EditorErrorBoundary';
 const ImageEditorModal = lazy(() => import('../components/ImageEditorModal'));
 const VideoEditorModal = lazy(() => import('../components/VideoEditorModal'));
-import { getEvent, getPhoto, getPhotos, loginToEvent, getPreviewUrl, getOriginalUrl, getCastPreviewUrl, downloadOriginal, downloadSmall, downloadInstagram, replacePhoto, toggleFavorite as toggleFavoriteAPI, getUserFavoriteIds, setPhotoFeatured, deletePhoto, getCollaborators } from '../api';
+import { getEvent, getPhoto, getPhotos, loginToEvent, getPreviewUrl, getOriginalUrl, getCastPreviewUrl, downloadOriginal, downloadSmall, downloadInstagram, replacePhoto, toggleFavorite as toggleFavoriteAPI, getUserFavoriteIds, setPhotoFeatured, deletePhoto, getCollaborators, getNamedPeople, tagPeopleOnPhoto } from '../api';
+import type { NamedPerson } from '../api';
 import { createPreview } from '../imageUtils';
 import type { Event, Photo } from '../types';
 import { useAuth } from '../contexts/AuthContext';
@@ -52,6 +53,15 @@ const PhotoDetail: React.FC = () => {
   const [showMobileMenu, setShowMobileMenu] = useState(false);
   const [collaboratorRole, setCollaboratorRole] = useState<'viewer' | 'uploader' | 'editor' | 'admin' | null>(null);
   const [cacheBuster, setCacheBuster] = useState<number>(0);
+  // "Tag people" editor state — lets an admin/editor correct/add who is in a photo (multiple
+  // people per photo are supported, since a photo can genuinely contain several people, and
+  // automatic face detection sometimes misses someone entirely, e.g. turned away or occluded).
+  const [showPeopleEditor, setShowPeopleEditor] = useState(false);
+  const [namedPeople, setNamedPeople] = useState<NamedPerson[]>([]);
+  const [namedPeopleLoading, setNamedPeopleLoading] = useState(false);
+  const [selectedPersonIds, setSelectedPersonIds] = useState<Set<number>>(new Set());
+  const [savingPeopleTags, setSavingPeopleTags] = useState(false);
+  const [peopleSearchQuery, setPeopleSearchQuery] = useState('');
   // Custom video player state
   const videoRef = useRef<HTMLVideoElement>(null);
   const [videoPaused, setVideoPaused] = useState(false);
@@ -1283,6 +1293,50 @@ const PhotoDetail: React.FC = () => {
     trackPhotoDownload(photo.id, slug, false, 1);
   };
 
+  const handleOpenPeopleEditor = async () => {
+    if (!photo) return;
+    setSelectedPersonIds(new Set((photo.people || []).map((p) => p.id)));
+    setPeopleSearchQuery('');
+    setShowPeopleEditor(true);
+    setNamedPeopleLoading(true);
+    try {
+      const people = await getNamedPeople();
+      setNamedPeople(people);
+    } catch (err) {
+      console.error('Failed to load people list', err);
+      toast.showError('Failed to load people list');
+    } finally {
+      setNamedPeopleLoading(false);
+    }
+  };
+
+  const handleTogglePersonSelection = (personId: number) => {
+    setSelectedPersonIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(personId)) {
+        next.delete(personId);
+      } else {
+        next.add(personId);
+      }
+      return next;
+    });
+  };
+
+  const handleSavePeopleTags = async () => {
+    if (!photo) return;
+    setSavingPeopleTags(true);
+    try {
+      const updatedPeople = await tagPeopleOnPhoto(photo.id, Array.from(selectedPersonIds));
+      setPhoto((prev) => (prev ? { ...prev, people: updatedPeople } : prev));
+      setShowPeopleEditor(false);
+    } catch (err) {
+      console.error('Failed to save people tags', err);
+      toast.showError('Failed to save people tags');
+    } finally {
+      setSavingPeopleTags(false);
+    }
+  };
+
   const handleToggleFeatured = async () => {
     if (!photo || !canFeatureMedia) return;
 
@@ -2057,6 +2111,37 @@ const PhotoDetail: React.FC = () => {
                 </dl>
               </div>
 
+              {/* People tagged on this photo */}
+              {((photo?.people && photo.people.length > 0) || canEditMedia) && (
+                <div>
+                  <h4 className="text-white font-medium mb-3 flex items-center gap-2">
+                    <Users className="w-4 h-4" /> People
+                  </h4>
+                  {photo?.people && photo.people.length > 0 ? (
+                    <div className="flex flex-wrap gap-2 mb-2">
+                      {photo.people.map((p) => (
+                        <span
+                          key={p.id}
+                          className="px-2.5 py-1 bg-gray-800 text-white text-sm rounded-full"
+                        >
+                          {p.name}
+                        </span>
+                      ))}
+                    </div>
+                  ) : (
+                    <p className="text-gray-500 text-sm mb-2">No one tagged yet.</p>
+                  )}
+                  {canEditMedia && (
+                    <button
+                      onClick={handleOpenPeopleEditor}
+                      className="text-blue-400 hover:text-blue-300 text-xs font-medium transition"
+                    >
+                      {photo?.people && photo.people.length > 0 ? 'Edit people' : 'Tag people'}
+                    </button>
+                  )}
+                </div>
+              )}
+
               {/* Camera Settings */}
               {(photo?.iso || photo?.aperture || photo?.shutter_speed || photo?.focal_length) && (
                 <div>
@@ -2184,6 +2269,85 @@ const PhotoDetail: React.FC = () => {
             />
           </Suspense>
         </EditorErrorBoundary>
+      )}
+
+      {/* Tag People Modal */}
+      {showPeopleEditor && (
+        <div
+          className="fixed inset-0 bg-black/75 flex items-center justify-center z-[100] p-4"
+          onClick={() => !savingPeopleTags && setShowPeopleEditor(false)}
+        >
+          <div
+            className="bg-gray-800 rounded-lg p-6 max-w-md w-full max-h-[80vh] flex flex-col"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex justify-between items-center mb-4 shrink-0">
+              <h2 className="text-xl font-bold text-white flex items-center gap-2">
+                <Users className="w-5 h-5" /> Tag people
+              </h2>
+              <button
+                onClick={() => setShowPeopleEditor(false)}
+                disabled={savingPeopleTags}
+                className="text-gray-400 hover:text-white disabled:opacity-50"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <input
+              type="text"
+              value={peopleSearchQuery}
+              onChange={(e) => setPeopleSearchQuery(e.target.value)}
+              placeholder="Search people..."
+              className="mb-3 w-full px-3 py-2 bg-gray-700 text-white rounded-lg text-sm placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500 shrink-0"
+            />
+
+            <div className="flex-1 overflow-y-auto space-y-1 -mx-1 px-1">
+              {namedPeopleLoading ? (
+                <p className="text-gray-400 text-sm py-4 text-center">Loading people...</p>
+              ) : namedPeople.length === 0 ? (
+                <p className="text-gray-400 text-sm py-4 text-center">
+                  No named people yet — name someone in Admin → People first.
+                </p>
+              ) : (
+                namedPeople
+                  .filter((p) => p.name.toLowerCase().includes(peopleSearchQuery.trim().toLowerCase()))
+                  .map((p) => {
+                    const selected = selectedPersonIds.has(p.id);
+                    return (
+                      <button
+                        key={p.id}
+                        onClick={() => handleTogglePersonSelection(p.id)}
+                        className={`w-full flex items-center justify-between gap-2 px-3 py-2 rounded-lg text-sm text-left transition ${
+                          selected ? 'bg-blue-600 text-white' : 'bg-gray-700/60 text-gray-200 hover:bg-gray-700'
+                        }`}
+                      >
+                        <span>{p.name}</span>
+                        {selected && <Check className="w-4 h-4 shrink-0" />}
+                      </button>
+                    );
+                  })
+              )}
+            </div>
+
+            <div className="flex gap-2.5 mt-4 shrink-0">
+              <button
+                onClick={() => setShowPeopleEditor(false)}
+                disabled={savingPeopleTags}
+                className="flex-1 py-2.5 bg-gray-700 text-white rounded-lg text-sm font-medium hover:bg-gray-600 transition disabled:opacity-50"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleSavePeopleTags}
+                disabled={savingPeopleTags}
+                className="flex-1 py-2.5 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 transition disabled:opacity-50"
+              >
+                {savingPeopleTags ? 'Saving...' : 'Save'}
+              </button>
+            </div>
+          </div>
+        </div>
       )}
 
       {/* Keyboard Help Modal */}

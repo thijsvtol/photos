@@ -20,6 +20,8 @@ interface ClusterRow {
   id: number;
   centroid_embedding: ArrayBuffer;
   face_count: number;
+  name?: string | null;
+  linked_user_email?: string | null;
 }
 
 class FakeFaceClusteringDb {
@@ -37,11 +39,11 @@ class FakeFaceClusteringDb {
         return stmt;
       },
       async all<T>() {
-        if (query.includes('SELECT id, centroid_embedding, face_count FROM person_clusters WHERE id IN')) {
+        if (query.includes('SELECT id, centroid_embedding, face_count, name, linked_user_email FROM person_clusters WHERE id IN')) {
           const ids = boundArgs as number[];
           const results = db.clusters
             .filter((c) => ids.includes(c.id))
-            .map((c) => ({ id: c.id, centroid_embedding: c.centroid_embedding, face_count: c.face_count }));
+            .map((c) => ({ id: c.id, centroid_embedding: c.centroid_embedding, face_count: c.face_count, name: c.name ?? null, linked_user_email: c.linked_user_email ?? null }));
           return { results: results as T[] };
         }
         if (query.includes('SELECT id, embedding, person_id FROM photo_faces WHERE photo_id IN')) {
@@ -115,6 +117,12 @@ class FakeFaceClusteringDb {
         return { results: [] as T[] };
       },
       async first<T>() {
+        if (query.includes('SELECT centroid_embedding, face_count, name, linked_user_email FROM person_clusters WHERE id = ?')) {
+          const [id] = boundArgs as [number];
+          const cluster = db.clusters.find((c) => c.id === id);
+          if (!cluster) return null;
+          return { centroid_embedding: cluster.centroid_embedding, face_count: cluster.face_count, name: cluster.name ?? null, linked_user_email: cluster.linked_user_email ?? null } as T;
+        }
         if (query.includes('SELECT centroid_embedding, face_count FROM person_clusters WHERE id = ?')) {
           const [id] = boundArgs as [number];
           const cluster = db.clusters.find((c) => c.id === id);
@@ -156,7 +164,16 @@ class FakeFaceClusteringDb {
         return null;
       },
       async run() {
-        if (query.includes('UPDATE person_clusters SET centroid_embedding')) {
+        if (query.includes('UPDATE person_clusters SET centroid_embedding') && query.includes('linked_user_email')) {
+          const [centroidEmbedding, faceCount, name, linkedUserEmail, id] = boundArgs as [ArrayBuffer, number, string | null, string | null, number];
+          const cluster = db.clusters.find((c) => c.id === id);
+          if (cluster) {
+            cluster.centroid_embedding = centroidEmbedding;
+            cluster.face_count = faceCount;
+            cluster.name = name;
+            cluster.linked_user_email = linkedUserEmail;
+          }
+        } else if (query.includes('UPDATE person_clusters SET centroid_embedding')) {
           const [centroidEmbedding, faceCount, id] = boundArgs as [ArrayBuffer, number, number];
           const cluster = db.clusters.find((c) => c.id === id);
           if (cluster) {
@@ -603,6 +620,57 @@ describe('mergeClusters', () => {
     // Centroid stays exactly the target's original value since the malformed source was
     // excluded from the average entirely (not zeroed/garbage-averaged in).
     expect(Array.from(blobToFloat32Array(db.clusters[0].centroid_embedding))[0]).toBeCloseTo(0, 5);
+  });
+
+  it('keeps the target\'s existing name/linked account when it already has one, even if a source also has one set', async () => {
+    const db = new FakeFaceClusteringDb();
+    db.clusters = [
+      { id: 1, centroid_embedding: embedding1024Of(0, 0, 0), face_count: 1, name: 'Alice', linked_user_email: 'alice@example.com' },
+      { id: 2, centroid_embedding: embedding1024Of(10, 0, 0), face_count: 1, name: 'Bob', linked_user_email: 'bob@example.com' },
+    ];
+    db.faces = [
+      { id: 1, photo_id: 'photo-a', embedding: embedding1024Of(0, 0, 0), person_id: 1 },
+      { id: 2, photo_id: 'photo-b', embedding: embedding1024Of(10, 0, 0), person_id: 2 },
+    ];
+
+    await mergeClusters(makeEnv(db), 1, [2]);
+
+    expect(db.clusters[0].name).toBe('Alice');
+    expect(db.clusters[0].linked_user_email).toBe('alice@example.com');
+  });
+
+  it("fills in the target's name/linked account from a source when the target (e.g. an \"Unnamed\" duplicate) doesn't have one", async () => {
+    const db = new FakeFaceClusteringDb();
+    db.clusters = [
+      { id: 1, centroid_embedding: embedding1024Of(0, 0, 0), face_count: 1, name: null, linked_user_email: null },
+      { id: 2, centroid_embedding: embedding1024Of(10, 0, 0), face_count: 1, name: 'Bob', linked_user_email: 'bob@example.com' },
+    ];
+    db.faces = [
+      { id: 1, photo_id: 'photo-a', embedding: embedding1024Of(0, 0, 0), person_id: 1 },
+      { id: 2, photo_id: 'photo-b', embedding: embedding1024Of(10, 0, 0), person_id: 2 },
+    ];
+
+    await mergeClusters(makeEnv(db), 1, [2]);
+
+    expect(db.clusters[0].name).toBe('Bob');
+    expect(db.clusters[0].linked_user_email).toBe('bob@example.com');
+  });
+
+  it('leaves name/linked account null when merging two unnamed clusters', async () => {
+    const db = new FakeFaceClusteringDb();
+    db.clusters = [
+      { id: 1, centroid_embedding: embedding1024Of(0, 0, 0), face_count: 1, name: null, linked_user_email: null },
+      { id: 2, centroid_embedding: embedding1024Of(10, 0, 0), face_count: 1, name: null, linked_user_email: null },
+    ];
+    db.faces = [
+      { id: 1, photo_id: 'photo-a', embedding: embedding1024Of(0, 0, 0), person_id: 1 },
+      { id: 2, photo_id: 'photo-b', embedding: embedding1024Of(10, 0, 0), person_id: 2 },
+    ];
+
+    await mergeClusters(makeEnv(db), 1, [2]);
+
+    expect(db.clusters[0].name).toBeNull();
+    expect(db.clusters[0].linked_user_email).toBeNull();
   });
 });
 

@@ -5,6 +5,7 @@ import { extractUser, hasEventCapabilityByEventId, isUserAdmin } from '../../aut
 import { permanentlyDeletePhotos } from '../../photoDeletion';
 import { logActivity } from '../../activityLog';
 import { isValidFaceInput } from '../../faceValidation';
+import { setManualPhotoPersonTags, getPhotoPeople } from '../../faceClustering';
 
 // Soft-deleted photos are kept this long before the nightly purge cron
 // (see scheduled.ts runTrashPurge) hard-deletes them from R2 + D1.
@@ -231,6 +232,54 @@ app.get('/duplicates', async (c) => {
   } catch (error) {
     console.error('Error fetching duplicate photos:', error);
     return c.json({ error: 'Failed to fetch duplicate photos' }, 500);
+  }
+});
+
+/**
+ * PUT /photos/:photoId/people
+ * Replaces the full set of manually-tagged people on a photo (see setManualPhotoPersonTags()'s
+ * doc comment in faceClustering.ts — this never touches automatically-detected faces, only the
+ * separate photo_person_tags table). Lets an admin/editor tag multiple people on a single photo
+ * even when face detection missed someone (turned away, occluded, etc.) or grouped faces
+ * imperfectly. Same permission level as image editing (`image_edit`), since this is a similar
+ * "correct/annotate this photo" action.
+ */
+app.put('/:photoId/people', async (c) => {
+  try {
+    const photoId = c.req.param('photoId');
+
+    const photo = await c.env.DB
+      .prepare('SELECT event_id FROM photos WHERE id = ?')
+      .bind(photoId)
+      .first<{ event_id: number }>();
+
+    if (!photo) {
+      return c.json({ error: 'Photo not found' }, 404);
+    }
+
+    const permissionError = await requireEventCapabilityById(
+      c,
+      photo.event_id,
+      'image_edit',
+      'Edit permission required for this event'
+    );
+    if (permissionError) return permissionError;
+
+    const { personIds } = await c.req.json<{ personIds: number[] }>();
+    if (!Array.isArray(personIds) || !personIds.every((id) => Number.isFinite(id))) {
+      return c.json({ error: 'personIds must be an array of numbers' }, 400);
+    }
+    if (personIds.length > 50) {
+      return c.json({ error: 'Cannot tag more than 50 people on a single photo' }, 400);
+    }
+
+    await setManualPhotoPersonTags(c.env, photoId, personIds);
+    const people = await getPhotoPeople(c.env, photoId);
+
+    return c.json({ success: true, people });
+  } catch (error) {
+    console.error('Error updating photo people tags:', error);
+    return c.json({ error: 'Failed to update photo people tags' }, 500);
   }
 });
 

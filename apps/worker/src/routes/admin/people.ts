@@ -168,9 +168,28 @@ app.get('/embedding-model', async (c) => {
  * List all named + unnamed person clusters with a cover photo + face count.
  * Clusters with only 1 face are hidden by default (mostly noise/one-offs)
  * unless ?includeSingles=1 is passed.
+ *
+ * ?namedOnly=1 instead returns every NAMED person regardless of face_count (including ones with
+ * 0 automatically-detected faces, e.g. a person who so far only exists via manual photo tags) —
+ * used by the "Tag people" picker on PhotoDetail, which only ever wants to offer named people
+ * (tagging an anonymous, un-reviewed cluster wouldn't mean anything to the person doing the
+ * tagging) and needs the complete list, not just ones with enough auto-detected faces to matter
+ * for clustering QA.
  */
 app.get('/', async (c) => {
   try {
+    if (c.req.query('namedOnly') === '1') {
+      const people = await c.env.DB
+        .prepare(`
+          SELECT id, name, face_count
+          FROM person_clusters
+          WHERE name IS NOT NULL
+          ORDER BY name COLLATE NOCASE
+        `)
+        .all();
+      return c.json({ people: people.results || [] });
+    }
+
     const includeSingles = c.req.query('includeSingles') === '1';
     const minFaces = includeSingles ? 1 : 2;
 

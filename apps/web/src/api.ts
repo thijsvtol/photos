@@ -699,6 +699,36 @@ export const deletePerson = async (personId: number): Promise<void> => {
   await api.delete(`/admin/people/${personId}`, { headers: getAdminHeaders() });
 };
 
+/** Lightweight list of every NAMED person (regardless of face_count) — used to populate the
+ *  "Tag people" picker on PhotoDetail, which only ever offers named people to tag (tagging an
+ *  anonymous, un-reviewed cluster wouldn't mean anything to whoever is doing the tagging). */
+export interface NamedPerson {
+  id: number;
+  name: string;
+  face_count: number;
+}
+export const getNamedPeople = async (): Promise<NamedPerson[]> => {
+  const response = await api.get<{ people: NamedPerson[] }>('/admin/people', {
+    params: { namedOnly: '1' },
+    headers: getAdminHeaders(),
+  });
+  return response.data.people;
+};
+
+/** Replaces the full set of manually-tagged people on a photo (in addition to whichever people
+ *  automatic face detection already found — see setManualPhotoPersonTags()'s doc comment in
+ *  apps/worker/src/faceClustering.ts). Returns the photo's complete up-to-date people list
+ *  (auto-detected + manual, combined and de-duplicated) so the caller can update its UI without
+ *  a separate re-fetch of the photo. */
+export const tagPeopleOnPhoto = async (photoId: string, personIds: number[]): Promise<{ id: number; name: string }[]> => {
+  const response = await api.put<{ success: boolean; people: { id: number; name: string }[] }>(
+    `/admin/photos/${photoId}/people`,
+    { personIds },
+    { headers: getAdminHeaders() }
+  );
+  return response.data.people;
+};
+
 export interface MyPhotosResponse {
   linked: boolean;
   person?: { id: number; displayName: string | null; faceCount: number };

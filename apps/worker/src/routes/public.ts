@@ -4,6 +4,7 @@ import type { Env, Event, Photo } from '../types';
 import { hasEventSessionAccess } from '../cookies';
 import { optionalAuth, getUser, isAdmin, getCollaboratorRoleByEventId } from '../auth';
 import { cosineSimilarity, embedSearchQuery } from '../aiEnrichment';
+import { getPhotoPeople } from '../faceClustering';
 
 const app = new Hono<{ Bindings: Env }>();
 
@@ -336,7 +337,7 @@ app.get('/api/events/:slug/photos', optionalAuth, async (c) => {
 app.get('/api/events/:slug/photos/:photoId', optionalAuth, async (c) => {
   const slug = c.req.param('slug')!;
   if (!isValidSlug(slug)) return c.json({ error: 'Invalid slug format' }, 400);
-  const photoId = c.req.param('photoId');
+  const photoId = c.req.param('photoId')!;
   
   try {
     const user = getUser(c);
@@ -405,6 +406,12 @@ app.get('/api/events/:slug/photos/:photoId', optionalAuth, async (c) => {
       return c.json({ error: 'Photo not found' }, 404);
     }
     
+    // Named people tagged on this photo (automatic face detection + manual admin tags — see
+    // getPhotoPeople()'s doc comment in faceClustering.ts). Fetched as a second query rather
+    // than a JOIN/GROUP_CONCAT in the query above since a photo can have any number of tagged
+    // people and .first<Photo>() only ever returns one row.
+    photo.people = await getPhotoPeople(c.env, photoId);
+
     return c.json({ photo });
   } catch (error) {
     console.error('Error fetching photo:', error);

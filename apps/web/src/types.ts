@@ -52,6 +52,9 @@ export interface Photo {
   archived_at?: string | null; // non-null = archived (hidden from Timeline, still in event gallery)
   event_slug_trash?: string; // present only on Trash listing rows
   event_name_trash?: string; // present only on Trash listing rows
+  /** Named people tagged on this photo (auto-detected + manual) — only populated by the single
+   *  photo-detail fetch (getPhoto()), not by list/gallery endpoints. */
+  people?: { id: number; name: string }[];
 }
 
 export interface CreateEventRequest {

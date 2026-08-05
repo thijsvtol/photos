@@ -57,6 +57,9 @@ export interface Photo {
     cache_version: number;
   source_photo_id: string | null;
   source_event_slug: string | null;
+  /** Named people tagged on this photo (auto-detected + manual) — populated only by the single
+   *  photo-detail route (GET /api/events/:slug/photos/:photoId), see getPhotoPeople(). */
+  people?: { id: number; name: string }[];
 }
 
 export interface Tag {
