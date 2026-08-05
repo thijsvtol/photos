@@ -37,13 +37,12 @@ type DisplayItem = { url: string; type: 'photo' | 'video'; title?: string };
 const VIDEO_STALL_TIMEOUT_MS = 15000;
 const VIDEO_MAX_AUTO_RETRIES = 2;
 
-// Percentage insets drawn by the ?debug=1 overscan calibration overlay.
-// Most TVs discard a few percent of every edge of the surface the Cast device
-// hands them (the Nest Hub, a direct-drive panel, discards nothing) — which is
-// why an object-contain portrait photo, sized to *exactly* full height, loses
-// its top and bottom on a TV but looks correct on the Hub. There is no
-// reliable way to query the overscan amount from JS, so instead we draw
-// nested rings and let the human read off the first one that's fully visible.
+// Percentage insets drawn by the ?debug=1 calibration overlay. Originally
+// added on the theory that the TV was cropping edges via overscan; the Nest
+// Hub then showed every ring down to 0% while the Google TV showed none at
+// all, which ruled that out (overscan trims edges, it cannot hide the middle
+// of the screen). Kept because the rings remain the quickest way to eyeball
+// whether the stage matches the visible display on a given device.
 const OVERSCAN_GUIDES = [
   { pct: 0, color: '#ef4444' },
   { pct: 2.5, color: '#f97316' },
@@ -53,13 +52,16 @@ const OVERSCAN_GUIDES = [
 ];
 
 /**
- * Temporary calibration overlay, enabled with ?debug=1 on the receiver URL.
+ * Diagnostic overlay, enabled with ?debug=1 on the receiver URL.
  *
- * A TV can't practically be inspected with devtools, so rather than guess at
- * an overscan percentage this draws labelled rings at known insets. Whichever
- * ring is the outermost *fully visible* one is the safe inset for this TV.
+ * A TV can't practically be inspected with devtools — enabling remote
+ * debugging and connecting to the device's port 9222 is a lot of ceremony to
+ * read four numbers — so the receiver reports its own geometry on screen
+ * instead. The corner markers and the tiled (rather than centred) readouts
+ * exist because the failure mode being chased made the centre of the page
+ * fall outside the visible area entirely.
  */
-function OverscanDebugOverlay() {
+function OverscanDebugOverlay({ stage }: { stage: { w: number; h: number } }) {
   const [metrics, setMetrics] = useState(() => readMetrics());
 
   useEffect(() => {
@@ -69,7 +71,10 @@ function OverscanDebugOverlay() {
   }, []);
 
   return (
-    <div className="fixed inset-0 z-[9999] pointer-events-none">
+    <div
+      className="z-[9999] pointer-events-none"
+      style={{ position: 'fixed', left: 0, top: 0, width: stage.w, height: stage.h }}
+    >
       {OVERSCAN_GUIDES.map(({ pct, color }) => (
         <div
           key={pct}
@@ -159,6 +164,70 @@ function readMetrics() {
   };
 }
 
+/**
+ * The receiver's stage size, in real pixels, remeasured on resize.
+ *
+ * Everything here used to be sized with `fixed inset-0` + `max-w-full
+ * max-h-full`, which is percentage-based: it only constrains the media if the
+ * engine resolves 100% against the viewport. On the Google TV receiver it
+ * doesn't — a large photo expanded the document past the display, the page
+ * was re-laid-out at content size, and the TV ended up showing a magnified
+ * top-left corner (the Nest Hub, with a smaller panel and a saner engine, was
+ * unaffected). Tellingly, the debug overlay rendered correctly right up until
+ * the moment an <img> decoded.
+ *
+ * Sizing the stage and the media in explicit pixels removes the dependency on
+ * how the engine resolves percentages entirely.
+ */
+function useStageSize() {
+  const [size, setSize] = useState(() => ({
+    w: window.innerWidth,
+    h: window.innerHeight,
+  }));
+
+  useEffect(() => {
+    const measure = () => setSize({ w: window.innerWidth, h: window.innerHeight });
+    measure();
+    window.addEventListener('resize', measure);
+    window.addEventListener('orientationchange', measure);
+    return () => {
+      window.removeEventListener('resize', measure);
+      window.removeEventListener('orientationchange', measure);
+    };
+  }, []);
+
+  return size;
+}
+
+/**
+ * Belt-and-braces companion to useStageSize: forbid scrolling/overflow at the
+ * document level for as long as the receiver is mounted, so no oversized
+ * child can grow the layout viewport in the first place. Restores whatever
+ * was there before on unmount, since this route shares a SPA with the normal
+ * scrolling gallery pages.
+ */
+function useLockedDocumentOverflow() {
+  useEffect(() => {
+    const html = document.documentElement;
+    const body = document.body;
+    const prev = {
+      htmlOverflow: html.style.overflow,
+      bodyOverflow: body.style.overflow,
+      bodyMargin: body.style.margin,
+    };
+
+    html.style.overflow = 'hidden';
+    body.style.overflow = 'hidden';
+    body.style.margin = '0';
+
+    return () => {
+      html.style.overflow = prev.htmlOverflow;
+      body.style.overflow = prev.bodyOverflow;
+      body.style.margin = prev.bodyMargin;
+    };
+  }, []);
+}
+
 function useDebugFlag(): boolean {
   const [enabled] = useState(() => {
     try {
@@ -172,6 +241,8 @@ function useDebugFlag(): boolean {
 
 export default function CastReceiver() {
   const debug = useDebugFlag();
+  const stage = useStageSize();
+  useLockedDocumentOverflow();
   const [media, setMedia] = useState<CastMediaMessage | null>(null);
   const [albumIndex, setAlbumIndex] = useState(0);
   // The item currently rendered on screen. Deliberately kept separate from
@@ -367,17 +438,32 @@ export default function CastReceiver() {
     };
   }, [displayedItem?.url, displayedItem?.type]);
 
+  // Explicit pixel dimensions rather than `inset-0`, and `overflow-hidden` so
+  // nothing inside can ever paint outside the stage — see useStageSize.
+  const stageStyle: React.CSSProperties = {
+    position: 'fixed',
+    left: 0,
+    top: 0,
+    width: stage.w,
+    height: stage.h,
+    overflow: 'hidden',
+  };
+  const mediaStyle: React.CSSProperties = {
+    maxWidth: stage.w,
+    maxHeight: stage.h,
+  };
+
   if (!displayedItem) {
     return (
-      <div className="fixed inset-0 bg-black flex items-center justify-center">
+      <div style={stageStyle} className="bg-black flex items-center justify-center">
         <p className="text-white/60 text-2xl font-light">Ready to cast</p>
-        {debug && <OverscanDebugOverlay />}
+        {debug && <OverscanDebugOverlay stage={stage} />}
       </div>
     );
   }
 
   return (
-    <div className="fixed inset-0 bg-black flex items-center justify-center">
+    <div style={stageStyle} className="bg-black flex items-center justify-center">
       {/* Blurred backdrop — fills the letterbox bars left by object-contain
           with a scaled, blurred copy of the same photo, so a 3:2 photo on a
           16:9 TV doesn't read as half-empty. Deliberately photos only: a
@@ -392,7 +478,8 @@ export default function CastReceiver() {
           src={displayedItem.url}
           alt=""
           aria-hidden="true"
-          className="absolute inset-0 w-full h-full object-cover scale-110 blur-2xl brightness-50"
+          style={{ position: 'absolute', left: 0, top: 0, width: stage.w, height: stage.h }}
+          className="object-cover scale-110 blur-2xl brightness-50"
         />
       )}
       {displayedItem.type === 'video' ? (
@@ -402,7 +489,8 @@ export default function CastReceiver() {
           autoPlay
           controls={false}
           preload="auto"
-          className="relative max-w-full max-h-full object-contain animate-fadeIn"
+          style={mediaStyle}
+          className="relative object-contain animate-fadeIn"
           onPlaying={() => {
             videoStartedRef.current = true;
             if (videoStallTimerRef.current) {
@@ -439,7 +527,8 @@ export default function CastReceiver() {
           key={displayedItem.url}
           src={displayedItem.url}
           alt={displayedItem.title || ''}
-          className="relative max-w-full max-h-full object-contain animate-fadeIn"
+          style={mediaStyle}
+          className="relative object-contain animate-fadeIn"
         />
       )}
       {/* Buffering spinner — shown while a (usually large) video hasn't
@@ -462,7 +551,7 @@ export default function CastReceiver() {
           {displayedItem.title}
         </div>
       )}
-      {debug && <OverscanDebugOverlay />}
+      {debug && <OverscanDebugOverlay stage={stage} />}
     </div>
   );
 }
