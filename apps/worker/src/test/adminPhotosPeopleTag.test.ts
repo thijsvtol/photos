@@ -20,11 +20,13 @@ vi.mock('../auth', async (importOriginal) => {
 const setManualPhotoPersonTagsMock = vi.fn();
 const getPhotoPeopleMock = vi.fn();
 const addManualPhotoPersonTagsMock = vi.fn();
+const removePersonFromPhotoMock = vi.fn();
 
 vi.mock('../faceClustering', () => ({
   setManualPhotoPersonTags: (...args: unknown[]) => setManualPhotoPersonTagsMock(...args),
   getPhotoPeople: (...args: unknown[]) => getPhotoPeopleMock(...args),
   addManualPhotoPersonTags: (...args: unknown[]) => addManualPhotoPersonTagsMock(...args),
+  removePersonFromPhoto: (...args: unknown[]) => removePersonFromPhotoMock(...args),
 }));
 
 import photosRouter from '../routes/admin/photos';
@@ -85,6 +87,7 @@ beforeEach(() => {
   setManualPhotoPersonTagsMock.mockReset();
   getPhotoPeopleMock.mockReset();
   addManualPhotoPersonTagsMock.mockReset();
+  removePersonFromPhotoMock.mockReset();
   getPhotoPeopleMock.mockResolvedValue([{ id: 1, name: 'Alice' }, { id: 2, name: 'Bob' }]);
 });
 
@@ -252,5 +255,63 @@ describe('POST /admin/photos/bulk-tag-people', () => {
 
     expect(res.status).toBe(401);
     expect(addManualPhotoPersonTagsMock).not.toHaveBeenCalled();
+  });
+});
+
+describe('DELETE /admin/photos/:photoId/people/:personId', () => {
+  it('removes the person from the photo and returns the remaining people list', async () => {
+    const photos: FakePhoto[] = [{ id: 'p1', event_id: 1 }];
+    getPhotoPeopleMock.mockResolvedValueOnce([{ id: 2, name: 'Bob' }]);
+
+    const res = await photosRouter.request(
+      'http://localhost/p1/people/1',
+      { method: 'DELETE' },
+      createFakeEnv(photos)
+    );
+
+    expect(res.status).toBe(200);
+    const body = await res.json() as { success: boolean; people: { id: number; name: string }[] };
+    expect(body.success).toBe(true);
+    expect(body.people).toEqual([{ id: 2, name: 'Bob' }]);
+    expect(removePersonFromPhotoMock).toHaveBeenCalledWith(expect.anything(), 'p1', 1);
+  });
+
+  it('returns 400 for a non-numeric person id', async () => {
+    const photos: FakePhoto[] = [{ id: 'p1', event_id: 1 }];
+
+    const res = await photosRouter.request(
+      'http://localhost/p1/people/not-a-number',
+      { method: 'DELETE' },
+      createFakeEnv(photos)
+    );
+
+    expect(res.status).toBe(400);
+    expect(removePersonFromPhotoMock).not.toHaveBeenCalled();
+  });
+
+  it('returns 404 for a photo that does not exist', async () => {
+    const res = await photosRouter.request(
+      'http://localhost/missing/people/1',
+      { method: 'DELETE' },
+      createFakeEnv([])
+    );
+
+    expect(res.status).toBe(404);
+    expect(removePersonFromPhotoMock).not.toHaveBeenCalled();
+  });
+
+  it('returns 403 when the user lacks image_edit capability for the event', async () => {
+    currentIsAdmin = false;
+    currentHasCapability = false;
+    const photos: FakePhoto[] = [{ id: 'p1', event_id: 1 }];
+
+    const res = await photosRouter.request(
+      'http://localhost/p1/people/1',
+      { method: 'DELETE' },
+      createFakeEnv(photos)
+    );
+
+    expect(res.status).toBe(403);
+    expect(removePersonFromPhotoMock).not.toHaveBeenCalled();
   });
 });

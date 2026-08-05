@@ -6,7 +6,7 @@ import SEO from '../components/SEO';
 import EditorErrorBoundary from '../components/EditorErrorBoundary';
 const ImageEditorModal = lazy(() => import('../components/ImageEditorModal'));
 const VideoEditorModal = lazy(() => import('../components/VideoEditorModal'));
-import { getEvent, getPhoto, getPhotos, loginToEvent, getPreviewUrl, getOriginalUrl, getCastPreviewUrl, downloadOriginal, downloadSmall, downloadInstagram, replacePhoto, toggleFavorite as toggleFavoriteAPI, getUserFavoriteIds, setPhotoFeatured, deletePhoto, getCollaborators, getNamedPeople, tagPeopleOnPhoto } from '../api';
+import { getEvent, getPhoto, getPhotos, loginToEvent, getPreviewUrl, getOriginalUrl, getCastPreviewUrl, downloadOriginal, downloadSmall, downloadInstagram, replacePhoto, toggleFavorite as toggleFavoriteAPI, getUserFavoriteIds, setPhotoFeatured, deletePhoto, getCollaborators, getNamedPeople, tagPeopleOnPhoto, removePersonFromPhoto } from '../api';
 import type { NamedPerson } from '../api';
 import { createPreview } from '../imageUtils';
 import type { Event, Photo } from '../types';
@@ -62,6 +62,7 @@ const PhotoDetail: React.FC = () => {
   const [selectedPersonIds, setSelectedPersonIds] = useState<Set<number>>(new Set());
   const [savingPeopleTags, setSavingPeopleTags] = useState(false);
   const [peopleSearchQuery, setPeopleSearchQuery] = useState('');
+  const [removingPersonId, setRemovingPersonId] = useState<number | null>(null);
   // Custom video player state
   const videoRef = useRef<HTMLVideoElement>(null);
   const [videoPaused, setVideoPaused] = useState(false);
@@ -1360,6 +1361,25 @@ const PhotoDetail: React.FC = () => {
     }
   };
 
+  // Quick single-click "unattach" from a person chip in the People section — separate from the
+  // full "Tag people" editor's Save flow because that flow only ever replaces MANUAL tags (see
+  // tagPeopleOnPhoto()'s doc comment); a person who's on the photo purely via automatic face
+  // detection would otherwise stay attached even after being deselected there. This calls the
+  // dedicated remove endpoint instead, which undoes both possible sources of attachment.
+  const handleRemovePersonFromPhoto = async (personId: number) => {
+    if (!photo) return;
+    setRemovingPersonId(personId);
+    try {
+      const updatedPeople = await removePersonFromPhoto(photo.id, personId);
+      setPhoto((prev) => (prev ? { ...prev, people: updatedPeople } : prev));
+    } catch (err) {
+      console.error('Failed to remove person from photo', err);
+      toast.showError('Failed to remove person from photo');
+    } finally {
+      setRemovingPersonId(null);
+    }
+  };
+
   const handleToggleFeatured = async () => {
     if (!photo || !canFeatureMedia) return;
 
@@ -2145,9 +2165,20 @@ const PhotoDetail: React.FC = () => {
                       {photo.people.map((p) => (
                         <span
                           key={p.id}
-                          className="px-2.5 py-1 bg-gray-800 text-white text-sm rounded-full"
+                          className="flex items-center gap-1 pl-2.5 pr-1.5 py-1 bg-gray-800 text-white text-sm rounded-full"
                         >
                           {p.name}
+                          {canEditMedia && (
+                            <button
+                              onClick={() => handleRemovePersonFromPhoto(p.id)}
+                              disabled={removingPersonId === p.id}
+                              className="text-gray-400 hover:text-white disabled:opacity-50 rounded-full p-0.5 hover:bg-white/10 transition"
+                              aria-label={`Remove ${p.name} from this photo`}
+                              title={`Remove ${p.name} from this photo`}
+                            >
+                              <X className="w-3.5 h-3.5" />
+                            </button>
+                          )}
                         </span>
                       ))}
                     </div>

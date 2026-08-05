@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { getPhotoPeople, setManualPhotoPersonTags, addManualPhotoPersonTags } from '../faceClustering';
+import { getPhotoPeople, setManualPhotoPersonTags, addManualPhotoPersonTags, removePersonFromPhoto } from '../faceClustering';
 import type { Env } from '../types';
 
 /**
@@ -11,9 +11,9 @@ import type { Env } from '../types';
  */
 
 interface FakeDb {
-  photoFaces: { photo_id: string; person_id: number | null }[];
+  photoFaces: { id: number; photo_id: string; person_id: number | null }[];
   personTags: { photo_id: string; person_id: number }[];
-  personClusters: { id: number; name: string | null }[];
+  personClusters: { id: number; name: string | null; face_count?: number }[];
 }
 
 function makeEnv(db: FakeDb): Env {
@@ -42,13 +42,28 @@ function makeEnv(db: FakeDb): Env {
                 .sort((a, b) => (a.name || '').localeCompare(b.name || ''));
               return { results: results as T[] };
             }
+            if (query.includes('SELECT id FROM photo_faces WHERE photo_id = ? AND person_id = ?')) {
+              const [photoId, personId] = boundArgs as [string, number];
+              const results = db.photoFaces
+                .filter((f) => f.photo_id === photoId && f.person_id === personId)
+                .map((f) => ({ id: f.id }));
+              return { results: results as T[] };
+            }
             return { results: [] as T[] };
           },
           async first<T>() {
+            if (query.includes('SELECT face_count FROM person_clusters WHERE id = ?')) {
+              const [personId] = boundArgs as [number];
+              const cluster = db.personClusters.find((c) => c.id === personId);
+              return (cluster ? { face_count: cluster.face_count ?? 0 } : null) as T | null;
+            }
             return null as T | null;
           },
           async run() {
-            if (query.includes('DELETE FROM photo_person_tags WHERE photo_id = ?')) {
+            if (query.includes('DELETE FROM photo_person_tags WHERE photo_id = ? AND person_id = ?')) {
+              const [photoId, personId] = boundArgs as [string, number];
+              db.personTags = db.personTags.filter((t) => !(t.photo_id === photoId && t.person_id === personId));
+            } else if (query.includes('DELETE FROM photo_person_tags WHERE photo_id = ?')) {
               const [photoId] = boundArgs as [string];
               db.personTags = db.personTags.filter((t) => t.photo_id !== photoId);
             }
@@ -58,6 +73,21 @@ function makeEnv(db: FakeDb): Env {
               if (!alreadyTagged) {
                 db.personTags.push({ photo_id: photoId, person_id: personId });
               }
+            }
+            if (query.includes('UPDATE photo_faces SET person_id = NULL WHERE id IN')) {
+              const faceIds = boundArgs as number[];
+              for (const face of db.photoFaces) {
+                if (faceIds.includes(face.id)) face.person_id = null;
+              }
+            }
+            if (query.includes('DELETE FROM person_clusters WHERE id = ?')) {
+              const [personId] = boundArgs as [number];
+              db.personClusters = db.personClusters.filter((c) => c.id !== personId);
+            }
+            if (query.includes('UPDATE person_clusters SET face_count = ?')) {
+              const [faceCount, personId] = boundArgs as [number, number];
+              const cluster = db.personClusters.find((c) => c.id === personId);
+              if (cluster) cluster.face_count = faceCount;
             }
             return { success: true, meta: { changes: 0 } };
           },
@@ -78,7 +108,7 @@ function makeEnv(db: FakeDb): Env {
 describe('getPhotoPeople', () => {
   it('returns named people from BOTH automatic face detection and manual tags, de-duplicated', async () => {
     const db: FakeDb = {
-      photoFaces: [{ photo_id: 'photo-a', person_id: 1 }],
+      photoFaces: [{ id: 1, photo_id: 'photo-a', person_id: 1 }],
       personTags: [{ photo_id: 'photo-a', person_id: 1 }, { photo_id: 'photo-a', person_id: 2 }],
       personClusters: [
         { id: 1, name: 'Alice' },
@@ -96,7 +126,7 @@ describe('getPhotoPeople', () => {
 
   it('excludes unnamed clusters even if a face on the photo belongs to one', async () => {
     const db: FakeDb = {
-      photoFaces: [{ photo_id: 'photo-a', person_id: 3 }],
+      photoFaces: [{ id: 1, photo_id: 'photo-a', person_id: 3 }],
       personTags: [],
       personClusters: [{ id: 3, name: null }],
     };
@@ -223,5 +253,71 @@ describe('addManualPhotoPersonTags', () => {
     await addManualPhotoPersonTags(makeEnv(db), ['photo-a'], []);
 
     expect(db.personTags).toEqual([]);
+  });
+});
+
+describe('removePersonFromPhoto', () => {
+  it('removes a manual tag for the given person on the given photo', async () => {
+    const db: FakeDb = {
+      photoFaces: [],
+      personTags: [
+        { photo_id: 'photo-a', person_id: 1 },
+        { photo_id: 'photo-a', person_id: 2 },
+      ],
+      personClusters: [],
+    };
+
+    await removePersonFromPhoto(makeEnv(db), 'photo-a', 1);
+
+    expect(db.personTags).toEqual([{ photo_id: 'photo-a', person_id: 2 }]);
+  });
+
+  it('unassigns an automatically-detected face on the photo and decrements the person\'s face_count', async () => {
+    const db: FakeDb = {
+      photoFaces: [
+        { id: 10, photo_id: 'photo-a', person_id: 1 },
+        { id: 11, photo_id: 'photo-b', person_id: 1 }, // different photo, must stay untouched
+      ],
+      personTags: [],
+      personClusters: [{ id: 1, name: 'Alice', face_count: 5 }],
+    };
+
+    await removePersonFromPhoto(makeEnv(db), 'photo-a', 1);
+
+    expect(db.photoFaces.find((f) => f.id === 10)?.person_id).toBeNull();
+    expect(db.photoFaces.find((f) => f.id === 11)?.person_id).toBe(1);
+    expect(db.personClusters.find((c) => c.id === 1)?.face_count).toBe(4);
+  });
+
+  it('deletes the person_clusters row entirely once its face_count reaches zero', async () => {
+    const db: FakeDb = {
+      photoFaces: [{ id: 10, photo_id: 'photo-a', person_id: 1 }],
+      personTags: [],
+      personClusters: [{ id: 1, name: 'Alice', face_count: 1 }],
+    };
+
+    await removePersonFromPhoto(makeEnv(db), 'photo-a', 1);
+
+    expect(db.personClusters).toEqual([]);
+  });
+
+  it('removes BOTH a manual tag AND an automatic face assignment when a person is attached via both', async () => {
+    const db: FakeDb = {
+      photoFaces: [{ id: 10, photo_id: 'photo-a', person_id: 1 }],
+      personTags: [{ photo_id: 'photo-a', person_id: 1 }],
+      personClusters: [{ id: 1, name: 'Alice', face_count: 1 }],
+    };
+
+    await removePersonFromPhoto(makeEnv(db), 'photo-a', 1);
+
+    expect(db.personTags).toEqual([]);
+    expect(db.photoFaces[0].person_id).toBeNull();
+  });
+
+  it('is a no-op (does not error) when the person has no tag/face on this photo at all', async () => {
+    const db: FakeDb = { photoFaces: [], personTags: [], personClusters: [{ id: 1, name: 'Alice', face_count: 3 }] };
+
+    await expect(removePersonFromPhoto(makeEnv(db), 'photo-a', 1)).resolves.toBeUndefined();
+    expect(db.personClusters).toEqual([{ id: 1, name: 'Alice', face_count: 3 }]);
   });
 });

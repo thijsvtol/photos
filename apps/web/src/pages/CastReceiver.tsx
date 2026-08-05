@@ -37,7 +37,91 @@ type DisplayItem = { url: string; type: 'photo' | 'video'; title?: string };
 const VIDEO_STALL_TIMEOUT_MS = 15000;
 const VIDEO_MAX_AUTO_RETRIES = 2;
 
+// Percentage insets drawn by the ?debug=1 overscan calibration overlay.
+// Most TVs discard a few percent of every edge of the surface the Cast device
+// hands them (the Nest Hub, a direct-drive panel, discards nothing) — which is
+// why an object-contain portrait photo, sized to *exactly* full height, loses
+// its top and bottom on a TV but looks correct on the Hub. There is no
+// reliable way to query the overscan amount from JS, so instead we draw
+// nested rings and let the human read off the first one that's fully visible.
+const OVERSCAN_GUIDES = [
+  { pct: 0, color: '#ef4444' },
+  { pct: 2.5, color: '#f97316' },
+  { pct: 5, color: '#eab308' },
+  { pct: 7.5, color: '#22c55e' },
+  { pct: 10, color: '#06b6d4' },
+];
+
+/**
+ * Temporary calibration overlay, enabled with ?debug=1 on the receiver URL.
+ *
+ * A TV can't practically be inspected with devtools, so rather than guess at
+ * an overscan percentage this draws labelled rings at known insets. Whichever
+ * ring is the outermost *fully visible* one is the safe inset for this TV.
+ */
+function OverscanDebugOverlay() {
+  const [metrics, setMetrics] = useState(() => readMetrics());
+
+  useEffect(() => {
+    const onResize = () => setMetrics(readMetrics());
+    window.addEventListener('resize', onResize);
+    return () => window.removeEventListener('resize', onResize);
+  }, []);
+
+  return (
+    <div className="fixed inset-0 z-[9999] pointer-events-none">
+      {OVERSCAN_GUIDES.map(({ pct, color }) => (
+        <div
+          key={pct}
+          className="absolute flex items-start justify-start"
+          style={{ inset: `${pct}%`, border: `2px solid ${color}` }}
+        >
+          <span
+            className="text-base font-mono font-bold px-1.5 py-0.5"
+            style={{ color: '#000', backgroundColor: color }}
+          >
+            {pct}%
+          </span>
+        </div>
+      ))}
+      <div className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 bg-black/80 text-white font-mono text-lg leading-relaxed px-6 py-4 rounded-lg text-center">
+        <div>inner&nbsp;&nbsp;{metrics.innerW} x {metrics.innerH}</div>
+        <div>screen&nbsp;{metrics.screenW} x {metrics.screenH}</div>
+        <div>avail&nbsp;&nbsp;{metrics.availW} x {metrics.availH}</div>
+        <div>dpr&nbsp;&nbsp;&nbsp;&nbsp;{metrics.dpr}</div>
+        <div className="mt-2 text-sm text-white/60">
+          report the outermost ring fully visible
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function readMetrics() {
+  return {
+    innerW: window.innerWidth,
+    innerH: window.innerHeight,
+    screenW: window.screen?.width ?? 0,
+    screenH: window.screen?.height ?? 0,
+    availW: window.screen?.availWidth ?? 0,
+    availH: window.screen?.availHeight ?? 0,
+    dpr: window.devicePixelRatio,
+  };
+}
+
+function useDebugFlag(): boolean {
+  const [enabled] = useState(() => {
+    try {
+      return new URLSearchParams(window.location.search).get('debug') === '1';
+    } catch {
+      return false;
+    }
+  });
+  return enabled;
+}
+
 export default function CastReceiver() {
+  const debug = useDebugFlag();
   const [media, setMedia] = useState<CastMediaMessage | null>(null);
   const [albumIndex, setAlbumIndex] = useState(0);
   // The item currently rendered on screen. Deliberately kept separate from
@@ -237,12 +321,30 @@ export default function CastReceiver() {
     return (
       <div className="fixed inset-0 bg-black flex items-center justify-center">
         <p className="text-white/60 text-2xl font-light">Ready to cast</p>
+        {debug && <OverscanDebugOverlay />}
       </div>
     );
   }
 
   return (
     <div className="fixed inset-0 bg-black flex items-center justify-center">
+      {/* Blurred backdrop — fills the letterbox bars left by object-contain
+          with a scaled, blurred copy of the same photo, so a 3:2 photo on a
+          16:9 TV doesn't read as half-empty. Deliberately photos only: a
+          second <video> element would double the decode load on the
+          Chromecast's hardware pipeline for a purely cosmetic effect.
+          scale-110 hides the transparent edges the blur would otherwise
+          feather in. The foreground below needs `relative` so it paints on
+          top of this positioned element. */}
+      {displayedItem.type === 'photo' && (
+        <img
+          key={`backdrop-${displayedItem.url}`}
+          src={displayedItem.url}
+          alt=""
+          aria-hidden="true"
+          className="absolute inset-0 w-full h-full object-cover scale-110 blur-2xl brightness-50"
+        />
+      )}
       {displayedItem.type === 'video' ? (
         <video
           key={`${displayedItem.url}#${videoRetryToken}`}
@@ -250,7 +352,7 @@ export default function CastReceiver() {
           autoPlay
           controls={false}
           preload="auto"
-          className="max-w-full max-h-full object-contain animate-fadeIn"
+          className="relative max-w-full max-h-full object-contain animate-fadeIn"
           onPlaying={() => {
             videoStartedRef.current = true;
             if (videoStallTimerRef.current) {
@@ -287,7 +389,7 @@ export default function CastReceiver() {
           key={displayedItem.url}
           src={displayedItem.url}
           alt={displayedItem.title || ''}
-          className="max-w-full max-h-full object-contain animate-fadeIn"
+          className="relative max-w-full max-h-full object-contain animate-fadeIn"
         />
       )}
       {/* Buffering spinner — shown while a (usually large) video hasn't
@@ -310,6 +412,7 @@ export default function CastReceiver() {
           {displayedItem.title}
         </div>
       )}
+      {debug && <OverscanDebugOverlay />}
     </div>
   );
 }

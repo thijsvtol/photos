@@ -729,6 +729,18 @@ export const tagPeopleOnPhoto = async (photoId: string, personIds: number[]): Pr
   return response.data.people;
 };
 
+/** Unattaches a single person from a single photo — undoes BOTH a manual tag AND any
+ *  automatically-detected face assignment (see removePersonFromPhoto()'s doc comment in
+ *  apps/worker/src/faceClustering.ts for why both are needed). Returns the photo's remaining
+ *  people list so the caller can update its UI without a separate re-fetch. */
+export const removePersonFromPhoto = async (photoId: string, personId: number): Promise<{ id: number; name: string }[]> => {
+  const response = await api.delete<{ success: boolean; people: { id: number; name: string }[] }>(
+    `/admin/photos/${photoId}/people/${personId}`,
+    { headers: getAdminHeaders() }
+  );
+  return response.data.people;
+};
+
 export interface MyPhotosResponse {
   linked: boolean;
   person?: { id: number; displayName: string | null; faceCount: number };

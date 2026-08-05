@@ -5,7 +5,7 @@ import { extractUser, hasEventCapabilityByEventId, isUserAdmin } from '../../aut
 import { permanentlyDeletePhotos } from '../../photoDeletion';
 import { logActivity } from '../../activityLog';
 import { isValidFaceInput } from '../../faceValidation';
-import { setManualPhotoPersonTags, getPhotoPeople, addManualPhotoPersonTags } from '../../faceClustering';
+import { setManualPhotoPersonTags, getPhotoPeople, addManualPhotoPersonTags, removePersonFromPhoto } from '../../faceClustering';
 
 // Soft-deleted photos are kept this long before the nightly purge cron
 // (see scheduled.ts runTrashPurge) hard-deletes them from R2 + D1.
@@ -280,6 +280,49 @@ app.put('/:photoId/people', async (c) => {
   } catch (error) {
     console.error('Error updating photo people tags:', error);
     return c.json({ error: 'Failed to update photo people tags' }, 500);
+  }
+});
+
+/**
+ * DELETE /photos/:photoId/people/:personId
+ * Unattaches a single person from a single photo — see removePersonFromPhoto()'s doc comment
+ * in faceClustering.ts for why this must undo BOTH a manual tag AND any automatically-detected
+ * face assignment (getPhotoPeople() shows the union of the two, so removing only one would
+ * leave the person still visibly attached). Same permission level as the other people-tagging
+ * routes (`image_edit`).
+ */
+app.delete('/:photoId/people/:personId', async (c) => {
+  try {
+    const photoId = c.req.param('photoId');
+    const personId = parseInt(c.req.param('personId'), 10);
+    if (!Number.isFinite(personId)) {
+      return c.json({ error: 'Invalid person ID' }, 400);
+    }
+
+    const photo = await c.env.DB
+      .prepare('SELECT event_id FROM photos WHERE id = ?')
+      .bind(photoId)
+      .first<{ event_id: number }>();
+
+    if (!photo) {
+      return c.json({ error: 'Photo not found' }, 404);
+    }
+
+    const permissionError = await requireEventCapabilityById(
+      c,
+      photo.event_id,
+      'image_edit',
+      'Edit permission required for this event'
+    );
+    if (permissionError) return permissionError;
+
+    await removePersonFromPhoto(c.env, photoId, personId);
+    const people = await getPhotoPeople(c.env, photoId);
+
+    return c.json({ success: true, people });
+  } catch (error) {
+    console.error('Error removing person from photo:', error);
+    return c.json({ error: 'Failed to remove person from photo' }, 500);
   }
 });
 

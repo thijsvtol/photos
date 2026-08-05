@@ -775,3 +775,57 @@ export async function addManualPhotoPersonTags(env: Env, photoIds: string[], per
   }
 }
 
+/**
+ * Fully removes a person from a single photo — the "unattach" counterpart to
+ * addManualPhotoPersonTags()/assignPhotosToPerson(). Undoes BOTH ways a person can be
+ * associated with a photo, since getPhotoPeople() (and therefore the PhotoDetail "People"
+ * section) shows the union of the two — removing only one would leave the person still
+ * visibly attached:
+ *  1. Deletes the photo_person_tags row (a manual tag), if any.
+ *  2. Unassigns (`person_id = NULL`) any photo_faces row on this photo that the automatic
+ *     clustering pipeline had assigned to this person, decrementing that person's face_count
+ *     (deleting the person_clusters row entirely if it reaches 0 — same "cluster disappears
+ *     once empty" behavior as assignPhotosToPerson()'s move-away path). The centroid is NOT
+ *     recomputed backward for the same reason documented on assignPhotosToPerson(): undoing a
+ *     running average exactly isn't possible without replaying its full history, and a
+ *     centroid missing one member is a negligible, self-correcting drift until the next
+ *     "Cluster Now"/"Rebuild All" pass. The unassigned face itself is NOT deleted — it goes
+ *     back to being an unclustered face, available to be picked up by a future clustering pass
+ *     or manually reassigned elsewhere, exactly like any other never-yet-clustered face.
+ */
+export async function removePersonFromPhoto(env: Env, photoId: string, personId: number): Promise<void> {
+  await env.DB
+    .prepare('DELETE FROM photo_person_tags WHERE photo_id = ? AND person_id = ?')
+    .bind(photoId, personId)
+    .run();
+
+  const { results: faceRows } = await env.DB
+    .prepare('SELECT id FROM photo_faces WHERE photo_id = ? AND person_id = ?')
+    .bind(photoId, personId)
+    .all<{ id: number }>();
+  const faceIds = (faceRows || []).map((f) => f.id);
+  if (faceIds.length === 0) return;
+
+  const placeholders = faceIds.map(() => '?').join(',');
+  await env.DB
+    .prepare(`UPDATE photo_faces SET person_id = NULL WHERE id IN (${placeholders})`)
+    .bind(...faceIds)
+    .run();
+
+  const cluster = await env.DB
+    .prepare('SELECT face_count FROM person_clusters WHERE id = ?')
+    .bind(personId)
+    .first<{ face_count: number }>();
+  if (!cluster) return;
+
+  const newCount = cluster.face_count - faceIds.length;
+  if (newCount <= 0) {
+    await env.DB.prepare('DELETE FROM person_clusters WHERE id = ?').bind(personId).run();
+  } else {
+    await env.DB
+      .prepare("UPDATE person_clusters SET face_count = ?, updated_at = datetime('now') WHERE id = ?")
+      .bind(newCount, personId)
+      .run();
+  }
+}
+
