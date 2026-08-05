@@ -19,10 +19,12 @@ vi.mock('../auth', async (importOriginal) => {
 
 const setManualPhotoPersonTagsMock = vi.fn();
 const getPhotoPeopleMock = vi.fn();
+const addManualPhotoPersonTagsMock = vi.fn();
 
 vi.mock('../faceClustering', () => ({
   setManualPhotoPersonTags: (...args: unknown[]) => setManualPhotoPersonTagsMock(...args),
   getPhotoPeople: (...args: unknown[]) => getPhotoPeopleMock(...args),
+  addManualPhotoPersonTags: (...args: unknown[]) => addManualPhotoPersonTagsMock(...args),
 }));
 
 import photosRouter from '../routes/admin/photos';
@@ -49,11 +51,28 @@ function createFakeEnv(photos: FakePhoto[]) {
           }
           return null as T | null;
         },
+        async all<T>() {
+          if (query.includes('SELECT p.id, p.event_id FROM photos p WHERE p.id IN')) {
+            const ids = boundArgs as string[];
+            const results = photos
+              .filter((p) => ids.includes(p.id))
+              .map((p) => ({ id: p.id, event_id: p.event_id }));
+            return { results: results as T[] };
+          }
+          return { results: [] as T[] };
+        },
         async run() {
           return { success: true, meta: { changes: 0 } };
         },
       };
       return stmt;
+    },
+    async batch<T>(statements: { all: () => Promise<T> }[]) {
+      const results: T[] = [];
+      for (const stmt of statements) {
+        results.push(await stmt.all());
+      }
+      return results;
     },
   };
   return { DB: db as unknown as D1Database, ADMIN_EMAILS: 'admin@example.com' } as any;
@@ -65,6 +84,7 @@ beforeEach(() => {
   currentHasCapability = true;
   setManualPhotoPersonTagsMock.mockReset();
   getPhotoPeopleMock.mockReset();
+  addManualPhotoPersonTagsMock.mockReset();
   getPhotoPeopleMock.mockResolvedValue([{ id: 1, name: 'Alice' }, { id: 2, name: 'Bob' }]);
 });
 
@@ -135,5 +155,102 @@ describe('PUT /admin/photos/:photoId/people', () => {
 
     expect(res.status).toBe(403);
     expect(setManualPhotoPersonTagsMock).not.toHaveBeenCalled();
+  });
+});
+
+describe('POST /admin/photos/bulk-tag-people', () => {
+  it('tags every existing photo with the given people and returns the tagged count', async () => {
+    const photos: FakePhoto[] = [{ id: 'p1', event_id: 1 }, { id: 'p2', event_id: 1 }];
+
+    const res = await photosRouter.request(
+      'http://localhost/bulk-tag-people',
+      { method: 'POST', body: JSON.stringify({ photoIds: ['p1', 'p2'], personIds: [1, 2] }), headers: { 'Content-Type': 'application/json' } },
+      createFakeEnv(photos)
+    );
+
+    expect(res.status).toBe(200);
+    const body = await res.json() as { success: boolean; taggedPhotoCount: number };
+    expect(body.success).toBe(true);
+    expect(body.taggedPhotoCount).toBe(2);
+    expect(addManualPhotoPersonTagsMock).toHaveBeenCalledWith(expect.anything(), ['p1', 'p2'], [1, 2]);
+  });
+
+  it('only tags photos that actually exist, ignoring unknown ids', async () => {
+    const photos: FakePhoto[] = [{ id: 'p1', event_id: 1 }];
+
+    const res = await photosRouter.request(
+      'http://localhost/bulk-tag-people',
+      { method: 'POST', body: JSON.stringify({ photoIds: ['p1', 'missing'], personIds: [1] }), headers: { 'Content-Type': 'application/json' } },
+      createFakeEnv(photos)
+    );
+
+    expect(res.status).toBe(200);
+    const body = await res.json() as { taggedPhotoCount: number };
+    expect(body.taggedPhotoCount).toBe(1);
+    expect(addManualPhotoPersonTagsMock).toHaveBeenCalledWith(expect.anything(), ['p1'], [1]);
+  });
+
+  it('returns 404 when none of the given photos exist', async () => {
+    const res = await photosRouter.request(
+      'http://localhost/bulk-tag-people',
+      { method: 'POST', body: JSON.stringify({ photoIds: ['missing'], personIds: [1] }), headers: { 'Content-Type': 'application/json' } },
+      createFakeEnv([])
+    );
+
+    expect(res.status).toBe(404);
+    expect(addManualPhotoPersonTagsMock).not.toHaveBeenCalled();
+  });
+
+  it('returns 400 when photoIds is missing or empty', async () => {
+    const res = await photosRouter.request(
+      'http://localhost/bulk-tag-people',
+      { method: 'POST', body: JSON.stringify({ photoIds: [], personIds: [1] }), headers: { 'Content-Type': 'application/json' } },
+      createFakeEnv([])
+    );
+
+    expect(res.status).toBe(400);
+    expect(addManualPhotoPersonTagsMock).not.toHaveBeenCalled();
+  });
+
+  it('returns 400 when personIds is missing, empty, or not all numbers', async () => {
+    const photos: FakePhoto[] = [{ id: 'p1', event_id: 1 }];
+
+    const res = await photosRouter.request(
+      'http://localhost/bulk-tag-people',
+      { method: 'POST', body: JSON.stringify({ photoIds: ['p1'], personIds: [] }), headers: { 'Content-Type': 'application/json' } },
+      createFakeEnv(photos)
+    );
+
+    expect(res.status).toBe(400);
+    expect(addManualPhotoPersonTagsMock).not.toHaveBeenCalled();
+  });
+
+  it('returns 403 when a non-admin lacks image_edit capability on one of the selected photos\' events', async () => {
+    currentIsAdmin = false;
+    currentHasCapability = false;
+    const photos: FakePhoto[] = [{ id: 'p1', event_id: 1 }];
+
+    const res = await photosRouter.request(
+      'http://localhost/bulk-tag-people',
+      { method: 'POST', body: JSON.stringify({ photoIds: ['p1'], personIds: [1] }), headers: { 'Content-Type': 'application/json' } },
+      createFakeEnv(photos)
+    );
+
+    expect(res.status).toBe(403);
+    expect(addManualPhotoPersonTagsMock).not.toHaveBeenCalled();
+  });
+
+  it('returns 401 when not authenticated', async () => {
+    currentUser = null;
+    const photos: FakePhoto[] = [{ id: 'p1', event_id: 1 }];
+
+    const res = await photosRouter.request(
+      'http://localhost/bulk-tag-people',
+      { method: 'POST', body: JSON.stringify({ photoIds: ['p1'], personIds: [1] }), headers: { 'Content-Type': 'application/json' } },
+      createFakeEnv(photos)
+    );
+
+    expect(res.status).toBe(401);
+    expect(addManualPhotoPersonTagsMock).not.toHaveBeenCalled();
   });
 });

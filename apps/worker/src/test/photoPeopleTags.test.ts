@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { getPhotoPeople, setManualPhotoPersonTags } from '../faceClustering';
+import { getPhotoPeople, setManualPhotoPersonTags, addManualPhotoPersonTags } from '../faceClustering';
 import type { Env } from '../types';
 
 /**
@@ -52,14 +52,24 @@ function makeEnv(db: FakeDb): Env {
               const [photoId] = boundArgs as [string];
               db.personTags = db.personTags.filter((t) => t.photo_id !== photoId);
             }
-            if (query.includes('INSERT INTO photo_person_tags')) {
+            if (query.includes('INSERT') && query.includes('INTO photo_person_tags')) {
               const [photoId, personId] = boundArgs as [string, number];
-              db.personTags.push({ photo_id: photoId, person_id: personId });
+              const alreadyTagged = db.personTags.some((t) => t.photo_id === photoId && t.person_id === personId);
+              if (!alreadyTagged) {
+                db.personTags.push({ photo_id: photoId, person_id: personId });
+              }
             }
             return { success: true, meta: { changes: 0 } };
           },
         };
         return stmt;
+      },
+      async batch<T>(statements: { run: () => Promise<T> }[]) {
+        const results: T[] = [];
+        for (const stmt of statements) {
+          results.push(await stmt.run());
+        }
+        return results;
       },
     } as unknown as Env['DB'],
   } as Env;
@@ -154,5 +164,64 @@ describe('setManualPhotoPersonTags', () => {
       { photo_id: 'photo-b', person_id: 5 },
       { photo_id: 'photo-a', person_id: 1 },
     ]);
+  });
+});
+
+describe('addManualPhotoPersonTags', () => {
+  it('tags every given person on every given photo (cross-product)', async () => {
+    const db: FakeDb = { photoFaces: [], personTags: [], personClusters: [] };
+
+    await addManualPhotoPersonTags(makeEnv(db), ['photo-a', 'photo-b'], [1, 2]);
+
+    expect(db.personTags.sort((a, b) => a.photo_id.localeCompare(b.photo_id) || a.person_id - b.person_id)).toEqual([
+      { photo_id: 'photo-a', person_id: 1 },
+      { photo_id: 'photo-a', person_id: 2 },
+      { photo_id: 'photo-b', person_id: 1 },
+      { photo_id: 'photo-b', person_id: 2 },
+    ]);
+  });
+
+  it('is purely ADDITIVE — never removes an existing tag on any photo, even ones not in this batch', async () => {
+    const db: FakeDb = {
+      photoFaces: [],
+      personTags: [{ photo_id: 'photo-a', person_id: 99 }],
+      personClusters: [],
+    };
+
+    await addManualPhotoPersonTags(makeEnv(db), ['photo-a'], [1]);
+
+    expect(db.personTags).toEqual([
+      { photo_id: 'photo-a', person_id: 99 },
+      { photo_id: 'photo-a', person_id: 1 },
+    ]);
+  });
+
+  it('is a no-op (does not error) when a (photo, person) pair is already tagged', async () => {
+    const db: FakeDb = {
+      photoFaces: [],
+      personTags: [{ photo_id: 'photo-a', person_id: 1 }],
+      personClusters: [],
+    };
+
+    await addManualPhotoPersonTags(makeEnv(db), ['photo-a'], [1]);
+
+    expect(db.personTags).toEqual([{ photo_id: 'photo-a', person_id: 1 }]);
+  });
+
+  it('de-duplicates repeated photo/person ids in the input', async () => {
+    const db: FakeDb = { photoFaces: [], personTags: [], personClusters: [] };
+
+    await addManualPhotoPersonTags(makeEnv(db), ['photo-a', 'photo-a'], [1, 1]);
+
+    expect(db.personTags).toEqual([{ photo_id: 'photo-a', person_id: 1 }]);
+  });
+
+  it('is a no-op given an empty photoIds or personIds array', async () => {
+    const db: FakeDb = { photoFaces: [], personTags: [], personClusters: [] };
+
+    await addManualPhotoPersonTags(makeEnv(db), [], [1]);
+    await addManualPhotoPersonTags(makeEnv(db), ['photo-a'], []);
+
+    expect(db.personTags).toEqual([]);
   });
 });

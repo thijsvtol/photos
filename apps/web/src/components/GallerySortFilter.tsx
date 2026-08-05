@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { X, CheckSquare, Heart, Star, Download, Trash2, Loader2, Copy, Search, Grid3X3, Grid2X2, LayoutGrid, Image, Video, LayoutList, SlidersHorizontal, MapPin } from 'lucide-react';
+import { X, CheckSquare, Heart, Star, Download, Trash2, Loader2, Copy, Search, Grid3X3, Grid2X2, LayoutGrid, Image, Video, LayoutList, SlidersHorizontal, MapPin, Users } from 'lucide-react';
 import { Capacitor } from '@capacitor/core';
 
 type DensityLevel = 'comfortable' | 'default' | 'dense';
@@ -27,6 +27,9 @@ interface GallerySortFilterProps {
   /** Global-admin-only action: open the location picker for the selected photos.
    *  Omit to hide the action (e.g. for non-admin collaborators). */
   onSetLocationSelected?: () => void;
+  /** Opens the "Tag people" picker for the selected photos (additive — never removes existing
+   *  tags). Omit to hide the action (e.g. for viewers without edit permission). */
+  onTagPeopleSelected?: () => void;
   isGlobalAdmin?: boolean;
   density?: DensityLevel;
   onDensityChange?: (density: DensityLevel) => void;
@@ -55,6 +58,7 @@ export function GallerySortFilter({
   isDeleting = false,
   isCopying = false,
   onSetLocationSelected,
+  onTagPeopleSelected,
   isGlobalAdmin = false,
   density,
   onDensityChange,
@@ -180,6 +184,19 @@ export function GallerySortFilter({
                   >
                     <MapPin className="w-4 h-4" />
                     <span className="hidden sm:inline">Set Location</span>
+                  </button>
+                )}
+
+                {/* Tag People (editor/admin) */}
+                {onTagPeopleSelected && (
+                  <button
+                    onClick={onTagPeopleSelected}
+                    className="flex-shrink-0 flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-white hover:bg-white/15 transition text-sm font-medium whitespace-nowrap"
+                    aria-label="Tag people on selected photos"
+                    title="Tag People"
+                  >
+                    <Users className="w-4 h-4" />
+                    <span className="hidden sm:inline">Tag People</span>
                   </button>
                 )}
 

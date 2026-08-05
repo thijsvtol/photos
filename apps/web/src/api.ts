@@ -1169,6 +1169,22 @@ export const bulkUpdatePhotoLocation = async (
   return response.data;
 };
 
+/** Adds (never replaces/removes) one or more people as manually-tagged across a batch of
+ *  selected photos at once — the EventGallery multi-select "Tag people" action. Existing tags
+ *  (on these or any other photo) are left untouched — see addManualPhotoPersonTags()'s doc
+ *  comment in apps/worker/src/faceClustering.ts. */
+export const bulkTagPeopleOnPhotos = async (
+  photoIds: string[],
+  personIds: number[]
+): Promise<{ taggedPhotoCount: number }> => {
+  const response = await api.post<{ success: boolean; taggedPhotoCount: number }>(
+    '/admin/photos/bulk-tag-people',
+    { photoIds, personIds },
+    { headers: getAdminHeaders() }
+  );
+  return { taggedPhotoCount: response.data.taggedPhotoCount };
+};
+
 export const geocodeEventPhotos = async (slug: string): Promise<{ updated: number; total: number }> => {
   const response = await api.post<{ updated: number; total: number }>(
     `/admin/events/${slug}/geocode-photos`,

@@ -1,6 +1,6 @@
 import React, { useEffect, useState, useRef, useMemo, useCallback } from 'react';
 import { useParams, Link } from 'react-router-dom';
-import { Upload, Settings } from 'lucide-react';
+import { Upload, Settings, Users, X, Check } from 'lucide-react';
 import Navbar from '../components/Navbar';
 import Footer from '../components/Footer';
 import { GallerySkeleton } from '../components/Skeletons';
@@ -18,7 +18,8 @@ import CastButton from '../components/CastButton';
 import AlbumPicker from '../components/AlbumPicker';
 import EventLocationPicker from '../components/EventLocationPicker';
 import { useUpload } from '../hooks/useUpload';
-import { getEvent, getPhotos, loginToEvent, getPreviewUrl, getCastPreviewUrl, requestZip, downloadZip, setPhotoFeatured, getUserFavoriteIds, toggleFavorite as toggleFavoriteAPI, bulkDeletePhotos, bulkCopyPhotos, bulkUpdatePhotoLocation, getCollaborators } from '../api';
+import { getEvent, getPhotos, loginToEvent, getPreviewUrl, getCastPreviewUrl, requestZip, downloadZip, setPhotoFeatured, getUserFavoriteIds, toggleFavorite as toggleFavoriteAPI, bulkDeletePhotos, bulkCopyPhotos, bulkUpdatePhotoLocation, bulkTagPeopleOnPhotos, getCollaborators, getNamedPeople } from '../api';
+import type { NamedPerson } from '../api';
 import type { Event, Photo, Collaborator } from '../types';
 import { CollaboratorAvatars } from '../components/CollaboratorAvatars';
 import { useAuth } from '../contexts/AuthContext';
@@ -49,6 +50,12 @@ const EventGallery: React.FC = () => {
   const [copying, setCopying] = useState(false);
   const [showCopyPicker, setShowCopyPicker] = useState(false);
   const [showLocationPicker, setShowLocationPicker] = useState(false);
+  const [showPeopleTagPicker, setShowPeopleTagPicker] = useState(false);
+  const [namedPeople, setNamedPeople] = useState<NamedPerson[]>([]);
+  const [namedPeopleLoading, setNamedPeopleLoading] = useState(false);
+  const [peopleTagSelection, setPeopleTagSelection] = useState<Set<number>>(new Set());
+  const [peopleTagSearchQuery, setPeopleTagSearchQuery] = useState('');
+  const [taggingPeople, setTaggingPeople] = useState(false);
   const [collaboratorRole, setCollaboratorRole] = useState<'viewer' | 'uploader' | 'editor' | 'admin' | null>(null);
   const [collaborators, setCollaborators] = useState<Collaborator[]>([]);
   const [activeDate, setActiveDate] = useState<string | null>(null);
@@ -475,6 +482,67 @@ const EventGallery: React.FC = () => {
       console.error('Error updating photo location:', error);
       await haptics.error();
       toast.showError('Failed to update photo location. Please try again.');
+    }
+  };
+
+  const handleOpenPeopleTagPicker = async () => {
+    if (selectedPhotos.size === 0) {
+      toast.showInfo('No photos selected');
+      return;
+    }
+    setPeopleTagSelection(new Set());
+    setPeopleTagSearchQuery('');
+    setShowPeopleTagPicker(true);
+    setNamedPeopleLoading(true);
+    try {
+      const people = await getNamedPeople();
+      setNamedPeople(people);
+    } catch (err) {
+      console.error('Failed to load people list', err);
+      toast.showError('Failed to load people list');
+    } finally {
+      setNamedPeopleLoading(false);
+    }
+  };
+
+  const handleToggleTagPersonSelection = (personId: number) => {
+    setPeopleTagSelection((prev) => {
+      const next = new Set(prev);
+      if (next.has(personId)) {
+        next.delete(personId);
+      } else {
+        next.add(personId);
+      }
+      return next;
+    });
+  };
+
+  // Adds (never replaces/removes) the selected people to every currently-selected photo — see
+  // bulkTagPeopleOnPhotos()'s doc comment in api.ts for why this is deliberately additive.
+  const handleBulkTagPeople = async () => {
+    if (peopleTagSelection.size === 0) {
+      toast.showInfo('Select at least one person');
+      return;
+    }
+    const selected = Array.from(selectedPhotos);
+    if (selected.length === 0) {
+      toast.showInfo('No photos selected');
+      return;
+    }
+
+    setTaggingPeople(true);
+    try {
+      const result = await bulkTagPeopleOnPhotos(selected, Array.from(peopleTagSelection));
+      setShowPeopleTagPicker(false);
+      clearSelection();
+      await haptics.success();
+      toast.showSuccess(`Tagged people on ${result.taggedPhotoCount} photo(s)`);
+    } catch (err) {
+      console.error('Failed to bulk-tag people', err);
+      await haptics.error();
+      toast.showError('Failed to tag people. Please try again.');
+    } finally {
+      setTaggingPeople(false);
     }
   };
 
@@ -1215,6 +1283,87 @@ const EventGallery: React.FC = () => {
           }}
         />
       )}
+      {showPeopleTagPicker && (
+        <div
+          className="fixed inset-0 bg-black/75 flex items-center justify-center z-[100] p-4"
+          onClick={() => !taggingPeople && setShowPeopleTagPicker(false)}
+        >
+          <div
+            className="bg-gray-800 rounded-lg p-6 max-w-md w-full max-h-[80vh] flex flex-col"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex justify-between items-center mb-4 shrink-0">
+              <h2 className="text-xl font-bold text-white flex items-center gap-2">
+                <Users className="w-5 h-5" /> Tag people on {selectedPhotos.size} photo{selectedPhotos.size === 1 ? '' : 's'}
+              </h2>
+              <button
+                onClick={() => setShowPeopleTagPicker(false)}
+                disabled={taggingPeople}
+                className="text-gray-400 hover:text-white disabled:opacity-50"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <p className="text-xs text-gray-400 mb-3 shrink-0">
+              Adds the selected people to every chosen photo — existing tags on these photos are kept.
+            </p>
+
+            <input
+              type="text"
+              value={peopleTagSearchQuery}
+              onChange={(e) => setPeopleTagSearchQuery(e.target.value)}
+              placeholder="Search people..."
+              className="mb-3 w-full px-3 py-2 bg-gray-700 text-white rounded-lg text-sm placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500 shrink-0"
+            />
+
+            <div className="flex-1 overflow-y-auto space-y-1 -mx-1 px-1">
+              {namedPeopleLoading ? (
+                <p className="text-gray-400 text-sm py-4 text-center">Loading people...</p>
+              ) : namedPeople.length === 0 ? (
+                <p className="text-gray-400 text-sm py-4 text-center">
+                  No named people yet — name someone in Admin → People first.
+                </p>
+              ) : (
+                namedPeople
+                  .filter((p) => p.name.toLowerCase().includes(peopleTagSearchQuery.trim().toLowerCase()))
+                  .map((p) => {
+                    const selected = peopleTagSelection.has(p.id);
+                    return (
+                      <button
+                        key={p.id}
+                        onClick={() => handleToggleTagPersonSelection(p.id)}
+                        className={`w-full flex items-center justify-between gap-2 px-3 py-2 rounded-lg text-sm text-left transition ${
+                          selected ? 'bg-blue-600 text-white' : 'bg-gray-700/60 text-gray-200 hover:bg-gray-700'
+                        }`}
+                      >
+                        <span>{p.name}</span>
+                        {selected && <Check className="w-4 h-4 shrink-0" />}
+                      </button>
+                    );
+                  })
+              )}
+            </div>
+
+            <div className="flex gap-2.5 mt-4 shrink-0">
+              <button
+                onClick={() => setShowPeopleTagPicker(false)}
+                disabled={taggingPeople}
+                className="flex-1 py-2.5 bg-gray-700 text-white rounded-lg text-sm font-medium hover:bg-gray-600 transition disabled:opacity-50"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleBulkTagPeople}
+                disabled={taggingPeople || peopleTagSelection.size === 0}
+                className="flex-1 py-2.5 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 transition disabled:opacity-50"
+              >
+                {taggingPeople ? 'Tagging...' : 'Tag People'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
       <SEO
         title={`${event?.name || 'Event Gallery'} - ${config.appName}`}
         description={`Browse ${photos.length} photos from ${event?.name}${event?.cities && event.cities.length > 0 ? ` in ${event.cities.join(', ')}` : ''}. Professional event photography featuring ice skating and inline skating.`}
@@ -1350,6 +1499,7 @@ const EventGallery: React.FC = () => {
           isDeleting={deleting}
           isCopying={copying}
           onSetLocationSelected={isAdmin ? () => setShowLocationPicker(true) : undefined}
+          onTagPeopleSelected={canDelete ? handleOpenPeopleTagPicker : undefined}
           isGlobalAdmin={isAdmin}
           density={density}
           onDensityChange={changeDensity}

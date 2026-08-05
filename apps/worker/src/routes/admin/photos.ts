@@ -5,7 +5,7 @@ import { extractUser, hasEventCapabilityByEventId, isUserAdmin } from '../../aut
 import { permanentlyDeletePhotos } from '../../photoDeletion';
 import { logActivity } from '../../activityLog';
 import { isValidFaceInput } from '../../faceValidation';
-import { setManualPhotoPersonTags, getPhotoPeople } from '../../faceClustering';
+import { setManualPhotoPersonTags, getPhotoPeople, addManualPhotoPersonTags } from '../../faceClustering';
 
 // Soft-deleted photos are kept this long before the nightly purge cron
 // (see scheduled.ts runTrashPurge) hard-deletes them from R2 + D1.
@@ -748,6 +748,77 @@ app.post('/bulk-delete', async (c) => {
   } catch (error) {
     console.error('Error in bulk delete:', error);
     return c.json({ error: 'Failed to process bulk delete' }, 500);
+  }
+});
+
+/**
+ * POST /photos/bulk-tag-people
+ * Adds one or more people as manually-tagged across multiple selected photos at once (the
+ * EventGallery multi-select "Tag people" action) — e.g. tagging everyone in a group photo, or
+ * tagging one person across a whole batch of photos from an event. ADDS only (never removes
+ * existing tags on any of the selected photos, even ones tagged individually before) — see
+ * addManualPhotoPersonTags()'s doc comment in faceClustering.ts for why this is deliberately
+ * additive rather than a bulk version of the single-photo replace-the-whole-set endpoint.
+ * Same permission level as image editing (`image_edit`), same per-event capability-check
+ * pattern as bulk-delete above (global admins bypass; others need the capability on every
+ * event any selected photo belongs to).
+ */
+app.post('/bulk-tag-people', async (c) => {
+  try {
+    const user = await extractUser(c);
+    if (!user) {
+      return c.json({ error: 'Authentication required' }, 401);
+    }
+
+    c.set('user', user);
+    const isGlobalAdmin = isUserAdmin(user, c.env.ADMIN_EMAILS || '');
+
+    const { photoIds, personIds } = await c.req.json<{ photoIds: string[]; personIds: number[] }>();
+
+    if (!Array.isArray(photoIds) || photoIds.length === 0) {
+      return c.json({ error: 'photoIds array is required' }, 400);
+    }
+    if (photoIds.length > 500) {
+      return c.json({ error: 'Cannot tag more than 500 photos at once' }, 400);
+    }
+    if (!Array.isArray(personIds) || personIds.length === 0 || !personIds.every((id) => Number.isFinite(id))) {
+      return c.json({ error: 'personIds must be a non-empty array of numbers' }, 400);
+    }
+    if (personIds.length > 50) {
+      return c.json({ error: 'Cannot tag more than 50 people at once' }, 400);
+    }
+
+    const uniquePhotoIds = Array.from(new Set(photoIds));
+
+    const photoSelectStatements = chunkArray(uniquePhotoIds, MAX_SQL_IN_CHUNK).map((idsChunk) => {
+      const placeholders = idsChunk.map(() => '?').join(', ');
+      return c.env.DB
+        .prepare(`SELECT p.id, p.event_id FROM photos p WHERE p.id IN (${placeholders}) AND p.deleted_at IS NULL`)
+        .bind(...idsChunk);
+    });
+    const photoRowBatches = await c.env.DB.batch<{ id: string; event_id: number }>(photoSelectStatements);
+    const existingPhotos = photoRowBatches.flatMap((batch) => batch.results || []);
+
+    if (existingPhotos.length === 0) {
+      return c.json({ error: 'None of the given photos were found' }, 404);
+    }
+
+    if (!isGlobalAdmin) {
+      const eventIds = Array.from(new Set(existingPhotos.map((photo) => photo.event_id)));
+      const permissionChecks = await Promise.all(
+        eventIds.map((eventId) => hasEventCapabilityByEventId(c.env.DB, eventId, user.email, 'image_edit'))
+      );
+      if (permissionChecks.some((allowed) => !allowed)) {
+        return c.json({ error: 'Edit permission required for one or more events' }, 403);
+      }
+    }
+
+    await addManualPhotoPersonTags(c.env, existingPhotos.map((p) => p.id), personIds);
+
+    return c.json({ success: true, taggedPhotoCount: existingPhotos.length });
+  } catch (error) {
+    console.error('Error in bulk tag people:', error);
+    return c.json({ error: 'Failed to tag people on selected photos' }, 500);
   }
 });
 
