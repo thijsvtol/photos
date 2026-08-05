@@ -84,27 +84,77 @@ function OverscanDebugOverlay() {
           </span>
         </div>
       ))}
-      <div className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 bg-black/80 text-white font-mono text-lg leading-relaxed px-6 py-4 rounded-lg text-center">
-        <div>inner&nbsp;&nbsp;{metrics.innerW} x {metrics.innerH}</div>
-        <div>screen&nbsp;{metrics.screenW} x {metrics.screenH}</div>
-        <div>avail&nbsp;&nbsp;{metrics.availW} x {metrics.availH}</div>
-        <div>dpr&nbsp;&nbsp;&nbsp;&nbsp;{metrics.dpr}</div>
-        <div className="mt-2 text-sm text-white/60">
-          report the outermost ring fully visible
+      {/* Corner markers. If the TV only shows one of these, the visible area
+          is an off-centre crop of a larger layout — which tells us far more
+          than the ring numbers do. */}
+      {CORNER_MARKERS.map(({ label, cls }) => (
+        <div
+          key={label}
+          className={`absolute ${cls} bg-white text-black font-mono font-bold text-3xl px-3 py-1`}
+        >
+          {label}
         </div>
-      </div>
+      ))}
+      {/* The readout is tiled across nine positions rather than centred once,
+          because on a mismatched viewport the centre of the page can fall
+          entirely outside what the TV displays — as it did on the first
+          attempt, where nothing at all was visible. At least one copy should
+          land in view wherever the crop happens to sit. */}
+      {READOUT_POSITIONS.map((cls) => (
+        <div
+          key={cls}
+          className={`absolute ${cls} bg-black/85 text-white font-mono text-base leading-snug px-4 py-3 rounded-lg`}
+        >
+          <div>inner&nbsp;&nbsp;{metrics.innerW} x {metrics.innerH}</div>
+          <div>client&nbsp;{metrics.clientW} x {metrics.clientH}</div>
+          <div>visual {metrics.visualW} x {metrics.visualH}</div>
+          <div>vscale {metrics.visualScale}</div>
+          <div>voff&nbsp;&nbsp;&nbsp;{metrics.visualOffX} , {metrics.visualOffY}</div>
+          <div>screen {metrics.screenW} x {metrics.screenH}</div>
+          <div>dpr&nbsp;&nbsp;&nbsp;&nbsp;{metrics.dpr}</div>
+        </div>
+      ))}
     </div>
   );
 }
 
+const CORNER_MARKERS = [
+  { label: 'TL', cls: 'top-0 left-0' },
+  { label: 'TR', cls: 'top-0 right-0' },
+  { label: 'BL', cls: 'bottom-0 left-0' },
+  { label: 'BR', cls: 'bottom-0 right-0' },
+];
+
+const READOUT_POSITIONS = [
+  'top-[6%] left-[6%]',
+  'top-[6%] left-1/2 -translate-x-1/2',
+  'top-[6%] right-[6%]',
+  'top-1/2 left-[6%] -translate-y-1/2',
+  'top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2',
+  'top-1/2 right-[6%] -translate-y-1/2',
+  'bottom-[6%] left-[6%]',
+  'bottom-[6%] left-1/2 -translate-x-1/2',
+  'bottom-[6%] right-[6%]',
+];
+
 function readMetrics() {
+  const vv = window.visualViewport;
   return {
     innerW: window.innerWidth,
     innerH: window.innerHeight,
+    clientW: document.documentElement.clientWidth,
+    clientH: document.documentElement.clientHeight,
     screenW: window.screen?.width ?? 0,
     screenH: window.screen?.height ?? 0,
-    availW: window.screen?.availWidth ?? 0,
-    availH: window.screen?.availHeight ?? 0,
+    // The decisive pair: visualViewport is what's actually *shown*, while
+    // innerWidth/clientWidth are the layout viewport. If these disagree, the
+    // TV is displaying a magnified crop of a larger layout — a viewport
+    // mismatch, not overscan, and no amount of title-safe inset would fix it.
+    visualW: vv ? Math.round(vv.width) : -1,
+    visualH: vv ? Math.round(vv.height) : -1,
+    visualScale: vv ? vv.scale : -1,
+    visualOffX: vv ? Math.round(vv.offsetLeft) : -1,
+    visualOffY: vv ? Math.round(vv.offsetTop) : -1,
     dpr: window.devicePixelRatio,
   };
 }
