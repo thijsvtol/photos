@@ -140,11 +140,13 @@ function OverscanDebugOverlay({ stage }: { stage: { w: number; h: number } }) {
             whiteSpace: 'pre',
           }}
         >
+          {`build  ${RECEIVER_BUILD}\n`}
+          {`objfit ${SUPPORTS.objectFit ? 'yes' : 'NO'}\n`}
+          {`blur   ${SUPPORTS.blur ? 'yes' : 'NO'}\n`}
           {`inner  ${metrics.innerW} x ${metrics.innerH}\n`}
           {`client ${metrics.clientW} x ${metrics.clientH}\n`}
           {`visual ${metrics.visualW} x ${metrics.visualH}\n`}
           {`vscale ${metrics.visualScale}\n`}
-          {`voff   ${metrics.visualOffX} , ${metrics.visualOffY}\n`}
           {`screen ${metrics.screenW} x ${metrics.screenH}\n`}
           {`dpr    ${metrics.dpr}`}
         </div>
@@ -194,6 +196,24 @@ const RECEIVER_KEYFRAMES = `
 function ReceiverStyles() {
   return <style>{RECEIVER_KEYFRAMES}</style>;
 }
+
+// Bumped by hand whenever this file changes, and surfaced in the ?debug=1
+// readout. Chromecasts cache receivers aggressively and there is no way to
+// tell from the sender which build a TV actually loaded — without this, a
+// "still broken" report can't be distinguished from "still running the old
+// bundle".
+const RECEIVER_BUILD = 'r5';
+
+// Feature detection rather than assumption. The Google TV receiver engine has
+// already proven old enough to drop `@layer` wholesale, so nothing beyond the
+// basics gets taken for granted here. `object-fit` in particular is load
+// bearing: applied to an explicitly-sized <img> it letterboxes, but if the
+// engine ignores it the very same markup *stretches* the image instead —
+// silently turning a correct layout into a squashed one.
+const SUPPORTS = {
+  objectFit: typeof CSS !== 'undefined' && !!CSS.supports?.('object-fit', 'cover'),
+  blur: typeof CSS !== 'undefined' && !!CSS.supports?.('filter', 'blur(2px)'),
+};
 
 /** Centre a child without relying on flexbox gap/utility classes. */
 const CENTRED: React.CSSProperties = {
@@ -513,18 +533,30 @@ export default function CastReceiver() {
     overflow: 'hidden',
     backgroundColor: '#000',
   };
-  // Absolutely positioned and sized to the whole stage, with object-fit doing
-  // the letterboxing. Not `max-width`/`max-height` on an auto-sized element:
-  // that leaves the box dependent on the image's intrinsic size, which is
-  // what let a multi-thousand-pixel photo expand the document in the first
-  // place. A fixed box plus object-fit can't do that whatever the source is.
+  // Letterboxing via max-width/max-height on an auto-sized replaced element,
+  // NOT via object-fit on a fixed box.
+  //
+  // Both express the same intent, but they fail in opposite directions. A
+  // fixed 960x540 box relies on object-fit to letterbox — and an engine that
+  // ignores object-fit stretches the image to the box instead, which is the
+  // squash this went through. Max-width/max-height is resolved by replaced
+  // element sizing itself (CSS 2.1 §10.4), which every engine implements and
+  // which preserves the intrinsic ratio by construction: cap the width, and
+  // the height follows; if that overshoots, cap the height and the width
+  // follows. Worst case it is ignored entirely and we are back to an
+  // oversized image — but these are inline styles, so that can't happen.
+  //
+  // Centred with a translate rather than flexbox so no parent layout mode is
+  // involved, and so flex-shrink can never compress one axis on its own.
   const mediaStyle: React.CSSProperties = {
     position: 'absolute',
-    left: 0,
-    top: 0,
-    width: stage.w,
-    height: stage.h,
-    objectFit: 'contain',
+    left: '50%',
+    top: '50%',
+    transform: 'translate(-50%, -50%)',
+    width: 'auto',
+    height: 'auto',
+    maxWidth: stage.w,
+    maxHeight: stage.h,
     zIndex: 1,
     animation: 'castFadeIn 0.3s ease-in-out',
   };
@@ -551,7 +583,7 @@ export default function CastReceiver() {
           Chromecast's hardware pipeline for a purely cosmetic effect. The
           scale hides the transparent edges the blur would otherwise feather
           in. zIndex keeps it behind the foreground regardless of DOM order. */}
-      {displayedItem.type === 'photo' && (
+      {displayedItem.type === 'photo' && SUPPORTS.objectFit && SUPPORTS.blur && (
         <img
           key={`backdrop-${displayedItem.url}`}
           src={displayedItem.url}
