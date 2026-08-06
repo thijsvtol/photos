@@ -1,16 +1,29 @@
 import { getInitials, getAvatarColor } from '../utils/userUtils';
+import { getPreviewUrl } from '../api';
 
 interface UserAvatarProps {
   email: string;
   name: string | null;
   size?: number; // Tailwind size value (e.g., 10 for h-10 w-10)
   showBorder?: boolean; // Whether to show white border ring
+  /** Cover photo of this user's linked person (see person_clusters.linked_user_email) — when
+   *  present, renders this photo instead of initials. All four fields are required together
+   *  since building a preview URL needs the event slug + file type. */
+  coverPhoto?: {
+    photoId: string;
+    eventSlug: string;
+    fileType?: string | null;
+    cacheVersion?: number | null;
+  } | null;
 }
 
-export function UserAvatar({ email, name, size = 10, showBorder = false }: UserAvatarProps) {
+export function UserAvatar({ email, name, size = 10, showBorder = false, coverPhoto }: UserAvatarProps) {
   const initials = getInitials(name, email);
   const colorClass = getAvatarColor(email);
-  const displayName = name || email;
+  // Never show the raw email address in a public-facing tooltip/title — only the display name,
+  // or a generic fallback for someone who hasn't set one yet (see the "force a name on login"
+  // flow, which should make this fallback increasingly rare over time).
+  const displayName = name || 'Collaborator';
   
   // Generate size classes
   const sizeClass = `h-${size} w-${size}`;
@@ -20,7 +33,7 @@ export function UserAvatar({ email, name, size = 10, showBorder = false }: UserA
     <div
       className={`
         ${sizeClass} 
-        ${colorClass} 
+        ${coverPhoto ? '' : colorClass} 
         ${textSizeClass}
         ${showBorder ? 'ring-2 ring-white dark:ring-gray-900' : ''}
         rounded-full 
@@ -35,10 +48,19 @@ export function UserAvatar({ email, name, size = 10, showBorder = false }: UserA
         hover:z-10
         relative
         group
+        overflow-hidden
       `}
       title={displayName}
     >
-      {initials}
+      {coverPhoto ? (
+        <img
+          src={getPreviewUrl(coverPhoto.eventSlug, coverPhoto.photoId, coverPhoto.fileType || undefined, coverPhoto.cacheVersion || undefined)}
+          alt={displayName}
+          className="w-full h-full object-cover"
+        />
+      ) : (
+        initials
+      )}
       
       {/* Tooltip */}
       <div className="

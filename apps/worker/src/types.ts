@@ -182,6 +182,10 @@ export interface CollaboratorWithUser {
   name: string | null;
   invited_at: string;
   role: CollaboratorRole;
+  cover_photo_id?: string | null;
+  cover_file_type?: string | null;
+  cover_cache_version?: number | null;
+  cover_event_slug?: string | null;
 }
 
 // Request to invite a collaborator

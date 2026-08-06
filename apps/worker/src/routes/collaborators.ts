@@ -38,6 +38,11 @@ app.use('/*', requireFeature('enableCollaborators'));
  * GET /api/events/:slug/collaborators
  * Get all collaborators for an event
  * Public endpoint - allows anyone who can view the event to see collaborators
+ *
+ * Includes the collaborator's linked person's cover photo (person_clusters.cover_photo_id, via
+ * linked_user_email — see AdminPersonDetail's "Linked account" section for how that link is
+ * set) so the public-facing collaborator display (CollaboratorAvatars.tsx) can show an actual
+ * photo of them instead of only ever falling back to initials.
  */
 app.get('/api/events/:slug/collaborators', async (c) => {
   const slug = c.req.param('slug')!;
@@ -60,9 +65,16 @@ app.get('/api/events/:slug/collaborators', async (c) => {
         ec.invited_at,
         ec.role,
         u.email,
-        u.name
+        u.name,
+        p.id as cover_photo_id,
+        p.file_type as cover_file_type,
+        p.cache_version as cover_cache_version,
+        e2.slug as cover_event_slug
       FROM event_collaborators ec
       LEFT JOIN users u ON ec.user_email = u.email
+      LEFT JOIN person_clusters pc ON LOWER(pc.linked_user_email) = LOWER(ec.user_email)
+      LEFT JOIN photos p ON p.id = pc.cover_photo_id
+      LEFT JOIN events e2 ON e2.id = p.event_id
       WHERE ec.event_id = ?
       ORDER BY ec.invited_at DESC
     `).bind(event.id).all<CollaboratorWithUser>();

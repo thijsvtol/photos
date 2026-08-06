@@ -32,6 +32,16 @@ export function CollaboratorAvatars({ collaborators }: CollaboratorAvatarsProps)
               name={collaborator.name}
               size={10}
               showBorder={true}
+              coverPhoto={
+                collaborator.cover_photo_id && collaborator.cover_event_slug
+                  ? {
+                      photoId: collaborator.cover_photo_id,
+                      eventSlug: collaborator.cover_event_slug,
+                      fileType: collaborator.cover_file_type,
+                      cacheVersion: collaborator.cover_cache_version,
+                    }
+                  : null
+              }
             />
           </div>
         ))}

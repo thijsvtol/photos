@@ -7,6 +7,7 @@ import { ThemeProvider } from './contexts/ThemeContext';
 import { RefreshProvider } from './contexts/RefreshContext';
 import { UploadProvider } from './contexts/UploadContext';
 import GlobalUploadIndicator from './components/GlobalUploadIndicator';
+import RequireProfileName from './components/RequireProfileName';
 import { OfflineBanner } from './components/OfflineBanner';
 import { ToastProvider } from './components/Toast';
 import ErrorBoundary from './components/ErrorBoundary';
@@ -309,6 +310,7 @@ function App() {
                   <AndroidAppPrompt />
                   <GlobalUploadIndicator />
                   <OfflineBanner />
+                  <RequireProfileName />
                 </BrowserRouter>
               </ToastProvider>
             </UploadProvider>

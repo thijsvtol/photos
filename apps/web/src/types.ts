@@ -152,6 +152,13 @@ export interface Collaborator {
   invited_at: string;
   status?: 'pending' | 'accepted' | 'declined';
   role: CollaboratorRole;
+  /** Linked person's cover photo (see person_clusters.linked_user_email), if any — lets the
+   *  public-facing collaborator display show an actual photo instead of only ever falling back
+   *  to initials. */
+  cover_photo_id?: string | null;
+  cover_file_type?: string | null;
+  cover_cache_version?: number | null;
+  cover_event_slug?: string | null;
 }
 
 export interface InviteCollaboratorRequest {
