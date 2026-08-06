@@ -1,5 +1,5 @@
 import { Suspense, useEffect } from 'react';
-import { BrowserRouter, Routes, Route, useNavigate, useLocation } from 'react-router-dom';
+import { BrowserRouter, Routes, Route, Navigate, useNavigate, useLocation } from 'react-router-dom';
 import { HelmetProvider } from 'react-helmet-async';
 import { Capacitor } from '@capacitor/core';
 import { AuthProvider } from './contexts/AuthContext';
@@ -34,7 +34,7 @@ const PrivacyPolicy = lazyWithReload(() => import('./pages/PrivacyPolicy'));
 const ShareUpload = lazyWithReload(() => import('./pages/ShareUpload'));
 const Timeline = lazyWithReload(() => import('./pages/Timeline'));
 const CastReceiver = lazyWithReload(() => import('./pages/CastReceiver'));
-const SearchPage = lazyWithReload(() => import('./pages/SearchPage'));
+const SearchRedirect = () => <Navigate to={`/timeline${window.location.search}`} replace />;
 const AdminPeople = lazyWithReload(() => import('./pages/AdminPeople'));
 const AdminPersonDetail = lazyWithReload(() => import('./pages/AdminPersonDetail'));
 const AdminUnattachedPhotos = lazyWithReload(() => import('./pages/AdminUnattachedPhotos'));
@@ -291,7 +291,7 @@ function App() {
                       <Route path="/share-upload" element={<ShareUpload />} />
                       <Route path="/timeline" element={<Timeline />} />
                       <Route path="/cast-receiver" element={<CastReceiver />} />
-                      <Route path="/search" element={<SearchPage />} />
+                      <Route path="/search" element={<SearchRedirect />} />
                       <Route path="/admin/people" element={<AdminPeople />} />
                       <Route path="/admin/people/unattached" element={<AdminUnattachedPhotos />} />
                       <Route path="/admin/people/:personId" element={<AdminPersonDetail />} />

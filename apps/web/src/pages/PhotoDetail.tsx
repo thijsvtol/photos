@@ -197,16 +197,29 @@ const PhotoDetail: React.FC = () => {
     }
   }, [videoMuted, photoId]);
 
-  // Check if we came from favorites page or timeline
+  // Check if we came from favorites page, timeline, or search results — each can restrict
+  // next/prev navigation to a subset of the event's photos instead of the full gallery.
   const fromFavorites = location.state?.fromFavorites;
   const fromTimeline = location.state?.fromTimeline;
+  const fromSearch = location.state?.fromSearch;
   const favoritePhotos = (location.state?.favoritePhotos || []) as Array<{ id: string; slug: string }>;
+  // Only this event's photo ids from the search results the user actually clicked from (see
+  // Timeline.tsx's per-event-group JustifiedGrid linkState — search is now built into the
+  // Timeline page rather than a separate page) — previously fromSearch was never read at all,
+  // so next/prev silently fell back to browsing the ENTIRE event instead of just the photos
+  // that matched the search (e.g. a specific person filter).
+  const searchResultIds = (location.state?.searchResultIds || []) as string[];
+  // Full /timeline?q=...&people=... URL to return to — needed since fromSearch alone isn't
+  // enough to reconstruct the exact search the user came from.
+  const searchUrl = (location.state?.searchUrl || '/timeline') as string;
   const sortBy = location.state?.sortBy || 'date_desc';
   
-  // Filter photos based on whether we're viewing favorites
-  // When in favorites mode, only show photos from this event that are in favorites
+  // Filter photos based on whether we're viewing favorites or search results.
+  // When restricted, only show photos from this event that are in that subset.
   const displayPhotos = fromFavorites && favoritePhotos.length > 0
     ? allPhotos.filter(p => favoritePhotos.some((fav: { id: string; slug: string }) => fav.id === p.id && fav.slug === slug))
+    : fromSearch && searchResultIds.length > 0
+    ? allPhotos.filter(p => searchResultIds.includes(p.id))
     : allPhotos;
   const photosToUse = displayPhotos.length > 0 ? displayPhotos : allPhotos;
 
@@ -454,7 +467,7 @@ const PhotoDetail: React.FC = () => {
         } else if (isSlideshow) {
           setIsSlideshow(false);
         } else {
-          navigate(fromFavorites ? '/favorites' : fromTimeline ? '/timeline' : `/events/${slug}`);
+          navigate(fromFavorites ? '/favorites' : fromTimeline ? '/timeline' : fromSearch ? searchUrl : `/events/${slug}`);
         }
       }
       if (e.key === 'f' || e.key === 'F') toggleFullscreen();
@@ -526,6 +539,8 @@ const PhotoDetail: React.FC = () => {
         // Find index in the appropriate list
         const photosToUse = fromFavorites && favoritePhotos.length > 0
           ? allPhotosData.filter(p => favoritePhotos.some((fav: { id: string; slug: string }) => fav.id === p.id && fav.slug === slug))
+          : fromSearch && searchResultIds.length > 0
+          ? allPhotosData.filter(p => searchResultIds.includes(p.id))
           : allPhotosData;
         const index = photosToUse.findIndex(p => p.id === photoId);
         setCurrentIndex(index);
@@ -1436,6 +1451,8 @@ const PhotoDetail: React.FC = () => {
       setAllPhotos(remainingPhotos);
       const remainingDisplayPhotos = fromFavorites && favoritePhotos.length > 0
         ? remainingPhotos.filter((p) => favoritePhotos.some((fav: { id: string; slug: string }) => fav.id === p.id && fav.slug === slug))
+        : fromSearch && searchResultIds.length > 0
+        ? remainingPhotos.filter((p) => searchResultIds.includes(p.id))
         : remainingPhotos;
 
       if (remainingDisplayPhotos.length > 0) {
@@ -1464,7 +1481,7 @@ const PhotoDetail: React.FC = () => {
           state: location.state,
         });
       } else {
-        navigate(fromFavorites ? '/favorites' : fromTimeline ? '/timeline' : `/events/${slug}`, { replace: true });
+        navigate(fromFavorites ? '/favorites' : fromTimeline ? '/timeline' : fromSearch ? searchUrl : `/events/${slug}`, { replace: true });
       }
     } catch (err) {
       console.error('Failed to delete photo:', err);
@@ -1793,7 +1810,7 @@ const PhotoDetail: React.FC = () => {
           <div className="flex items-center justify-between">
             {/* Back button */}
             <button
-              onClick={() => navigate(fromFavorites ? '/favorites' : fromTimeline ? '/timeline' : `/events/${slug}`)}
+              onClick={() => navigate(fromFavorites ? '/favorites' : fromTimeline ? '/timeline' : fromSearch ? searchUrl : `/events/${slug}`)}
               className="text-white p-2 -ml-2 hover:bg-white/10 rounded-full transition"
               aria-label="Back"
             >

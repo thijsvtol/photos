@@ -1,5 +1,6 @@
 import React, { useEffect, useState, useRef, useMemo } from 'react';
-import { Clock, Download, X } from 'lucide-react';
+import { useSearchParams } from 'react-router-dom';
+import { Clock, Download, X, Search, Users, Check } from 'lucide-react';
 import Navbar from '../components/Navbar';
 import Footer from '../components/Footer';
 import { TimelineSkeleton } from '../components/Skeletons';
@@ -9,7 +10,8 @@ import VerticalDateScrubber from '../components/VerticalDateScrubber';
 import MemoriesCarousel from '../components/MemoriesCarousel';
 import { useGridDensity } from '../hooks/useGridDensity';
 import { usePhotoSelection } from '../hooks/usePhotoSelection';
-import { getTimeline, getUserFavoriteIds, toggleFavorite as toggleFavoriteAPI, requestZip, downloadZip, getMyPhotos } from '../api';
+import { getTimeline, getUserFavoriteIds, toggleFavorite as toggleFavoriteAPI, requestZip, downloadZip, getMyPhotos, searchPhotos, getPublicNamedPeople } from '../api';
+import type { SearchResultPhoto, PublicNamedPerson } from '../api';
 import { getCachedTimelinePhotos, cacheTimelinePhotos } from '../services/timelineCache';
 import type { Photo } from '../types';
 import { config } from '../config';
@@ -96,6 +98,7 @@ function LazyDateGroup({ photoCount, children }: { photoCount: number; children:
 const Timeline: React.FC = () => {
   const { isAuthenticated } = useAuth();
   const toast = useToast();
+  const [searchParams, setSearchParams] = useSearchParams();
   const [photos, setPhotos] = useState<Photo[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
@@ -112,6 +115,28 @@ const Timeline: React.FC = () => {
   const dateRefs = useRef<Map<string, HTMLDivElement>>(new Map());
   const loadMoreRef = useRef<HTMLDivElement | null>(null);
   const { targetRowHeight, containerRef: densityContainerRef } = useGridDensity();
+
+  // Search + people filter — Timeline and the old standalone Search page were nearly identical
+  // (both: browse every accessible photo, grouped for display, with favorite/select actions),
+  // so they're now one combined page: by default this shows the full timeline (unchanged
+  // behavior below); typing a query or picking people switches to a search-results view in
+  // place, without navigating away. `/search?...` still works (see App.tsx's redirect) and
+  // deep-links straight into search mode via these same URL params.
+  const initialQuery = searchParams.get('q') || '';
+  const initialPeople = (searchParams.get('people') || '')
+    .split(',')
+    .map((s) => parseInt(s, 10))
+    .filter((n) => Number.isFinite(n));
+  const [searchQuery, setSearchQuery] = useState(initialQuery);
+  const [selectedPersonIds, setSelectedPersonIds] = useState<Set<number>>(new Set(initialPeople));
+  const [namedPeople, setNamedPeople] = useState<PublicNamedPerson[]>([]);
+  const [showPeoplePicker, setShowPeoplePicker] = useState(false);
+  const [peopleSearchQuery, setPeopleSearchQuery] = useState('');
+  const [searchResults, setSearchResults] = useState<SearchResultPhoto[] | null>(null);
+  const [searching, setSearching] = useState(false);
+  const [searchError, setSearchError] = useState<string | null>(null);
+  const hasActiveSearch = Boolean(searchQuery.trim()) || selectedPersonIds.size > 0;
+  const selectedPeople = namedPeople.filter((p) => selectedPersonIds.has(p.id));
 
   const {
     selectedPhotos,
@@ -163,6 +188,73 @@ const Timeline: React.FC = () => {
       toast.showError('Download failed');
     }
   };
+
+  // Runs a search (text query and/or people filter) and shows the results in place of the
+  // normal date-grouped timeline — see hasActiveSearch's doc comment above for why this exists
+  // as a mode switch on the same page rather than a separate route.
+  const runSearch = async (q: string, personIds: Set<number>) => {
+    if (!q.trim() && personIds.size === 0) {
+      setSearchResults(null);
+      return;
+    }
+    setSearching(true);
+    setSearchError(null);
+    try {
+      const results = await searchPhotos(q.trim(), 200, Array.from(personIds));
+      setSearchResults(results);
+    } catch (err) {
+      console.error('Search failed:', err);
+      setSearchResults([]);
+      setSearchError('Search failed — please try again.');
+    } finally {
+      setSearching(false);
+    }
+  };
+
+  const updateUrlAndSearch = (q: string, personIds: Set<number>) => {
+    const params: Record<string, string> = {};
+    if (q.trim()) params.q = q.trim();
+    if (personIds.size > 0) params.people = Array.from(personIds).join(',');
+    setSearchParams(params, { replace: true });
+    void runSearch(q, personIds);
+  };
+
+  const handleSearchSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    updateUrlAndSearch(searchQuery, selectedPersonIds);
+  };
+
+  const handleTogglePerson = (personId: number) => {
+    setSelectedPersonIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(personId)) {
+        next.delete(personId);
+      } else {
+        next.add(personId);
+      }
+      updateUrlAndSearch(searchQuery, next);
+      return next;
+    });
+  };
+
+  const handleClearSearch = () => {
+    setSearchQuery('');
+    setSelectedPersonIds(new Set());
+    setSearchResults(null);
+    setSearchError(null);
+    setSearchParams({}, { replace: true });
+  };
+
+  // Load the public named-people list once (for the people-filter picker) and, if the page was
+  // opened with ?q=/?people= already in the URL (e.g. a deep link, or the old /search page's
+  // links redirecting here — see App.tsx), run that search immediately.
+  useEffect(() => {
+    getPublicNamedPeople().then(setNamedPeople).catch((err) => console.error('Failed to load people list', err));
+    if (initialQuery || initialPeople.length > 0) {
+      void runSearch(initialQuery, new Set(initialPeople));
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // Detect hover support
   useEffect(() => {
@@ -299,6 +391,20 @@ const Timeline: React.FC = () => {
 
   const { dates, groups } = useMemo(() => groupByDate(filteredPhotos), [filteredPhotos]);
 
+  // Search results are grouped by event (not date) — same approach the old standalone Search
+  // page used, since JustifiedGrid needs one `slug` per instance to build preview URLs and
+  // results can span many events.
+  const searchResultsByEvent = useMemo(() => {
+    if (!searchResults) return [];
+    const groups = new Map<string, SearchResultPhoto[]>();
+    for (const photo of searchResults) {
+      const arr = groups.get(photo.event_slug) || [];
+      arr.push(photo);
+      groups.set(photo.event_slug, arr);
+    }
+    return Array.from(groups.entries());
+  }, [searchResults]);
+
   const scrollToDate = (date: string) => {
     const el = dateRefs.current.get(date);
     if (!el) return;
@@ -326,7 +432,7 @@ const Timeline: React.FC = () => {
             </p>
           </div>
 
-          {myPhotoIds && (
+          {myPhotoIds && !hasActiveSearch && (
             <div className="inline-flex rounded-lg border border-gray-300 dark:border-gray-600 overflow-hidden self-start">
               <button
                 onClick={() => setFilterMode('all')}
@@ -352,6 +458,173 @@ const Timeline: React.FC = () => {
           )}
         </div>
 
+        {/* Search bar + people filter — switches this page into "search mode" in place (see
+            hasActiveSearch's doc comment above) instead of navigating to a separate page. */}
+        <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl shadow-sm p-3 sm:p-4 mb-6">
+          <form onSubmit={handleSearchSubmit} className="flex gap-2">
+            <div className="relative flex-1">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+              <input
+                type="text"
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                placeholder="Search by filename, location, or description…"
+                className="w-full pl-10 pr-4 py-2.5 border border-gray-300 dark:border-gray-600 rounded-lg dark:bg-gray-900 dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+              />
+            </div>
+            <button
+              type="submit"
+              className="px-5 py-2.5 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700 transition shrink-0"
+            >
+              Search
+            </button>
+            {hasActiveSearch && (
+              <button
+                type="button"
+                onClick={handleClearSearch}
+                className="px-4 py-2.5 bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 text-sm font-medium rounded-lg hover:bg-gray-200 dark:hover:bg-gray-600 transition shrink-0"
+              >
+                Clear
+              </button>
+            )}
+          </form>
+
+          <div className="flex flex-wrap items-center gap-2 mt-3">
+            {selectedPeople.map((p) => (
+              <span
+                key={p.id}
+                className="flex items-center gap-1 pl-3 pr-1.5 py-1 bg-blue-100 dark:bg-blue-900/40 text-blue-800 dark:text-blue-300 text-sm rounded-full"
+              >
+                {p.name}
+                <button
+                  onClick={() => handleTogglePerson(p.id)}
+                  className="p-0.5 rounded-full hover:bg-blue-200 dark:hover:bg-blue-800 transition"
+                  aria-label={`Remove ${p.name} filter`}
+                >
+                  <X className="w-3.5 h-3.5" />
+                </button>
+              </span>
+            ))}
+            <button
+              onClick={() => setShowPeoplePicker((v) => !v)}
+              className="flex items-center gap-1.5 px-3 py-1.5 text-sm bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 rounded-full hover:bg-gray-200 dark:hover:bg-gray-600 transition"
+            >
+              <Users className="w-4 h-4" /> {selectedPeople.length > 0 ? 'Edit people' : 'Filter by people'}
+            </button>
+          </div>
+
+          {showPeoplePicker && (
+            <div className="mt-3 max-w-sm bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-lg p-3">
+              <p className="text-xs text-gray-500 dark:text-gray-400 mb-2">
+                Selecting multiple people only shows photos where they're all together.
+              </p>
+              <input
+                type="text"
+                value={peopleSearchQuery}
+                onChange={(e) => setPeopleSearchQuery(e.target.value)}
+                placeholder="Search people…"
+                className="w-full mb-2 px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white rounded-lg placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                autoFocus
+              />
+              <div className="max-h-56 overflow-y-auto space-y-1">
+                {namedPeople.length === 0 ? (
+                  <p className="text-sm text-gray-500 dark:text-gray-400 py-2 text-center">No named people yet.</p>
+                ) : (
+                  namedPeople
+                    .filter((p) => p.name.toLowerCase().includes(peopleSearchQuery.trim().toLowerCase()))
+                    .map((p) => {
+                      const selected = selectedPersonIds.has(p.id);
+                      return (
+                        <button
+                          key={p.id}
+                          onClick={() => handleTogglePerson(p.id)}
+                          className={`w-full flex items-center justify-between gap-2 px-3 py-2 rounded-lg text-sm text-left transition ${
+                            selected
+                              ? 'bg-blue-600 text-white'
+                              : 'bg-white dark:bg-gray-700/60 text-gray-800 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700'
+                          }`}
+                        >
+                          <span>{p.name}</span>
+                          {selected && <Check className="w-4 h-4 shrink-0" />}
+                        </button>
+                      );
+                    })
+                )}
+              </div>
+            </div>
+          )}
+        </div>
+
+        {hasActiveSearch ? (
+          <>
+            {searchError && (
+              <div className="bg-red-50 dark:bg-red-900/30 border border-red-200 dark:border-red-800 text-red-700 dark:text-red-300 px-4 py-3 rounded-lg mb-4 text-sm">
+                {searchError}
+              </div>
+            )}
+            {searching ? (
+              <div className="text-center py-12">
+                <div className="inline-block animate-spin rounded-full h-12 w-12 border-b-2 border-gray-900 dark:border-white"></div>
+              </div>
+            ) : searchResults && searchResults.length === 0 ? (
+              <div className="text-center py-16">
+                <p className="text-gray-600 dark:text-gray-400">
+                  {searchQuery.trim() ? (
+                    <>
+                      No photos found for "{searchQuery}"
+                      {selectedPeople.length > 0 && <> with {selectedPeople.map((p) => p.name).join(' and ')}</>}. Search
+                      covers filenames, locations, and AI-generated descriptions (descriptions are added
+                      gradually in the background, so very recently uploaded photos may not be searchable
+                      by content yet).
+                    </>
+                  ) : selectedPeople.length > 0 ? (
+                    <>
+                      No photos found with {selectedPeople.map((p) => p.name).join(' and ')}
+                      {selectedPeople.length > 1 ? ' together' : ''}. This only searches photos in
+                      events you have access to.
+                    </>
+                  ) : (
+                    'No photos found.'
+                  )}
+                </p>
+              </div>
+            ) : searchResults && searchResults.length > 0 ? (
+              <>
+                <p className="text-sm text-gray-500 dark:text-gray-400 mb-3">
+                  {searchResults.length} photo{searchResults.length === 1 ? '' : 's'} found
+                </p>
+                <div ref={densityContainerRef}>
+                  {searchResultsByEvent.map(([eventSlug, eventPhotos]) => (
+                    <div key={eventSlug} className="mb-6">
+                      {searchResultsByEvent.length > 1 && (
+                        <p className="text-sm text-gray-500 dark:text-gray-400 mb-2 px-1">
+                          {eventPhotos[0]?.event_name || eventSlug}
+                        </p>
+                      )}
+                      <JustifiedGrid
+                        photos={eventPhotos}
+                        slug={eventSlug}
+                        targetRowHeight={targetRowHeight}
+                        spacing={4}
+                        selectedPhotos={new Set()}
+                        forceControlsVisible={false}
+                        userFavorites={userFavorites}
+                        supportsHover={supportsHover}
+                        linkState={{
+                          fromSearch: true,
+                          searchResultIds: eventPhotos.map((p) => p.id),
+                          searchUrl: `${window.location.pathname}${window.location.search}`,
+                        }}
+                        onToggleFavorite={isAuthenticated ? toggleFavorite : undefined}
+                      />
+                    </div>
+                  ))}
+                </div>
+              </>
+            ) : null}
+          </>
+        ) : (
+          <>
         <MemoriesCarousel />
 
         {loading ? (
@@ -462,6 +735,8 @@ const Timeline: React.FC = () => {
               onSelectDate={scrollToDate}
             />
           </div>
+        )}
+          </>
         )}
       </div>
       <Footer />

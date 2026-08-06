@@ -894,10 +894,19 @@ app.get('/api/search', optionalAuth, async (c) => {
       }
     } else if (peopleFilteredPhotoIds) {
       // People-only search (no text query) — pull candidates directly, restricted to the
-      // people-filtered photo id set. Chunked (D1 caps bound parameters per statement) since a
-      // frequently-photographed person can easily appear in more photos than fit in one IN().
+      // people-filtered photo id set. Chunked (D1 caps bound parameters per statement at 100)
+      // since a frequently-photographed person can easily appear in more photos than fit in one
+      // IN(). Event-access filtering is done in JS against `eventMap` (built from `eventIds`)
+      // AFTER the query, rather than also cramming `p.event_id IN (${placeholders})` into the
+      // same statement — combining both IN() clauses in one call used to intermittently exceed
+      // D1's 100-bound-parameter limit for anyone with a large event list (e.g. an admin, who
+      // can see every event: 37 events + an 80-photo chunk = 117 params, well over the limit),
+      // throwing a genuine D1 error that the outer try/catch turned into a 500 — which the
+      // frontend then silently rendered as "no results" instead of surfacing the real failure.
+      // Confirmed via production data: person 8141 has 319 photos (4 chunks of up to 80), and
+      // an admin session (37 total events) reliably hit this on at least one chunk.
       const idsArray = Array.from(peopleFilteredPhotoIds);
-      const PHOTO_ID_CHUNK_SIZE = 80; // leaves room for eventIds' own placeholders in the same statement
+      const PHOTO_ID_CHUNK_SIZE = 90;
       for (let i = 0; i < idsArray.length; i += PHOTO_ID_CHUNK_SIZE) {
         const idChunk = idsArray.slice(i, i + PHOTO_ID_CHUNK_SIZE);
         const idPlaceholders = idChunk.map(() => '?').join(',');
@@ -908,13 +917,14 @@ app.get('/api/search', optionalAuth, async (c) => {
                    p.embedding
             FROM photos p
             WHERE p.id IN (${idPlaceholders})
-              AND p.event_id IN (${placeholders})
               AND p.upload_complete = 1
               AND p.deleted_at IS NULL
           `)
-          .bind(...idChunk, ...eventIds)
+          .bind(...idChunk)
           .all<Photo & { event_id: number; embedding: ArrayBuffer | null }>();
-        candidateRows.push(...(result.results || []));
+        for (const row of result.results || []) {
+          if (eventMap.has(row.event_id)) candidateRows.push(row);
+        }
       }
       candidateRows.sort((a, b) => (a.capture_time < b.capture_time ? 1 : -1));
       candidateRows = candidateRows.slice(0, 300);

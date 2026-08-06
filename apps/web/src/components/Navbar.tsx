@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { Link, useLocation } from 'react-router-dom';
-import { Heart, MapPin, LayoutGrid, Settings, LogOut, User, LogIn, ChevronDown, Clock, Upload, ShieldCheck, Search } from 'lucide-react';
+import { Heart, MapPin, LayoutGrid, Settings, LogOut, User, LogIn, ChevronDown, Clock, Upload, ShieldCheck } from 'lucide-react';
 import { Capacitor } from '@capacitor/core';
 import { useAuth } from '../contexts/AuthContext';
 import { config } from '../config';
@@ -30,6 +30,11 @@ const Navbar: React.FC = () => {
   const isActive = (path: string) => {
     if (path === '/events') {
       return location.pathname === '/events' || location.pathname.startsWith('/events/') || location.pathname.startsWith('/p/');
+    }
+    // /search redirects to /timeline (they were merged into one combined browse+search page —
+    // see Timeline.tsx), but keep the nav highlighted correctly for anyone still mid-redirect.
+    if (path === '/timeline') {
+      return location.pathname === '/timeline' || location.pathname === '/search';
     }
     return location.pathname === path;
   };
@@ -96,12 +101,6 @@ const Navbar: React.FC = () => {
               <Clock className="w-4 h-4 sm:mr-0" aria-hidden="true" />
               <span className="hidden sm:inline">Timeline</span>
               <span className="sr-only sm:hidden">Timeline</span>
-            </Link>
-
-            <Link to="/search" className={linkClass('/search')}>
-              <Search className="w-4 h-4 sm:mr-0" aria-hidden="true" />
-              <span className="hidden sm:inline">Search</span>
-              <span className="sr-only sm:hidden">Search</span>
             </Link>
             
             {/* User Menu */}

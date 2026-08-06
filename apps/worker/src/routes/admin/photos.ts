@@ -1055,7 +1055,12 @@ app.post('/bulk-copy', async (c) => {
 
     const errors: { photoId: string; error: string }[] = [];
     let copiedCount = 0;
-    const uploaderName = user.name?.trim() ? user.name.trim().split(' ')[0] : null;
+    // `uploaded_by` must store the copier's EMAIL, not their display name — see
+    // uploads/start's own doc comment for why (public.ts's `LEFT JOIN users u ON
+    // p.uploaded_by = u.email` and the new-upload-notification "exclude the uploader"
+    // logic both key off email; a name here can never match either, silently breaking
+    // "Uploaded by" display and notification exclusion for every copied photo).
+    const uploaderEmail = user.email;
 
     const COPY_BATCH_SIZE = 25;
     for (let i = 0; i < sourcePhotos.length; i += COPY_BATCH_SIZE) {
@@ -1084,7 +1089,7 @@ app.post('/bulk-copy', async (c) => {
                 photo.capture_time, photo.width, photo.height, photo.iso, photo.aperture,
                 photo.shutter_speed, photo.focal_length, photo.camera_make, photo.camera_model,
                 photo.lens_model, photo.latitude, photo.longitude, photo.city,
-                photo.blur_placeholder, uploaderName,
+                photo.blur_placeholder, uploaderEmail,
                 rootPhotoId, rootEventSlug
               )
               .run(),
