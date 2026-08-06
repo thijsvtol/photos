@@ -714,16 +714,51 @@ app.get('/api/memories', optionalAuth, async (c) => {
  * normal visitor-facing feature (like filtering by tag or city), so exposing just the name list
  * (not who they're linked to, not their face data) here is intentional and safe for anyone to
  * see and use, matching the request that this filter "was meant for everyone".
+ *
+ * Restricted to people the requester could plausibly "know" — i.e. who appear (via an
+ * auto-detected face OR a manual tag) in at least one photo in an event the requester actually
+ * has access to (public events, always; private events, admins only; collaborators_only events,
+ * only if the requester is a collaborator on that specific event). Without this, the filter
+ * would leak the mere EXISTENCE/name of people who only ever appear in someone's private or
+ * collaborators-only album to any anonymous visitor, regardless of whether they could ever see
+ * a single photo of them — the same access boundary already enforced on the search results
+ * themselves (see the `people` param handling in GET /api/search below) needs to apply here
+ * too, or the filter picker itself becomes the leak. Admins see everyone, matching how they see
+ * every event regardless of visibility.
  */
-app.get('/api/people/named', async (c) => {
+app.get('/api/people/named', optionalAuth, async (c) => {
   try {
+    const user = getUser(c);
+    const userIsAdmin = isAdmin(c);
+    const userEmail = user?.email || '';
+
     const people = await c.env.DB
       .prepare(`
-        SELECT id, name
-        FROM person_clusters
-        WHERE name IS NOT NULL
-        ORDER BY name COLLATE NOCASE
+        SELECT DISTINCT pc.id, pc.name
+        FROM person_clusters pc
+        WHERE pc.name IS NOT NULL
+          AND (
+            ? = 1
+            OR EXISTS (
+              SELECT 1
+              FROM (
+                SELECT photo_id FROM photo_faces WHERE person_id = pc.id
+                UNION
+                SELECT photo_id FROM photo_person_tags WHERE person_id = pc.id
+              ) pp
+              JOIN photos p ON p.id = pp.photo_id
+              JOIN events e ON e.id = p.event_id
+              LEFT JOIN event_collaborators ec ON e.id = ec.event_id AND ec.user_email = ?
+              WHERE p.deleted_at IS NULL
+                AND (
+                  e.visibility = 'public'
+                  OR (e.visibility = 'collaborators_only' AND ec.user_email IS NOT NULL)
+                )
+            )
+          )
+        ORDER BY pc.name COLLATE NOCASE
       `)
+      .bind(userIsAdmin ? 1 : 0, userEmail)
       .all<{ id: number; name: string }>();
     return c.json({ people: people.results || [] });
   } catch (error) {
