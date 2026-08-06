@@ -1,12 +1,18 @@
-import React, { useEffect, useState } from 'react';
-import { Link, useSearchParams } from 'react-router-dom';
+import React, { useEffect, useMemo, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { Search, Users, X, Check } from 'lucide-react';
 import Navbar from '../components/Navbar';
 import Footer from '../components/Footer';
-import { searchPhotos, getPreviewUrl, getPublicNamedPeople } from '../api';
+import JustifiedGrid from '../components/JustifiedGrid';
+import { useGridDensity } from '../hooks/useGridDensity';
+import { useAuth } from '../contexts/AuthContext';
+import { useToast } from '../components/Toast';
+import { searchPhotos, getPublicNamedPeople, getUserFavoriteIds, toggleFavorite as toggleFavoriteAPI } from '../api';
 import type { SearchResultPhoto, PublicNamedPerson } from '../api';
 
 const SearchPage: React.FC = () => {
+  const { isAuthenticated } = useAuth();
+  const toast = useToast();
   const [searchParams, setSearchParams] = useSearchParams();
   const initialQuery = searchParams.get('q') || '';
   const initialPeople = (searchParams.get('people') || '')
@@ -27,6 +33,56 @@ const SearchPage: React.FC = () => {
   const [selectedPersonIds, setSelectedPersonIds] = useState<Set<number>>(new Set(initialPeople));
   const [showPeoplePicker, setShowPeoplePicker] = useState(false);
   const [peopleSearchQuery, setPeopleSearchQuery] = useState('');
+
+  // Same justified-grid setup as EventGallery/Timeline (density-aware row height, hover
+  // detection for touch vs. mouse controls, favorites) so results look and behave identically —
+  // including real video playback via JustifiedGrid's ProgressiveVideo rendering, which the
+  // previous plain <img>-only grid here never supported at all.
+  const { targetRowHeight, containerRef: densityContainerRef } = useGridDensity();
+  const [supportsHover, setSupportsHover] = useState(true);
+  const [userFavorites, setUserFavorites] = useState<Set<string>>(new Set());
+
+  useEffect(() => {
+    const mq = window.matchMedia('(hover: hover) and (pointer: fine)');
+    setSupportsHover(mq.matches);
+    const handler = () => setSupportsHover(mq.matches);
+    mq.addEventListener('change', handler);
+    return () => mq.removeEventListener('change', handler);
+  }, []);
+
+  useEffect(() => {
+    if (!isAuthenticated) return;
+    getUserFavoriteIds()
+      .then((favIds) => setUserFavorites(new Set(favIds.map((f) => f.photoId))))
+      .catch(() => { /* ignore — favorites just won't show as favorited */ });
+  }, [isAuthenticated]);
+
+  const toggleFavorite = async (photoId: string, isFavorited: boolean) => {
+    try {
+      await toggleFavoriteAPI(photoId, isFavorited);
+      setUserFavorites((prev) => {
+        const next = new Set(prev);
+        if (isFavorited) next.delete(photoId);
+        else next.add(photoId);
+        return next;
+      });
+    } catch {
+      toast.showError('Failed to update favorite');
+    }
+  };
+
+  // JustifiedGrid renders one event's photos at a time (it needs a single `slug` to build
+  // preview URLs), same grouping approach Timeline.tsx uses for its own cross-event photo list.
+  const resultsByEvent = useMemo(() => {
+    const groups = new Map<string, SearchResultPhoto[]>();
+    for (const photo of results) {
+      const arr = groups.get(photo.event_slug) || [];
+      arr.push(photo);
+      groups.set(photo.event_slug, arr);
+    }
+    return Array.from(groups.entries());
+  }, [results]);
+
 
   useEffect(() => {
     getPublicNamedPeople().then(setNamedPeople).catch((err) => console.error('Failed to load people list', err));
@@ -197,28 +253,27 @@ const SearchPage: React.FC = () => {
             </p>
           </div>
         ) : results.length > 0 ? (
-          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4">
-            {results.map((photo) => (
-              <Link
-                key={photo.id}
-                to={`/p/${photo.event_slug}/${photo.id}`}
-                className="rounded-lg overflow-hidden shadow hover:shadow-lg transition-shadow bg-white dark:bg-gray-800"
-              >
-                <div className="aspect-square">
-                  <img
-                    src={getPreviewUrl(photo.event_slug, photo.id, photo.file_type, photo.cache_version)}
-                    alt={photo.original_filename}
-                    className="w-full h-full object-cover"
-                    loading="lazy"
-                  />
-                </div>
-                <div className="p-2">
-                  <p className="text-xs text-gray-600 dark:text-gray-400 truncate">{photo.event_name}</p>
-                  {photo.ai_caption && (
-                    <p className="text-xs text-gray-400 truncate italic">{photo.ai_caption}</p>
-                  )}
-                </div>
-              </Link>
+          <div ref={densityContainerRef}>
+            {resultsByEvent.map(([eventSlug, eventPhotos]) => (
+              <div key={eventSlug} className="mb-6">
+                {resultsByEvent.length > 1 && (
+                  <p className="text-sm text-gray-500 dark:text-gray-400 mb-2 px-1">
+                    {eventPhotos[0]?.event_name || eventSlug}
+                  </p>
+                )}
+                <JustifiedGrid
+                  photos={eventPhotos}
+                  slug={eventSlug}
+                  targetRowHeight={targetRowHeight}
+                  spacing={4}
+                  selectedPhotos={new Set()}
+                  forceControlsVisible={false}
+                  userFavorites={userFavorites}
+                  supportsHover={supportsHover}
+                  linkState={{ fromSearch: true }}
+                  onToggleFavorite={isAuthenticated ? toggleFavorite : undefined}
+                />
+              </div>
             ))}
           </div>
         ) : null}
