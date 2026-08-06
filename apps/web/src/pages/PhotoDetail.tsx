@@ -990,11 +990,24 @@ const PhotoDetail: React.FC = () => {
       // Clamp translation so the image doesn't leave the viewport. Fall back to
       // the actual viewport dimensions (not an arbitrary guess) if the container
       // hasn't been measured yet, so panning isn't over-constrained on small screens.
+      //
+      // The zoomed content's on-screen pixel shift equals zoomTranslate.{x,y}
+      // directly, NOT divided by zoomScale — the transform is
+      // `scale(zoomScale) translate(x/zoomScale, y/zoomScale)`, and that
+      // `/zoomScale` in the translate exactly cancels the outer scale()'s
+      // multiplication (CSS composes right-to-left: translate happens in the
+      // element's local/unscaled space, then gets multiplied by the scale).
+      // So the max pan distance for the scaled content to still fully cover
+      // the container is `containerWidth * (zoomScale - 1) / 2` — previously
+      // this was ALSO divided by zoomScale, under-shooting the true edge by
+      // that same factor (e.g. at 2.5x zoom, only ~40% of the way to the
+      // actual image edge was reachable) — this was the long-standing
+      // "can pan a bit but never reach the true edges" bug.
       const container = imageContainerRef.current;
       const containerWidth = container?.clientWidth || window.innerWidth;
       const containerHeight = container?.clientHeight || window.innerHeight;
-      const maxX = (containerWidth * (zoomScale - 1)) / (2 * zoomScale);
-      const maxY = (containerHeight * (zoomScale - 1)) / (2 * zoomScale);
+      const maxX = (containerWidth * (zoomScale - 1)) / 2;
+      const maxY = (containerHeight * (zoomScale - 1)) / 2;
       setZoomTranslate({
         x: Math.max(-maxX, Math.min(maxX, translateStart.current.x + dx)),
         y: Math.max(-maxY, Math.min(maxY, translateStart.current.y + dy)),
