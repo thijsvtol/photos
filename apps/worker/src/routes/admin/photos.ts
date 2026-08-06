@@ -5,7 +5,7 @@ import { extractUser, hasEventCapabilityByEventId, isUserAdmin } from '../../aut
 import { permanentlyDeletePhotos } from '../../photoDeletion';
 import { logActivity } from '../../activityLog';
 import { isValidFaceInput } from '../../faceValidation';
-import { setManualPhotoPersonTags, getPhotoPeople, addManualPhotoPersonTags, removePersonFromPhoto } from '../../faceClustering';
+import { setManualPhotoPersonTags, getPhotoPeople, addManualPhotoPersonTags, removePersonFromPhoto, syncPeopleAcrossDuplicates } from '../../faceClustering';
 
 // Soft-deleted photos are kept this long before the nightly purge cron
 // (see scheduled.ts runTrashPurge) hard-deletes them from R2 + D1.
@@ -232,6 +232,25 @@ app.get('/duplicates', async (c) => {
   } catch (error) {
     console.error('Error fetching duplicate photos:', error);
     return c.json({ error: 'Failed to fetch duplicate photos' }, 500);
+  }
+});
+
+/**
+ * POST /photos/duplicates/sync-people
+ *
+ * See syncPeopleAcrossDuplicates()'s doc comment in faceClustering.ts — copies people already
+ * identified (via face detection or manual tag) on any photo to every OTHER exact-content
+ * duplicate of it (same file_hash, regardless of which event each copy was uploaded to), so
+ * tagging one copy doesn't have to be redone by hand for every other event it was also shared
+ * into. Manual-tag-only (never touches photo_faces/centroids); safe to re-run repeatedly.
+ */
+app.post('/duplicates/sync-people', async (c) => {
+  try {
+    const result = await syncPeopleAcrossDuplicates(c.env);
+    return c.json({ success: true, ...result });
+  } catch (error) {
+    console.error('Error syncing people across duplicates:', error);
+    return c.json({ error: 'Failed to sync people across duplicates' }, 500);
   }
 });
 

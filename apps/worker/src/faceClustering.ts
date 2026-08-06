@@ -788,6 +788,91 @@ export async function getPhotoPeople(env: Env, photoId: string): Promise<PhotoPe
 }
 
 /**
+ * Copies people tags across exact-content duplicate photos (same `file_hash`, computed
+ * client-side at upload time — see GET /admin/photos/duplicates' doc comment) so tagging/
+ * clustering one copy doesn't have to be redone by hand for every other event the same photo
+ * was also uploaded to (e.g. a photo shared into both "Evil8" and "TBT Event"). For each group
+ * of photos sharing a `file_hash`, computes the UNION of every NAMED person already identified
+ * on ANY photo in the group (via either an auto-detected face or a manual tag — the same two
+ * sources getPhotoPeople() combines) and adds a manual `photo_person_tags` row for that person
+ * on every OTHER photo in the group missing it. Deliberately additive/manual-tag-only (never
+ * touches photo_faces or centroids): a duplicate photo may have entirely different photo_faces
+ * rows (each is a separately re-detected/uploaded file, even though the bytes are identical),
+ * and this operation's job is only to make sure a person already confirmed on one copy is also
+ * reflected on its siblings, not to run face-detection math. Safe to re-run repeatedly (a no-op
+ * once every duplicate group is already fully in sync) since it uses `INSERT OR IGNORE`.
+ */
+export async function syncPeopleAcrossDuplicates(env: Env): Promise<{ groupsSynced: number; tagsAdded: number }> {
+  const { results: dupPhotoRows } = await env.DB
+    .prepare(`
+      SELECT id, file_hash
+      FROM photos
+      WHERE deleted_at IS NULL
+        AND file_hash IS NOT NULL
+        AND file_hash IN (
+          SELECT file_hash FROM photos
+          WHERE deleted_at IS NULL AND file_hash IS NOT NULL
+          GROUP BY file_hash
+          HAVING COUNT(*) > 1
+        )
+    `)
+    .all<{ id: string; file_hash: string }>();
+
+  const photosByHash = new Map<string, string[]>();
+  for (const row of dupPhotoRows || []) {
+    const list = photosByHash.get(row.file_hash) || [];
+    list.push(row.id);
+    photosByHash.set(row.file_hash, list);
+  }
+
+  let groupsSynced = 0;
+  let tagsAdded = 0;
+
+  for (const photoIds of photosByHash.values()) {
+    if (photoIds.length < 2) continue;
+
+    const placeholders = photoIds.map(() => '?').join(',');
+    const { results: peopleRows } = await env.DB
+      .prepare(`
+        SELECT DISTINCT photo_id, person_id FROM (
+          SELECT photo_id, person_id FROM photo_faces WHERE photo_id IN (${placeholders}) AND person_id IS NOT NULL
+          UNION
+          SELECT photo_id, person_id FROM photo_person_tags WHERE photo_id IN (${placeholders})
+        )
+        WHERE person_id IN (SELECT id FROM person_clusters WHERE name IS NOT NULL)
+      `)
+      .bind(...photoIds, ...photoIds)
+      .all<{ photo_id: string; person_id: number }>();
+
+    const allPersonIds = new Set((peopleRows || []).map((r) => r.person_id));
+    if (allPersonIds.size === 0) continue;
+
+    const existingByPhoto = new Map<string, Set<number>>();
+    for (const row of peopleRows || []) {
+      if (!existingByPhoto.has(row.photo_id)) existingByPhoto.set(row.photo_id, new Set());
+      existingByPhoto.get(row.photo_id)!.add(row.person_id);
+    }
+
+    let groupChanged = false;
+    for (const photoId of photoIds) {
+      const existing = existingByPhoto.get(photoId) || new Set<number>();
+      for (const personId of allPersonIds) {
+        if (existing.has(personId)) continue;
+        await env.DB
+          .prepare('INSERT OR IGNORE INTO photo_person_tags (photo_id, person_id) VALUES (?, ?)')
+          .bind(photoId, personId)
+          .run();
+        tagsAdded++;
+        groupChanged = true;
+      }
+    }
+    if (groupChanged) groupsSynced++;
+  }
+
+  return { groupsSynced, tagsAdded };
+}
+
+/**
  * Replaces the full set of MANUALLY tagged people on a photo (photo_person_tags only — never
  * touches photo_faces/automatic detections). Used by the admin "Tag people" editor on
  * PhotoDetail, which always submits the complete desired set rather than one-at-a-time add/

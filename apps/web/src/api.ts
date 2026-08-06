@@ -1390,6 +1390,18 @@ export const getDuplicatePhotos = async (): Promise<DuplicateGroup[]> => {
   return response.data.groups;
 };
 
+/** Copies people already identified on any duplicate photo (same file_hash, any event) to every
+ *  other copy missing them — see syncPeopleAcrossDuplicates()'s doc comment in
+ *  apps/worker/src/faceClustering.ts. Manual-tag-only, safe to re-run repeatedly. */
+export const syncPeopleAcrossDuplicates = async (): Promise<{ groupsSynced: number; tagsAdded: number }> => {
+  const response = await api.post<{ success: boolean; groupsSynced: number; tagsAdded: number }>(
+    '/admin/photos/duplicates/sync-people',
+    {},
+    { headers: getAdminHeaders() }
+  );
+  return { groupsSynced: response.data.groupsSynced, tagsAdded: response.data.tagsAdded };
+};
+
 // Albums API (cross-event collections, admin-only)
 export interface Album {
   id: number;

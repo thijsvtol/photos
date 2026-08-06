@@ -31,11 +31,15 @@ const AdminUnattachedPhotos: React.FC = () => {
 
   const [selected, setSelected] = useState<Set<string>>(new Set());
 
-  // Assign-to-person picker for the current selection — same lazily-loaded people list +
-  // searchable dropdown pattern as AdminPersonDetail's "Move to…"/"Combine" pickers.
+  // Assign-to-person(s) picker for the current selection — same lazily-loaded people list +
+  // searchable dropdown pattern as AdminPersonDetail's "Move to…"/"Combine" pickers, but
+  // multi-select (checkboxes, not one-click-to-assign) since a single photo can easily contain
+  // several people at once (e.g. a group photo) and forcing one pass per person would mean
+  // reselecting the same batch of photos over and over.
   const [showAssignPicker, setShowAssignPicker] = useState(false);
   const [allPeople, setAllPeople] = useState<Person[] | null>(null);
   const [assignSearch, setAssignSearch] = useState('');
+  const [peopleToAssign, setPeopleToAssign] = useState<Set<number>>(new Set());
   const [assigning, setAssigning] = useState(false);
   const [assignError, setAssignError] = useState<string | null>(null);
   const [assignResult, setAssignResult] = useState<string | null>(null);
@@ -90,6 +94,7 @@ const AdminUnattachedPhotos: React.FC = () => {
     if (selected.size === 0) return;
     setAssignError(null);
     setAssignResult(null);
+    setPeopleToAssign(new Set());
     setShowAssignPicker(true);
     if (!allPeople) {
       try {
@@ -101,24 +106,40 @@ const AdminUnattachedPhotos: React.FC = () => {
     }
   };
 
-  const handleAssignTo = async (personId: number, personName: string) => {
+  const togglePersonToAssign = (personId: number) => {
+    setPeopleToAssign((prev) => {
+      const next = new Set(prev);
+      if (next.has(personId)) next.delete(personId);
+      else next.add(personId);
+      return next;
+    });
+  };
+
+  const handleConfirmAssign = async () => {
     const photoIds = Array.from(selected);
-    if (photoIds.length === 0) return;
+    const personIds = Array.from(peopleToAssign);
+    if (photoIds.length === 0 || personIds.length === 0 || !allPeople) return;
+    const names = allPeople.filter((p) => personIds.includes(p.id)).map((p) => p.name || 'Unnamed');
     try {
       setAssigning(true);
       setAssignError(null);
-      // Reassign any detected faces AND add a manual tag — see this file's top-of-component doc
-      // comment for why both are needed to cover every unattached photo, not just the ones with
-      // an existing detected face.
-      await assignPhotosToPerson(personId, photoIds);
-      await bulkTagPeopleOnPhotos(photoIds, [personId]);
-      // Every selected photo is now attached to this person one way or another — drop them all
+      // Reassign any detected faces AND add a manual tag for EVERY selected person — see this
+      // file's top-of-component doc comment for why both are needed to cover every unattached
+      // photo, not just the ones with an existing detected face. bulkTagPeopleOnPhotos already
+      // accepts multiple personIds in one call; assignPhotosToPerson only ever targets one
+      // person at a time, so it's called once per selected person.
+      for (const personId of personIds) {
+        await assignPhotosToPerson(personId, photoIds);
+      }
+      await bulkTagPeopleOnPhotos(photoIds, personIds);
+      // Every selected photo is now attached to at least one of these people — drop them all
       // from this list locally.
       setPhotos((prev) => prev.filter((p) => !selected.has(p.id)));
-      setAssignResult(`Assigned ${photoIds.length} photo${photoIds.length === 1 ? '' : 's'} to ${personName}.`);
+      setAssignResult(`Assigned ${photoIds.length} photo${photoIds.length === 1 ? '' : 's'} to ${names.join(', ')}.`);
       clearSelection();
       setShowAssignPicker(false);
       setAssignSearch('');
+      setPeopleToAssign(new Set());
     } catch (err) {
       setAssignError('Failed to assign photos');
       console.error(err);
@@ -260,12 +281,15 @@ const AdminUnattachedPhotos: React.FC = () => {
                     Assign {selected.size} photo{selected.size === 1 ? '' : 's'} to…
                   </h2>
                   <button
-                    onClick={() => { setShowAssignPicker(false); setAssignSearch(''); setAssignError(null); }}
+                    onClick={() => { setShowAssignPicker(false); setAssignSearch(''); setAssignError(null); setPeopleToAssign(new Set()); }}
                     className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-200"
                   >
                     <X className="w-5 h-5" />
                   </button>
                 </div>
+                <p className="text-xs text-gray-500 dark:text-gray-400 mb-2">
+                  Select one or more people — useful for group photos with several people in them.
+                </p>
                 <input
                   type="text"
                   value={assignSearch}
@@ -282,21 +306,38 @@ const AdminUnattachedPhotos: React.FC = () => {
                     {allPeople
                       .filter((p) => !assignSearch.trim() || (p.name || 'Unnamed').toLowerCase().includes(assignSearch.trim().toLowerCase()))
                       .slice(0, 30)
-                      .map((p) => (
-                        <li key={p.id}>
-                          <button
-                            onClick={() => handleAssignTo(p.id, p.name || 'Unnamed')}
-                            disabled={assigning}
-                            className="w-full text-left px-3 py-2 text-sm hover:bg-gray-100 dark:hover:bg-gray-700 flex items-center justify-between disabled:opacity-50"
-                          >
-                            <span className="text-gray-900 dark:text-gray-100">{p.name || 'Unnamed'}</span>
-                            <span className="text-xs text-gray-500 dark:text-gray-400">{p.photo_count} photo{p.photo_count === 1 ? '' : 's'}</span>
-                          </button>
-                        </li>
-                      ))}
+                      .map((p) => {
+                        const isChecked = peopleToAssign.has(p.id);
+                        return (
+                          <li key={p.id}>
+                            <button
+                              onClick={() => togglePersonToAssign(p.id)}
+                              disabled={assigning}
+                              className="w-full text-left px-3 py-2 text-sm hover:bg-gray-100 dark:hover:bg-gray-700 flex items-center gap-2 disabled:opacity-50"
+                            >
+                              <span
+                                className={`w-5 h-5 shrink-0 rounded flex items-center justify-center border-2 ${
+                                  isChecked ? 'bg-blue-600 border-blue-600' : 'border-gray-300 dark:border-gray-500'
+                                }`}
+                              >
+                                {isChecked && <Check className="w-3.5 h-3.5 text-white" />}
+                              </span>
+                              <span className="flex-1 text-gray-900 dark:text-gray-100">{p.name || 'Unnamed'}</span>
+                              <span className="text-xs text-gray-500 dark:text-gray-400">{p.photo_count} photo{p.photo_count === 1 ? '' : 's'}</span>
+                            </button>
+                          </li>
+                        );
+                      })}
                   </ul>
                 )}
                 {assignError && <p className="text-sm text-red-600 dark:text-red-400 mt-2">{assignError}</p>}
+                <button
+                  onClick={handleConfirmAssign}
+                  disabled={assigning || peopleToAssign.size === 0}
+                  className="w-full mt-4 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  {assigning ? 'Assigning…' : `Assign ${peopleToAssign.size > 0 ? `${peopleToAssign.size} ` : ''}person${peopleToAssign.size === 1 ? '' : 's'}`}
+                </button>
               </div>
             </div>
           </div>

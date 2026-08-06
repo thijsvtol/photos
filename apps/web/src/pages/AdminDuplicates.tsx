@@ -1,8 +1,8 @@
 import React, { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { Copy, Trash2 } from 'lucide-react';
+import { Copy, Trash2, Users, Loader2 } from 'lucide-react';
 import Navbar from '../components/Navbar';
-import { getDuplicatePhotos, deletePhoto, getPreviewUrl } from '../api';
+import { getDuplicatePhotos, deletePhoto, getPreviewUrl, syncPeopleAcrossDuplicates } from '../api';
 import type { DuplicateGroup, DuplicatePhoto } from '../api';
 
 const AdminDuplicates: React.FC = () => {
@@ -11,6 +11,7 @@ const AdminDuplicates: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
   const [deletingPhoto, setDeletingPhoto] = useState<DuplicatePhoto | null>(null);
+  const [syncingPeople, setSyncingPeople] = useState(false);
 
   useEffect(() => {
     loadData();
@@ -49,6 +50,25 @@ const AdminDuplicates: React.FC = () => {
 
   const totalDuplicates = groups.reduce((sum, g) => sum + (g.photos.length - 1), 0);
 
+  const handleSyncPeople = async () => {
+    try {
+      setSyncingPeople(true);
+      setError(null);
+      const { groupsSynced, tagsAdded } = await syncPeopleAcrossDuplicates();
+      setSuccess(
+        tagsAdded > 0
+          ? `Synced people across ${groupsSynced} duplicate group${groupsSynced === 1 ? '' : 's'} (${tagsAdded} tag${tagsAdded === 1 ? '' : 's'} added).`
+          : 'Everything is already in sync — no missing tags found.'
+      );
+      setTimeout(() => setSuccess(null), 5000);
+    } catch (err) {
+      setError('Failed to sync people across duplicates');
+      console.error(err);
+    } finally {
+      setSyncingPeople(false);
+    }
+  };
+
   return (
     <div className="min-h-screen bg-gray-50 dark:bg-gray-900">
       <Navbar />
@@ -64,6 +84,17 @@ const AdminDuplicates: React.FC = () => {
             Photos with identical content (same file bytes), possibly uploaded to different
             events. {totalDuplicates > 0 && `${totalDuplicates} extra cop${totalDuplicates === 1 ? 'y' : 'ies'} found.`}
           </p>
+          {groups.length > 0 && (
+            <button
+              onClick={handleSyncPeople}
+              disabled={syncingPeople}
+              title="If a person is already identified (face or manual tag) on one copy of a duplicate photo, add them to every other copy that's missing it — no need to redo tagging per event"
+              className="mt-3 px-4 py-2 bg-gray-200 dark:bg-gray-700 text-gray-800 dark:text-gray-200 rounded-lg hover:bg-gray-300 dark:hover:bg-gray-600 transition flex items-center gap-2 disabled:opacity-50"
+            >
+              {syncingPeople ? <Loader2 className="w-4 h-4 animate-spin" /> : <Users className="w-4 h-4" />}
+              {syncingPeople ? 'Syncing…' : 'Sync people across duplicates'}
+            </button>
+          )}
         </div>
 
         {success && (
