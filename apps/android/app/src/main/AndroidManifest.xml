@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8" ?>
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
     <application
         android:allowBackup="true"
         android:icon="@mipmap/ic_launcher"
@@ -96,6 +97,21 @@
         <receiver
             android:name=".sync.SyncActionReceiver"
             android:exported="false" />
+
+        <!-- FolderSyncWorker runs as a long-running foreground job (see
+             SyncNotifier.initialForegroundInfo), and WorkManager hosts that
+             through its OWN service, whose entry in the androidx.work library
+             manifest declares no foregroundServiceType. Merging the type in
+             here is mandatory, not cosmetic: from Android 14 (targetSdk 34+)
+             starting a typed foreground service whose manifest entry lacks
+             that type throws MissingForegroundServiceTypeException, so
+             background folder sync would crash on every run. Lint catches it
+             as SpecifyForegroundServiceType, which fails lintVitalRelease and
+             therefore assembleRelease. -->
+        <service
+            android:name="androidx.work.impl.foreground.SystemForegroundService"
+            android:foregroundServiceType="dataSync"
+            tools:node="merge" />
     </application>
 
     <!-- Permissions -->
