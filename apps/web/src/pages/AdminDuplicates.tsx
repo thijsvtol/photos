@@ -1,8 +1,8 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { Copy, Trash2, Users, Loader2, Hash } from 'lucide-react';
+import { Copy, Trash2, Users, Loader2, Hash, FolderCheck } from 'lucide-react';
 import Navbar from '../components/Navbar';
-import { getDuplicatePhotos, deletePhoto, getPreviewUrl, getOriginalUrl, syncPeopleAcrossDuplicates, getPhotosMissingFileHash, setPhotoFileHash } from '../api';
+import { getDuplicatePhotos, deletePhoto, bulkDeletePhotos, getPreviewUrl, getOriginalUrl, syncPeopleAcrossDuplicates, getPhotosMissingFileHash, setPhotoFileHash } from '../api';
 import { computeFileHash } from '../imageUtils';
 import type { DuplicateGroup, DuplicatePhoto } from '../api';
 
@@ -15,6 +15,13 @@ const AdminDuplicates: React.FC = () => {
   const [syncingPeople, setSyncingPeople] = useState(false);
   const [backfilling, setBackfilling] = useState(false);
   const [backfillProgress, setBackfillProgress] = useState<{ done: number } | null>(null);
+  // "Keep album X" bulk cleanup — lets an admin pick a single event as the trusted
+  // source-of-truth copy and bulk-delete every OTHER duplicate copy of those same photos
+  // (found in any other event) in one action, rather than clicking through each group's
+  // individual Trash button one photo at a time.
+  const [keepEventSlug, setKeepEventSlug] = useState('');
+  const [bulkDeleting, setBulkDeleting] = useState(false);
+  const [confirmingBulkDelete, setConfirmingBulkDelete] = useState(false);
 
   useEffect(() => {
     loadData();
@@ -52,6 +59,61 @@ const AdminDuplicates: React.FC = () => {
   };
 
   const totalDuplicates = groups.reduce((sum, g) => sum + (g.photos.length - 1), 0);
+
+  // Every distinct event that appears in at least one duplicate group, sorted by name — the
+  // options for the "keep this album" picker below.
+  const eventOptions = useMemo(() => {
+    const bySlug = new Map<string, string>();
+    for (const group of groups) {
+      for (const photo of group.photos) {
+        if (!bySlug.has(photo.event_slug)) bySlug.set(photo.event_slug, photo.event_name);
+      }
+    }
+    return Array.from(bySlug.entries())
+      .map(([slug, name]) => ({ slug, name }))
+      .sort((a, b) => a.name.localeCompare(b.name));
+  }, [groups]);
+
+  // Every OTHER-event photo that's a duplicate of something already in `keepEventSlug` — these
+  // are exactly what the bulk action below deletes. A group only qualifies if it actually
+  // contains a photo from the kept event (a group with no photo from that event is unrelated).
+  const photosToDeleteForKeptEvent = useMemo(() => {
+    if (!keepEventSlug) return [];
+    const result: DuplicatePhoto[] = [];
+    for (const group of groups) {
+      const hasKeptCopy = group.photos.some((p) => p.event_slug === keepEventSlug);
+      if (!hasKeptCopy) continue;
+      for (const photo of group.photos) {
+        if (photo.event_slug !== keepEventSlug) result.push(photo);
+      }
+    }
+    return result;
+  }, [groups, keepEventSlug]);
+
+  const handleBulkDeleteForKeptEvent = async () => {
+    if (photosToDeleteForKeptEvent.length === 0) return;
+    try {
+      setBulkDeleting(true);
+      setError(null);
+      const photoIds = photosToDeleteForKeptEvent.map((p) => p.id);
+      const { deletedCount } = await bulkDeletePhotos(photoIds);
+      const deletedIds = new Set(photoIds);
+      setGroups((prev) =>
+        prev
+          .map((g) => ({ ...g, photos: g.photos.filter((p) => !deletedIds.has(p.id)) }))
+          .filter((g) => g.photos.length > 1)
+      );
+      setConfirmingBulkDelete(false);
+      setSuccess(`Moved ${deletedCount} duplicate photo${deletedCount === 1 ? '' : 's'} to Trash, keeping the copies in the selected album.`);
+      setTimeout(() => setSuccess(null), 5000);
+      setKeepEventSlug('');
+    } catch (err) {
+      setError('Failed to bulk-delete duplicates');
+      console.error(err);
+    } finally {
+      setBulkDeleting(false);
+    }
+  };
 
   const handleSyncPeople = async () => {
     try {
@@ -168,6 +230,41 @@ const AdminDuplicates: React.FC = () => {
           </div>
         </div>
 
+        {groups.length > 0 && (
+          <div className="mb-6 bg-white dark:bg-gray-800 rounded-lg shadow p-4">
+            <h2 className="text-sm font-semibold text-gray-700 dark:text-gray-300 flex items-center gap-2 mb-2">
+              <FolderCheck className="w-4 h-4" /> Keep an album, delete its duplicates elsewhere
+            </h2>
+            <p className="text-xs text-gray-500 dark:text-gray-400 mb-3">
+              Pick an event below — every OTHER-event copy of a photo that's already in that
+              event will be moved to Trash in one go, instead of clicking through each
+              duplicate set individually.
+            </p>
+            <div className="flex flex-wrap items-center gap-2">
+              <select
+                value={keepEventSlug}
+                onChange={(e) => setKeepEventSlug(e.target.value)}
+                className="px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white rounded-lg"
+              >
+                <option value="">Select an album…</option>
+                {eventOptions.map((e) => (
+                  <option key={e.slug} value={e.slug}>{e.name}</option>
+                ))}
+              </select>
+              <button
+                onClick={() => setConfirmingBulkDelete(true)}
+                disabled={!keepEventSlug || photosToDeleteForKeptEvent.length === 0 || bulkDeleting}
+                className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                <Trash2 className="w-4 h-4" />
+                {keepEventSlug
+                  ? `Delete ${photosToDeleteForKeptEvent.length} duplicate${photosToDeleteForKeptEvent.length === 1 ? '' : 's'} elsewhere`
+                  : 'Delete duplicates elsewhere'}
+              </button>
+            </div>
+          </div>
+        )}
+
         {success && (
           <div className="bg-green-50 border border-green-200 text-green-700 px-4 py-3 rounded mb-4">
             {success}
@@ -217,6 +314,38 @@ const AdminDuplicates: React.FC = () => {
                 </div>
               </div>
             ))}
+          </div>
+        )}
+
+        {confirmingBulkDelete && (
+          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
+            <div className="bg-white dark:bg-gray-800 rounded-lg shadow-xl max-w-lg w-full">
+              <div className="p-6">
+                <h2 className="text-2xl font-bold mb-4 text-red-600">🗑️ Move to Trash</h2>
+                <p className="mb-4 text-gray-700 dark:text-gray-300">
+                  Move {photosToDeleteForKeptEvent.length} duplicate photo{photosToDeleteForKeptEvent.length === 1 ? '' : 's'} to
+                  Trash, keeping the copies already in <strong>{eventOptions.find((e) => e.slug === keepEventSlug)?.name}</strong>?
+                  This cannot be undone (though Trash items are recoverable for a while).
+                </p>
+                <div className="flex gap-3">
+                  <button
+                    onClick={handleBulkDeleteForKeptEvent}
+                    disabled={bulkDeleting}
+                    className="flex-1 px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition disabled:opacity-50 flex items-center justify-center gap-2"
+                  >
+                    {bulkDeleting && <Loader2 className="w-4 h-4 animate-spin" />}
+                    {bulkDeleting ? 'Deleting…' : 'Move to Trash'}
+                  </button>
+                  <button
+                    onClick={() => setConfirmingBulkDelete(false)}
+                    disabled={bulkDeleting}
+                    className="flex-1 px-4 py-2 bg-gray-300 dark:bg-gray-700 text-gray-700 dark:text-gray-200 rounded-lg hover:bg-gray-400 dark:hover:bg-gray-600 transition disabled:opacity-50"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </div>
+            </div>
           </div>
         )}
 
