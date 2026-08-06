@@ -1,8 +1,7 @@
 import { Capacitor } from '@capacitor/core';
-import { Filesystem } from '@capacitor/filesystem';
-import SafDirectory from './safDirectory';
-import { addToQueue } from '../uploadQueue';
-import { ulid } from 'ulid';
+import { config as appConfig } from '../config';
+import FolderSync, { type FolderSyncStatus, type FolderSyncSettings } from './folderSyncPlugin';
+import { purgeFolderSyncQueueItems } from '../uploadQueue';
 
 // Enable debug logging (set to false in production builds)
 const DEBUG = import.meta.env.DEV;
@@ -18,14 +17,32 @@ export interface FolderSyncConfig {
   folderPath: string;
   eventSlug: string;
   autoSync: boolean;
+  /**
+   * @deprecated Kept only so old persisted configs still parse. The native
+   * engine's ledger — not a timestamp — decides what has already been
+   * uploaded; a wall-clock cutoff is exactly what caused the duplicate uploads
+   * this replaced. Never write this.
+   */
   lastSyncTime?: number;
 }
 
+/** Marks that the one-time migration off the old JS pipeline has run. */
+const MIGRATION_KEY = 'folderSyncNativeMigrated';
+
 /**
- * Folder sync service for mobile devices.
- * Uses the native SafDirectoryPlugin to enumerate files via Android's
- * DocumentsContract API, which works correctly under scoped storage (API 30+).
- * File reading uses Filesystem.readFile() with content:// URIs returned by SAF.
+ * Folder sync configuration for mobile devices.
+ *
+ * This used to BE the sync implementation: it enumerated the folder, read every
+ * new file fully into memory via Filesystem.readFile() (whole file as base64
+ * across the Capacitor bridge, then atob'd into a second copy, then a Blob),
+ * and persisted all of it into IndexedDB before uploading a single byte. That
+ * is what made large batches OOM, and it only ran while the WebView was alive.
+ *
+ * All of that now lives in the native WorkManager engine
+ * (apps/android/.../sync/), which streams files straight from their content://
+ * URIs and runs hourly with the app closed. What remains here is configuration:
+ * the folder→event mapping the user manages in FolderSyncManager, mirrored into
+ * the native layer so the background job can read it with no WebView running.
  */
 class FolderSyncService {
   private syncConfigs: Map<string, FolderSyncConfig> = new Map();
@@ -37,21 +54,47 @@ class FolderSyncService {
       return;
     }
 
-    // Load saved sync configurations
     await this.loadConfigs();
+    await this.migrateOffLegacyPipeline();
+    // Push the current mapping (and API base URL) down to the native engine so
+    // a background run has everything it needs without the app being open.
+    await this.pushConfigToNative();
   }
 
   /**
-   * Save sync configurations to storage
+   * One-time cleanup for devices upgrading from the JS pipeline.
+   *
+   * Those devices can have gigabytes of File blobs sitting in the IndexedDB
+   * upload queue from folder scans that never drained — and uploadManager.init()
+   * loads every one of them at startup, which on its own can take the WebView
+   * out of memory before anything else runs. Dropping them is safe: the native
+   * ledger plus the server-side hash pre-check prevent any of that content from
+   * being re-uploaded.
    */
+  private async migrateOffLegacyPipeline() {
+    if (localStorage.getItem(MIGRATION_KEY) === '1') return;
+
+    try {
+      const purged = await purgeFolderSyncQueueItems();
+      if (purged > 0) {
+        debug(`Migration: dropped ${purged} legacy folder-sync queue item(s) holding file blobs`);
+      }
+      localStorage.removeItem('lastFolderScanTime');
+      localStorage.setItem(MIGRATION_KEY, '1');
+    } catch (err) {
+      // Retry on the next launch rather than blocking initialisation.
+      console.warn('[FolderSync] Legacy queue migration failed:', err);
+    }
+  }
+
+  /** Save sync configurations to storage */
   private async saveConfigs() {
     const configs = Array.from(this.syncConfigs.values());
     localStorage.setItem(this.STORAGE_KEY, JSON.stringify(configs));
+    await this.pushConfigToNative();
   }
 
-  /**
-   * Load sync configurations from storage
-   */
+  /** Load sync configurations from storage */
   private async loadConfigs() {
     const stored = localStorage.getItem(this.STORAGE_KEY);
     if (stored) {
@@ -66,210 +109,121 @@ class FolderSyncService {
       });
       // Persist cleaned-up configs
       if (configs.length !== this.syncConfigs.size) {
-        await this.saveConfigs();
+        const cleaned = Array.from(this.syncConfigs.values());
+        localStorage.setItem(this.STORAGE_KEY, JSON.stringify(cleaned));
       }
     }
   }
 
   /**
-   * Add a folder to sync to an event
+   * Mirrors the folder list and API base URL into the native engine.
+   *
+   * The base URL has to come from here: the engine can read the auth token
+   * straight out of Capacitor Preferences, but the API origin is a build-time
+   * (VITE_API_URL) / runtime (window.__CONFIG__) web concern.
+   */
+  private async pushConfigToNative() {
+    if (!Capacitor.isNativePlatform()) return;
+    try {
+      await FolderSync.configure({
+        apiBaseUrl: appConfig.apiUrl,
+        folders: Array.from(this.syncConfigs.values()).map(c => ({
+          treeUri: c.folderPath,
+          eventSlug: c.eventSlug,
+          enabled: c.autoSync,
+        })),
+      });
+    } catch (err) {
+      console.warn('[FolderSync] Failed to push config to native engine:', err);
+    }
+  }
+
+  /**
+   * Add a folder to sync to an event.
+   *
+   * Deliberately carries no "start from now" timestamp: the native ledger
+   * already knows every file it has uploaded, keyed by content hash and by a
+   * document identity that survives re-picking the folder. That is what stops
+   * re-adding a folder — or reassigning it to another event and back — from
+   * re-uploading everything in it, which the old lastSyncTime approach did
+   * every single time.
    */
   async addFolderSync(eventSlug: string, folderPath: string): Promise<void> {
     if (!Capacitor.isNativePlatform()) {
       throw new Error('Folder sync only available on mobile');
     }
 
-    const config: FolderSyncConfig = {
+    this.syncConfigs.set(folderPath, {
       folderPath,
       eventSlug,
       autoSync: true,
-      lastSyncTime: undefined, // No lastSyncTime so first sync picks up everything
-    };
-
-    this.syncConfigs.set(folderPath, config);
+    });
     await this.saveConfigs();
   }
 
   /**
-   * Remove a folder from syncing
+   * Remove a folder from syncing.
+   *
+   * Keeps the native ledger intact on purpose — if the same folder is added
+   * back later, its history is still there and nothing is re-uploaded. Use
+   * forgetSyncHistory() for the "actually re-upload everything" case.
    */
   async removeFolderSync(folderPath: string): Promise<void> {
     this.syncConfigs.delete(folderPath);
     await this.saveConfigs();
   }
 
-  /**
-   * Get all configured folder syncs
-   */
+  /** Enable/disable a single folder without forgetting its sync history. */
+  async setFolderEnabled(folderPath: string, enabled: boolean): Promise<void> {
+    const config = this.syncConfigs.get(folderPath);
+    if (!config) return;
+    config.autoSync = enabled;
+    this.syncConfigs.set(folderPath, config);
+    await this.saveConfigs();
+  }
+
+  /** Get all configured folder syncs */
   getFolderSyncs(): FolderSyncConfig[] {
     return Array.from(this.syncConfigs.values());
   }
 
   /**
-   * Sync a specific folder using the native SAF plugin.
-   * The folderPath must be a content:// tree URI obtained from FilePicker.pickDirectory().
+   * Ask the native engine to scan now. Returns immediately — the run happens
+   * in a WorkManager job and reports progress via its own notification, so
+   * there is no count to hand back here.
    */
-  async syncFolder(folderPath: string): Promise<number> {
-    const config = this.syncConfigs.get(folderPath);
-    if (!config) {
-      throw new Error('Folder not configured for sync');
-    }
-
+  async syncNow(): Promise<void> {
     if (!Capacitor.isNativePlatform()) {
       throw new Error('Folder sync only available on mobile');
     }
+    await FolderSync.syncNow();
+  }
 
-    // Validate that this is a content:// URI
-    if (!folderPath.startsWith('content://')) {
-      console.error('[FolderSync] Invalid folder URI (not content://):', folderPath);
-      throw new Error('Invalid folder URI. Please remove and re-add this folder.');
-    }
+  /** Live engine status: settings, queue counts and quarantined files. */
+  async getStatus(eventSlug?: string): Promise<FolderSyncStatus> {
+    return FolderSync.getStatus(eventSlug ? { eventSlug } : undefined);
+  }
 
-    try {
-      // Use the native SAF plugin to list files (works with scoped storage)
-      debug('Listing files via SAF for:', folderPath);
-      const result = await SafDirectory.listFiles({ treeUri: folderPath });
+  /** Update the run conditions (Wi-Fi only, battery, interval, master switch). */
+  async updateSettings(settings: Partial<FolderSyncSettings>): Promise<void> {
+    if (!Capacitor.isNativePlatform()) return;
+    await FolderSync.configure(settings);
+  }
 
-      debug(`SAF listFiles returned ${result.files.length} entries`);
-
-      let addedCount = 0;
-      let skippedCount = 0;
-      const lastSync = config.lastSyncTime || 0;
-
-      for (const file of result.files) {
-        // Only process image and video files
-        if (!this.isMediaFile(file.name)) {
-          debug(`Skipping non-media: ${file.name} (${file.mimeType})`);
-          continue;
-        }
-
-        // Skip if file was already synced (based on modification time)
-        if (file.mtime && file.mtime <= lastSync) {
-          skippedCount++;
-          continue;
-        }
-
-        try {
-          debug(`Reading file: ${file.name} via ${file.uri}`);
-
-          // Filesystem.readFile() supports content:// URIs
-          const fileData = await Filesystem.readFile({ path: file.uri });
-
-          // Convert to File object
-          const blob = this.base64ToBlob(fileData.data as string, this.getMimeType(file.name));
-          const fileObj = new File([blob], file.name, {
-            type: this.getMimeType(file.name),
-            lastModified: file.mtime || Date.now(),
-          });
-
-          // Add to upload queue
-          await addToQueue({
-            id: ulid(),
-            file: fileObj,
-            photoId: ulid(),
-            fileType: this.getMimeType(file.name),
-            eventSlug: config.eventSlug,
-            status: 'pending',
-            progress: 0,
-          });
-
-          addedCount++;
-        } catch (fileError) {
-          console.error('[FolderSync] Failed to read file:', file.name, fileError);
-          // Continue with next file instead of failing entire sync
-        }
-      }
-
-      debug(`Done: ${addedCount} added, ${skippedCount} already synced`);
-
-      // Update last sync time
-      config.lastSyncTime = Date.now();
-      this.syncConfigs.set(folderPath, config);
-      await this.saveConfigs();
-
-      return addedCount;
-    } catch (error) {
-      console.error('[FolderSync] Error syncing folder:', error);
-      throw error;
-    }
+  /** Put a single quarantined file back in the queue. */
+  async retryFailed(id: number): Promise<void> {
+    await FolderSync.retryFailed({ id });
   }
 
   /**
-   * Sync all configured folders
+   * Forget what has been synced from a folder so its contents are uploaded
+   * again. The server-side hash pre-check still suppresses anything that
+   * genuinely is a duplicate, so this recovers from a corrupt ledger without
+   * flooding the event with copies.
    */
-  async syncAllFolders(): Promise<number> {
-    const configs = this.getFolderSyncs();
-    let totalAdded = 0;
-
-    for (const config of configs) {
-      if (config.autoSync) {
-        try {
-          const count = await this.syncFolder(config.folderPath);
-          totalAdded += count;
-        } catch (error) {
-          console.error(`Error syncing folder ${config.folderPath}:`, error);
-        }
-      }
-    }
-
-    return totalAdded;
-  }
-
-  /**
-   * Check if file is a media file (image or video)
-   */
-  private isMediaFile(filename: string): boolean {
-    const ext = filename.toLowerCase().split('.').pop();
-    return ['jpg', 'jpeg', 'png', 'gif', 'webp', 'heic', 'heif', 'mp4', 'mov', 'avi', 'mkv'].includes(ext || '');
-  }
-
-  /**
-   * Get MIME type from filename
-   *
-   * 'mov' is normalized straight to 'video/mp4' (not 'video/quicktime') since
-   * that's the only video MIME type the rest of the pipeline — R2 storage
-   * keys, media routes, the nightly HEVC-compatibility transcode job —
-   * understands. See normalizeVideoFileType()'s doc comment in
-   * utils/videoMetadata.ts for why relabeling a MOV file this way (without
-   * re-encoding) is safe: MOV and MP4 share the same underlying container
-   * format.
-   */
-  private getMimeType(filename: string): string {
-    const ext = filename.toLowerCase().split('.').pop();
-    const mimeTypes: Record<string, string> = {
-      'jpg': 'image/jpeg',
-      'jpeg': 'image/jpeg',
-      'png': 'image/png',
-      'gif': 'image/gif',
-      'webp': 'image/webp',
-      'heic': 'image/heic',
-      'heif': 'image/heif',
-      'mp4': 'video/mp4',
-      'mov': 'video/mp4',
-      'avi': 'video/x-msvideo',
-      'mkv': 'video/x-matroska',
-    };
-    return mimeTypes[ext || ''] || 'application/octet-stream';
-  }
-
-  /**
-   * Convert base64 to Blob using chunked processing to avoid OOM on large files.
-   */
-  private base64ToBlob(base64: string, mimeType: string): Blob {
-    const byteCharacters = atob(base64);
-    const sliceSize = 512 * 1024; // Process 512KB at a time
-    const byteArrays: BlobPart[] = [];
-
-    for (let offset = 0; offset < byteCharacters.length; offset += sliceSize) {
-      const end = Math.min(offset + sliceSize, byteCharacters.length);
-      const byteArray = new Uint8Array(end - offset);
-      for (let i = 0; i < byteArray.length; i++) {
-        byteArray[i] = byteCharacters.charCodeAt(offset + i);
-      }
-      byteArrays.push(byteArray as unknown as BlobPart);
-    }
-
-    return new Blob(byteArrays, { type: mimeType });
+  async forgetSyncHistory(folderPath: string): Promise<number> {
+    const { removed } = await FolderSync.resetLedger({ treeUri: folderPath });
+    return removed;
   }
 }
 

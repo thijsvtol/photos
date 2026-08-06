@@ -8,6 +8,7 @@ import nl.thijsvtol.photos.plugins.SafDirectoryPlugin;
 import nl.thijsvtol.photos.plugins.ShareHandlerPlugin;
 import nl.thijsvtol.photos.plugins.ProgressNotificationPlugin;
 import nl.thijsvtol.photos.plugins.CastPlugin;
+import nl.thijsvtol.photos.sync.FolderSyncPlugin;
 
 public class MainActivity extends BridgeActivity {
     @Override
@@ -30,6 +31,7 @@ public class MainActivity extends BridgeActivity {
         registerPlugin(ShareHandlerPlugin.class);
         registerPlugin(ProgressNotificationPlugin.class);
         registerPlugin(CastPlugin.class);
+        registerPlugin(FolderSyncPlugin.class);
         super.onCreate(savedInstanceState);
         
         android.util.Log.d("MainActivity", "onCreate completed, handling intent immediately");

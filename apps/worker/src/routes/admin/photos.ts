@@ -6,6 +6,7 @@ import { permanentlyDeletePhotos } from '../../photoDeletion';
 import { logActivity } from '../../activityLog';
 import { isValidFaceInput } from '../../faceValidation';
 import { setManualPhotoPersonTags, getPhotoPeople, addManualPhotoPersonTags, removePersonFromPhoto, syncPeopleAcrossDuplicates } from '../../faceClustering';
+import { MAX_SQL_IN_CHUNK, chunkArray } from '../../utils';
 
 // Soft-deleted photos are kept this long before the nightly purge cron
 // (see scheduled.ts runTrashPurge) hard-deletes them from R2 + D1.
@@ -19,18 +20,6 @@ const app = new Hono<{ Bindings: Env; Variables: Variables }>();
 
 const RETRY_ATTEMPTS = 3;
 const RETRY_BASE_DELAY_MS = 120;
-
-// D1 caps bound parameters at 100 per statement. Keep IN (...) chunks well
-// under that so bulk operations on large selections don't 500.
-const MAX_SQL_IN_CHUNK = 90;
-
-function chunkArray<T>(items: T[], size: number): T[][] {
-  const chunks: T[][] = [];
-  for (let i = 0; i < items.length; i += size) {
-    chunks.push(items.slice(i, i + size));
-  }
-  return chunks;
-}
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 

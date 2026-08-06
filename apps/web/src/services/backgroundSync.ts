@@ -6,7 +6,7 @@ import { Network } from '@capacitor/network';
 import { ulid } from 'ulid';
 import { getPendingUploads, updateQueueItem } from '../uploadQueue';
 import { startUpload, uploadPart, completeUpload, cancelUpload as cancelUploadApi } from '../api';
-import { folderSyncService } from './folderSync';
+import FolderSync from './folderSyncPlugin';
 import { uploadManager } from './uploadManager';
 import { createPreview, computeFileHash } from '../imageUtils';
 import { normalizeVideoFileType } from '../utils/videoMetadata';
@@ -19,17 +19,31 @@ const PARALLEL_CHUNKS = 4; // Upload up to 4 chunks simultaneously
 const MAX_RETRIES = 5; // Maximum retry attempts (increased from 3)
 const RETRY_DELAY_MS = 2000; // Initial retry delay: 2 seconds
 const MAX_CHUNK_RETRIES = 3; // Retry individual chunks up to 3 times
-const PERIODIC_SYNC_INTERVAL = 4 * 60 * 60 * 1000; // 4 hours between folder scans
-const FOREGROUND_CHECK_INTERVAL = 2 * 60 * 60 * 1000; // Check every 2 hours while app is open
 
 /**
- * Background sync service for uploading photos when app is in background.
- * Also handles periodic foreground folder checks and resume-on-focus syncing.
+ * Background sync service for uploads the JS layer owns: files the user picked
+ * manually, and files shared into the app via a share intent.
+ *
+ * Folder sync deliberately does NOT go through here any more. It used to —
+ * this service scanned configured folders on resume and on every
+ * processPendingUploads() call — but that only worked while the WebView was
+ * alive, and the two scan triggers could run concurrently and each queue the
+ * entire folder. Folder sync now lives in the native WorkManager engine
+ * (apps/android/.../sync/), which runs with the app closed and keeps its own
+ * ledger; all this service does for it is ask it to scan when the app comes
+ * back to the foreground.
  */
 class BackgroundSyncService {
   private taskId: string | null = null;
   private isRunning = false;
-  private lastFolderScanTime = 0;
+  /**
+   * Guards processPendingUploads() against concurrent runs. It has three
+   * independent callers — the app-resume listener, syncNow() (used by the
+   * share-upload page), and uploadManager.addFiles() on native — and without
+   * this two of them could process the same queue item at once, racing each
+   * other's progress writes and starting two multipart uploads for one photo.
+   */
+  private isProcessing = false;
 
   /**
    * Calculate exponential backoff delay in milliseconds
@@ -130,10 +144,11 @@ class BackgroundSyncService {
       console.warn('[BackgroundSync] Failed to request notification permissions:', err);
     }
 
-    // Listen for app state changes — sync folders when app resumes
+    // Listen for app state changes — resume uploads and kick a folder scan
+    // when the app comes back to the foreground.
     App.addListener('appStateChange', async ({ isActive }) => {
       if (isActive) {
-        await this.syncFoldersIfDue();
+        this.requestFolderScan();
         // Also kick the upload manager to resume pending items. Use
         // refresh() instead of init() to resume pending items — this used
         // to call init(), but init() is a one-shot initializer that no-ops
@@ -143,51 +158,26 @@ class BackgroundSyncService {
       }
     });
 
-    // Periodic foreground folder check (every 2 hours while app is open)
-    setInterval(() => {
-      this.syncFoldersIfDue();
-    }, FOREGROUND_CHECK_INTERVAL);
-
-    // Restore persisted last scan time
-    const stored = localStorage.getItem('lastFolderScanTime');
-    if (stored) this.lastFolderScanTime = parseInt(stored, 10) || 0;
-
-    // Run an initial folder scan if overdue
-    await this.syncFoldersIfDue();
+    // Kick a scan on launch too, so opening the app always picks up new photos
+    // immediately rather than waiting for the next periodic run.
+    this.requestFolderScan();
   }
 
   /**
-   * Check configured folders for new files if enough time has passed
-   * since the last scan. Queues any new files via the upload manager.
+   * Asks the native folder-sync engine to scan now.
+   *
+   * There is no interval-gating or network check here any more: WorkManager
+   * owns the schedule (hourly by default) and enforces the user's Wi-Fi-only
+   * and battery constraints, and its unique-work name means a request while a
+   * run is already in flight is a no-op rather than a second concurrent scan.
+   * The previous JS version gated on a `lastFolderScanTime` that two callers
+   * could read before either wrote it — which queued the whole folder twice.
    */
-  private async syncFoldersIfDue() {
-    const now = Date.now();
-    if (now - this.lastFolderScanTime < PERIODIC_SYNC_INTERVAL) return;
-
-    // Check network before scanning
-    if (Capacitor.isNativePlatform()) {
-      const status = await Network.getStatus();
-      if (!status.connected) return;
-    } else if (!navigator.onLine) {
-      return;
-    }
-
-    const configs = folderSyncService.getFolderSyncs();
-    if (configs.length === 0) return;
-
-    console.log('[BackgroundSync] Periodic folder scan starting');
-    try {
-      const newFiles = await folderSyncService.syncAllFolders();
-      this.lastFolderScanTime = now;
-      localStorage.setItem('lastFolderScanTime', String(now));
-      if (newFiles > 0) {
-        console.log(`[BackgroundSync] Periodic scan: ${newFiles} new files queued`);
-        // Kick upload manager to start processing (see note above re: refresh() vs init())
-        uploadManager.refresh();
-      }
-    } catch (err) {
-      console.warn('[BackgroundSync] Periodic folder scan failed:', err);
-    }
+  private requestFolderScan() {
+    if (!Capacitor.isNativePlatform()) return;
+    FolderSync.syncNow().catch(err => {
+      console.warn('[BackgroundSync] Failed to request folder scan:', err);
+    });
   }
 
   /**
@@ -224,9 +214,17 @@ class BackgroundSyncService {
   }
 
   /**
-   * Process all pending uploads in the queue
+   * Process all pending uploads in the queue.
+   *
+   * Re-entrant calls return immediately rather than starting a second pass
+   * over the same items — see the `isProcessing` field for why that matters.
    */
   private async processPendingUploads() {
+    if (this.isProcessing) {
+      console.log('[BackgroundSync] Already processing, skipping duplicate run');
+      return;
+    }
+
     const isNative = Capacitor.isNativePlatform();
 
     // Check network status (native only, web assumes online via navigator.onLine)
@@ -241,23 +239,13 @@ class BackgroundSyncService {
       return;
     }
 
-    // Scan configured folders for new photos before processing uploads (native only)
-    if (isNative) {
-      try {
-        const newFiles = await folderSyncService.syncAllFolders();
-        if (newFiles > 0) {
-          console.log(`Background folder scan: ${newFiles} new files queued`);
-        }
-      } catch (error) {
-        console.warn('Background folder scan failed:', error);
-      }
-    }
-
     const pendingUploads = await getPendingUploads();
-    
+
     if (pendingUploads.length === 0) {
       return;
     }
+
+    this.isProcessing = true;
 
     console.log(`Processing ${pendingUploads.length} pending uploads in background`);
 
@@ -299,6 +287,7 @@ class BackgroundSyncService {
     try {
       await this.uploadBatch(pendingUploads, notificationId, eventSlug, isNative);
     } finally {
+      this.isProcessing = false;
       if (isNative) {
         try {
           await ProgressNotification.stopForeground();

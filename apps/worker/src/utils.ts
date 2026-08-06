@@ -89,3 +89,21 @@ export function firstNameOf(fullName: string | null | undefined): string | null 
   if (!trimmed) return null;
   return trimmed.split(/\s+/)[0];
 }
+
+/**
+ * D1 caps bound parameters at 100 per statement. Keep IN (...) chunks well
+ * under that so bulk operations on large selections don't 500.
+ *
+ * Shared by routes/admin/photos.ts's bulk photo operations and
+ * routes/admin/uploads.ts's POST /check-hashes (the Android folder-sync
+ * engine's duplicate pre-check, which sends up to 500 hashes per call).
+ */
+export const MAX_SQL_IN_CHUNK = 90;
+
+export function chunkArray<T>(items: T[], size: number): T[][] {
+  const chunks: T[][] = [];
+  for (let i = 0; i < items.length; i += size) {
+    chunks.push(items.slice(i, i + size));
+  }
+  return chunks;
+}

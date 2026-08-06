@@ -1,3 +1,4 @@
+import { Capacitor } from '@capacitor/core';
 import { Preferences } from '@capacitor/preferences';
 import { Browser } from '@capacitor/browser';
 import { App } from '@capacitor/app';
@@ -167,6 +168,27 @@ export class MobileAuthService {
     });
     // Mirror to localStorage for synchronous access in image URL construction
     localStorage.setItem(LOCAL_TOKEN_KEY, token.token);
+    // The native folder-sync engine reads this same Preferences entry, but it
+    // also needs the API base URL (a web-side build/runtime concern) and a
+    // nudge to reschedule — a background run that started while signed out
+    // would otherwise stay idle until the app happened to be opened again.
+    await this.notifyFolderSyncEngine();
+  }
+
+  /**
+   * Re-pushes config to the native folder-sync engine after an auth change.
+   *
+   * Best-effort and non-blocking by design: sign-in and sign-out must never
+   * fail because folder sync is unavailable (web platform, plugin missing).
+   */
+  private static async notifyFolderSyncEngine() {
+    if (!Capacitor.isNativePlatform()) return;
+    try {
+      const { default: FolderSync } = await import('./folderSyncPlugin');
+      await FolderSync.configure({ apiBaseUrl: getConfig().apiUrl });
+    } catch (err) {
+      console.warn('[MobileAuth] Failed to notify folder sync engine:', err);
+    }
   }
 
   /**
@@ -237,6 +259,10 @@ export class MobileAuthService {
     await Preferences.remove({ key: USER_KEY });
     await Preferences.remove({ key: EVENT_SESSIONS_KEY });
     await Preferences.remove({ key: 'oauth_state' });
+    // Let the native engine notice the token is gone now, rather than
+    // discovering it on its next scheduled run and posting a "sign in again"
+    // notification the user didn't need to see.
+    await this.notifyFolderSyncEngine();
   }
 
   static async setEventSessionToken(eventSlug: string, token: string) {

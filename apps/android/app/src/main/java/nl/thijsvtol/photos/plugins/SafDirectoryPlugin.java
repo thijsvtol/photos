@@ -1,7 +1,6 @@
 package nl.thijsvtol.photos.plugins;
 
 import android.content.ContentResolver;
-import android.database.Cursor;
 import android.net.Uri;
 import android.provider.DocumentsContract;
 import android.util.Base64;
@@ -13,15 +12,21 @@ import com.getcapacitor.PluginCall;
 import com.getcapacitor.PluginMethod;
 import com.getcapacitor.annotation.CapacitorPlugin;
 
+import nl.thijsvtol.photos.sync.MediaProbe;
+import nl.thijsvtol.photos.sync.SafScanner;
+
 import java.io.OutputStream;
+import java.util.List;
 
 /**
- * Native Capacitor plugin that lists files in a directory selected via
- * Android's Storage Access Framework (SAF).
+ * Native Capacitor plugin for working with directories selected via Android's
+ * Storage Access Framework (SAF).
  *
  * Capacitor's Filesystem.readdir() uses java.io.File.listFiles() which
- * returns null on Android 11+ scoped storage. This plugin uses
- * DocumentsContract + ContentResolver to properly enumerate SAF tree URIs.
+ * returns null on Android 11+ scoped storage, so the actual enumeration lives
+ * in {@link SafScanner} (DocumentsContract + ContentResolver). This plugin is
+ * the JS-facing wrapper around it; the background folder-sync engine uses the
+ * same scanner directly, so there is exactly one implementation of the walk.
  */
 @CapacitorPlugin(name = "SafDirectory")
 public class SafDirectoryPlugin extends Plugin {
@@ -41,72 +46,24 @@ public class SafDirectoryPlugin extends Plugin {
         }
 
         try {
-            Uri treeUri = Uri.parse(treeUriString);
-            String docId = DocumentsContract.getTreeDocumentId(treeUri);
-            Uri childrenUri = DocumentsContract.buildChildDocumentsUriUsingTree(treeUri, docId);
+            boolean recursive = Boolean.TRUE.equals(call.getBoolean("recursive", false));
+            long since = call.getLong("since", 0L);
+            int limit = call.getInt("limit", 0);
 
-            ContentResolver resolver = getContext().getContentResolver();
-
-            // Take persistable permission so the URI survives app restarts
-            try {
-                resolver.takePersistableUriPermission(treeUri,
-                        android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION);
-            } catch (SecurityException e) {
-                // Non-fatal: permission may already be taken or not persistable
-            }
-
-            String[] projection = new String[]{
-                    DocumentsContract.Document.COLUMN_DOCUMENT_ID,
-                    DocumentsContract.Document.COLUMN_DISPLAY_NAME,
-                    DocumentsContract.Document.COLUMN_MIME_TYPE,
-                    DocumentsContract.Document.COLUMN_SIZE,
-                    DocumentsContract.Document.COLUMN_LAST_MODIFIED
-            };
+            List<SafScanner.SafFile> files = SafScanner.scan(
+                getContext().getContentResolver(), treeUriString, recursive, since, limit
+            );
 
             JSArray filesArray = new JSArray();
-
-            Cursor cursor = resolver.query(childrenUri, projection, null, null, null);
-            if (cursor != null) {
-                try {
-                    int idCol = cursor.getColumnIndexOrThrow(DocumentsContract.Document.COLUMN_DOCUMENT_ID);
-                    int nameCol = cursor.getColumnIndexOrThrow(DocumentsContract.Document.COLUMN_DISPLAY_NAME);
-                    int mimeCol = cursor.getColumnIndexOrThrow(DocumentsContract.Document.COLUMN_MIME_TYPE);
-                    int sizeCol = cursor.getColumnIndexOrThrow(DocumentsContract.Document.COLUMN_SIZE);
-                    int mtimeCol = cursor.getColumnIndexOrThrow(DocumentsContract.Document.COLUMN_LAST_MODIFIED);
-
-                    while (cursor.moveToNext()) {
-                        String childDocId = cursor.getString(idCol);
-                        String name = cursor.getString(nameCol);
-                        String mimeType = cursor.getString(mimeCol);
-                        
-                        // Handle null values safely
-                        if (name == null || name.isEmpty()) {
-                            continue;
-                        }
-                        
-                        long size = cursor.isNull(sizeCol) ? 0 : cursor.getLong(sizeCol);
-                        long mtime = cursor.isNull(mtimeCol) ? System.currentTimeMillis() : cursor.getLong(mtimeCol);
-
-                        // Skip directories (mime type is vnd.android.document/directory)
-                        if (DocumentsContract.Document.MIME_TYPE_DIR.equals(mimeType)) {
-                            continue;
-                        }
-
-                        // Build a content:// URI for this specific file
-                        Uri fileUri = DocumentsContract.buildDocumentUriUsingTree(treeUri, childDocId);
-
-                        JSObject fileObj = new JSObject();
-                        fileObj.put("name", name);
-                        fileObj.put("uri", fileUri.toString());
-                        fileObj.put("mimeType", mimeType != null ? mimeType : "application/octet-stream");
-                        fileObj.put("size", size);
-                        fileObj.put("mtime", mtime);
-
-                        filesArray.put(fileObj);
-                    }
-                } finally {
-                    cursor.close();
-                }
+            for (SafScanner.SafFile file : files) {
+                JSObject fileObj = new JSObject();
+                fileObj.put("name", file.name);
+                fileObj.put("uri", file.uri);
+                fileObj.put("docId", file.docId);
+                fileObj.put("mimeType", file.mimeType);
+                fileObj.put("size", file.size);
+                fileObj.put("mtime", file.mtime);
+                filesArray.put(fileObj);
             }
 
             JSObject result = new JSObject();
@@ -115,6 +72,43 @@ public class SafDirectoryPlugin extends Plugin {
 
         } catch (Exception e) {
             call.reject("Failed to list directory: " + e.getMessage(), e);
+        }
+    }
+
+    /**
+     * Returns a downscaled JPEG preview of a single SAF document as base64.
+     *
+     * Used by faceDetectionQueue.ts to run face detection on photos the native
+     * background engine uploaded: those never pass through the JS upload
+     * manager, so there is no File blob to detect against. Deliberately returns
+     * the ~1920px preview rather than the original — it's ample for face
+     * detection and, unlike reading the original through
+     * Filesystem.readFile(), it can't OOM the WebView on a 108MP photo.
+     */
+    @PluginMethod()
+    public void readPreview(PluginCall call) {
+        String uri = call.getString("uri");
+        if (uri == null || uri.isEmpty()) {
+            call.reject("uri parameter is required");
+            return;
+        }
+        if (!uri.startsWith("content://")) {
+            call.reject("uri must be a content:// URI from Storage Access Framework");
+            return;
+        }
+
+        try {
+            byte[] jpeg = new MediaProbe(getContext().getContentResolver()).createPreview(uri);
+            if (jpeg == null) {
+                call.reject("Could not decode image");
+                return;
+            }
+            JSObject result = new JSObject();
+            result.put("data", Base64.encodeToString(jpeg, Base64.NO_WRAP));
+            result.put("mimeType", "image/jpeg");
+            call.resolve(result);
+        } catch (Exception | OutOfMemoryError e) {
+            call.reject("Failed to read preview: " + e.getMessage());
         }
     }
 

@@ -14,9 +14,13 @@
  * avoids any auth/CORS considerations entirely and works identically on
  * web and native.
  */
+import { Capacitor } from '@capacitor/core';
+import { App } from '@capacitor/app';
 import { uploadManager } from './services/uploadManager';
 import { detectFaces } from './faceDetection';
 import { saveFaces } from './api';
+import FolderSync from './services/folderSyncPlugin';
+import SafDirectory from './services/safDirectory';
 import type { UploadQueueItem } from './types';
 
 const processedIds = new Set<string>();
@@ -44,12 +48,77 @@ async function processItem(item: UploadQueueItem): Promise<void> {
   }
 }
 
+/**
+ * Runs face detection for photos the NATIVE folder-sync engine uploaded.
+ *
+ * Those never pass through the upload manager — the engine streams them
+ * straight from their content:// URIs in a background WorkManager job, with no
+ * WebView alive — so the subscription below never sees them and they would
+ * silently get no faces. The engine parks each uploaded image in its ledger
+ * instead, and this drains that list whenever the app is open.
+ *
+ * Uses SafDirectory.readPreview() rather than reading the original: it returns
+ * the same ~1920px JPEG the engine uploaded as the photo's preview, which is
+ * ample for detection and, unlike reading a 108MP original through the
+ * Capacitor bridge, cannot exhaust the WebView's memory.
+ */
+async function drainNativeFaceJobs(): Promise<void> {
+  if (!Capacitor.isNativePlatform()) return;
+
+  try {
+    const { jobs } = await FolderSync.takePendingFaceJobs();
+    for (const job of jobs) {
+      try {
+        const { data } = await SafDirectory.readPreview({ uri: job.uri });
+        const blob = base64ToBlob(data, 'image/jpeg');
+        const objectUrl = URL.createObjectURL(blob);
+        try {
+          const faces = await detectFaces(objectUrl);
+          if (faces.length > 0) {
+            await saveFaces(job.eventSlug, job.photoId, faces);
+          }
+        } finally {
+          URL.revokeObjectURL(objectUrl);
+        }
+        await FolderSync.clearFaceJob({ photoId: job.photoId });
+      } catch (err) {
+        // Clear the job anyway: a file that can't be decoded (deleted since
+        // upload, unsupported container) would otherwise be retried on every
+        // single app launch forever.
+        console.warn('[faceDetectionQueue] Native face job failed:', job.name, err);
+        await FolderSync.clearFaceJob({ photoId: job.photoId }).catch(() => {});
+      }
+    }
+  } catch (err) {
+    console.warn('[faceDetectionQueue] Failed to drain native face jobs:', err);
+  }
+}
+
+/** Decodes a base64 payload without building an intermediate full-size string copy. */
+function base64ToBlob(base64: string, mimeType: string): Blob {
+  const binary = atob(base64);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) {
+    bytes[i] = binary.charCodeAt(i);
+  }
+  return new Blob([bytes], { type: mimeType });
+}
+
 let started = false;
 
 /** Starts watching the upload manager. Safe to call multiple times (no-op after the first). */
 export function startFaceDetectionQueue(): void {
   if (started) return;
   started = true;
+
+  if (Capacitor.isNativePlatform()) {
+    void drainNativeFaceJobs();
+    // Also drain on resume — a background sync run may have uploaded photos
+    // while the app was closed.
+    App.addListener('appStateChange', ({ isActive }) => {
+      if (isActive) void drainNativeFaceJobs();
+    }).catch(() => { /* listener registration is best-effort */ });
+  }
 
   uploadManager.subscribe((items) => {
     for (const item of items) {

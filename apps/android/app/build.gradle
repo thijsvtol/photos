@@ -58,6 +58,15 @@ dependencies {
     androidTestImplementation "androidx.test.espresso:espresso-core:$androidxEspressoCoreVersion"
     implementation project(':capacitor-cordova-android-plugins')
 
+    // Native folder-sync engine (java/nl/thijsvtol/photos/sync/). WorkManager
+    // schedules the periodic scan (and reschedules it after reboot) so folder
+    // sync keeps running with the app closed — the previous JS-only pipeline
+    // died with the WebView. ExifInterface and OkHttp let the worker read
+    // metadata and stream uploads without ever buffering a whole file.
+    implementation "androidx.work:work-runtime:$androidxWorkVersion"
+    implementation "androidx.exifinterface:exifinterface:$androidxExifInterfaceVersion"
+    implementation "com.squareup.okhttp3:okhttp:$okhttpVersion"
+
     // Google Cast SDK (native sender) — backs plugins/CastPlugin.java. The
     // `mediarouter` artifact provides the standard "Cast to" device chooser
     // dialog used by CastPlugin.startDiscovery().

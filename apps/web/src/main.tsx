@@ -63,15 +63,17 @@ if (Capacitor.isNativePlatform()) {
     });
   });
   
-  folderSyncService.initialize().then(() => {
-    // Auto-sync configured folders on app launch
-    folderSyncService.syncAllFolders().then((count) => {
-      if (count > 0) {
-        console.log(`Folder sync: ${count} new files queued for upload`);
-      }
-    }).catch((err) => {
-      console.warn('Folder auto-sync on startup failed:', err);
-    });
+  // Hands the configured folder→event mapping and the API base URL to the
+  // native sync engine, and (re)schedules its periodic WorkManager job.
+  //
+  // This used to ALSO kick off a folder scan here, which raced the one
+  // backgroundSyncService.initialize() started: neither had written
+  // lastSyncTime yet, so both scans saw the same "new" files and each queued
+  // the entire folder — an instant duplicate of every photo. The scan is now
+  // requested in exactly one place (backgroundSync's requestFolderScan), and
+  // WorkManager's unique-work name makes overlapping runs impossible anyway.
+  folderSyncService.initialize().catch((err) => {
+    console.warn('Folder sync initialization failed:', err);
   });
 
   // Initialize share intent handling

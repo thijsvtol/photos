@@ -90,6 +90,12 @@
             android:name=".UploadForegroundService"
             android:exported="false"
             android:foregroundServiceType="dataSync" />
+
+        <!-- "Pause sync" action on the folder-sync progress notification.
+             Not exported: only our own notification triggers it. -->
+        <receiver
+            android:name=".sync.SyncActionReceiver"
+            android:exported="false" />
     </application>
 
     <!-- Permissions -->
@@ -104,4 +110,11 @@
          when the app is backgrounded/screen is locked. -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
+    <!-- WorkManager's network constraints (see sync/SyncScheduler.java) read
+         connectivity state to decide whether the periodic folder-sync job may
+         run; without this the UNMETERED/CONNECTED constraint can never be met. -->
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <!-- Lets WorkManager's own boot receiver re-register the periodic folder
+         sync after the device restarts, so sync survives a reboot. -->
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
 </manifest>

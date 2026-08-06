@@ -6,12 +6,102 @@ import { logActivity } from '../../activityLog';
 import { checkFeature } from '../../features';
 import { isVideoFileType, getStorageExtension } from '../../fileTypeUtils';
 import { isValidFaceInput } from '../../faceValidation';
+import { MAX_SQL_IN_CHUNK, chunkArray } from '../../utils';
 
 type Variables = {
   user: User;
 };
 
 const app = new Hono<{ Bindings: Env; Variables: Variables }>();
+
+/** Upper bound on hashes accepted per POST /check-hashes call. Keeps the
+ *  request body and the number of chunked D1 statements bounded regardless of
+ *  how large the client's backlog is — the Android sync engine pages through
+ *  its pending files in batches of this size. */
+const MAX_HASHES_PER_CHECK = 500;
+
+/** SHA-256 hex, matching computeFileHash() in apps/web/src/imageUtils.ts and
+ *  MediaProbe.sha256() in the Android sync engine. */
+const SHA256_HEX = /^[0-9a-f]{64}$/;
+
+/**
+ * POST /events/:slug/uploads/check-hashes
+ *
+ * Given a batch of SHA-256 content hashes, reports which ones this event
+ * already has a fully-uploaded, non-deleted photo for. Lets a client skip
+ * re-uploading content the server already holds.
+ *
+ * This is what makes folder sync survive a reinstall, cleared app data, or a
+ * second device: the Android engine's local ledger is the fast path, and this
+ * endpoint is the authoritative fallback when that ledger doesn't know about a
+ * file yet. Without it, re-adding a previously-synced folder re-uploads every
+ * photo in it.
+ *
+ * Mounted on the uploads router so requireUploadPermission applies (admins and
+ * collaborators with upload capability), and so the path — which contains
+ * `/uploads/` — hits the admin-only-gate exemption in routes/admin.ts.
+ */
+app.post('/check-hashes', requireUploadPermission, async (c) => {
+  const slug = c.req.param('slug')!;
+
+  try {
+    const body = await c.req.json<{ hashes?: unknown }>().catch(() => ({ hashes: undefined }));
+
+    if (!Array.isArray(body.hashes)) {
+      return c.json({ error: 'hashes must be an array' }, 400);
+    }
+    if (body.hashes.length > MAX_HASHES_PER_CHECK) {
+      return c.json({ error: `At most ${MAX_HASHES_PER_CHECK} hashes may be checked per request` }, 400);
+    }
+
+    // Normalise and drop anything that isn't a plausible hash, so a malformed
+    // client can never widen the IN (...) list with junk.
+    const hashes = Array.from(
+      new Set(
+        body.hashes
+          .filter((h): h is string => typeof h === 'string')
+          .map((h) => h.trim().toLowerCase())
+          .filter((h) => SHA256_HEX.test(h))
+      )
+    );
+
+    if (hashes.length === 0) {
+      return c.json({ existing: [] });
+    }
+
+    const event = await c.env.DB
+      .prepare('SELECT id FROM events WHERE slug = ?')
+      .bind(slug)
+      .first<{ id: number }>();
+
+    if (!event) {
+      return c.json({ error: 'Event not found' }, 404);
+    }
+
+    // Only count photos that actually finished uploading and aren't in the
+    // trash — a half-uploaded or soft-deleted row must NOT suppress a
+    // re-upload, or the photo would be permanently missing from the event.
+    const statements = chunkArray(hashes, MAX_SQL_IN_CHUNK).map((chunk) =>
+      c.env.DB
+        .prepare(
+          `SELECT DISTINCT file_hash FROM photos
+           WHERE event_id = ?
+             AND deleted_at IS NULL
+             AND upload_complete = 1
+             AND file_hash IN (${chunk.map(() => '?').join(',')})`
+        )
+        .bind(event.id, ...chunk)
+    );
+
+    const results = await c.env.DB.batch<{ file_hash: string }>(statements);
+    const existing = results.flatMap((r) => (r.results || []).map((row) => row.file_hash));
+
+    return c.json({ existing });
+  } catch (error) {
+    console.error('Error checking file hashes:', error);
+    return c.json({ error: 'Failed to check file hashes' }, 500);
+  }
+});
 
 /**
  * POST /start
