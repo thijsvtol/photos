@@ -39,10 +39,12 @@ app.use('/*', requireFeature('enableCollaborators'));
  * Get all collaborators for an event
  * Public endpoint - allows anyone who can view the event to see collaborators
  *
- * Includes the collaborator's linked person's cover photo (person_clusters.cover_photo_id, via
+ * Includes the collaborator's linked person's id + cover photo (person_clusters, via
  * linked_user_email — see AdminPersonDetail's "Linked account" section for how that link is
  * set) so the public-facing collaborator display (CollaboratorAvatars.tsx) can show an actual
- * photo of them instead of only ever falling back to initials.
+ * photo of them instead of only ever falling back to initials, and so its "View photos of X"
+ * detail modal can deep-link into the combined Timeline/Search page's people filter
+ * (?people=<person_id>) for that person.
  */
 app.get('/api/events/:slug/collaborators', async (c) => {
   const slug = c.req.param('slug')!;
@@ -66,6 +68,7 @@ app.get('/api/events/:slug/collaborators', async (c) => {
         ec.role,
         u.email,
         u.name,
+        pc.id as person_id,
         p.id as cover_photo_id,
         p.file_type as cover_file_type,
         p.cache_version as cover_cache_version,

@@ -805,7 +805,12 @@ app.get('/api/search', optionalAuth, async (c) => {
     const user = getUser(c);
     const userIsAdmin = isAdmin(c);
     const userEmail = user?.email || '';
-    const limit = Math.min(parseInt(c.req.query('limit') || '60', 10), 200);
+    // Default/max result count — raised from 60/200 (2026-08-06) after a person with ~1000
+    // photos in the library was silently truncated to 200 results with no indication anything
+    // was cut off. People-only filtering (no `q`) is a simple id-set lookup, not full-text
+    // search relevance ranking, so there's no meaningful "top N most relevant" concept to cap
+    // tightly on — the whole point is showing every photo of that person.
+    const limit = Math.min(parseInt(c.req.query('limit') || '60', 10), 2000);
 
     const eventsQuery = `
       SELECT DISTINCT e.id, e.slug, e.name
@@ -927,7 +932,11 @@ app.get('/api/search', optionalAuth, async (c) => {
         }
       }
       candidateRows.sort((a, b) => (a.capture_time < b.capture_time ? 1 : -1));
-      candidateRows = candidateRows.slice(0, 300);
+      // No artificial cap here (unlike the FTS branch's LIMIT 300, which exists for text-search
+      // relevance/cost reasons) — this is a plain id-set lookup already bounded by however many
+      // photos actually match every selected person, and the whole point of a people filter is
+      // to show ALL of them, not an arbitrarily truncated "top 300". The final response size is
+      // still bounded by `limit` below (now up to 2000, see its own doc comment).
     }
 
     // Optional semantic re-rank: only meaningful for longer, sentence-like

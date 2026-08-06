@@ -209,19 +209,28 @@ const PhotoDetail: React.FC = () => {
   // so next/prev silently fell back to browsing the ENTIRE event instead of just the photos
   // that matched the search (e.g. a specific person filter).
   const searchResultIds = (location.state?.searchResultIds || []) as string[];
+  // Only this event's photo ids that actually appear in the Timeline (see Timeline.tsx's
+  // `timelinePhotoIdsByEvent` doc comment) — previously `fromTimeline` only ever affected the
+  // Back button's destination, never what next/prev actually iterated over, so swiping through
+  // photos opened from the Timeline silently browsed that event's ENTIRE gallery instead of
+  // just the (possibly filtered, e.g. "Just me") subset shown in the Timeline.
+  const timelinePhotoIds = (location.state?.timelinePhotoIds || []) as string[];
   // Full /timeline?q=...&people=... URL to return to — needed since fromSearch alone isn't
   // enough to reconstruct the exact search the user came from.
   const searchUrl = (location.state?.searchUrl || '/timeline') as string;
   const sortBy = location.state?.sortBy || 'date_desc';
   
-  // Filter photos based on whether we're viewing favorites or search results.
+  // Filter photos based on whether we're viewing favorites, search results, or the timeline.
   // When restricted, only show photos from this event that are in that subset.
   const displayPhotos = fromFavorites && favoritePhotos.length > 0
     ? allPhotos.filter(p => favoritePhotos.some((fav: { id: string; slug: string }) => fav.id === p.id && fav.slug === slug))
     : fromSearch && searchResultIds.length > 0
     ? allPhotos.filter(p => searchResultIds.includes(p.id))
+    : fromTimeline && timelinePhotoIds.length > 0
+    ? allPhotos.filter(p => timelinePhotoIds.includes(p.id))
     : allPhotos;
   const photosToUse = displayPhotos.length > 0 ? displayPhotos : allPhotos;
+
 
   const swipePreviewPhoto = (() => {
     if (swipeOffset === 0 || currentIndex < 0 || photosToUse.length < 2) {
@@ -541,6 +550,8 @@ const PhotoDetail: React.FC = () => {
           ? allPhotosData.filter(p => favoritePhotos.some((fav: { id: string; slug: string }) => fav.id === p.id && fav.slug === slug))
           : fromSearch && searchResultIds.length > 0
           ? allPhotosData.filter(p => searchResultIds.includes(p.id))
+          : fromTimeline && timelinePhotoIds.length > 0
+          ? allPhotosData.filter(p => timelinePhotoIds.includes(p.id))
           : allPhotosData;
         const index = photosToUse.findIndex(p => p.id === photoId);
         setCurrentIndex(index);
@@ -1453,6 +1464,8 @@ const PhotoDetail: React.FC = () => {
         ? remainingPhotos.filter((p) => favoritePhotos.some((fav: { id: string; slug: string }) => fav.id === p.id && fav.slug === slug))
         : fromSearch && searchResultIds.length > 0
         ? remainingPhotos.filter((p) => searchResultIds.includes(p.id))
+        : fromTimeline && timelinePhotoIds.length > 0
+        ? remainingPhotos.filter((p) => timelinePhotoIds.includes(p.id))
         : remainingPhotos;
 
       if (remainingDisplayPhotos.length > 0) {

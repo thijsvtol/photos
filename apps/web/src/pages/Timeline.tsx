@@ -200,7 +200,10 @@ const Timeline: React.FC = () => {
     setSearching(true);
     setSearchError(null);
     try {
-      const results = await searchPhotos(q.trim(), 200, Array.from(personIds));
+      // 2000 (worker's max, see GET /api/search's `limit` doc comment) rather than the old 200
+      // — a person with hundreds/thousands of photos in the library was silently truncated to
+      // 200 results with no indication anything was cut off.
+      const results = await searchPhotos(q.trim(), 2000, Array.from(personIds));
       setSearchResults(results);
     } catch (err) {
       console.error('Search failed:', err);
@@ -390,6 +393,25 @@ const Timeline: React.FC = () => {
   }, [photos, filterMode, myPhotoIds]);
 
   const { dates, groups } = useMemo(() => groupByDate(filteredPhotos), [filteredPhotos]);
+
+  // Photo ids per event across the ENTIRE (filtered) timeline, not just one date's slice — used
+  // so PhotoDetail's next/prev navigation (see its `fromTimeline`/`timelinePhotoIds` handling)
+  // can restrict itself to "every photo of this event that's actually in the timeline" instead
+  // of silently falling back to browsing that event's ENTIRE gallery (the previously-reported
+  // bug: `fromTimeline` only ever affected the Back button's destination, never what next/prev
+  // actually iterated over). A single event's photos in the timeline can span multiple dates
+  // (each rendered as a separate JustifiedGrid instance below), so this must be computed from
+  // the full `filteredPhotos` list, not from one date-grid's own `eventPhotos` slice.
+  const timelinePhotoIdsByEvent = useMemo(() => {
+    const map = new Map<string, string[]>();
+    for (const p of filteredPhotos) {
+      const s = p.event_slug || '';
+      const arr = map.get(s) || [];
+      arr.push(p.id);
+      map.set(s, arr);
+    }
+    return map;
+  }, [filteredPhotos]);
 
   // Search results are grouped by event (not date) — same approach the old standalone Search
   // page used, since JustifiedGrid needs one `slug` per instance to build preview URLs and
@@ -701,7 +723,7 @@ const Timeline: React.FC = () => {
                           forceControlsVisible={selectedPhotos.size > 0}
                           userFavorites={userFavorites}
                           supportsHover={supportsHover}
-                          linkState={{ fromTimeline: true }}
+                          linkState={{ fromTimeline: true, timelinePhotoIds: timelinePhotoIdsByEvent.get(eventSlug) || [] }}
                           onToggleSelection={togglePhotoSelection}
                           onToggleFavorite={isAuthenticated ? toggleFavorite : undefined}
                         />
