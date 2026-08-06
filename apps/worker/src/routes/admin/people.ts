@@ -1,7 +1,8 @@
 import { Hono } from 'hono';
 import type { Env, User } from '../../types';
 import { requireAdmin } from '../../auth';
-import { getClusterData, applyClusteringResults, countUnclusteredFaces, getLegacyFaceStats, resetLegacyFaces, mergeClusters, assignPhotosToPerson, resetAllClusters, learnFromManualTags, getUnattachedPhotos, resetFacesForFacelessTaggedPhotos } from '../../faceClustering';
+import { logActivity } from '../../activityLog';
+import { getClusterData, applyClusteringResults, countUnclusteredFaces, getLegacyFaceStats, resetLegacyFaces, mergeClusters, assignPhotosToPerson, resetAllClusters, resetSingleCluster, learnFromManualTags, getUnattachedPhotos, resetFacesForFacelessTaggedPhotos } from '../../faceClustering';
 import type { ClusterResult } from '../../faceClustering';
 
 type Variables = {
@@ -379,6 +380,19 @@ app.put('/:personId', async (c) => {
         .run();
     }
 
+    const changed: string[] = [];
+    if (name !== undefined && name !== null) changed.push('name');
+    if (coverPhotoId !== undefined && coverPhotoId !== null) changed.push('cover');
+    if (linkedUserEmail !== undefined) changed.push(linkedUserEmail ? 'account_linked' : 'account_unlinked');
+
+    await logActivity(c.env, {
+      actorEmail: c.get('user')?.email || 'unknown',
+      action: 'person_update',
+      targetType: 'person',
+      targetId: String(personId),
+      metadata: { name: name ?? undefined, changed },
+    });
+
     return c.json({ success: true });
   } catch (error) {
     console.error('Error updating person:', error);
@@ -407,6 +421,15 @@ app.post('/merge', async (c) => {
     }
 
     const { facesMoved } = await mergeClusters(c.env, targetPersonId, sourcePersonIds);
+
+    await logActivity(c.env, {
+      actorEmail: c.get('user')?.email || 'unknown',
+      action: 'person_merge',
+      targetType: 'person',
+      targetId: String(targetPersonId),
+      metadata: { mergedCount: sourcePersonIds.length, facesMoved },
+    });
+
     return c.json({ success: true, facesMoved });
   } catch (error) {
     console.error('Error merging people:', error);
@@ -493,11 +516,50 @@ app.delete('/:personId', async (c) => {
       return c.json({ error: 'Invalid person ID' }, 400);
     }
 
+    // Capture the name first — it's gone after the delete, and "deleted a
+    // person" without one is useless in the feed.
+    const person = await c.env.DB
+      .prepare('SELECT name FROM person_clusters WHERE id = ?')
+      .bind(personId)
+      .first<{ name: string | null }>();
+
     await c.env.DB.prepare('DELETE FROM person_clusters WHERE id = ?').bind(personId).run();
+
+    await logActivity(c.env, {
+      actorEmail: c.get('user')?.email || 'unknown',
+      action: 'person_delete',
+      targetType: 'person',
+      targetId: String(personId),
+      metadata: { name: person?.name ?? undefined },
+    });
+
     return c.json({ success: true });
   } catch (error) {
     console.error('Error deleting person:', error);
     return c.json({ error: 'Failed to delete person' }, 500);
+  }
+});
+
+/**
+ * POST /people/:personId/reset-cluster
+ * Unassigns this person's auto-detected faces (photo_faces) and clears its centroid/face_count,
+ * WITHOUT deleting the person record itself — the name, linked account, and cover photo are all
+ * kept, so future automatic clustering re-accumulates under the same identity instead of
+ * starting over as an unnamed cluster. See resetSingleCluster()'s doc comment in
+ * faceClustering.ts for how this differs from the destructive DELETE above.
+ */
+app.post('/:personId/reset-cluster', async (c) => {
+  try {
+    const personId = parseInt(c.req.param('personId'), 10);
+    if (!Number.isFinite(personId)) {
+      return c.json({ error: 'Invalid person ID' }, 400);
+    }
+
+    const result = await resetSingleCluster(c.env, personId);
+    return c.json({ success: true, ...result });
+  } catch (error) {
+    console.error('Error resetting person cluster:', error);
+    return c.json({ error: 'Failed to reset person cluster' }, 500);
   }
 });
 

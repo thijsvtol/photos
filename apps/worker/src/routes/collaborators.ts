@@ -79,7 +79,7 @@ app.get('/api/events/:slug/collaborators', async (c) => {
         p.cache_version as cover_cache_version,
         e2.slug as cover_event_slug
       FROM event_collaborators ec
-      LEFT JOIN users u ON ec.user_email = u.email
+      LEFT JOIN users u ON LOWER(ec.user_email) = LOWER(u.email)
       LEFT JOIN person_clusters pc ON LOWER(pc.linked_user_email) = LOWER(ec.user_email)
       LEFT JOIN photos p ON p.id = pc.cover_photo_id
       LEFT JOIN events e2 ON e2.id = p.event_id

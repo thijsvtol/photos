@@ -409,16 +409,18 @@ export interface SearchResultPhoto extends Photo {
  *  re-ranked when possible. `personIds` (optional) requires the photo to contain EVERY given
  *  person (not just any of them) — see the worker route's doc comment in routes/public.ts for
  *  why AND, not OR, is the right default. Can be used alone (no `query`) for a pure people
- *  search, or combined with a text query. */
-export const searchPhotos = async (query: string, limit: number = 60, personIds?: number[]): Promise<SearchResultPhoto[]> => {
-  const response = await api.get<{ photos: SearchResultPhoto[] }>('/search', {
+ *  search, or combined with a text query. Returns `hasMore: true` when the server's own `limit`
+ *  (or an internal candidate cap) truncated the result set, so callers can show a "showing first
+ *  N results" notice instead of silently truncating with no indication. */
+export const searchPhotos = async (query: string, limit: number = 60, personIds?: number[]): Promise<{ photos: SearchResultPhoto[]; hasMore: boolean }> => {
+  const response = await api.get<{ photos: SearchResultPhoto[]; hasMore?: boolean }>('/search', {
     params: {
       q: query,
       limit,
       ...(personIds && personIds.length > 0 ? { people: personIds.join(',') } : {}),
     },
   });
-  return response.data.photos;
+  return { photos: response.data.photos, hasMore: Boolean(response.data.hasMore) };
 };
 
 // Faces / People API
@@ -738,6 +740,21 @@ export const assignPhotosToPerson = async (personId: number, photoIds: string[])
 
 export const deletePerson = async (personId: number): Promise<void> => {
   await api.delete(`/admin/people/${personId}`, { headers: getAdminHeaders() });
+};
+
+/**
+ * Resets a single person's auto-detected clustering (unassigns their photo_faces, clears their
+ * centroid/face_count) WITHOUT deleting the person record — unlike deletePerson(), their name,
+ * linked account, and cover photo are kept, so future automatic clustering re-accumulates under
+ * the same identity. See resetSingleCluster()'s doc comment in apps/worker/src/faceClustering.ts.
+ */
+export const resetPersonCluster = async (personId: number): Promise<{ facesUnassigned: number }> => {
+  const response = await api.post<{ success: boolean; facesUnassigned: number }>(
+    `/admin/people/${personId}/reset-cluster`,
+    {},
+    { headers: getAdminHeaders() }
+  );
+  return { facesUnassigned: response.data.facesUnassigned };
 };
 
 /** Lets manual photo tagging directly improve future automatic clustering — see
@@ -1325,25 +1342,100 @@ export const getEventStats = async (slug: string): Promise<EventStats> => {
   return response.data;
 };
 
+/**
+ * Domains the activity feed can be filtered by. The server owns the mapping
+ * from domain to action prefixes (DOMAIN_PREFIXES in
+ * apps/worker/src/routes/admin/analytics.ts), so new actions in an existing
+ * domain need no change here.
+ */
+export const ACTIVITY_DOMAINS = ['photos', 'events', 'people', 'sharing', 'tags'] as const;
+export type ActivityDomain = (typeof ACTIVITY_DOMAINS)[number];
+
+export type ActivityAction =
+  | 'photo_upload'
+  | 'photo_favorite'
+  | 'photo_trash'
+  | 'photo_restore'
+  | 'photo_delete_permanent'
+  | 'photo_bulk_delete'
+  | 'photo_bulk_copy'
+  | 'photo_replace'
+  | 'photo_archive'
+  | 'photo_featured'
+  | 'photo_location_edit'
+  | 'event_create'
+  | 'event_update'
+  | 'event_delete'
+  | 'event_tags_update'
+  | 'event_location_update'
+  | 'tag_create'
+  | 'tag_update'
+  | 'tag_delete'
+  | 'person_update'
+  | 'person_merge'
+  | 'person_delete'
+  | 'person_tag_add'
+  | 'person_tag_remove'
+  // Sourced from collaboration_history, namespaced server-side.
+  | 'collab_invite'
+  | 'collab_accept'
+  | 'collab_decline'
+  | 'collab_remove'
+  | 'collab_upload';
+
 export interface ActivityEntry {
+  /** Which table the row came from. `id` is only unique WITHIN a source, so
+   *  React keys must combine the two. */
+  source: 'activity' | 'collab';
   id: number;
   event_id: number | null;
   event_name: string | null;
   event_slug: string | null;
   actor_email: string;
-  action: 'photo_favorite' | 'event_create' | 'album_create' | 'photo_trash';
+  /** Widened over time; the UI keeps an unknown-action fallback rather than
+   *  assuming this list is exhaustive. */
+  action: ActivityAction | (string & {});
   target_type: string | null;
   target_id: string | null;
+  /** Only set for collaboration entries (who was invited/removed). */
+  target_user_email: string | null;
   metadata: string | null;
   created_at: string;
 }
 
-/** Recent site-wide activity feed (polling-based, admin only). */
-export const getActivityFeed = async (limit: number = 50): Promise<ActivityEntry[]> => {
-  const response = await api.get<{ activity: ActivityEntry[] }>(`/admin/stats/activity?limit=${limit}`, {
+export interface ActivityFeedOptions {
+  limit?: number;
+  /** ISO timestamp from a previous response's `nextCursor`. */
+  before?: string | null;
+  domain?: ActivityDomain | null;
+  eventSlug?: string | null;
+  actor?: string | null;
+}
+
+/** Site-wide activity feed (polling-based, admin only). Unions the photo/event
+ *  action log with collaboration history — see the endpoint's doc comment. */
+export const getActivityFeed = async (
+  options: ActivityFeedOptions = {}
+): Promise<{ activity: ActivityEntry[]; nextCursor: string | null }> => {
+  const params: Record<string, string> = { limit: String(options.limit ?? 50) };
+  if (options.before) params.before = options.before;
+  if (options.domain) params.domain = options.domain;
+  if (options.eventSlug) params.eventSlug = options.eventSlug;
+  if (options.actor) params.actor = options.actor;
+
+  const response = await api.get<{ activity: ActivityEntry[]; nextCursor: string | null }>(
+    '/admin/stats/activity',
+    { params, headers: getAdminHeaders() }
+  );
+  return response.data;
+};
+
+/** Distinct actors across both feeds, for the activity page's filter dropdown. */
+export const getActivityActors = async (): Promise<string[]> => {
+  const response = await api.get<{ actors: string[] }>('/admin/stats/activity/actors', {
     headers: getAdminHeaders(),
   });
-  return response.data.activity;
+  return response.data.actors;
 };
 
 // Event Management API
@@ -1472,72 +1564,6 @@ export const setPhotoFileHash = async (photoId: string, fileHash: string): Promi
     { headers: getAdminHeaders() }
   );
   return { updated: response.data.updated };
-};
-
-// Albums API (cross-event collections, admin-only)
-export interface Album {
-  id: number;
-  name: string;
-  description: string | null;
-  cover_photo_id: string | null;
-  cover_file_type?: string | null;
-  cover_cache_version?: number | null;
-  cover_event_slug?: string | null;
-  created_by: string;
-  created_at: string;
-  updated_at: string;
-  photo_count?: number;
-}
-
-export interface AlbumPhoto extends Photo {
-  event_slug: string;
-  event_name: string;
-  position: number;
-}
-
-export const getAlbums = async (): Promise<Album[]> => {
-  const response = await api.get<{ albums: Album[] }>('/admin/albums', { headers: getAdminHeaders() });
-  return response.data.albums;
-};
-
-export const getAlbum = async (albumId: number): Promise<{ album: Album; photos: AlbumPhoto[] }> => {
-  const response = await api.get<{ album: Album; photos: AlbumPhoto[] }>(`/admin/albums/${albumId}`, {
-    headers: getAdminHeaders(),
-  });
-  return response.data;
-};
-
-export const createAlbum = async (name: string, description?: string): Promise<Album> => {
-  const response = await api.post<{ album: Album }>(
-    '/admin/albums',
-    { name, description },
-    { headers: getAdminHeaders() }
-  );
-  return response.data.album;
-};
-
-export const updateAlbum = async (
-  albumId: number,
-  data: { name?: string; description?: string; coverPhotoId?: string | null }
-): Promise<void> => {
-  await api.put(`/admin/albums/${albumId}`, data, { headers: getAdminHeaders() });
-};
-
-export const deleteAlbum = async (albumId: number): Promise<void> => {
-  await api.delete(`/admin/albums/${albumId}`, { headers: getAdminHeaders() });
-};
-
-export const addPhotosToAlbum = async (albumId: number, photoIds: string[]): Promise<{ addedCount: number }> => {
-  const response = await api.post<{ addedCount: number }>(
-    `/admin/albums/${albumId}/photos`,
-    { photoIds },
-    { headers: getAdminHeaders() }
-  );
-  return response.data;
-};
-
-export const removePhotoFromAlbum = async (albumId: number, photoId: string): Promise<void> => {
-  await api.delete(`/admin/albums/${albumId}/photos/${photoId}`, { headers: getAdminHeaders() });
 };
 
 export const bulkDeletePhotos = async (photoIds: string[]): Promise<{ deletedCount: number; totalRequested: number }> => {

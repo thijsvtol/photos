@@ -278,6 +278,31 @@ export async function resetAllClusters(env: Env): Promise<{ facesUnassigned: num
   };
 }
 
+/**
+ * Resets ONE cluster's auto-detected membership/centroid without deleting the person record
+ * itself — unlike `DELETE /people/:personId` (which removes the person entirely, losing its
+ * name/linked account/cover photo), this is for "this person's auto-clustering got polluted with
+ * wrong faces, let it re-accumulate from scratch" while KEEPING the identity (name,
+ * linked_user_email, cover_photo_id) intact so future automatic clustering and any existing
+ * manual `photo_person_tags` for this person still resolve to the same named identity. Only
+ * `photo_faces` rows (auto-detected) are unassigned — `photo_person_tags` (explicit manual
+ * "this photo has this person in it" tags) are deliberately left untouched, since those
+ * represent admin-verified ground truth, not a clustering byproduct to discard.
+ */
+export async function resetSingleCluster(env: Env, personId: number): Promise<{ facesUnassigned: number }> {
+  const unassignResult = await env.DB
+    .prepare('UPDATE photo_faces SET person_id = NULL WHERE person_id = ?')
+    .bind(personId)
+    .run();
+  await env.DB
+    .prepare('UPDATE person_clusters SET centroid_embedding = NULL, face_count = 0 WHERE id = ?')
+    .bind(personId)
+    .run();
+  return {
+    facesUnassigned: unassignResult.meta.changes ?? 0,
+  };
+}
+
 /** One cluster's final state after the client's greedy-clustering pass, ready to persist. */
 export interface ClusterResult {
   /** null = brand-new cluster (never existed before this pass); otherwise an existing cluster id. */

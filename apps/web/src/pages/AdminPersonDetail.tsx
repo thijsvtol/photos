@@ -2,7 +2,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
 import { Users, Pencil, Trash2, Check, X, UserPlus, GitMerge, MoveRight, UserMinus } from 'lucide-react';
 import Navbar from '../components/Navbar';
-import { getPerson, updatePerson, deletePerson, getPreviewUrl, searchUsers, getPeople, mergePeople, assignPhotosToPerson, removePersonFromPhoto } from '../api';
+import { getPerson, updatePerson, deletePerson, resetPersonCluster, getPreviewUrl, searchUsers, getPeople, mergePeople, assignPhotosToPerson, removePersonFromPhoto } from '../api';
 import type { Person, PersonPhoto } from '../api';
 
 const AdminPersonDetail: React.FC = () => {
@@ -15,6 +15,9 @@ const AdminPersonDetail: React.FC = () => {
   const [editingName, setEditingName] = useState(false);
   const [nameInput, setNameInput] = useState('');
   const [confirmingDelete, setConfirmingDelete] = useState(false);
+  const [confirmingReset, setConfirmingReset] = useState(false);
+  const [resetting, setResetting] = useState(false);
+  const [resetResult, setResetResult] = useState<string | null>(null);
   const [linkEmailInput, setLinkEmailInput] = useState('');
   const [linkSuggestions, setLinkSuggestions] = useState<Array<{ email: string; name: string | null }>>([]);
   const [linkError, setLinkError] = useState<string | null>(null);
@@ -98,6 +101,23 @@ const AdminPersonDetail: React.FC = () => {
     } catch (err) {
       setError('Failed to delete person');
       console.error(err);
+    }
+  };
+
+  const handleResetCluster = async () => {
+    if (!person) return;
+    try {
+      setResetting(true);
+      setError(null);
+      const result = await resetPersonCluster(person.id);
+      setResetResult(`Un-clustered ${result.facesUnassigned} face${result.facesUnassigned === 1 ? '' : 's'}. "${person.name || 'This person'}" is still here — its auto-clustering can re-accumulate from scratch.`);
+      setConfirmingReset(false);
+      await loadData();
+    } catch (err) {
+      setError('Failed to reset person cluster');
+      console.error(err);
+    } finally {
+      setResetting(false);
     }
   };
 
@@ -258,6 +278,11 @@ const AdminPersonDetail: React.FC = () => {
             {error}
           </div>
         )}
+        {resetResult && (
+          <div className="bg-amber-50 dark:bg-amber-900/30 border border-amber-200 dark:border-amber-800 text-amber-800 dark:text-amber-300 px-4 py-3 rounded mb-4">
+            {resetResult}
+          </div>
+        )}
         {person && (
           <div className="mb-8 flex justify-between items-start flex-wrap gap-3">
             <div className="flex items-center gap-3">
@@ -289,12 +314,21 @@ const AdminPersonDetail: React.FC = () => {
                 </div>
               )}
             </div>
-            <button
-              onClick={() => setConfirmingDelete(true)}
-              className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition flex items-center gap-2"
-            >
-              <Trash2 className="w-4 h-4" /> Delete Person
-            </button>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => setConfirmingReset(true)}
+                className="px-4 py-2 bg-amber-500 text-white rounded-lg hover:bg-amber-600 transition flex items-center gap-2"
+                title="Un-group this person's auto-detected faces without deleting their name/link/cover photo"
+              >
+                Reset Clustering
+              </button>
+              <button
+                onClick={() => setConfirmingDelete(true)}
+                className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition flex items-center gap-2"
+              >
+                <Trash2 className="w-4 h-4" /> Delete Person
+              </button>
+            </div>
           </div>
         )}
         <p className="text-sm text-gray-500 dark:text-gray-400 mb-2">
@@ -511,6 +545,39 @@ const AdminPersonDetail: React.FC = () => {
                 )}
               </div>
             ))}
+          </div>
+        )}
+
+        {confirmingReset && (
+          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
+            <div className="bg-white dark:bg-gray-800 rounded-lg shadow-xl max-w-md w-full">
+              <div className="p-6">
+                <h2 className="text-2xl font-bold mb-4 text-amber-600 dark:text-amber-400">Reset Clustering</h2>
+                <p className="mb-4 text-gray-700 dark:text-gray-300">
+                  Un-group every auto-detected face currently assigned to this person and clear
+                  their centroid, so future clustering re-accumulates them from scratch. Unlike
+                  "Delete Person", this KEEPS the name, linked account, cover photo, and any
+                  manual photo tags — use this if this person's group got polluted with wrong
+                  faces but you don't want to lose their identity.
+                </p>
+                <div className="flex gap-3">
+                  <button
+                    onClick={handleResetCluster}
+                    disabled={resetting}
+                    className="flex-1 px-4 py-2 bg-amber-500 text-white rounded-lg hover:bg-amber-600 transition disabled:opacity-50"
+                  >
+                    {resetting ? 'Resetting…' : 'Reset'}
+                  </button>
+                  <button
+                    onClick={() => setConfirmingReset(false)}
+                    disabled={resetting}
+                    className="flex-1 px-4 py-2 bg-gray-300 dark:bg-gray-700 text-gray-700 dark:text-gray-200 rounded-lg hover:bg-gray-400 dark:hover:bg-gray-600 transition"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </div>
+            </div>
           </div>
         )}
 

@@ -119,27 +119,68 @@ const AdminUnattachedPhotos: React.FC = () => {
     const photoIds = Array.from(selected);
     const personIds = Array.from(peopleToAssign);
     if (photoIds.length === 0 || personIds.length === 0 || !allPeople) return;
-    const names = allPeople.filter((p) => personIds.includes(p.id)).map((p) => p.name || 'Unnamed');
+    const nameFor = (id: number) => allPeople.find((p) => p.id === id)?.name || 'Unnamed';
     try {
       setAssigning(true);
       setAssignError(null);
-      // Reassign any detected faces AND add a manual tag for EVERY selected person — see this
-      // file's top-of-component doc comment for why both are needed to cover every unattached
-      // photo, not just the ones with an existing detected face. bulkTagPeopleOnPhotos already
-      // accepts multiple personIds in one call; assignPhotosToPerson only ever targets one
-      // person at a time, so it's called once per selected person.
+      // Reassign any detected faces for EVERY selected person individually — each call is
+      // tracked separately (rather than relying on one shared try/catch for the whole loop) so
+      // that if person B's call fails after person A's already succeeded, we know exactly which
+      // people succeeded vs failed instead of reporting a single all-or-nothing error while some
+      // assignments silently went through. See this file's top-of-component doc comment for why
+      // both assignPhotosToPerson AND bulkTagPeopleOnPhotos are needed to cover every unattached
+      // photo, not just the ones with an existing detected face.
+      const succeededIds: number[] = [];
+      const failedIds: number[] = [];
       for (const personId of personIds) {
-        await assignPhotosToPerson(personId, photoIds);
+        try {
+          await assignPhotosToPerson(personId, photoIds);
+          succeededIds.push(personId);
+        } catch (err) {
+          console.error(`Failed to assign photos to person ${personId}`, err);
+          failedIds.push(personId);
+        }
       }
-      await bulkTagPeopleOnPhotos(photoIds, personIds);
-      // Every selected photo is now attached to at least one of these people — drop them all
-      // from this list locally.
-      setPhotos((prev) => prev.filter((p) => !selected.has(p.id)));
-      setAssignResult(`Assigned ${photoIds.length} photo${photoIds.length === 1 ? '' : 's'} to ${names.join(', ')}.`);
-      clearSelection();
-      setShowAssignPicker(false);
-      setAssignSearch('');
-      setPeopleToAssign(new Set());
+      // Only manually-tag the people whose face-reassignment actually succeeded — tagging
+      // someone that assignPhotosToPerson just failed for would misleadingly mark the photo as
+      // "done" for them.
+      if (succeededIds.length > 0) {
+        try {
+          await bulkTagPeopleOnPhotos(photoIds, succeededIds);
+        } catch (err) {
+          console.error('Failed to bulk-tag people on photos', err);
+          // Move everyone that got this far back into "failed" — the face reassignment alone
+          // isn't considered a complete success without the manual tag also landing.
+          failedIds.push(...succeededIds.splice(0, succeededIds.length));
+        }
+      }
+
+      if (succeededIds.length > 0) {
+        // Only drop photos from the list if EVERY requested person succeeded — if some people
+        // failed, the photo may still need attention (a retry targeting just the failed people),
+        // so leave it visible rather than risk hiding it while incomplete.
+        if (failedIds.length === 0) {
+          setPhotos((prev) => prev.filter((p) => !selected.has(p.id)));
+          clearSelection();
+          setShowAssignPicker(false);
+          setAssignSearch('');
+          setPeopleToAssign(new Set());
+        } else {
+          // Leave the failed people selected so the admin can immediately retry just those,
+          // without needing to reopen the picker and re-find them.
+          setPeopleToAssign(new Set(failedIds));
+        }
+      }
+
+      const successNames = succeededIds.map(nameFor).join(', ');
+      const failedNames = failedIds.map(nameFor).join(', ');
+      if (failedIds.length === 0) {
+        setAssignResult(`Assigned ${photoIds.length} photo${photoIds.length === 1 ? '' : 's'} to ${successNames}.`);
+      } else if (succeededIds.length === 0) {
+        setAssignError(`Failed to assign photos to ${failedNames}. You can retry.`);
+      } else {
+        setAssignResult(`Assigned ${photoIds.length} photo${photoIds.length === 1 ? '' : 's'} to ${successNames}, but failed for ${failedNames} — you can retry.`);
+      }
     } catch (err) {
       setAssignError('Failed to assign photos');
       console.error(err);

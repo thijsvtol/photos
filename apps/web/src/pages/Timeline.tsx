@@ -133,6 +133,7 @@ const Timeline: React.FC = () => {
   const [showPeoplePicker, setShowPeoplePicker] = useState(false);
   const [peopleSearchQuery, setPeopleSearchQuery] = useState('');
   const [searchResults, setSearchResults] = useState<SearchResultPhoto[] | null>(null);
+  const [searchHasMore, setSearchHasMore] = useState(false);
   const [searching, setSearching] = useState(false);
   const [searchError, setSearchError] = useState<string | null>(null);
   const hasActiveSearch = Boolean(searchQuery.trim()) || selectedPersonIds.size > 0;
@@ -195,6 +196,7 @@ const Timeline: React.FC = () => {
   const runSearch = async (q: string, personIds: Set<number>) => {
     if (!q.trim() && personIds.size === 0) {
       setSearchResults(null);
+      setSearchHasMore(false);
       return;
     }
     setSearching(true);
@@ -202,12 +204,15 @@ const Timeline: React.FC = () => {
     try {
       // 2000 (worker's max, see GET /api/search's `limit` doc comment) rather than the old 200
       // — a person with hundreds/thousands of photos in the library was silently truncated to
-      // 200 results with no indication anything was cut off.
-      const results = await searchPhotos(q.trim(), 2000, Array.from(personIds));
+      // 200 results with no indication anything was cut off. `hasMore` (below) now surfaces it
+      // when truncation still happens at this higher cap.
+      const { photos: results, hasMore: more } = await searchPhotos(q.trim(), 2000, Array.from(personIds));
       setSearchResults(results);
+      setSearchHasMore(more);
     } catch (err) {
       console.error('Search failed:', err);
       setSearchResults([]);
+      setSearchHasMore(false);
       setSearchError('Search failed — please try again.');
     } finally {
       setSearching(false);
@@ -244,6 +249,7 @@ const Timeline: React.FC = () => {
     setSearchQuery('');
     setSelectedPersonIds(new Set());
     setSearchResults(null);
+    setSearchHasMore(false);
     setSearchError(null);
     setSearchParams({}, { replace: true });
   };
@@ -415,17 +421,26 @@ const Timeline: React.FC = () => {
 
   // Search results are grouped by event (not date) — same approach the old standalone Search
   // page used, since JustifiedGrid needs one `slug` per instance to build preview URLs and
-  // results can span many events.
+  // results can span many events. The "Just me" toggle (`filterMode`) stays applicable as an
+  // ADDITIONAL filter on top of search results, rather than being hidden/reset whenever a search
+  // is active — previously the toggle was hidden entirely during search, which made its state
+  // feel like it silently reset even though `filterMode` itself never actually changed.
+  const filteredSearchResults = useMemo(() => {
+    if (!searchResults) return null;
+    if (filterMode !== 'me' || !myPhotoIds) return searchResults;
+    return searchResults.filter((p) => myPhotoIds.has(p.id));
+  }, [searchResults, filterMode, myPhotoIds]);
+
   const searchResultsByEvent = useMemo(() => {
-    if (!searchResults) return [];
+    if (!filteredSearchResults) return [];
     const groups = new Map<string, SearchResultPhoto[]>();
-    for (const photo of searchResults) {
+    for (const photo of filteredSearchResults) {
       const arr = groups.get(photo.event_slug) || [];
       arr.push(photo);
       groups.set(photo.event_slug, arr);
     }
     return Array.from(groups.entries());
-  }, [searchResults]);
+  }, [filteredSearchResults]);
 
   const scrollToDate = (date: string) => {
     const el = dateRefs.current.get(date);
@@ -454,7 +469,7 @@ const Timeline: React.FC = () => {
             </p>
           </div>
 
-          {myPhotoIds && !hasActiveSearch && (
+          {myPhotoIds && (
             <div className="inline-flex rounded-lg border border-gray-300 dark:border-gray-600 overflow-hidden self-start">
               <button
                 onClick={() => setFilterMode('all')}
@@ -588,7 +603,7 @@ const Timeline: React.FC = () => {
               <div className="text-center py-12">
                 <div className="inline-block animate-spin rounded-full h-12 w-12 border-b-2 border-gray-900 dark:border-white"></div>
               </div>
-            ) : searchResults && searchResults.length === 0 ? (
+            ) : filteredSearchResults && filteredSearchResults.length === 0 ? (
               <div className="text-center py-16">
                 <p className="text-gray-600 dark:text-gray-400">
                   {searchQuery.trim() ? (
@@ -605,15 +620,19 @@ const Timeline: React.FC = () => {
                       {selectedPeople.length > 1 ? ' together' : ''}. This only searches photos in
                       events you have access to.
                     </>
+                  ) : filterMode === 'me' ? (
+                    `No results among just ${myDisplayName || 'your'} photos — try switching back to "All".`
                   ) : (
                     'No photos found.'
                   )}
                 </p>
               </div>
-            ) : searchResults && searchResults.length > 0 ? (
+            ) : filteredSearchResults && filteredSearchResults.length > 0 ? (
               <>
                 <p className="text-sm text-gray-500 dark:text-gray-400 mb-3">
-                  {searchResults.length} photo{searchResults.length === 1 ? '' : 's'} found
+                  {filteredSearchResults.length} photo{filteredSearchResults.length === 1 ? '' : 's'} found
+                  {filterMode === 'me' && ' (filtered to just you)'}
+                  {searchHasMore && ' — showing the first batch only; refine your search to see more.'}
                 </p>
                 <div ref={densityContainerRef}>
                   {searchResultsByEvent.map(([eventSlug, eventPhotos]) => (

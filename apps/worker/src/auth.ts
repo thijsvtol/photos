@@ -188,16 +188,30 @@ export async function optionalAuth(c: Context<{ Bindings: Env; Variables: Variab
 
 /**
  * Insert or update user in database (email is primary key)
+ *
+ * Existence check is deliberately CASE-INSENSITIVE (`LOWER(email) = LOWER(?)`) — every
+ * permission check elsewhere (getCollaboratorRole/getCollaboratorRoleByEventId) already treats
+ * email case-insensitively for exactly this reason: an SSO/Access JWT's `email` claim can come
+ * back with different casing across logins (or differ from whatever casing an admin typed when
+ * inviting a collaborator via event_collaborators.user_email — see collaborators.ts). An exact
+ * `WHERE email = ?` check here would fail to find that already-existing row and INSERT A
+ * DUPLICATE users row under the new casing (email is the primary key, so two different-case
+ * rows for the same real person can coexist) — that duplicate then breaks the plain, exact-match
+ * `LEFT JOIN users u ON ec.user_email = u.email` used by GET /api/events/:slug/collaborators
+ * (collaborators.ts), silently hiding that collaborator's name/cover-photo/person_id even though
+ * they DO have a name set, for a completely different reason than the "never set a name"
+ * fallback already handled there. Always writes back using the EXISTING row's own canonical
+ * casing (never the newly-seen casing) so `users.email` never drifts once first created.
  */
 async function upsertUser(db: D1Database, user: User): Promise<void> {
   try {
     logger.debug('Upserting user:', { email: user.email, name: user.name });
     
-    // First check if user exists
+    // First check if user exists (case-insensitively — see doc comment above)
     const existingUser = await db
-      .prepare('SELECT email, name FROM users WHERE email = ?')
+      .prepare('SELECT email, name FROM users WHERE LOWER(email) = LOWER(?)')
       .bind(user.email)
-      .first();
+      .first<{ email: string; name: string | null }>();
     
     if (!existingUser) {
       // User doesn't exist, create with name from JWT (if available)
@@ -207,11 +221,13 @@ async function upsertUser(db: D1Database, user: User): Promise<void> {
         .bind(user.email, user.name || null)
         .run();
     } else {
-      // User exists - ONLY update last_login, preserve existing name
+      // User exists - ONLY update last_login (using the row's OWN existing email casing, never
+      // the newly-observed one, so `users.email` can never silently change/duplicate), preserve
+      // existing name
       logger.debug('User exists, updating only last_login. Existing name:', existingUser.name);
       await db
         .prepare('UPDATE users SET last_login = datetime(\'now\') WHERE email = ?')
-        .bind(user.email)
+        .bind(existingUser.email)
         .run();
     }
     

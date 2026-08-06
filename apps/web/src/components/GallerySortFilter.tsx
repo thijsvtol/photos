@@ -258,6 +258,7 @@ export function GallerySortFilter({
             >
               <option value="date_desc">Date (Newest First)</option>
               <option value="date_asc">Date (Oldest First)</option>
+              <option value="uploaded_desc">Recently Uploaded</option>
               <option value="name_asc">Name (A-Z)</option>
               <option value="name_desc">Name (Z-A)</option>
             </select>

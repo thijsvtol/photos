@@ -25,6 +25,16 @@ const PREVIEW_GRACE_MINUTES = 10;
 const PREVIEW_READY_CLAUSE =
   `(p.preview_complete = 1 OR p.uploaded_at <= datetime('now', '-${PREVIEW_GRACE_MINUTES} minutes'))`;
 
+// GET /api/search's FTS branch fetches candidates WITHOUT an `event_id IN (...)` clause (access
+// filtering happens afterward in JS against `eventMap` — see that route's doc comment for why:
+// combining an FTS MATCH param with a large accessible-event-id list can exceed D1's 100-bound-
+// parameter limit for anyone with many accessible events). Since some fraction of these
+// candidates may get discarded afterward for belonging to an event the requester can't see, the
+// raw fetch limit is set higher than the old flat `LIMIT 300` (which assumed every fetched row
+// was already access-filtered) so a private/inaccessible event's matches can't silently starve
+// out the requester's own accessible results.
+const FTS_CANDIDATE_LIMIT = 1000;
+
 // CORS configuration for same-origin requests
 app.use('/*', cors({
   origin: '*',
@@ -230,7 +240,7 @@ app.get('/api/events/:slug', optionalAuth, async (c) => {
 /**
  * GET /api/events/:slug/photos
  * Returns photos for an event (requires authentication if password protected)
- * Supports query params: sort (date_asc, date_desc, name_asc, name_desc), people (comma-
+ * Supports query params: sort (date_asc, date_desc, uploaded_desc, name_asc, name_desc), people (comma-
  * separated person_clusters ids — requires the photo to contain EVERY given person, same AND
  * semantics and same auto-detected-∪-manually-tagged union as GET /api/search's `people` param).
  */
@@ -296,6 +306,9 @@ app.get('/api/events/:slug/photos', optionalAuth, async (c) => {
         break;
       case 'date_desc':
         orderBy = 'p.capture_time DESC';
+        break;
+      case 'uploaded_desc':
+        orderBy = 'p.uploaded_at DESC';
         break;
       case 'name_asc':
         orderBy = 'p.original_filename ASC';
@@ -830,8 +843,6 @@ app.get('/api/search', optionalAuth, async (c) => {
       return c.json({ photos: [] });
     }
 
-    const eventIds = events.results.map(e => e.id);
-    const placeholders = eventIds.map(() => '?').join(',');
     const eventMap = new Map<number, { slug: string; name: string }>();
     for (const e of events.results) {
       eventMap.set(e.id, { slug: e.slug, name: e.name });
@@ -876,7 +887,18 @@ app.get('/api/search', optionalAuth, async (c) => {
       .join(' ');
 
     let candidateRows: (Photo & { event_id: number; embedding: ArrayBuffer | null })[] = [];
+    // Set when the FTS branch's own internal LIMIT (FTS_CANDIDATE_LIMIT) was hit, so `hasMore`
+    // below can still report truncation even in the (rare) case where post-filter results end up
+    // under the final `limit` param despite more matches existing above the raw fetch cap.
+    let ftsCandidateLimitHit = false;
     if (ftsQuery) {
+      // Event-access filtering is done in JS against `eventMap` (built from `eventIds`) AFTER
+      // the query, rather than cramming `p.event_id IN (${placeholders})` into the same FTS
+      // statement — combining an FTS MATCH param with a large `eventIds` IN() list can exceed
+      // D1's 100-bound-parameter limit for anyone with a large event list (e.g. an admin who
+      // can see every event), the exact same class of bug already fixed below for the
+      // people-only path. LIMIT 300 is deliberately generous here since filtering happens
+      // afterward — see FTS_CANDIDATE_LIMIT's doc comment.
       const result = await c.env.DB
         .prepare(`
           SELECT p.id, p.event_id, p.original_filename, p.file_type, p.capture_time,
@@ -885,15 +907,15 @@ app.get('/api/search', optionalAuth, async (c) => {
           FROM photos_fts f
           JOIN photos p ON p.rowid = f.rowid
           WHERE photos_fts MATCH ?
-            AND p.event_id IN (${placeholders})
             AND p.upload_complete = 1
             AND p.deleted_at IS NULL
           ORDER BY p.capture_time DESC
-          LIMIT 300
+          LIMIT ${FTS_CANDIDATE_LIMIT}
         `)
-        .bind(ftsQuery, ...eventIds)
+        .bind(ftsQuery)
         .all<Photo & { event_id: number; embedding: ArrayBuffer | null }>();
-      candidateRows = result.results || [];
+      ftsCandidateLimitHit = (result.results || []).length >= FTS_CANDIDATE_LIMIT;
+      candidateRows = (result.results || []).filter((p) => eventMap.has(p.event_id));
       if (peopleFilteredPhotoIds) {
         candidateRows = candidateRows.filter((p) => peopleFilteredPhotoIds!.has(p.id));
       }
@@ -965,7 +987,13 @@ app.get('/api/search', optionalAuth, async (c) => {
       event_name: eventMap.get(photo.event_id)?.name || '',
     }));
 
-    return c.json({ photos });
+    // `hasMore` tells the frontend whether `ranked` actually had more candidates than `limit`
+    // could return, so it can show a "showing first N results" notice instead of silently
+    // truncating with zero indication anything was cut off (previously a person with more
+    // photos than the cap allowed would just see a flat, unexplained N-result list).
+    const hasMore = ranked.length > limit || ftsCandidateLimitHit;
+
+    return c.json({ photos, hasMore });
   } catch (error) {
     console.error('Error searching photos:', error);
     return c.json({ error: 'Failed to search photos' }, 500);
