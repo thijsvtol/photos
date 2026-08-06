@@ -193,12 +193,12 @@ describe('resetAllClusters', () => {
  * faceEmbeddingOnnx.ts using a raw `fetch()` (which bypasses this app's auth entirely — native
  * admin sessions authenticate via a Bearer token added by an axios request interceptor, not a
  * cookie) instead of the shared `api` axios instance. This must go through the SAME `api`
- * instance (with admin headers + native bearer-token interceptor) as every other admin
+ * instance (with the native bearer-token interceptor) as every other authenticated
  * endpoint, and must request `responseType: 'arraybuffer'` since the model is a binary ONNX
  * file, not JSON.
  */
 describe('getEmbeddingModelBuffer', () => {
-  it('GETs /admin/people/embedding-model as an arraybuffer through the shared api instance with admin headers', async () => {
+  it('GETs /me/face-embedding-model as an arraybuffer through the shared api instance', async () => {
     const modelBuffer = new ArrayBuffer(8);
     getMock.mockResolvedValueOnce({ data: modelBuffer });
 
@@ -207,8 +207,8 @@ describe('getEmbeddingModelBuffer', () => {
 
     expect(result).toBe(modelBuffer);
     expect(getMock).toHaveBeenCalledWith(
-      '/admin/people/embedding-model',
-      expect.objectContaining({ responseType: 'arraybuffer', headers: expect.anything() })
+      '/me/face-embedding-model',
+      expect.objectContaining({ responseType: 'arraybuffer' })
     );
   });
 });

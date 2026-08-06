@@ -70,4 +70,41 @@ app.get('/api/me/photos', requireAuth, async (c) => {
   }
 });
 
+/**
+ * GET /api/me/face-embedding-model
+ *
+ * Streams the face-recognition ONNX model (ArcFace ResNet100, int8-quantized, ~63MB) used
+ * client-side by apps/web/src/faceEmbeddingOnnx.ts to compute face-recognition embeddings for
+ * EVERY upload (see faceDetectionQueue.ts), not just admin actions — this route previously
+ * lived under the admin-only `/api/admin/people/embedding-model` group, which meant any
+ * non-admin collaborator's uploads silently got ZERO face detection: the model fetch 403'd
+ * (requireAdmin gates the whole /admin/people/* router on the global ADMIN_EMAILS whitelist,
+ * completely separate from per-event collaborator upload permission) and that 403 was silently
+ * swallowed by faceDetection.ts's best-effort try/catch, so nothing ever surfaced the failure —
+ * "Scan Library for Faces" (admin-only) still worked fine, masking that upload-time detection
+ * was broken for anyone but a global admin. Moved here (any authenticated user, `requireAuth`)
+ * since the model itself isn't sensitive — same non-admin-authenticated pattern as
+ * GET /api/me/photos above. Long, immutable cache headers since the model file at this R2 key
+ * never changes without a deploy (a version bump would use a new R2 key, not overwrite this
+ * one, to avoid ever serving a half-cached mixed version).
+ */
+app.get('/api/me/face-embedding-model', requireAuth, async (c) => {
+  try {
+    const object = await c.env.PHOTOS_BUCKET.get('models/arcface-r100-int8.onnx');
+    if (!object) {
+      return c.json({ error: 'Model not found' }, 404);
+    }
+    return new Response(object.body, {
+      headers: {
+        'Content-Type': 'application/octet-stream',
+        'Content-Length': String(object.size),
+        'Cache-Control': 'public, max-age=31536000, immutable',
+      },
+    });
+  } catch (error) {
+    console.error('Error fetching embedding model:', error);
+    return c.json({ error: 'Failed to fetch embedding model' }, 500);
+  }
+});
+
 export default app;

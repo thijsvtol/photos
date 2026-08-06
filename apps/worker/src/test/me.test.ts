@@ -118,3 +118,56 @@ describe('GET /api/me/photos', () => {
     expect(body.linked).toBe(true);
   });
 });
+
+describe('GET /api/me/face-embedding-model', () => {
+  it('requires authentication', async () => {
+    const fake = createFakeEnv([], []);
+    const env = { ...makeEnv(fake), PHOTOS_BUCKET: { get: async () => null } };
+    const res = await meRouter.request('http://localhost/api/me/face-embedding-model', {}, env);
+    expect(res.status).toBe(401);
+  });
+
+  it('streams the R2 object with a long, immutable cache header for ANY authenticated user (not admin-only)', async () => {
+    currentUser = { id: 'u1', email: 'collaborator@example.com' };
+    const fake = createFakeEnv([], []);
+    const body = new Uint8Array([1, 2, 3]);
+    const env = {
+      ...makeEnv(fake),
+      PHOTOS_BUCKET: {
+        get: async (key: string) => {
+          expect(key).toBe('models/arcface-r100-int8.onnx');
+          return { body, size: body.byteLength };
+        },
+      },
+    };
+
+    const res = await meRouter.request('http://localhost/api/me/face-embedding-model', {}, env);
+
+    expect(res.status).toBe(200);
+    expect(res.headers.get('Cache-Control')).toContain('immutable');
+    expect(res.headers.get('Content-Type')).toBe('application/octet-stream');
+  });
+
+  it('returns 404 if the model object is missing from R2', async () => {
+    currentUser = { id: 'u1', email: 'collaborator@example.com' };
+    const fake = createFakeEnv([], []);
+    const env = { ...makeEnv(fake), PHOTOS_BUCKET: { get: async () => null } };
+
+    const res = await meRouter.request('http://localhost/api/me/face-embedding-model', {}, env);
+
+    expect(res.status).toBe(404);
+  });
+
+  it('returns 500 if R2 fetch throws', async () => {
+    currentUser = { id: 'u1', email: 'collaborator@example.com' };
+    const fake = createFakeEnv([], []);
+    const env = {
+      ...makeEnv(fake),
+      PHOTOS_BUCKET: { get: async () => { throw new Error('R2 boom'); } },
+    };
+
+    const res = await meRouter.request('http://localhost/api/me/face-embedding-model', {}, env);
+
+    expect(res.status).toBe(500);
+  });
+});

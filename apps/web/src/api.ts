@@ -680,17 +680,23 @@ export const resetAllClusters = async (): Promise<{ facesUnassigned: number; clu
 
 /** Fetches the ArcFace ONNX face-recognition model binary (see apps/web/src/faceEmbeddingOnnx.ts)
  *  via the SHARED `api` axios instance rather than a raw `fetch()` — critical because a raw
- *  fetch bypasses this app's auth entirely: native (Capacitor) admin sessions authenticate via a
+ *  fetch bypasses this app's auth entirely: native (Capacitor) sessions authenticate via a
  *  Bearer token added by `api`'s request interceptor (there is no cookie to send), and even on
- *  web, `api`'s baseURL/getAdminHeaders() must be used for consistency with every other admin
- *  endpoint. Fixed 2026-08-04 after "Scan Library for Faces" silently marked every photo as
- *  processed with ZERO faces found — every embedding computation was failing (model fetch
- *  401ing) but `faceDetection.ts`'s per-face try/catch swallowed the error into an empty face
- *  list, which `faceBackfill.ts` then (correctly, for a DIFFERENT reason — see its own doc
- *  comment) persisted as "checked, 0 faces" instead of surfacing the failure. */
+ *  web, `api`'s baseURL is needed for consistency with every other authenticated endpoint. Fixed
+ *  2026-08-04 after "Scan Library for Faces" silently marked every photo as processed with ZERO
+ *  faces found — every embedding computation was failing (model fetch 401ing) but
+ *  `faceDetection.ts`'s per-face try/catch swallowed the error into an empty face list, which
+ *  `faceBackfill.ts` then (correctly, for a DIFFERENT reason — see its own doc comment)
+ *  persisted as "checked, 0 faces" instead of surfacing the failure.
+ *
+ *  Fixed AGAIN 2026-08-06: this used to hit `/admin/people/embedding-model` (global-admin-only,
+ *  via ADMIN_EMAILS), but the model is fetched for EVERY upload's face detection
+ *  (faceDetectionQueue.ts), not just admin actions — so any non-admin collaborator's uploads
+ *  silently got zero face detection (the resulting 403 was swallowed by the same best-effort
+ *  try/catch above). Moved to `/me/face-embedding-model` (any authenticated user) — see that
+ *  route's doc comment in apps/worker/src/routes/me.ts. */
 export const getEmbeddingModelBuffer = async (): Promise<ArrayBuffer> => {
-  const response = await api.get<ArrayBuffer>('/admin/people/embedding-model', {
-    headers: getAdminHeaders(),
+  const response = await api.get<ArrayBuffer>('/me/face-embedding-model', {
     responseType: 'arraybuffer',
   });
   return response.data;

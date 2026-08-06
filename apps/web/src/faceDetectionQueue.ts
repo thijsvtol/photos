@@ -56,6 +56,13 @@ export function startFaceDetectionQueue(): void {
       if (item.status !== 'completed') continue;
       if (processedIds.has(item.id)) continue;
       if (!isImage(item)) continue;
+      // Don't mark as processed until the actual File is available — completion
+      // notifications from backgroundSync/syncItemProgress can arrive BEFORE the
+      // full queue item (with its File) has been backfilled from Dexie (see
+      // uploadManager.syncItemProgress()'s doc comment); marking this id as
+      // processed too early would permanently skip it once the file DOES arrive
+      // in a follow-up notify().
+      if (!item.file) continue;
 
       processedIds.add(item.id);
       if (processedIds.size > MAX_TRACKED_IDS) {

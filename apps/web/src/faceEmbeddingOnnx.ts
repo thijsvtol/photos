@@ -14,8 +14,10 @@
  * distance and minimize within-identity distance (unlike Human's FaceRes). Licensed for
  * non-commercial research use (this app is a personal/non-commercial gallery). Too large for a
  * Cloudflare Pages static asset (25MiB per-file limit) — hosted in R2 and served via the
- * admin-only `GET /api/admin/people/embedding-model` Worker route (see faceClustering.ts's
- * doc comment / people.ts route), fetched here through `api.ts`'s `getEmbeddingModelBuffer()`
+ * `GET /api/me/face-embedding-model` Worker route, gated to any AUTHENTICATED user (not
+ * admin-only — see routes/me.ts's doc comment for why: this model is fetched for EVERY
+ * upload's face detection, not just admin actions), fetched here through `api.ts`'s
+ * `getEmbeddingModelBuffer()`
  * (the SHARED axios instance) rather than a raw `fetch()` — a raw fetch bypasses this app's
  * auth entirely (native/Capacitor admin sessions authenticate via a Bearer token added by an
  * axios request interceptor, not a cookie), which silently 401'd on every single face and was

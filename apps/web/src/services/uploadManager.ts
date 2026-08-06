@@ -10,7 +10,7 @@ import { Capacitor } from '@capacitor/core';
 import ExifReader from 'exifreader';
 import axios from 'axios';
 import { startUpload, uploadPart, completeUpload, cancelUpload as cancelUploadApi } from '../api';
-import { addToQueue, updateQueueItem, getQueueItems, getPendingUploads, removeFromQueue, clearCompletedUploads } from '../uploadQueue';
+import { addToQueue, updateQueueItem, getQueueItem, getQueueItems, getPendingUploads, removeFromQueue, clearCompletedUploads } from '../uploadQueue';
 import { createPreview, computeFileHash } from '../imageUtils';
 import { isRawFile, isRawFileType, getRawFileType, createRawPreview, createRawPlaceholder } from '../rawImageUtils';
 import { extractMp4CreationTime, isVideoFile, normalizeVideoFileType } from '../utils/videoMetadata';
@@ -436,13 +436,25 @@ class UploadManager {
     await this.resumeAll();
   }
 
-  /** Merge a live status/progress update into the in-memory state and notify
+  /**  Merge a live status/progress update into the in-memory state and notify
    *  listeners (e.g. GlobalUploadIndicator). Used by backgroundSync (native)
    *  so the on-screen upload list reflects the same progress as the native
    *  notification in real time, instead of only jumping to the final state
    *  once the whole batch finishes. If the item isn't tracked yet (e.g. a
-   *  folder-sync item processed before a refresh()/resumeAll() call), it is
-   *  added to the map so it becomes visible immediately. */
+   *  folder-sync item processed before a refresh()/resumeAll() call, or a
+   *  Share-to-app item added straight to the Dexie queue — see
+   *  ShareUpload.tsx — that backgroundSync then uploads directly without
+   *  ever going through this manager's own addFiles()/enqueueUpload()), the
+   *  partial `updates` alone is added to the map immediately so it becomes
+   *  visible right away, but is ALSO backfilled from Dexie asynchronously
+   *  (which has the real `File` object — IndexedDB/Dexie can store Blobs)
+   *  and merged in via a follow-up notify() once that resolves. Without
+   *  this backfill, `faceDetectionQueue.ts`'s subscribe listener would see
+   *  a `status: 'completed'` item with NO `file` and silently skip face
+   *  detection entirely for every upload that took this path — this was a
+   *  real, confirmed bug (fixed 2026-08-06): Share-to-app uploads never got
+   *  faces detected because the map only ever received `{status:
+   *  'completed', progress, photoId}`, never the file. */
   syncItemProgress(id: string, updates: Partial<UploadQueueItem>) {
     const existing = this.items.get(id);
     if (existing) {
@@ -450,6 +462,16 @@ class UploadManager {
     } else {
       this.items.set(id, { ...updates, id } as UploadQueueItem);
       this.notify();
+      void getQueueItem(id).then((full) => {
+        if (!full) return;
+        // Re-merge in case `updates` (already applied above) is newer than
+        // what's currently in Dexie by the time this resolves.
+        const current = this.items.get(id);
+        this.items.set(id, { ...full, ...current });
+        this.notify();
+      }).catch((err) => {
+        console.warn('[UploadManager] Failed to backfill queue item from Dexie:', id, err);
+      });
     }
   }
 
