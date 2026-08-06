@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { Users, Check, X, UserPlus } from 'lucide-react';
 import Navbar from '../components/Navbar';
-import { getUnattachedPhotos, getPeople, assignPhotosToPerson, getPreviewUrl } from '../api';
+import { getUnattachedPhotos, getPeople, assignPhotosToPerson, bulkTagPeopleOnPhotos, getPreviewUrl } from '../api';
 import type { UnattachedPhoto, Person } from '../api';
 
 /**
@@ -10,9 +10,17 @@ import type { UnattachedPhoto, Person } from '../api';
  * attached at all (neither an auto-detected face assigned to a person nor a manual tag; see
  * getUnattachedPhotos()'s doc comment in apps/worker/src/faceClustering.ts), so an admin can
  * find and bulk-assign photos that clustering/tagging never touched instead of only ever
- * discovering them one event/photo at a time. Reuses the existing "assign photos to person"
- * action (assignPhotosToPerson, the same one AdminPersonDetail's per-photo "Move to…" button
- * uses) applied to a multi-select instead of a single photo.
+ * discovering them one event/photo at a time.
+ *
+ * Assigning to a person calls BOTH assignPhotosToPerson() (reassigns any DETECTED faces on the
+ * selected photos — handles the `has_unclustered_faces` case) AND bulkTagPeopleOnPhotos() (adds
+ * a manual photo_person_tags row — handles photos with ZERO detected faces at all, which is the
+ * common case here since this list exists precisely because these photos were never clustered).
+ * Using assignPhotosToPerson alone silently did nothing for a face-less photo (0 faces to move,
+ * hence the confusing "Assigned 0 photos" toast even though a photo genuinely had nobody
+ * attached before) — the manual tag is what actually attaches the person in that case, same as
+ * AdminPersonDetail's per-photo "Move to…" button only ever needing assignPhotosToPerson because
+ * every photo shown there already has at least one detected face by definition.
  */
 const AdminUnattachedPhotos: React.FC = () => {
   const [photos, setPhotos] = useState<UnattachedPhoto[]>([]);
@@ -99,10 +107,15 @@ const AdminUnattachedPhotos: React.FC = () => {
     try {
       setAssigning(true);
       setAssignError(null);
-      const { assigned } = await assignPhotosToPerson(personId, photoIds);
-      // Assigned photos are no longer unattached — drop them from this list locally.
+      // Reassign any detected faces AND add a manual tag — see this file's top-of-component doc
+      // comment for why both are needed to cover every unattached photo, not just the ones with
+      // an existing detected face.
+      await assignPhotosToPerson(personId, photoIds);
+      await bulkTagPeopleOnPhotos(photoIds, [personId]);
+      // Every selected photo is now attached to this person one way or another — drop them all
+      // from this list locally.
       setPhotos((prev) => prev.filter((p) => !selected.has(p.id)));
-      setAssignResult(`Assigned ${assigned} photo${assigned === 1 ? '' : 's'} to ${personName}.`);
+      setAssignResult(`Assigned ${photoIds.length} photo${photoIds.length === 1 ? '' : 's'} to ${personName}.`);
       clearSelection();
       setShowAssignPicker(false);
       setAssignSearch('');
@@ -157,7 +170,10 @@ const AdminUnattachedPhotos: React.FC = () => {
           </div>
         ) : (
           <>
-            <div className="mb-4 flex items-center gap-3 flex-wrap sticky top-0 z-10 bg-gray-50 dark:bg-gray-900 py-2">
+            {/* Sticky below Navbar (which is itself sticky, top-0, h-16/64px, z-50) — top-16
+                offsets past it instead of getting hidden underneath it, and a lower z-index
+                keeps Navbar always on top when both are stuck at the same time. */}
+            <div className="mb-4 flex items-center gap-3 flex-wrap sticky top-16 z-20 bg-gray-50 dark:bg-gray-900 py-2 border-b border-gray-200 dark:border-gray-700">
               <span className="text-sm text-gray-600 dark:text-gray-400">
                 {selected.size} of {photos.length} selected
               </span>
