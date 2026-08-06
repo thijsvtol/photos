@@ -64,7 +64,12 @@ const AdminPeople: React.FC = () => {
   // teach the model, without a full rebuild. See learnFromManualTags()'s doc comment in
   // apps/worker/src/faceClustering.ts for exactly what it does/why it's conservative.
   const [learningFromTags, setLearningFromTags] = useState(false);
-  const [learnResult, setLearnResult] = useState<{ personsUpdated: number; facesAssigned: number } | null>(null);
+  const [learnResult, setLearnResult] = useState<{
+    personsUpdated: number;
+    facesAssigned: number;
+    taggedPhotosWithNoFaceData: number;
+    taggedPhotosNeverScanned: number;
+  } | null>(null);
   // Name search + sort — the list has no pagination, so for a library with many named people
   // finding a specific one by scrolling/scanning wasn't practical.
   const [nameFilter, setNameFilter] = useState('');
@@ -473,9 +478,24 @@ const AdminPeople: React.FC = () => {
 
         {learnResult && (
           <div className="mb-8 bg-blue-50 dark:bg-blue-950/40 border border-blue-200 dark:border-blue-800 text-blue-800 dark:text-blue-300 px-4 py-3 rounded-lg text-sm">
-            {learnResult.facesAssigned > 0
-              ? `Learned from your tags: ${learnResult.facesAssigned} face${learnResult.facesAssigned === 1 ? '' : 's'} assigned across ${learnResult.personsUpdated} person${learnResult.personsUpdated === 1 ? '' : 's'}.`
-              : 'Nothing new to learn right now — either every tagged photo is already fully matched, or a photo has multiple tags/faces that are too ambiguous to learn from automatically.'}
+            {learnResult.facesAssigned > 0 && (
+              <p>
+                Learned from your tags: {learnResult.facesAssigned} face{learnResult.facesAssigned === 1 ? '' : 's'} assigned across {learnResult.personsUpdated} person{learnResult.personsUpdated === 1 ? '' : 's'}.
+              </p>
+            )}
+            {learnResult.facesAssigned === 0 && learnResult.taggedPhotosWithNoFaceData === 0 && (
+              <p>
+                Nothing new to learn right now — either every tagged photo is already fully matched, or a photo has multiple tags/faces that are too ambiguous to learn from automatically.
+              </p>
+            )}
+            {learnResult.taggedPhotosWithNoFaceData > 0 && (
+              <p className={learnResult.facesAssigned > 0 ? 'mt-1' : ''}>
+                {learnResult.taggedPhotosWithNoFaceData} tagged photo{learnResult.taggedPhotosWithNoFaceData === 1 ? ' has' : 's have'} no detected face at all, so there's nothing for the model to learn from them — the tag itself is still saved and correct, there's just no face data behind it.
+                {learnResult.taggedPhotosNeverScanned > 0 && (
+                  <> {learnResult.taggedPhotosNeverScanned} of those {learnResult.taggedPhotosNeverScanned === 1 ? 'has' : 'have'} never been scanned for faces — running "Scan Library for Faces" above may detect a face on some of them, after which running "Learn from Tags" again could pick those up.</>
+                )}
+              </p>
+            )}
           </div>
         )}
 

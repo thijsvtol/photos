@@ -54,6 +54,18 @@ class FakeFaceClusteringDb {
             .map((t) => ({ photo_id: t.photo_id, person_id: t.person_id }));
           return { results: results as T[] };
         }
+        if (query.includes('SELECT p.id, p.faces_processed_at') && query.includes('FROM photos p')) {
+          // Replicates: tagged photos with zero photo_faces rows at all.
+          const taggedPhotoIds = new Set(db.personTags.map((t) => t.photo_id));
+          const photoIdsWithFaces = new Set(db.faces.map((f) => f.photo_id));
+          const results = [...taggedPhotoIds]
+            .filter((id) => !photoIdsWithFaces.has(id))
+            .map((id) => {
+              const photo = db.photos.find((p) => p.id === id);
+              return { id, faces_processed_at: photo ? photo.faces_processed_at : null };
+            });
+          return { results: results as T[] };
+        }
         if (query.includes('SELECT id, centroid_embedding, face_count, name, linked_user_email FROM person_clusters WHERE id IN')) {
           const ids = boundArgs as number[];
           const results = db.clusters
@@ -937,7 +949,7 @@ describe('learnFromManualTags', () => {
 
     const result = await learnFromManualTags(makeEnv(db));
 
-    expect(result).toEqual({ personsUpdated: 0, facesAssigned: 0 });
+    expect(result).toEqual({ personsUpdated: 0, facesAssigned: 0, taggedPhotosWithNoFaceData: 0, taggedPhotosNeverScanned: 0 });
   });
 
   it('processes multiple qualifying photos for the same person in one call', async () => {
@@ -957,6 +969,30 @@ describe('learnFromManualTags', () => {
 
     expect(personsUpdated).toBe(1);
     expect(facesAssigned).toBe(2);
+  });
+
+  it('reports taggedPhotosWithNoFaceData/taggedPhotosNeverScanned for tagged photos with zero detected faces at all', async () => {
+    const db = new FakeFaceClusteringDb();
+    db.clusters = [{ id: 1, centroid_embedding: embedding1024Of(0, 0, 0), face_count: 1 }];
+    // photo-with-face DOES have face data (learnable); photo-no-faces-scanned was scanned but
+    // genuinely has no detected face; photo-never-scanned has never been through face detection
+    // at all — the only one where re-scanning could plausibly help.
+    db.faces = [{ id: 1, photo_id: 'photo-with-face', embedding: embedding1024Of(3, 0, 0), person_id: null }];
+    db.photos = [
+      { id: 'photo-no-faces-scanned', faces_processed_at: '2026-01-01T00:00:00Z' },
+      { id: 'photo-never-scanned', faces_processed_at: null },
+    ];
+    db.personTags = [
+      { photo_id: 'photo-with-face', person_id: 1 },
+      { photo_id: 'photo-no-faces-scanned', person_id: 1 },
+      { photo_id: 'photo-never-scanned', person_id: 1 },
+    ];
+
+    const result = await learnFromManualTags(makeEnv(db));
+
+    expect(result.facesAssigned).toBe(1); // photo-with-face's sole unclustered face gets learned
+    expect(result.taggedPhotosWithNoFaceData).toBe(2); // the two faceless tagged photos
+    expect(result.taggedPhotosNeverScanned).toBe(1); // only photo-never-scanned, the actionable one
   });
 });
 

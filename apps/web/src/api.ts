@@ -742,14 +742,33 @@ export const deletePerson = async (personId: number): Promise<void> => {
 
 /** Lets manual photo tagging directly improve future automatic clustering — see
  *  learnFromManualTags()'s doc comment in apps/worker/src/faceClustering.ts. Safe to run
- *  repeatedly (a no-op once no qualifying tag/face pairs remain). */
-export const learnFromManualTags = async (): Promise<{ personsUpdated: number; facesAssigned: number }> => {
-  const response = await api.post<{ success: boolean; personsUpdated: number; facesAssigned: number }>(
+ *  repeatedly (a no-op once no qualifying tag/face pairs remain).
+ *  `taggedPhotosWithNoFaceData`/`taggedPhotosNeverScanned` explain a "0 faces assigned" result
+ *  that isn't a bug — most manually-tagged photos (e.g. bulk-tagged via the Unattached Photos
+ *  page) simply have no detected face at all to learn from. */
+export const learnFromManualTags = async (): Promise<{
+  personsUpdated: number;
+  facesAssigned: number;
+  taggedPhotosWithNoFaceData: number;
+  taggedPhotosNeverScanned: number;
+}> => {
+  const response = await api.post<{
+    success: boolean;
+    personsUpdated: number;
+    facesAssigned: number;
+    taggedPhotosWithNoFaceData: number;
+    taggedPhotosNeverScanned: number;
+  }>(
     '/admin/people/learn-from-tags',
     undefined,
     { headers: getAdminHeaders() }
   );
-  return { personsUpdated: response.data.personsUpdated, facesAssigned: response.data.facesAssigned };
+  return {
+    personsUpdated: response.data.personsUpdated,
+    facesAssigned: response.data.facesAssigned,
+    taggedPhotosWithNoFaceData: response.data.taggedPhotosWithNoFaceData,
+    taggedPhotosNeverScanned: response.data.taggedPhotosNeverScanned,
+  };
 };
 
 /** Lightweight list of every NAMED person (regardless of face_count) — used to populate the

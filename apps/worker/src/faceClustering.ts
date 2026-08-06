@@ -1000,8 +1000,29 @@ export async function removePersonFromPhoto(env: Env, photoId: string, personId:
  * multiple tagged people and/or multiple unclustered faces is skipped entirely rather than
  * guessing which face belongs to which tag (a wrong guess would actively corrupt that person's
  * centroid, worse than doing nothing).
+ *
+ * IMPORTANT LIMITATION admins regularly trip over: this can only "teach" the model using a REAL
+ * detected face embedding — a manually-tagged photo with ZERO photo_faces rows at all (no face
+ * ever detected on it, e.g. the person is small/turned away/partially out of frame, or the
+ * photo simply hasn't been through "Scan Library for Faces" yet) has NO embedding data for this
+ * function to learn from, no matter how many people are tagged on it. Bulk-tagging via the
+ * Unattached Photos page in particular tags MANY faceless photos at once (that's the whole
+ * reason they were "unattached" — nothing to look up by), so a large batch of manual tags often
+ * produces a "nothing to learn" result even though the tags themselves are perfectly correct —
+ * this is expected, not a bug: there's simply no face vector to add to that person's centroid
+ * from those photos. The returned `taggedPhotosWithNoFaceData`/`taggedPhotosNeverScanned` counts
+ * exist so the caller (see AdminPeople.tsx's "Learn from Tags" result banner) can explain this
+ * distinction rather than leaving the admin to wonder why 200+ freshly-tagged photos "did
+ * nothing" — `taggedPhotosNeverScanned` (a subset of the former) is the ACTIONABLE part: running
+ * "Scan Library for Faces" first may detect a face on those specific photos, after which
+ * re-running this again could pick them up (if exactly one face + one tag on that photo).
  */
-export async function learnFromManualTags(env: Env): Promise<{ personsUpdated: number; facesAssigned: number }> {
+export async function learnFromManualTags(env: Env): Promise<{
+  personsUpdated: number;
+  facesAssigned: number;
+  taggedPhotosWithNoFaceData: number;
+  taggedPhotosNeverScanned: number;
+}> {
   const { results: tagRows } = await env.DB
     .prepare(`
       SELECT t.photo_id, t.person_id
@@ -1010,6 +1031,17 @@ export async function learnFromManualTags(env: Env): Promise<{ personsUpdated: n
         AND (SELECT COUNT(*) FROM photo_faces f WHERE f.photo_id = t.photo_id AND f.person_id IS NULL) = 1
     `)
     .all<{ photo_id: string; person_id: number }>();
+
+  const { results: noFaceDataRows } = await env.DB
+    .prepare(`
+      SELECT p.id, p.faces_processed_at
+      FROM photos p
+      WHERE p.id IN (SELECT DISTINCT photo_id FROM photo_person_tags)
+        AND p.id NOT IN (SELECT DISTINCT photo_id FROM photo_faces)
+    `)
+    .all<{ id: string; faces_processed_at: string | null }>();
+  const taggedPhotosWithNoFaceData = (noFaceDataRows || []).length;
+  const taggedPhotosNeverScanned = (noFaceDataRows || []).filter((r) => !r.faces_processed_at).length;
 
   const photoIdsByPerson = new Map<number, Set<string>>();
   for (const row of tagRows || []) {
@@ -1037,6 +1069,6 @@ export async function learnFromManualTags(env: Env): Promise<{ personsUpdated: n
     }
   }
 
-  return { personsUpdated, facesAssigned };
+  return { personsUpdated, facesAssigned, taggedPhotosWithNoFaceData, taggedPhotosNeverScanned };
 }
 
