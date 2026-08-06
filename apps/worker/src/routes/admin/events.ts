@@ -147,7 +147,25 @@ app.put('/:slug', async (c) => {
       .prepare(`UPDATE events SET ${updates.join(', ')} WHERE id = ?`)
       .bind(...values)
       .run();
-    
+
+    // Record WHICH fields changed, not just "event updated" — a visibility or
+    // password change is the most audit-worthy thing that happens to an event,
+    // and a bare "updated" entry would hide it. Never log the password itself.
+    const changed: string[] = [];
+    if (name !== undefined) changed.push('name');
+    if (description !== undefined) changed.push('description');
+    if (visibility !== undefined) changed.push('visibility');
+    if (password !== undefined) changed.push(password === '' ? 'password_removed' : 'password_set');
+
+    await logActivity(c.env, {
+      eventId: event.id,
+      actorEmail: c.get('user')?.email || 'unknown',
+      action: 'event_update',
+      targetType: 'event',
+      targetId: String(event.id),
+      metadata: { slug, changed, ...(visibility !== undefined ? { visibility: visibility || 'public' } : {}) },
+    });
+
     return c.json({ success: true });
   } catch (error) {
     console.error('Error updating event:', error);
@@ -165,14 +183,14 @@ app.delete('/:slug', async (c) => {
   try {
     // Get event and all photos
     const event = await c.env.DB
-      .prepare('SELECT id FROM events WHERE slug = ?')
+      .prepare('SELECT id, name FROM events WHERE slug = ?')
       .bind(slug)
-      .first<{ id: number }>();
-    
+      .first<{ id: number; name: string }>();
+
     if (!event) {
       return c.json({ error: 'Event not found' }, 404);
     }
-    
+
     // Get all photo IDs for R2 cleanup (only non-copied photos have their own R2 files)
     const photos = await c.env.DB
       .prepare('SELECT id FROM photos WHERE event_id = ? AND source_photo_id IS NULL')
@@ -196,7 +214,18 @@ app.delete('/:slug', async (c) => {
       .prepare('DELETE FROM events WHERE id = ?')
       .bind(event.id)
       .run();
-    
+
+    // eventId is deliberately left null: the row would cascade-delete with the
+    // event it references, and the whole point of this entry is to survive it.
+    // The slug/name live in metadata instead.
+    await logActivity(c.env, {
+      actorEmail: c.get('user')?.email || 'unknown',
+      action: 'event_delete',
+      targetType: 'event',
+      targetId: String(event.id),
+      metadata: { slug, name: event.name, photoCount: (photos.results || []).length },
+    });
+
     return c.json({ success: true });
   } catch (error) {
     console.error('Error deleting event:', error);
@@ -232,7 +261,18 @@ app.put('/:slug/location', async (c) => {
       .prepare('UPDATE photos SET latitude = ?, longitude = ? WHERE event_id = ? AND (latitude IS NULL OR longitude IS NULL)')
       .bind(latitude, longitude, event.id)
       .run();
-    
+
+    if (result.meta.changes > 0) {
+      await logActivity(c.env, {
+        eventId: event.id,
+        actorEmail: c.get('user')?.email || 'unknown',
+        action: 'event_location_update',
+        targetType: 'event',
+        targetId: String(event.id),
+        metadata: { slug, count: result.meta.changes, latitude, longitude },
+      });
+    }
+
     return c.json({ success: true, updated_count: result.meta.changes });
   } catch (error) {
     console.error('Error setting event location:', error);
@@ -279,7 +319,16 @@ app.post('/:slug/tags', async (c) => {
           .run();
       }
     }
-    
+
+    await logActivity(c.env, {
+      eventId: event.id,
+      actorEmail: c.get('user')?.email || 'unknown',
+      action: 'event_tags_update',
+      targetType: 'event',
+      targetId: String(event.id),
+      metadata: { slug, tagCount: tagIds.length },
+    });
+
     return c.json({ success: true });
   } catch (error) {
     console.error('Error setting event tags:', error);

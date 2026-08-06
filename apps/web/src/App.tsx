@@ -44,8 +44,6 @@ const AdminPhotoManager = lazyWithReload(() => import('./pages/AdminPhotoManager
 const AdminTagManager = lazyWithReload(() => import('./pages/AdminTagManager'));
 const AdminTrash = lazyWithReload(() => import('./pages/AdminTrash'));
 const AdminDuplicates = lazyWithReload(() => import('./pages/AdminDuplicates'));
-const AdminAlbums = lazyWithReload(() => import('./pages/AdminAlbums'));
-const AdminAlbumDetail = lazyWithReload(() => import('./pages/AdminAlbumDetail'));
 const AdminActivity = lazyWithReload(() => import('./pages/AdminActivity'));
 
 // Loading component
@@ -300,8 +298,6 @@ function App() {
                       <Route path="/admin/tags" element={<AdminTagManager />} />
                       <Route path="/admin/trash" element={<AdminTrash />} />
                       <Route path="/admin/duplicates" element={<AdminDuplicates />} />
-                      <Route path="/admin/albums" element={<AdminAlbums />} />
-                      <Route path="/admin/albums/:albumId" element={<AdminAlbumDetail />} />
                       <Route path="/admin/activity" element={<AdminActivity />} />
                       <Route path="/admin/events/:slug/photos" element={<AdminPhotoManager />} />
                     </Routes>

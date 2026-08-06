@@ -1,6 +1,7 @@
 import { Hono } from 'hono';
 import type { Env, User } from '../../types';
 import { requireAdmin } from '../../auth';
+import { logActivity } from '../../activityLog';
 
 type Variables = {
   user: User;
@@ -32,8 +33,18 @@ app.post('/', async (c) => {
     const result = await c.env.DB
       .prepare('INSERT INTO tags (name, slug) VALUES (?, ?) RETURNING *')
       .bind(name, tagSlug)
-      .first();
-    
+      .first<{ id: number }>();
+
+    if (result) {
+      await logActivity(c.env, {
+        actorEmail: c.get('user')?.email || 'unknown',
+        action: 'tag_create',
+        targetType: 'tag',
+        targetId: String(result.id),
+        metadata: { name, slug: tagSlug },
+      });
+    }
+
     return c.json({ tag: result });
   } catch (error) {
     console.error('Error creating tag:', error);
@@ -81,8 +92,16 @@ app.put('/:id', async (c) => {
     const updated = await c.env.DB
       .prepare('SELECT * FROM tags WHERE id = ?')
       .bind(tagId)
-      .first();
-    
+      .first<{ name: string }>();
+
+    await logActivity(c.env, {
+      actorEmail: c.get('user')?.email || 'unknown',
+      action: 'tag_update',
+      targetType: 'tag',
+      targetId: String(tagId),
+      metadata: { name: updated?.name, changed: Object.keys({ ...(name !== undefined ? { name } : {}), ...(slug !== undefined ? { slug } : {}) }) },
+    });
+
     return c.json({ tag: updated });
   } catch (error) {
     console.error('Error updating tag:', error);
@@ -98,12 +117,26 @@ app.delete('/:id', async (c) => {
   const tagId = parseInt(c.req.param('id'));
   
   try {
+    // Read the name before deleting so the feed entry can say which tag went.
+    const tag = await c.env.DB
+      .prepare('SELECT name FROM tags WHERE id = ?')
+      .bind(tagId)
+      .first<{ name: string }>();
+
     // Delete tag (cascade will handle event_tags)
     await c.env.DB
       .prepare('DELETE FROM tags WHERE id = ?')
       .bind(tagId)
       .run();
-    
+
+    await logActivity(c.env, {
+      actorEmail: c.get('user')?.email || 'unknown',
+      action: 'tag_delete',
+      targetType: 'tag',
+      targetId: String(tagId),
+      metadata: { name: tag?.name },
+    });
+
     return c.json({ success: true });
   } catch (error) {
     console.error('Error deleting tag:', error);

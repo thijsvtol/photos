@@ -163,6 +163,34 @@ export async function runTrashPurge(env: Env): Promise<void> {
   await permanentlyDeletePhotos(env, toPurge);
 }
 
+// The admin activity feed only ever looks back a few pages; without a purge
+// activity_log grows forever, and every poll of the feed pays for it in the
+// ORDER BY. Six months is well past the point anyone scrolls back to.
+export const ACTIVITY_RETENTION_DAYS = 180;
+
+/**
+ * Trims `activity_log` to ACTIVITY_RETENTION_DAYS. Deliberately does NOT
+ * touch `collaboration_history` — that table backs a user-facing per-event
+ * history view (see routes/collaborators.ts), not just the admin feed, so it
+ * keeps its full record.
+ */
+export async function runActivityLogPurge(env: Env): Promise<void> {
+  const log = createLogger(env);
+  const cutoff = new Date(Date.now() - ACTIVITY_RETENTION_DAYS * 24 * 60 * 60 * 1000).toISOString();
+
+  const result = await env.DB
+    .prepare('DELETE FROM activity_log WHERE created_at < ?')
+    .bind(cutoff)
+    .run();
+
+  const purged = result.meta?.changes ?? 0;
+  if (purged > 0) {
+    log.info(`[runActivityLogPurge] Removed ${purged} activity entr(ies) older than ${ACTIVITY_RETENTION_DAYS} days`);
+  } else {
+    log.debug('[runActivityLogPurge] No activity entries past the retention window');
+  }
+}
+
 /**
  * Entry point invoked by the Worker `scheduled` handler. Finds collaborator
  * uploads that have not yet been notified, emails a batched summary, and marks

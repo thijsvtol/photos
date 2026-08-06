@@ -2,6 +2,7 @@ import { Hono } from 'hono';
 import type { Env, StartUploadRequest, CompleteUploadRequest, User } from '../../types';
 import { requireUploadPermission, isAdmin } from '../../auth';
 import { logCollaborationAction } from '../collaborators';
+import { logActivity } from '../../activityLog';
 import { checkFeature } from '../../features';
 import { isVideoFileType, getStorageExtension } from '../../fileTypeUtils';
 import { isValidFaceInput } from '../../faceValidation';
@@ -363,7 +364,30 @@ app.post('/:photoId/complete', requireUploadPermission, async (c) => {
         }
       }
     }
-    
+
+    // Admin uploads go to activity_log instead. The two are mutually exclusive
+    // on purpose: the admin activity feed unions activity_log with
+    // collaboration_history, so logging an upload to both would show it twice.
+    // Same firstCompletion/!isPreview guard as above, for the same reason —
+    // a retried /complete must not produce a second entry.
+    if (!isPreview && firstCompletion && isAdmin(c)) {
+      const user = c.get('user');
+      const eventRow = await c.env.DB
+        .prepare('SELECT id FROM events WHERE slug = ?')
+        .bind(slug)
+        .first<{ id: number }>();
+
+      if (user && eventRow) {
+        await logActivity(c.env, {
+          eventId: eventRow.id,
+          actorEmail: user.email,
+          action: 'photo_upload',
+          targetType: 'photo',
+          targetId: photoId,
+        });
+      }
+    }
+
     return c.json({ success: true, message: 'Upload completed successfully' });
   } catch (error) {
     console.error('[UPLOAD] Error completing upload:', error);

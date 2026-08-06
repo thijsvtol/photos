@@ -6,7 +6,7 @@ import type { Env } from '../types';
  * Tests for the polling-based activity feed writer (activityLog.ts). The
  * most important behavior to lock in: a failure writing an activity entry
  * must NEVER throw and break the primary action it's attached to (e.g.
- * favoriting a photo, creating an event/album, trashing a photo).
+ * favoriting a photo, creating an event, trashing a photo).
  */
 
 function makeDbCapturing() {
@@ -84,7 +84,7 @@ describe('logActivity', () => {
 
     await logActivity(env, {
       actorEmail: 'admin@example.com',
-      action: 'album_create',
+      action: 'tag_create',
     });
 
     expect(db.inserts[0][0]).toBeNull();

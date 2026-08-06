@@ -14,7 +14,7 @@ import collaboratorsRoutes from './routes/collaborators';
 import mobileAuthRoutes from './routes/mobileAuth';
 import meRoutes from './routes/me';
 import { seo } from './routes/seo';
-import { runUploadNotifications, runStaleUploadCleanup, runTrashPurge } from './scheduled';
+import { runUploadNotifications, runStaleUploadCleanup, runTrashPurge, runActivityLogPurge } from './scheduled';
 import { runAiEnrichment } from './aiEnrichment';
 
 const app = new Hono<{ Bindings: Env }>();
@@ -128,6 +128,9 @@ export default {
     );
     ctx.waitUntil(
       runTrashPurge(env).catch((err) => log.error('Scheduled runTrashPurge failed:', err))
+    );
+    ctx.waitUntil(
+      runActivityLogPurge(env).catch((err) => log.error('Scheduled runActivityLogPurge failed:', err))
     );
     ctx.waitUntil(
       runAiEnrichment(env).catch((err) => log.error('Scheduled runAiEnrichment failed:', err))

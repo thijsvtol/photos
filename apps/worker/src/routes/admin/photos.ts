@@ -374,6 +374,15 @@ app.put('/:photoId/people', async (c) => {
     await setManualPhotoPersonTags(c.env, photoId, personIds);
     const people = await getPhotoPeople(c.env, photoId);
 
+    await logActivity(c.env, {
+      eventId: photo.event_id,
+      actorEmail: c.get('user')?.email || 'unknown',
+      action: 'person_tag_add',
+      targetType: 'photo',
+      targetId: photoId,
+      metadata: { personCount: personIds.length },
+    });
+
     return c.json({ success: true, people });
   } catch (error) {
     console.error('Error updating photo people tags:', error);
@@ -417,6 +426,15 @@ app.delete('/:photoId/people/:personId', async (c) => {
     await removePersonFromPhoto(c.env, photoId, personId);
     const people = await getPhotoPeople(c.env, photoId);
 
+    await logActivity(c.env, {
+      eventId: photo.event_id,
+      actorEmail: c.get('user')?.email || 'unknown',
+      action: 'person_tag_remove',
+      targetType: 'photo',
+      targetId: photoId,
+      metadata: { personId },
+    });
+
     return c.json({ success: true, people });
   } catch (error) {
     console.error('Error removing person from photo:', error);
@@ -454,7 +472,16 @@ app.put('/:photoId/featured', async (c) => {
       .prepare('UPDATE photos SET is_featured = ? WHERE id = ?')
       .bind(isFeatured ? 1 : 0, photoId)
       .run();
-    
+
+    await logActivity(c.env, {
+      eventId: photo.event_id,
+      actorEmail: c.get('user')?.email || 'unknown',
+      action: 'photo_featured',
+      targetType: 'photo',
+      targetId: photoId,
+      metadata: { featured: !!isFeatured },
+    });
+
     return c.json({ success: true, is_featured: isFeatured });
   } catch (error) {
     console.error('Error updating featured status:', error);
@@ -513,6 +540,17 @@ app.put('/:photoId/replace', async (c) => {
         // Ignore if ig version doesn't exist
       }
     };
+    // Both the raw-body and legacy multipart paths end in a successful replace,
+    // so log from one place rather than duplicating the call at each return.
+    const logReplace = (target: string) =>
+      logActivity(c.env, {
+        eventId: photo.event_id,
+        actorEmail: c.get('user')?.email || 'unknown',
+        action: 'photo_replace',
+        targetType: 'photo',
+        targetId: photoId,
+        metadata: { target },
+      });
 
     const reqContentType = c.req.header('Content-Type') || '';
 
@@ -542,6 +580,8 @@ app.put('/:photoId/replace', async (c) => {
       // caches refresh, which is the desired behaviour after an edit.
       await bumpCacheVersion();
 
+      await logReplace(target);
+
       return c.json({ success: true });
     }
 
@@ -566,6 +606,8 @@ app.put('/:photoId/replace', async (c) => {
 
     await deleteStaleIg();
     await bumpCacheVersion();
+
+    await logReplace('multipart');
 
     return c.json({ success: true });
   } catch (error) {
@@ -659,6 +701,14 @@ app.put('/:photoId/restore', async (c) => {
       .bind(photoId)
       .run();
 
+    await logActivity(c.env, {
+      eventId: photo.event_id,
+      actorEmail: c.get('user')?.email || 'unknown',
+      action: 'photo_restore',
+      targetType: 'photo',
+      targetId: photoId,
+    });
+
     return c.json({ success: true });
   } catch (error) {
     console.error('Error restoring photo:', error);
@@ -699,6 +749,15 @@ app.delete('/:photoId/permanent', async (c) => {
 
     await permanentlyDeletePhotos(c.env, [photo]);
 
+    await logActivity(c.env, {
+      eventId: photo.event_id,
+      actorEmail: c.get('user')?.email || 'unknown',
+      action: 'photo_delete_permanent',
+      targetType: 'photo',
+      targetId: photoId,
+      metadata: { count: 1 },
+    });
+
     return c.json({ success: true });
   } catch (error) {
     console.error('Error permanently deleting photo:', error);
@@ -738,6 +797,15 @@ app.put('/:photoId/archive', async (c) => {
       .prepare("UPDATE photos SET archived_at = CASE WHEN ? THEN datetime('now') ELSE NULL END WHERE id = ?")
       .bind(isArchived ? 1 : 0, photoId)
       .run();
+
+    await logActivity(c.env, {
+      eventId: photo.event_id,
+      actorEmail: c.get('user')?.email || 'unknown',
+      action: 'photo_archive',
+      targetType: 'photo',
+      targetId: photoId,
+      metadata: { archived: !!isArchived },
+    });
 
     return c.json({ success: true, is_archived: isArchived });
   } catch (error) {
@@ -789,6 +857,18 @@ app.post('/trash/empty', async (c) => {
 
     const toDelete = photos.results || [];
     await permanentlyDeletePhotos(c.env, toDelete);
+
+    // One row for the whole sweep — emptying the trash is a single decision,
+    // and per-photo entries would bury everything else in the feed. The
+    // photos span multiple events, so this entry isn't tied to one.
+    if (toDelete.length > 0) {
+      await logActivity(c.env, {
+        actorEmail: c.get('user')?.email || 'unknown',
+        action: 'photo_delete_permanent',
+        targetType: 'trash',
+        metadata: { count: toDelete.length, source: 'empty_trash' },
+      });
+    }
 
     return c.json({ success: true, deletedCount: toDelete.length });
   } catch (error) {
@@ -878,10 +958,22 @@ app.post('/bulk-delete', async (c) => {
       );
 
       deletedCount = existingPhotos.length;
+
+      // A single row for the whole selection, not one per photo — a 500-photo
+      // bulk delete would otherwise flood the feed. Attribute it to the event
+      // only when the selection came from one.
+      const eventIds = Array.from(new Set(existingPhotos.map((p) => p.event_id)));
+      await logActivity(c.env, {
+        eventId: eventIds.length === 1 ? eventIds[0] : null,
+        actorEmail: user.email,
+        action: 'photo_bulk_delete',
+        targetType: 'photo',
+        metadata: { count: deletedCount, eventCount: eventIds.length },
+      });
     }
-    
-    return c.json({ 
-      success: true, 
+
+    return c.json({
+      success: true,
       deletedCount,
       totalRequested: photoIds.length,
       errors: errors.length > 0 ? errors : undefined
@@ -955,6 +1047,15 @@ app.post('/bulk-tag-people', async (c) => {
     }
 
     await addManualPhotoPersonTags(c.env, existingPhotos.map((p) => p.id), personIds);
+
+    const taggedEventIds = Array.from(new Set(existingPhotos.map((p) => p.event_id)));
+    await logActivity(c.env, {
+      eventId: taggedEventIds.length === 1 ? taggedEventIds[0] : null,
+      actorEmail: user.email,
+      action: 'person_tag_add',
+      targetType: 'photo',
+      metadata: { photoCount: existingPhotos.length, personCount: personIds.length, bulk: true },
+    });
 
     return c.json({ success: true, taggedPhotoCount: existingPhotos.length });
   } catch (error) {
@@ -1118,6 +1219,15 @@ app.post('/bulk-copy', async (c) => {
         `)
         .bind(targetEvent.id, targetEvent.id)
         .run();
+
+      await logActivity(c.env, {
+        eventId: targetEvent.id,
+        actorEmail: user.email,
+        action: 'photo_bulk_copy',
+        targetType: 'event',
+        targetId: String(targetEvent.id),
+        metadata: { count: copiedCount, targetSlug: targetEvent.slug },
+      });
     }
 
     return c.json({
@@ -1191,6 +1301,15 @@ app.patch('/bulk-location', async (c) => {
     );
 
     const updatedCount = results.reduce((sum, result) => sum + (result.meta?.changes ?? 0), 0);
+
+    if (updatedCount > 0) {
+      await logActivity(c.env, {
+        actorEmail: c.get('user')?.email || 'unknown',
+        action: 'photo_location_edit',
+        targetType: 'photo',
+        metadata: { count: updatedCount, latitude, longitude },
+      });
+    }
 
     return c.json({ success: true, updatedCount, totalRequested: photoIds.length });
   } catch (error) {
