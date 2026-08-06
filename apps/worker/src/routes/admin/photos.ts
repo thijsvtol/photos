@@ -187,6 +187,85 @@ app.post('/:photoId/faces', async (c) => {
 });
 
 /**
+ * GET /photos/missing-file-hash
+ *
+ * Paginated list of photos (images/RAW only — matching computeFileHash()'s own scope in
+ * imageUtils.ts, which skips video to avoid reading large files fully into memory) that have no
+ * `file_hash` yet, so the client can backfill it: download each original, hash it, then PATCH
+ * the result back via PATCH /:photoId/file-hash. Two situations produce a NULL file_hash here:
+ * (1) photos uploaded before the file_hash column/feature existed at all, and (2) — the bug
+ * fixed 2026-08-06 — EVERY photo ever uploaded via the native Android app's background-sync
+ * upload path (backgroundSync.ts), which never computed or sent a hash at all until that fix,
+ * meaning `file_hash` was NULL for the vast majority of this app's production photos regardless
+ * of age. Cursor-paginated by id (ULIDs sort lexicographically ≈ chronologically, but the exact
+ * order doesn't matter here — this is just a stable, index-friendly pagination key).
+ */
+app.get('/missing-file-hash', async (c) => {
+  try {
+    const cursor = c.req.query('cursor') || null;
+    const limit = Math.min(parseInt(c.req.query('limit') || '50', 10) || 50, 200);
+
+    const cursorClause = cursor ? 'AND p.id > ?' : '';
+    const bindings: (string | number)[] = cursor ? [cursor, limit + 1] : [limit + 1];
+
+    const { results } = await c.env.DB
+      .prepare(`
+        SELECT p.id, p.file_type, p.cache_version, e.slug as event_slug
+        FROM photos p
+        JOIN events e ON p.event_id = e.id
+        WHERE p.deleted_at IS NULL
+          AND p.upload_complete = 1
+          AND p.file_hash IS NULL
+          AND p.file_type NOT IN ('video/mp4')
+          ${cursorClause}
+        ORDER BY p.id ASC
+        LIMIT ?
+      `)
+      .bind(...bindings)
+      .all<{ id: string; file_type: string; cache_version: number | null; event_slug: string }>();
+
+    const rows = results || [];
+    const photos = rows.slice(0, limit);
+    const hasMore = rows.length > limit;
+    const nextCursor = hasMore && photos.length > 0 ? photos[photos.length - 1].id : null;
+
+    return c.json({ photos, nextCursor });
+  } catch (error) {
+    console.error('Error fetching photos missing file_hash:', error);
+    return c.json({ error: 'Failed to fetch photos missing file_hash' }, 500);
+  }
+});
+
+/**
+ * PATCH /photos/:photoId/file-hash
+ *
+ * Sets a single photo's `file_hash`, computed client-side (see GET /missing-file-hash's doc
+ * comment above) — used by the one-time "Backfill file hashes" admin action to retroactively
+ * populate the column for photos uploaded before it existed, or before the background-sync
+ * hashing bug was fixed. Never overwrites an already-set hash (WHERE guard), so this is safe to
+ * re-run/retry without risking clobbering a legitimate value with a stale/incorrect one.
+ */
+app.patch('/:photoId/file-hash', async (c) => {
+  try {
+    const photoId = c.req.param('photoId');
+    const { fileHash } = await c.req.json<{ fileHash?: string }>();
+    if (!fileHash || typeof fileHash !== 'string') {
+      return c.json({ error: 'fileHash is required' }, 400);
+    }
+
+    const result = await c.env.DB
+      .prepare('UPDATE photos SET file_hash = ? WHERE id = ? AND file_hash IS NULL')
+      .bind(fileHash, photoId)
+      .run();
+
+    return c.json({ success: true, updated: (result.meta.changes ?? 0) > 0 });
+  } catch (error) {
+    console.error('Error setting photo file_hash:', error);
+    return c.json({ error: 'Failed to set photo file_hash' }, 500);
+  }
+});
+
+/**
  * GET /photos/duplicates
  * Groups all non-trashed photos that share the same file_hash (exact-content
  * duplicates, computed client-side at upload time — see uploadManager.ts's

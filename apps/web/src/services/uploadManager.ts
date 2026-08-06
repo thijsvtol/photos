@@ -11,7 +11,7 @@ import ExifReader from 'exifreader';
 import axios from 'axios';
 import { startUpload, uploadPart, completeUpload, cancelUpload as cancelUploadApi } from '../api';
 import { addToQueue, updateQueueItem, getQueueItems, getPendingUploads, removeFromQueue, clearCompletedUploads } from '../uploadQueue';
-import { createPreview } from '../imageUtils';
+import { createPreview, computeFileHash } from '../imageUtils';
 import { isRawFile, isRawFileType, getRawFileType, createRawPreview, createRawPlaceholder } from '../rawImageUtils';
 import { extractMp4CreationTime } from '../utils/videoMetadata';
 import type { UploadQueueItem } from '../types';
@@ -543,7 +543,7 @@ class UploadManager {
       // Cached on the item so a retry never re-hashes the same file.
       let fileHash = item.fileHash;
       if (!isVideo && !fileHash) {
-        fileHash = await this.computeFileHash(item.file);
+        fileHash = await computeFileHash(item.file);
         if (fileHash) {
           this.updateItem(item.id, { fileHash });
           await updateQueueItem(item.id, { fileHash });
@@ -898,25 +898,6 @@ class UploadManager {
         blurPlaceholder: blurPlaceholder || undefined,
       };
     } catch { return {}; }
-  }
-
-  /** SHA-256 hash (hex) of a file's full contents, used for client-side
-   *  duplicate-photo detection. Capped at MAX_HASHABLE_SIZE and best-effort —
-   *  returns undefined (never throws) if hashing fails or the file is too
-   *  large to hash without risking excessive memory use. */
-  private async computeFileHash(file: File): Promise<string | undefined> {
-    const MAX_HASHABLE_SIZE = 100 * 1024 * 1024; // 100MB
-    if (file.size > MAX_HASHABLE_SIZE) return undefined;
-    try {
-      const buffer = await file.arrayBuffer();
-      const digest = await crypto.subtle.digest('SHA-256', buffer);
-      return Array.from(new Uint8Array(digest))
-        .map((b) => b.toString(16).padStart(2, '0'))
-        .join('');
-    } catch (err) {
-      console.warn('[UploadManager] Failed to compute file hash:', err);
-      return undefined;
-    }
   }
 }
 

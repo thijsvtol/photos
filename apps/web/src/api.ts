@@ -1402,6 +1402,41 @@ export const syncPeopleAcrossDuplicates = async (): Promise<{ groupsSynced: numb
   return { groupsSynced: response.data.groupsSynced, tagsAdded: response.data.tagsAdded };
 };
 
+export interface MissingHashPhoto {
+  id: string;
+  file_type: string;
+  cache_version: number | null;
+  event_slug: string;
+}
+
+/** ONE PAGE of photos (images/RAW only) with no file_hash yet — see GET
+ *  /admin/photos/missing-file-hash's doc comment in routes/admin/photos.ts for why so many
+ *  photos ended up in this state (a background-sync upload bug, fixed 2026-08-06, meant most
+ *  photos uploaded via the Android app never got a hash at all). Used by the one-time
+ *  "Backfill file hashes" admin action on the Duplicates page. */
+export const getPhotosMissingFileHash = async (
+  cursor: string | null = null,
+  limit = 50
+): Promise<{ photos: MissingHashPhoto[]; nextCursor: string | null }> => {
+  const response = await api.get<{ photos: MissingHashPhoto[]; nextCursor: string | null }>(
+    '/admin/photos/missing-file-hash',
+    { params: { ...(cursor ? { cursor } : undefined), limit }, headers: getAdminHeaders() }
+  );
+  return response.data;
+};
+
+/** Sets a single photo's file_hash (computed client-side by the caller) — never overwrites an
+ *  already-set hash. Returns `updated: false` if the photo already had one (a no-op, not an
+ *  error) so the backfill loop can just move on. */
+export const setPhotoFileHash = async (photoId: string, fileHash: string): Promise<{ updated: boolean }> => {
+  const response = await api.patch<{ success: boolean; updated: boolean }>(
+    `/admin/photos/${photoId}/file-hash`,
+    { fileHash },
+    { headers: getAdminHeaders() }
+  );
+  return { updated: response.data.updated };
+};
+
 // Albums API (cross-event collections, admin-only)
 export interface Album {
   id: number;

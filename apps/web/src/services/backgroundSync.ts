@@ -8,7 +8,7 @@ import { getPendingUploads, updateQueueItem } from '../uploadQueue';
 import { startUpload, uploadPart, completeUpload, cancelUpload as cancelUploadApi } from '../api';
 import { folderSyncService } from './folderSync';
 import { uploadManager } from './uploadManager';
-import { createPreview } from '../imageUtils';
+import { createPreview, computeFileHash } from '../imageUtils';
 import ProgressNotification from '../plugins/ProgressNotification';
 import type { UploadQueueItem } from '../types';
 
@@ -379,6 +379,20 @@ class BackgroundSyncService {
         // matching uploadManager.ts's foreground upload path.
         const originalProgressMax = isVideo ? 100 : 80;
 
+        // Compute a content hash for duplicate detection (images/RAW only,
+        // same as uploadManager.ts's foreground path — this used to be
+        // missing entirely here, which meant every photo uploaded via this
+        // native background-sync path got file_hash = NULL, silently
+        // breaking duplicate detection for the whole library). Cached on the
+        // queue item so a retry never re-hashes the same file.
+        let fileHash = upload.fileHash;
+        if (!isVideo && !fileHash) {
+          fileHash = await computeFileHash(upload.file);
+          if (fileHash) {
+            await this.updateQueueItemAndSync(upload.id, { fileHash });
+          }
+        }
+
         const startOriginalUpload = () => startUpload(
           upload.eventSlug,
           photoId,
@@ -397,7 +411,8 @@ class BackgroundSyncService {
           upload.longitude,
           upload.blurPlaceholder,
           false,
-          upload.file.type
+          upload.file.type,
+          fileHash
         );
 
         // Once the original file has already fully uploaded (a previous

@@ -15,6 +15,37 @@ export interface ResizeOptions {
   quality: number;
 }
 
+const MAX_HASHABLE_SIZE = 100 * 1024 * 1024; // 100MB
+
+/**
+ * SHA-256 hash (hex) of a file's full contents, used for client-side
+ * duplicate-photo detection (see GET /admin/photos/duplicates and
+ * syncPeopleAcrossDuplicates() in apps/worker/src/faceClustering.ts, both of
+ * which group photos by this value). Capped at MAX_HASHABLE_SIZE and
+ * best-effort — returns undefined (never throws) if hashing fails or the
+ * file is too large to hash without risking excessive memory use.
+ *
+ * Shared between uploadManager.ts's foreground upload path, backgroundSync.ts's native
+ * background-upload path (the latter used to skip this entirely, which meant essentially every
+ * photo uploaded via the Android app got `file_hash = NULL` — see backgroundSync.ts's fix
+ * comment for the full story), and AdminDuplicates.tsx's one-time "Backfill file hashes" action
+ * (hashing an already-downloaded `Blob`, not a fresh upload's `File` — `File` extends `Blob`, so
+ * this accepts either).
+ */
+export async function computeFileHash(file: Blob): Promise<string | undefined> {
+  if (file.size > MAX_HASHABLE_SIZE) return undefined;
+  try {
+    const buffer = await file.arrayBuffer();
+    const digest = await crypto.subtle.digest('SHA-256', buffer);
+    return Array.from(new Uint8Array(digest))
+      .map((b) => b.toString(16).padStart(2, '0'))
+      .join('');
+  } catch (err) {
+    console.warn('[computeFileHash] Failed to compute file hash:', err);
+    return undefined;
+  }
+}
+
 /**
  * Resize an image file to a smaller version using canvas
  */
