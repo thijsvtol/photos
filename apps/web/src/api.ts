@@ -1300,12 +1300,19 @@ export const bulkUpdatePhotoLocation = async (
   latitude: number,
   longitude: number
 ): Promise<{ updatedCount: number; totalRequested: number }> => {
-  const response = await api.patch<{ updatedCount: number; totalRequested: number }>(
-    '/admin/photos/bulk-location',
-    { photoIds, latitude, longitude },
-    { headers: getAdminHeaders() }
-  );
-  return response.data;
+  // Chunked — see bulkDeletePhotos()'s doc comment above (same 500-per-call worker cap).
+  const BULK_CHUNK_SIZE = 500;
+  let updatedCount = 0;
+  for (let i = 0; i < photoIds.length; i += BULK_CHUNK_SIZE) {
+    const chunk = photoIds.slice(i, i + BULK_CHUNK_SIZE);
+    const response = await api.patch<{ updatedCount: number; totalRequested: number }>(
+      '/admin/photos/bulk-location',
+      { photoIds: chunk, latitude, longitude },
+      { headers: getAdminHeaders() }
+    );
+    updatedCount += response.data.updatedCount;
+  }
+  return { updatedCount, totalRequested: photoIds.length };
 };
 
 /** Adds (never replaces/removes) one or more people as manually-tagged across a batch of
@@ -1316,12 +1323,20 @@ export const bulkTagPeopleOnPhotos = async (
   photoIds: string[],
   personIds: number[]
 ): Promise<{ taggedPhotoCount: number }> => {
-  const response = await api.post<{ success: boolean; taggedPhotoCount: number }>(
-    '/admin/photos/bulk-tag-people',
-    { photoIds, personIds },
-    { headers: getAdminHeaders() }
-  );
-  return { taggedPhotoCount: response.data.taggedPhotoCount };
+  // Chunked (photos, not people — personIds is already capped at 50 per call server-side and is
+  // never large) — see bulkDeletePhotos()'s doc comment above (same 500-per-call worker cap).
+  const BULK_CHUNK_SIZE = 500;
+  let taggedPhotoCount = 0;
+  for (let i = 0; i < photoIds.length; i += BULK_CHUNK_SIZE) {
+    const chunk = photoIds.slice(i, i + BULK_CHUNK_SIZE);
+    const response = await api.post<{ success: boolean; taggedPhotoCount: number }>(
+      '/admin/photos/bulk-tag-people',
+      { photoIds: chunk, personIds },
+      { headers: getAdminHeaders() }
+    );
+    taggedPhotoCount += response.data.taggedPhotoCount;
+  }
+  return { taggedPhotoCount };
 };
 
 export const geocodeEventPhotos = async (slug: string): Promise<{ updated: number; total: number }> => {
@@ -1573,21 +1588,38 @@ export const setPhotoFileHash = async (photoId: string, fileHash: string): Promi
 };
 
 export const bulkDeletePhotos = async (photoIds: string[]): Promise<{ deletedCount: number; totalRequested: number }> => {
-  const response = await api.post<{ deletedCount: number; totalRequested: number; errors?: any[] }>(
-    '/admin/photos/bulk-delete',
-    { photoIds },
-    { headers: getAdminHeaders() }
-  );
-  return response.data;
+  // Chunked to stay under the worker's own per-call cap (BULK_DELETE_MAX_PHOTOS = 500 in
+  // admin/photos.ts) — callers like a duplicate-cleanup banner can easily gather more than 500
+  // ids at once (e.g. "855 duplicate photos in 110 sets"), which previously failed outright with
+  // "Cannot delete more than 500 photos at once" instead of silently succeeding in batches.
+  const BULK_CHUNK_SIZE = 500;
+  let deletedCount = 0;
+  for (let i = 0; i < photoIds.length; i += BULK_CHUNK_SIZE) {
+    const chunk = photoIds.slice(i, i + BULK_CHUNK_SIZE);
+    const response = await api.post<{ deletedCount: number; totalRequested: number; errors?: any[] }>(
+      '/admin/photos/bulk-delete',
+      { photoIds: chunk },
+      { headers: getAdminHeaders() }
+    );
+    deletedCount += response.data.deletedCount;
+  }
+  return { deletedCount, totalRequested: photoIds.length };
 };
 
 export const bulkCopyPhotos = async (photoIds: string[], targetEventSlug: string): Promise<{ copiedCount: number; totalRequested: number }> => {
-  const response = await api.post<{ copiedCount: number; totalRequested: number; errors?: any[] }>(
-    '/admin/photos/bulk-copy',
-    { photoIds, targetEventSlug },
-    { headers: getAdminHeaders() }
-  );
-  return response.data;
+  // Chunked — see bulkDeletePhotos()'s doc comment above (same 500-per-call worker cap).
+  const BULK_CHUNK_SIZE = 500;
+  let copiedCount = 0;
+  for (let i = 0; i < photoIds.length; i += BULK_CHUNK_SIZE) {
+    const chunk = photoIds.slice(i, i + BULK_CHUNK_SIZE);
+    const response = await api.post<{ copiedCount: number; totalRequested: number; errors?: any[] }>(
+      '/admin/photos/bulk-copy',
+      { photoIds: chunk, targetEventSlug },
+      { headers: getAdminHeaders() }
+    );
+    copiedCount += response.data.copiedCount;
+  }
+  return { copiedCount, totalRequested: photoIds.length };
 };
 
 // Tag Management API
