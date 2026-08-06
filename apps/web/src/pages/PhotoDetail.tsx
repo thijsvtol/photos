@@ -640,7 +640,15 @@ const PhotoDetail: React.FC = () => {
         setPhoto(nextPhoto);
         setImageLoaded(isPreloaded); // If preloaded, mark as loaded immediately
         
-        navigate(`/p/${slug}/${nextPhoto.id}`, { replace: true });
+        // Preserve the navigation-context state (fromTimeline/fromSearch/etc) across this
+        // in-place navigate — previously omitted here, which silently dropped `location.state`
+        // on every `replace: true` call. Since this component doesn't remount between photos
+        // (same route, different :photoId param), `photosToUse` re-derives itself from
+        // `location.state` on every render — so after the FIRST next/prev, the context was
+        // already gone and browsing silently fell back to the event's entire gallery instead of
+        // staying restricted to the Timeline/search subset the user actually came from. This was
+        // the reported "next photo goes to the whole album, not the Timeline" bug.
+        navigate(`/p/${slug}/${nextPhoto.id}`, { replace: true, state: location.state });
         
         // End transition and reset slide direction
         transitionTimeoutRef.current = setTimeout(() => {
@@ -669,7 +677,8 @@ const PhotoDetail: React.FC = () => {
         setPhoto(firstPhoto);
         setImageLoaded(isPreloaded);
         
-        navigate(`/p/${slug}/${firstPhoto.id}`, { replace: true });
+        // See the preceding navigate() call's comment for why `state: location.state` is required.
+        navigate(`/p/${slug}/${firstPhoto.id}`, { replace: true, state: location.state });
         transitionTimeoutRef.current = setTimeout(() => {
           setPreviousPhoto(null);
           setIsTransitioning(false);
@@ -679,7 +688,7 @@ const PhotoDetail: React.FC = () => {
       }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isTransitioning, fromFavorites, favoritePhotos, photoId, slug, navigate, displayPhotos, allPhotos, currentIndex, preloadedImages, photo]);
+  }, [isTransitioning, fromFavorites, favoritePhotos, photoId, slug, navigate, displayPhotos, allPhotos, currentIndex, preloadedImages, photo, location.state]);
 
   const navigateToPrevious = useCallback(() => {
     // When viewing favorites, always navigate through the favoritePhotos list across all events
@@ -724,7 +733,10 @@ const PhotoDetail: React.FC = () => {
         setPhoto(prevPhoto);
         setImageLoaded(isPreloaded); // If preloaded, mark as loaded immediately
         
-        navigate(`/p/${slug}/${prevPhoto.id}`, { replace: true });
+        // See navigateToNext()'s matching comment for why `state: location.state` is required
+        // here — omitting it silently drops the fromTimeline/fromSearch/etc context after the
+        // FIRST navigation.
+        navigate(`/p/${slug}/${prevPhoto.id}`, { replace: true, state: location.state });
         
         // End transition and reset slide direction
         transitionTimeoutRef.current = setTimeout(() => {
@@ -753,7 +765,7 @@ const PhotoDetail: React.FC = () => {
         setPhoto(lastPhoto);
         setImageLoaded(isPreloaded);
         
-        navigate(`/p/${slug}/${lastPhoto.id}`, { replace: true });
+        navigate(`/p/${slug}/${lastPhoto.id}`, { replace: true, state: location.state });
         transitionTimeoutRef.current = setTimeout(() => {
           setPreviousPhoto(null);
           setIsTransitioning(false);
@@ -763,7 +775,7 @@ const PhotoDetail: React.FC = () => {
       }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isTransitioning, fromFavorites, favoritePhotos, photoId, slug, navigate, displayPhotos, allPhotos, currentIndex, preloadedImages, photo]);
+  }, [isTransitioning, fromFavorites, favoritePhotos, photoId, slug, navigate, displayPhotos, allPhotos, currentIndex, preloadedImages, photo, location.state]);
 
   // Keep refs updated for stable event handlers
   navigateNextRef.current = navigateToNext;
