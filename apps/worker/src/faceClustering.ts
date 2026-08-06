@@ -1010,18 +1010,21 @@ export async function removePersonFromPhoto(env: Env, photoId: string, personId:
  * reason they were "unattached" — nothing to look up by), so a large batch of manual tags often
  * produces a "nothing to learn" result even though the tags themselves are perfectly correct —
  * this is expected, not a bug: there's simply no face vector to add to that person's centroid
- * from those photos. The returned `taggedPhotosWithNoFaceData`/`taggedPhotosNeverScanned` counts
- * exist so the caller (see AdminPeople.tsx's "Learn from Tags" result banner) can explain this
- * distinction rather than leaving the admin to wonder why 200+ freshly-tagged photos "did
- * nothing" — `taggedPhotosNeverScanned` (a subset of the former) is the ACTIONABLE part: running
- * "Scan Library for Faces" first may detect a face on those specific photos, after which
- * re-running this again could pick them up (if exactly one face + one tag on that photo).
+ * from those photos. The returned `taggedPhotosWithNoFaceData`/`taggedPhotosNeverScannedImages`/
+ * `taggedPhotosNeverScannedVideos` counts exist so the caller (see AdminPeople.tsx's "Learn from
+ * Tags" result banner) can explain this distinction rather than leaving the admin to wonder why
+ * 200+ freshly-tagged photos "did nothing" — `taggedPhotosNeverScannedImages` is the ACTIONABLE
+ * part (running "Scan Library for Faces"/"Re-scan Tagged Photos" may detect a face on those);
+ * `taggedPhotosNeverScannedVideos` never can be (video face detection isn't supported at all —
+ * see faceBackfill.ts), so it's reported separately rather than lumped in as if scanning could
+ * help.
  */
 export async function learnFromManualTags(env: Env): Promise<{
   personsUpdated: number;
   facesAssigned: number;
   taggedPhotosWithNoFaceData: number;
-  taggedPhotosNeverScanned: number;
+  taggedPhotosNeverScannedImages: number;
+  taggedPhotosNeverScannedVideos: number;
 }> {
   const { results: tagRows } = await env.DB
     .prepare(`
@@ -1034,14 +1037,16 @@ export async function learnFromManualTags(env: Env): Promise<{
 
   const { results: noFaceDataRows } = await env.DB
     .prepare(`
-      SELECT p.id, p.faces_processed_at
+      SELECT p.id, p.faces_processed_at, p.file_type
       FROM photos p
       WHERE p.id IN (SELECT DISTINCT photo_id FROM photo_person_tags)
         AND p.id NOT IN (SELECT DISTINCT photo_id FROM photo_faces)
     `)
-    .all<{ id: string; faces_processed_at: string | null }>();
+    .all<{ id: string; faces_processed_at: string | null; file_type: string }>();
   const taggedPhotosWithNoFaceData = (noFaceDataRows || []).length;
-  const taggedPhotosNeverScanned = (noFaceDataRows || []).filter((r) => !r.faces_processed_at).length;
+  const neverScanned = (noFaceDataRows || []).filter((r) => !r.faces_processed_at);
+  const taggedPhotosNeverScannedVideos = neverScanned.filter((r) => r.file_type === 'video/mp4').length;
+  const taggedPhotosNeverScannedImages = neverScanned.length - taggedPhotosNeverScannedVideos;
 
   const photoIdsByPerson = new Map<number, Set<string>>();
   for (const row of tagRows || []) {
@@ -1069,6 +1074,50 @@ export async function learnFromManualTags(env: Env): Promise<{
     }
   }
 
-  return { personsUpdated, facesAssigned, taggedPhotosWithNoFaceData, taggedPhotosNeverScanned };
+  return { personsUpdated, facesAssigned, taggedPhotosWithNoFaceData, taggedPhotosNeverScannedImages, taggedPhotosNeverScannedVideos };
+}
+
+/**
+ * Resets `faces_processed_at` back to NULL for every manually-tagged photo (image/RAW only —
+ * videos are never face-detected at all, see faceBackfill.ts, so resetting them would just
+ * make them permanently re-appear in the "pending" count with no way to ever actually clear it)
+ * that was already scanned but found ZERO faces, so the next "Scan Library for Faces" pass
+ * re-detects them.
+ *
+ * Exists specifically because of a real backfill-quality bug (fixed 2026-08-06): the backfill
+ * scan used to run detection against each photo's 1920px-capped PREVIEW image instead of the
+ * full-resolution original that upload-time detection has always used (see faceBackfill.ts's
+ * doc comment) — for small/distant faces in group or action-sports shots (this app's dominant
+ * content), that resolution loss could genuinely cost the detector faces it would otherwise
+ * have found. Re-scanning with the now-fixed original-resolution backfill can recover some of
+ * those. Deliberately scoped to MANUALLY-TAGGED photos only (not the whole library) — those are
+ * the photos an admin has explicitly confirmed contain a real person, so re-detecting them is
+ * high-value; blindly resetting every zero-face photo library-wide would also re-scan the many
+ * photos that legitimately have no faces at all (landscapes, objects, etc.), wasting a lot of
+ * scan time for no benefit.
+ */
+export async function resetFacesForFacelessTaggedPhotos(env: Env): Promise<{ photosReset: number }> {
+  const { results } = await env.DB
+    .prepare(`
+      SELECT p.id
+      FROM photos p
+      WHERE p.id IN (SELECT DISTINCT photo_id FROM photo_person_tags)
+        AND p.id NOT IN (SELECT DISTINCT photo_id FROM photo_faces)
+        AND p.faces_processed_at IS NOT NULL
+        AND p.file_type != 'video/mp4'
+    `)
+    .all<{ id: string }>();
+
+  const photoIds = (results || []).map((r) => r.id);
+  for (const idChunk of chunk(photoIds, FACE_ID_CHUNK_SIZE)) {
+    if (idChunk.length === 0) continue;
+    const placeholders = idChunk.map(() => '?').join(',');
+    await env.DB
+      .prepare(`UPDATE photos SET faces_processed_at = NULL WHERE id IN (${placeholders})`)
+      .bind(...idChunk)
+      .run();
+  }
+
+  return { photosReset: photoIds.length };
 }
 

@@ -7,14 +7,26 @@
  * (AI captions/embeddings, trash purge, face clustering — all pure server
  * crons), this cannot run purely on a schedule inside the Worker. Instead:
  *   - GET /admin/photos/faces-pending enumerates unprocessed photos
- *   - this module fetches each photo's PREVIEW image (small, fast) as a
- *     same-origin blob, runs detectFaces() on it in the browser, and posts
- *     results to POST /admin/photos/:photoId/faces
+ *   - this module fetches each photo's ORIGINAL image (same full-resolution
+ *     file that upload-time detection — faceDetectionQueue.ts — already
+ *     uses) as a same-origin blob, runs detectFaces() on it in the browser,
+ *     and posts results to POST /admin/photos/:photoId/faces
+ *
+ * IMPORTANT: this used to fetch the 1920px-capped PREVIEW image instead of the original —
+ * fixed 2026-08-06 after admins found that a large fraction of manually-tagged photos had
+ * been "scanned" (faces_processed_at set) yet detected zero faces despite clearly containing
+ * visible people. Upload-time detection (faceDetectionQueue.ts) has always run against the
+ * full original file; this backfill scan alone was silently working with strictly less pixel
+ * data, which cost real recall specifically for small/distant faces in group or action-sports
+ * shots — precisely the kind of face this app's content skews toward (see faceDetection.ts's
+ * top-of-file doc comment) and precisely the case the preview's downscale would blur away
+ * before the detector ever saw it. Slower per-photo (bigger download) but strictly more
+ * accurate, matching upload-time detection's quality.
  *
  * Exposed as an explicit "Scan Library" action on the People admin page
  * (immediate, user-controlled, with progress) — see AdminPeople.tsx.
  */
-import { getFacesPendingPhotos, saveBackfilledFaces, getPreviewUrl } from './api';
+import { getFacesPendingPhotos, saveBackfilledFaces, getOriginalUrl } from './api';
 import { detectFaces } from './faceDetection';
 
 const BATCH_SIZE = 8;
@@ -26,14 +38,14 @@ export interface BackfillProgress {
 }
 
 async function processPhoto(photo: { id: string; file_type: string; cache_version: number; event_slug: string }): Promise<void> {
-  const previewUrl = getPreviewUrl(photo.event_slug, photo.id, photo.file_type, photo.cache_version);
+  const originalUrl = getOriginalUrl(photo.event_slug, photo.id, photo.file_type, photo.cache_version);
 
   try {
     // Fetch as a blob first (same pattern used by ImageEditorModal/auto-enhance)
     // so @vladmandic/human always operates on a same-origin blob URL, avoiding any
     // cross-origin canvas-tainting issues on native.
-    const res = await fetch(previewUrl);
-    if (!res.ok) throw new Error(`Failed to fetch preview (${res.status})`);
+    const res = await fetch(originalUrl);
+    if (!res.ok) throw new Error(`Failed to fetch original (${res.status})`);
     const blob = await res.blob();
     const objectUrl = URL.createObjectURL(blob);
     try {

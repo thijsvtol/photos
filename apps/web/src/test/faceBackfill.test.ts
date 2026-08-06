@@ -2,14 +2,14 @@ import { describe, expect, it, vi, beforeEach } from 'vitest';
 
 const getFacesPendingPhotosMock = vi.fn();
 const saveBackfilledFacesMock = vi.fn();
-const getPreviewUrlMock = vi.fn((..._args: unknown[]) => 'https://example.com/preview.jpg');
+const getOriginalUrlMock = vi.fn((..._args: unknown[]) => 'https://example.com/original.jpg');
 const detectFacesMock = vi.fn();
 
 vi.mock('../api', () => ({
   getFacesPendingPhotos: (limit?: number) => getFacesPendingPhotosMock(limit),
   saveBackfilledFaces: (photoId: string, faces: unknown) => saveBackfilledFacesMock(photoId, faces),
-  getPreviewUrl: (slug: string, photoId: string, fileType?: string, cacheVersion?: number) =>
-    getPreviewUrlMock(slug, photoId, fileType, cacheVersion),
+  getOriginalUrl: (slug: string, photoId: string, fileType?: string, cacheVersion?: number) =>
+    getOriginalUrlMock(slug, photoId, fileType, cacheVersion),
 }));
 
 vi.mock('../faceDetection', () => ({

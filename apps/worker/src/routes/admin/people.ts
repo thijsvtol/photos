@@ -1,7 +1,7 @@
 import { Hono } from 'hono';
 import type { Env, User } from '../../types';
 import { requireAdmin } from '../../auth';
-import { getClusterData, applyClusteringResults, countUnclusteredFaces, getLegacyFaceStats, resetLegacyFaces, mergeClusters, assignPhotosToPerson, resetAllClusters, learnFromManualTags, getUnattachedPhotos } from '../../faceClustering';
+import { getClusterData, applyClusteringResults, countUnclusteredFaces, getLegacyFaceStats, resetLegacyFaces, mergeClusters, assignPhotosToPerson, resetAllClusters, learnFromManualTags, getUnattachedPhotos, resetFacesForFacelessTaggedPhotos } from '../../faceClustering';
 import type { ClusterResult } from '../../faceClustering';
 
 type Variables = {
@@ -429,6 +429,24 @@ app.post('/learn-from-tags', async (c) => {
   } catch (error) {
     console.error('Error learning from manual tags:', error);
     return c.json({ error: 'Failed to learn from manual tags' }, 500);
+  }
+});
+
+/**
+ * POST /people/rescan-faceless-tagged-photos
+ * See resetFacesForFacelessTaggedPhotos()'s doc comment in faceClustering.ts — resets
+ * `faces_processed_at` for manually-tagged photos that were scanned but found zero faces (an
+ * older backfill-quality bug meant these may have been checked against a downscaled preview
+ * rather than the full original), so the next "Scan Library for Faces" pass re-detects them
+ * with the fixed, full-resolution logic. Safe to run repeatedly.
+ */
+app.post('/rescan-faceless-tagged-photos', async (c) => {
+  try {
+    const result = await resetFacesForFacelessTaggedPhotos(c.env);
+    return c.json({ success: true, ...result });
+  } catch (error) {
+    console.error('Error resetting faceless tagged photos:', error);
+    return c.json({ error: 'Failed to reset faceless tagged photos' }, 500);
   }
 });
 

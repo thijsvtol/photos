@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { getClusterData, applyClusteringResults, countUnclusteredFaces, getLegacyFaceStats, resetLegacyFaces, blobToFloat32Array, mergeClusters, assignPhotosToPerson, resetAllClusters, learnFromManualTags } from '../faceClustering';
+import { getClusterData, applyClusteringResults, countUnclusteredFaces, getLegacyFaceStats, resetLegacyFaces, blobToFloat32Array, mergeClusters, assignPhotosToPerson, resetAllClusters, learnFromManualTags, resetFacesForFacelessTaggedPhotos } from '../faceClustering';
 import type { Env } from '../types';
 
 /**
@@ -27,7 +27,7 @@ interface ClusterRow {
 class FakeFaceClusteringDb {
   faces: FaceRow[] = [];
   clusters: ClusterRow[] = [];
-  photos: { id: string; faces_processed_at: string | null }[] = [];
+  photos: { id: string; faces_processed_at: string | null; file_type?: string }[] = [];
   personTags: { photo_id: string; person_id: number }[] = [];
   private nextClusterId = 1;
 
@@ -62,8 +62,21 @@ class FakeFaceClusteringDb {
             .filter((id) => !photoIdsWithFaces.has(id))
             .map((id) => {
               const photo = db.photos.find((p) => p.id === id);
-              return { id, faces_processed_at: photo ? photo.faces_processed_at : null };
+              return { id, faces_processed_at: photo ? photo.faces_processed_at : null, file_type: photo?.file_type || 'image/jpeg' };
             });
+          return { results: results as T[] };
+        }
+        if (query.includes('SELECT p.id') && query.includes('FROM photos p') && query.includes("file_type != 'video/mp4'") && !query.includes('SELECT p.id, p.faces_processed_at')) {
+          // Replicates resetFacesForFacelessTaggedPhotos()'s query: manually-tagged, faceless,
+          // already-scanned (faces_processed_at IS NOT NULL), non-video photos.
+          const taggedPhotoIds = new Set(db.personTags.map((t) => t.photo_id));
+          const photoIdsWithFaces = new Set(db.faces.map((f) => f.photo_id));
+          const results = [...taggedPhotoIds]
+            .filter((id) => !photoIdsWithFaces.has(id))
+            .map((id) => db.photos.find((p) => p.id === id))
+            .filter((p): p is { id: string; faces_processed_at: string | null; file_type?: string } =>
+              !!p && !!p.faces_processed_at && p.file_type !== 'video/mp4')
+            .map((p) => ({ id: p.id }));
           return { results: results as T[] };
         }
         if (query.includes('SELECT id, centroid_embedding, face_count, name, linked_user_email FROM person_clusters WHERE id IN')) {
@@ -949,7 +962,7 @@ describe('learnFromManualTags', () => {
 
     const result = await learnFromManualTags(makeEnv(db));
 
-    expect(result).toEqual({ personsUpdated: 0, facesAssigned: 0, taggedPhotosWithNoFaceData: 0, taggedPhotosNeverScanned: 0 });
+    expect(result).toEqual({ personsUpdated: 0, facesAssigned: 0, taggedPhotosWithNoFaceData: 0, taggedPhotosNeverScannedImages: 0, taggedPhotosNeverScannedVideos: 0 });
   });
 
   it('processes multiple qualifying photos for the same person in one call', async () => {
@@ -971,28 +984,65 @@ describe('learnFromManualTags', () => {
     expect(facesAssigned).toBe(2);
   });
 
-  it('reports taggedPhotosWithNoFaceData/taggedPhotosNeverScanned for tagged photos with zero detected faces at all', async () => {
+  it('reports taggedPhotosWithNoFaceData split into never-scanned images (actionable) vs videos (never scannable)', async () => {
     const db = new FakeFaceClusteringDb();
     db.clusters = [{ id: 1, centroid_embedding: embedding1024Of(0, 0, 0), face_count: 1 }];
     // photo-with-face DOES have face data (learnable); photo-no-faces-scanned was scanned but
-    // genuinely has no detected face; photo-never-scanned has never been through face detection
-    // at all — the only one where re-scanning could plausibly help.
+    // genuinely has no detected face; photo-never-scanned-image has never been through face
+    // detection at all (the only actionable case — re-scanning could plausibly help);
+    // photo-never-scanned-video is a video, which can NEVER be face-scanned regardless.
     db.faces = [{ id: 1, photo_id: 'photo-with-face', embedding: embedding1024Of(3, 0, 0), person_id: null }];
     db.photos = [
-      { id: 'photo-no-faces-scanned', faces_processed_at: '2026-01-01T00:00:00Z' },
-      { id: 'photo-never-scanned', faces_processed_at: null },
+      { id: 'photo-no-faces-scanned', faces_processed_at: '2026-01-01T00:00:00Z', file_type: 'image/jpeg' },
+      { id: 'photo-never-scanned-image', faces_processed_at: null, file_type: 'image/jpeg' },
+      { id: 'photo-never-scanned-video', faces_processed_at: null, file_type: 'video/mp4' },
     ];
     db.personTags = [
       { photo_id: 'photo-with-face', person_id: 1 },
       { photo_id: 'photo-no-faces-scanned', person_id: 1 },
-      { photo_id: 'photo-never-scanned', person_id: 1 },
+      { photo_id: 'photo-never-scanned-image', person_id: 1 },
+      { photo_id: 'photo-never-scanned-video', person_id: 1 },
     ];
 
     const result = await learnFromManualTags(makeEnv(db));
 
     expect(result.facesAssigned).toBe(1); // photo-with-face's sole unclustered face gets learned
-    expect(result.taggedPhotosWithNoFaceData).toBe(2); // the two faceless tagged photos
-    expect(result.taggedPhotosNeverScanned).toBe(1); // only photo-never-scanned, the actionable one
+    expect(result.taggedPhotosWithNoFaceData).toBe(3); // the three faceless tagged photos
+    expect(result.taggedPhotosNeverScannedImages).toBe(1); // only photo-never-scanned-image
+    expect(result.taggedPhotosNeverScannedVideos).toBe(1); // only photo-never-scanned-video
+  });
+});
+
+describe('resetFacesForFacelessTaggedPhotos', () => {
+  it('resets faces_processed_at only for already-scanned, faceless, tagged, non-video photos', async () => {
+    const db = new FakeFaceClusteringDb();
+    db.faces = [{ id: 1, photo_id: 'photo-has-face', embedding: embedding1024Of(1, 0, 0), person_id: null }];
+    db.photos = [
+      { id: 'photo-no-face-scanned', faces_processed_at: '2026-01-01T00:00:00Z', file_type: 'image/jpeg' },
+      { id: 'photo-never-scanned', faces_processed_at: null, file_type: 'image/jpeg' },
+      { id: 'photo-video', faces_processed_at: '2026-01-01T00:00:00Z', file_type: 'video/mp4' },
+    ];
+    db.personTags = [
+      { photo_id: 'photo-has-face', person_id: 1 },
+      { photo_id: 'photo-no-face-scanned', person_id: 1 },
+      { photo_id: 'photo-never-scanned', person_id: 1 },
+      { photo_id: 'photo-video', person_id: 1 },
+    ];
+
+    const result = await resetFacesForFacelessTaggedPhotos(makeEnv(db));
+
+    // Only photo-no-face-scanned qualifies: has a tag, no face data, WAS already scanned
+    // (nothing to "reset" for a never-scanned photo), and isn't a video.
+    expect(result).toEqual({ photosReset: 1 });
+    expect(db.photos.find((p) => p.id === 'photo-no-face-scanned')?.faces_processed_at).toBeNull();
+    expect(db.photos.find((p) => p.id === 'photo-never-scanned')?.faces_processed_at).toBeNull(); // was already null
+    expect(db.photos.find((p) => p.id === 'photo-video')?.faces_processed_at).not.toBeNull(); // untouched — video
+  });
+
+  it('is a no-op when there is nothing to reset', async () => {
+    const db = new FakeFaceClusteringDb();
+    const result = await resetFacesForFacelessTaggedPhotos(makeEnv(db));
+    expect(result).toEqual({ photosReset: 0 });
   });
 });
 

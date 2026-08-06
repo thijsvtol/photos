@@ -2,7 +2,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { Users, ScanFace, Loader2, Sparkles, Eye, EyeOff, GitMerge, X, Check, GraduationCap, Search, ArrowUpDown } from 'lucide-react';
 import Navbar from '../components/Navbar';
-import { getPeople, getPreviewUrl, getFullClusterData, getAllFacesForDeepRebuild, applyClusteringResults, resetAllClusters, mergePeople, getLegacyFaceStats, resetLegacyFaces, learnFromManualTags } from '../api';
+import { getPeople, getPreviewUrl, getFullClusterData, getAllFacesForDeepRebuild, applyClusteringResults, resetAllClusters, mergePeople, getLegacyFaceStats, resetLegacyFaces, learnFromManualTags, rescanFacelessTaggedPhotos } from '../api';
 import type { Person, LegacyFaceStats } from '../api';
 import { runBackfillScan } from '../faceBackfill';
 import type { BackfillProgress } from '../faceBackfill';
@@ -68,8 +68,15 @@ const AdminPeople: React.FC = () => {
     personsUpdated: number;
     facesAssigned: number;
     taggedPhotosWithNoFaceData: number;
-    taggedPhotosNeverScanned: number;
+    taggedPhotosNeverScannedImages: number;
+    taggedPhotosNeverScannedVideos: number;
   } | null>(null);
+  // "Re-scan tagged photos with no face data" — see rescanFacelessTaggedPhotos()'s doc comment
+  // in api.ts. Resets faces_processed_at for manually-tagged photos that came up empty on a
+  // previous scan, so the next "Scan Library for Faces" pass re-checks them with the now-fixed
+  // (full-resolution-original, not a downscaled preview) backfill logic.
+  const [rescanningFaceless, setRescanningFaceless] = useState(false);
+  const [rescanResult, setRescanResult] = useState<{ photosReset: number } | null>(null);
   // Name search + sort — the list has no pagination, so for a library with many named people
   // finding a specific one by scrolling/scanning wasn't practical.
   const [nameFilter, setNameFilter] = useState('');
@@ -129,6 +136,38 @@ const AdminPeople: React.FC = () => {
       console.error(err);
     } finally {
       setLearningFromTags(false);
+    }
+  };
+
+  const handleRescanFacelessTaggedPhotos = async () => {
+    setRescanningFaceless(true);
+    setRescanResult(null);
+    setLearnResult(null);
+    try {
+      const result = await rescanFacelessTaggedPhotos();
+      setRescanResult(result);
+      // The reset photos are now back in the "pending" queue — immediately run the same scan
+      // loop "Scan Library for Faces" uses so the admin doesn't have to click a second button.
+      if (result.photosReset > 0) {
+        setScanning(true);
+        setScanProgress(null);
+        cancelRef.current = false;
+        try {
+          await runBackfillScan((progress) => {
+            setScanProgress(progress);
+            if (cancelRef.current) return false;
+          });
+          await loadData();
+          setLegacyStats(await getLegacyFaceStats());
+        } finally {
+          setScanning(false);
+        }
+      }
+    } catch (err) {
+      setError('Failed to re-scan tagged photos with no face data');
+      console.error(err);
+    } finally {
+      setRescanningFaceless(false);
     }
   };
 
@@ -441,6 +480,24 @@ const AdminPeople: React.FC = () => {
                   <GraduationCap className="w-4 h-4" /> Learn from Tags
                 </button>
               )}
+              {(rescanningFaceless || scanning) && rescanningFaceless ? (
+                <button
+                  disabled
+                  className="px-4 py-2 bg-gray-300 text-gray-700 rounded-lg flex items-center gap-2 cursor-wait"
+                >
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                  {scanning && scanProgress ? `Re-scanning… ${scanProgress.processed}` : 'Re-scanning…'}
+                </button>
+              ) : (
+                <button
+                  onClick={handleRescanFacelessTaggedPhotos}
+                  disabled={scanning}
+                  title="Re-check manually-tagged photos that were scanned but found no face — a past backfill bug scanned a downscaled preview instead of the full original, which could genuinely miss small/distant faces"
+                  className="px-4 py-2 bg-gray-200 dark:bg-gray-700 text-gray-800 dark:text-gray-200 rounded-lg hover:bg-gray-300 dark:hover:bg-gray-600 transition flex items-center gap-2 disabled:opacity-50"
+                >
+                  <ScanFace className="w-4 h-4" /> Re-scan Tagged Photos
+                </button>
+              )}
               <Link
                 to="/admin/people/unattached"
                 title="Browse photos with nobody identified yet and bulk-assign them to a person"
@@ -476,6 +533,16 @@ const AdminPeople: React.FC = () => {
           </button>
         </div>
 
+        {rescanResult && (
+          <div className="mb-4 bg-blue-50 dark:bg-blue-950/40 border border-blue-200 dark:border-blue-800 text-blue-800 dark:text-blue-300 px-4 py-3 rounded-lg text-sm">
+            {rescanResult.photosReset > 0 ? (
+              <>Queued {rescanResult.photosReset} tagged photo{rescanResult.photosReset === 1 ? '' : 's'} for re-scanning{scanning ? '…' : '.'} {!scanning && 'Check above for any newly-found faces.'}</>
+            ) : (
+              'No tagged photos needed a re-scan — every one already has either face data or has never been checked yet (use "Scan Library for Faces" for those).'
+            )}
+          </div>
+        )}
+
         {learnResult && (
           <div className="mb-8 bg-blue-50 dark:bg-blue-950/40 border border-blue-200 dark:border-blue-800 text-blue-800 dark:text-blue-300 px-4 py-3 rounded-lg text-sm">
             {learnResult.facesAssigned > 0 && (
@@ -490,9 +557,12 @@ const AdminPeople: React.FC = () => {
             )}
             {learnResult.taggedPhotosWithNoFaceData > 0 && (
               <p className={learnResult.facesAssigned > 0 ? 'mt-1' : ''}>
-                {learnResult.taggedPhotosWithNoFaceData} tagged photo{learnResult.taggedPhotosWithNoFaceData === 1 ? ' has' : 's have'} no detected face at all, so there's nothing for the model to learn from them — the tag itself is still saved and correct, there's just no face data behind it.
-                {learnResult.taggedPhotosNeverScanned > 0 && (
-                  <> {learnResult.taggedPhotosNeverScanned} of those {learnResult.taggedPhotosNeverScanned === 1 ? 'has' : 'have'} never been scanned for faces — running "Scan Library for Faces" above may detect a face on some of them, after which running "Learn from Tags" again could pick those up.</>
+                {learnResult.taggedPhotosWithNoFaceData} tagged photo{learnResult.taggedPhotosWithNoFaceData === 1 ? ' has' : 's have'} no detected face at all, so there's nothing for the model to learn from them yet — the tag itself is still saved and correct, there's just no face data behind it.
+                {learnResult.taggedPhotosNeverScannedVideos > 0 && (
+                  <> {learnResult.taggedPhotosNeverScannedVideos} of those {learnResult.taggedPhotosNeverScannedVideos === 1 ? 'is a video' : 'are videos'}, which can never be face-scanned at all (video isn't currently supported).</>
+                )}
+                {learnResult.taggedPhotosNeverScannedImages > 0 && (
+                  <> {learnResult.taggedPhotosNeverScannedImages} of those {learnResult.taggedPhotosNeverScannedImages === 1 ? 'is an image that has' : 'are images that have'} never been scanned — try "Re-scan Tagged Photos" above.</>
                 )}
               </p>
             )}

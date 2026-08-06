@@ -743,21 +743,24 @@ export const deletePerson = async (personId: number): Promise<void> => {
 /** Lets manual photo tagging directly improve future automatic clustering — see
  *  learnFromManualTags()'s doc comment in apps/worker/src/faceClustering.ts. Safe to run
  *  repeatedly (a no-op once no qualifying tag/face pairs remain).
- *  `taggedPhotosWithNoFaceData`/`taggedPhotosNeverScanned` explain a "0 faces assigned" result
- *  that isn't a bug — most manually-tagged photos (e.g. bulk-tagged via the Unattached Photos
- *  page) simply have no detected face at all to learn from. */
+ *  `taggedPhotosWithNoFaceData`/`taggedPhotosNeverScannedImages`/`taggedPhotosNeverScannedVideos`
+ *  explain a "0 faces assigned" result that isn't a bug — most manually-tagged photos (e.g.
+ *  bulk-tagged via the Unattached Photos page) simply have no detected face at all to learn
+ *  from, and video tags can NEVER get face data (video face detection isn't supported). */
 export const learnFromManualTags = async (): Promise<{
   personsUpdated: number;
   facesAssigned: number;
   taggedPhotosWithNoFaceData: number;
-  taggedPhotosNeverScanned: number;
+  taggedPhotosNeverScannedImages: number;
+  taggedPhotosNeverScannedVideos: number;
 }> => {
   const response = await api.post<{
     success: boolean;
     personsUpdated: number;
     facesAssigned: number;
     taggedPhotosWithNoFaceData: number;
-    taggedPhotosNeverScanned: number;
+    taggedPhotosNeverScannedImages: number;
+    taggedPhotosNeverScannedVideos: number;
   }>(
     '/admin/people/learn-from-tags',
     undefined,
@@ -767,8 +770,23 @@ export const learnFromManualTags = async (): Promise<{
     personsUpdated: response.data.personsUpdated,
     facesAssigned: response.data.facesAssigned,
     taggedPhotosWithNoFaceData: response.data.taggedPhotosWithNoFaceData,
-    taggedPhotosNeverScanned: response.data.taggedPhotosNeverScanned,
+    taggedPhotosNeverScannedImages: response.data.taggedPhotosNeverScannedImages,
+    taggedPhotosNeverScannedVideos: response.data.taggedPhotosNeverScannedVideos,
   };
+};
+
+/** Resets faces_processed_at for manually-tagged photos that were scanned but found zero
+ *  faces (images/RAW only) — see resetFacesForFacelessTaggedPhotos()'s doc comment in
+ *  apps/worker/src/faceClustering.ts. Lets the next "Scan Library for Faces" pass re-detect
+ *  them with the fixed, full-resolution-original backfill logic (2026-08-06) rather than the
+ *  smaller preview image the backfill used to (and may have missed faces on) before that fix. */
+export const rescanFacelessTaggedPhotos = async (): Promise<{ photosReset: number }> => {
+  const response = await api.post<{ success: boolean; photosReset: number }>(
+    '/admin/people/rescan-faceless-tagged-photos',
+    undefined,
+    { headers: getAdminHeaders() }
+  );
+  return { photosReset: response.data.photosReset };
 };
 
 /** Lightweight list of every NAMED person (regardless of face_count) — used to populate the
