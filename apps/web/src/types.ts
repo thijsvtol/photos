@@ -159,6 +159,10 @@ export interface Collaborator {
   cover_file_type?: string | null;
   cover_cache_version?: number | null;
   cover_event_slug?: string | null;
+  /** id of this collaborator's linked person_clusters row (see linked_user_email), if any — lets
+   *  the collaborator detail modal offer a "View photos of X" link into the Timeline's people
+   *  filter (?people=<person_id>) for this specific person. */
+  person_id?: number | null;
 }
 
 export interface InviteCollaboratorRequest {

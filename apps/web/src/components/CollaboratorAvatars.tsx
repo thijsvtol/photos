@@ -1,3 +1,6 @@
+import { useState } from 'react';
+import { Link } from 'react-router-dom';
+import { X, Images } from 'lucide-react';
 import { UserAvatar } from './UserAvatar';
 import type { Collaborator } from '../types';
 
@@ -13,6 +16,8 @@ interface CollaboratorAvatarsProps {
 }
 
 export function CollaboratorAvatars({ collaborators, size = 10, showLabel = true }: CollaboratorAvatarsProps) {
+  const [detailCollaborator, setDetailCollaborator] = useState<Collaborator | null>(null);
+
   if (collaborators.length === 0) return null;
   
   // Determine stacking strategy based on number of collaborators
@@ -40,6 +45,7 @@ export function CollaboratorAvatars({ collaborators, size = 10, showLabel = true
               name={collaborator.name}
               size={size}
               showBorder={true}
+              onClick={() => setDetailCollaborator(collaborator)}
               coverPhoto={
                 collaborator.cover_photo_id && collaborator.cover_event_slug
                   ? {
@@ -85,6 +91,69 @@ export function CollaboratorAvatars({ collaborators, size = 10, showLabel = true
         <span className="ml-3 text-sm text-gray-600 dark:text-gray-400">
           {total} {total === 1 ? 'collaborator' : 'collaborators'}
         </span>
+      )}
+
+      {/* Collaborator detail modal — clicking any avatar above opens this instead of nothing
+          happening (avatars used to be purely a hover-tooltip display). Offers a "View photos
+          of X" link into the Timeline's people filter (?people=<person_id>) when this
+          collaborator has a linked, identified person — the same access control the Timeline
+          filter itself already enforces (see GET /api/people/named) applies there, so this link
+          is safe to show to anyone who can already see the collaborator list. */}
+      {detailCollaborator && (
+        <div
+          className="fixed inset-0 z-[110] flex items-center justify-center p-4 bg-black/60"
+          onClick={() => setDetailCollaborator(null)}
+        >
+          <div
+            className="bg-white dark:bg-gray-800 rounded-xl shadow-xl max-w-xs w-full p-5"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex justify-end">
+              <button
+                onClick={() => setDetailCollaborator(null)}
+                className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-200"
+                aria-label="Close"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            <div className="flex flex-col items-center -mt-2">
+              <UserAvatar
+                email={detailCollaborator.email}
+                name={detailCollaborator.name}
+                size={20}
+                coverPhoto={
+                  detailCollaborator.cover_photo_id && detailCollaborator.cover_event_slug
+                    ? {
+                        photoId: detailCollaborator.cover_photo_id,
+                        eventSlug: detailCollaborator.cover_event_slug,
+                        fileType: detailCollaborator.cover_file_type,
+                        cacheVersion: detailCollaborator.cover_cache_version,
+                      }
+                    : null
+                }
+              />
+              <h3 className="mt-3 text-lg font-semibold text-gray-900 dark:text-white">
+                {detailCollaborator.name || 'Collaborator'}
+              </h3>
+              <p className="text-sm text-gray-500 dark:text-gray-400 capitalize">{detailCollaborator.role}</p>
+
+              {detailCollaborator.person_id ? (
+                <Link
+                  to={`/timeline?people=${detailCollaborator.person_id}`}
+                  onClick={() => setDetailCollaborator(null)}
+                  className="mt-4 w-full flex items-center justify-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition text-sm font-medium"
+                >
+                  <Images className="w-4 h-4" /> View photos of {(detailCollaborator.name || 'them').split(' ')[0]}
+                </Link>
+              ) : (
+                <p className="mt-4 text-xs text-gray-400 dark:text-gray-500 text-center">
+                  This collaborator isn't linked to an identified person yet, so their photos can't be filtered for.
+                </p>
+              )}
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );

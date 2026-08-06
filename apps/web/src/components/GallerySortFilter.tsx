@@ -1,9 +1,14 @@
 import { useState } from 'react';
-import { X, CheckSquare, Heart, Star, Download, Trash2, Loader2, Copy, Search, Grid3X3, Grid2X2, LayoutGrid, Image, Video, LayoutList, SlidersHorizontal, MapPin, Users } from 'lucide-react';
+import { X, CheckSquare, Heart, Star, Download, Trash2, Loader2, Copy, Search, Grid3X3, Grid2X2, LayoutGrid, Image, Video, LayoutList, SlidersHorizontal, MapPin, Users, Check } from 'lucide-react';
 import { Capacitor } from '@capacitor/core';
 
 type DensityLevel = 'comfortable' | 'default' | 'dense';
 export type MediaTypeFilter = 'all' | 'photos' | 'videos';
+
+interface SimplePerson {
+  id: number;
+  name: string;
+}
 
 interface GallerySortFilterProps {
   sortBy: string;
@@ -33,6 +38,14 @@ interface GallerySortFilterProps {
   isGlobalAdmin?: boolean;
   density?: DensityLevel;
   onDensityChange?: (density: DensityLevel) => void;
+  /** People filter — folded into this shared sort/filter bar (rather than its own separate
+   *  chips-row above the gallery, which is what EventGallery/Timeline each used to render
+   *  independently) so filtering by person lives in the same place as every other filter
+   *  control instead of being yet another distinct row. Omit `namedPeople` entirely to hide
+   *  this control (e.g. non-admin EventGallery visitors). */
+  namedPeople?: SimplePerson[];
+  selectedPersonIds?: Set<number>;
+  onTogglePerson?: (personId: number) => void;
 }
 
 /**
@@ -62,6 +75,9 @@ export function GallerySortFilter({
   isGlobalAdmin = false,
   density,
   onDensityChange,
+  namedPeople,
+  selectedPersonIds,
+  onTogglePerson,
 }: GallerySortFilterProps) {
   const isAndroid = Capacitor.getPlatform() === 'android';
   // On mobile, the media-type filter + grid-density controls are tucked into a
@@ -70,8 +86,12 @@ export function GallerySortFilter({
   // one line and wrapped messily on narrow screens. On sm+ screens this row is
   // always shown regardless of this state (see `sm:flex` below).
   const [showMobileFilters, setShowMobileFilters] = useState(false);
-  const hasSecondRow = Boolean(onMediaTypeFilterChange) || Boolean(density && onDensityChange);
-  const hasActiveMobileFilter = mediaTypeFilter !== 'all';
+  const [showPeoplePicker, setShowPeoplePicker] = useState(false);
+  const [peopleSearchQuery, setPeopleSearchQuery] = useState('');
+  const hasPeopleFilter = Boolean(namedPeople && onTogglePerson);
+  const hasSecondRow = Boolean(onMediaTypeFilterChange) || Boolean(density && onDensityChange) || hasPeopleFilter;
+  const hasActiveMobileFilter = mediaTypeFilter !== 'all' || (selectedPersonIds?.size ?? 0) > 0;
+  const selectedPeople = (namedPeople || []).filter((p) => selectedPersonIds?.has(p.id));
   
   return (
     <>
@@ -359,6 +379,87 @@ export function GallerySortFilter({
                 </button>
               </div>
             )}
+
+            {/* People filter — a searchable popover instead of a separate always-visible
+                chips row, folding it into the same sort/filter bar as everything else. */}
+            {hasPeopleFilter && (
+              <div className="relative">
+                <button
+                  onClick={() => setShowPeoplePicker((v) => !v)}
+                  className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium border transition-colors ${
+                    selectedPeople.length > 0
+                      ? 'bg-blue-100 dark:bg-blue-900/40 border-blue-300 dark:border-blue-700 text-blue-600 dark:text-blue-400'
+                      : 'border-gray-300 dark:border-gray-600 text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300'
+                  }`}
+                  aria-expanded={showPeoplePicker}
+                >
+                  <Users className="w-4 h-4" />
+                  {selectedPeople.length > 0 ? `${selectedPeople.length} ${selectedPeople.length === 1 ? 'person' : 'people'}` : 'People'}
+                </button>
+
+                {showPeoplePicker && (
+                  <div className="absolute left-0 top-full mt-2 w-64 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-lg p-3 z-30">
+                    <p className="text-xs text-gray-500 dark:text-gray-400 mb-2">
+                      Selecting multiple people only shows photos where they're all together.
+                    </p>
+                    <input
+                      type="text"
+                      value={peopleSearchQuery}
+                      onChange={(e) => setPeopleSearchQuery(e.target.value)}
+                      placeholder="Search people…"
+                      className="w-full mb-2 px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white rounded-lg placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      autoFocus
+                    />
+                    <div className="max-h-56 overflow-y-auto space-y-1">
+                      {(namedPeople || []).length === 0 ? (
+                        <p className="text-sm text-gray-500 dark:text-gray-400 py-2 text-center">No named people yet.</p>
+                      ) : (
+                        (namedPeople || [])
+                          .filter((p) => p.name.toLowerCase().includes(peopleSearchQuery.trim().toLowerCase()))
+                          .map((p) => {
+                            const selected = selectedPersonIds?.has(p.id) ?? false;
+                            return (
+                              <button
+                                key={p.id}
+                                onClick={() => onTogglePerson?.(p.id)}
+                                className={`w-full flex items-center justify-between gap-2 px-3 py-2 rounded-lg text-sm text-left transition ${
+                                  selected
+                                    ? 'bg-blue-600 text-white'
+                                    : 'bg-gray-50 dark:bg-gray-700/60 text-gray-800 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700'
+                                }`}
+                              >
+                                <span>{p.name}</span>
+                                {selected && <Check className="w-4 h-4 shrink-0" />}
+                              </button>
+                            );
+                          })
+                      )}
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Selected-people chips (only when the people filter is active at all) */}
+        {hasPeopleFilter && selectedPeople.length > 0 && (
+          <div className="flex flex-wrap items-center gap-2 mt-3 pt-3 border-t border-gray-100 dark:border-gray-700">
+            {selectedPeople.map((p) => (
+              <span
+                key={p.id}
+                className="flex items-center gap-1 pl-3 pr-1.5 py-1 bg-blue-100 dark:bg-blue-900/40 text-blue-800 dark:text-blue-300 text-sm rounded-full"
+              >
+                {p.name}
+                <button
+                  onClick={() => onTogglePerson?.(p.id)}
+                  className="p-0.5 rounded-full hover:bg-blue-200 dark:hover:bg-blue-800 transition"
+                  aria-label={`Remove ${p.name} filter`}
+                >
+                  <X className="w-3.5 h-3.5" />
+                </button>
+              </span>
+            ))}
           </div>
         )}
       </div>

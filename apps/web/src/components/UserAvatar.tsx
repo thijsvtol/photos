@@ -15,9 +15,12 @@ interface UserAvatarProps {
     fileType?: string | null;
     cacheVersion?: number | null;
   } | null;
+  /** Makes the avatar an actual clickable button (e.g. to open a collaborator detail modal)
+   *  instead of a plain hover-only display. */
+  onClick?: () => void;
 }
 
-export function UserAvatar({ email, name, size = 10, showBorder = false, coverPhoto }: UserAvatarProps) {
+export function UserAvatar({ email, name, size = 10, showBorder = false, coverPhoto, onClick }: UserAvatarProps) {
   const initials = getInitials(name, email);
   const colorClass = getAvatarColor(email);
   // Never show the raw email address in a public-facing tooltip/title — only the display name,
@@ -31,6 +34,10 @@ export function UserAvatar({ email, name, size = 10, showBorder = false, coverPh
   
   return (
     <div
+      onClick={onClick}
+      role={onClick ? 'button' : undefined}
+      tabIndex={onClick ? 0 : undefined}
+      onKeyDown={onClick ? (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onClick(); } } : undefined}
       className={`
         ${sizeClass} 
         ${textSizeClass}
@@ -41,7 +48,7 @@ export function UserAvatar({ email, name, size = 10, showBorder = false, coverPh
         justify-center 
         text-white 
         font-semibold 
-        cursor-default 
+        ${onClick ? 'cursor-pointer' : 'cursor-default'} 
         transition-transform 
         hover:scale-110 
         hover:z-10
