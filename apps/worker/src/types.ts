@@ -187,6 +187,7 @@ export interface CollaboratorWithUser {
   cover_cache_version?: number | null;
   cover_event_slug?: string | null;
   person_id?: number | null;
+  person_name?: string | null;
 }
 
 // Request to invite a collaborator

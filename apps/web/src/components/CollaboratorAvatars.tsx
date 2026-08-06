@@ -43,6 +43,7 @@ export function CollaboratorAvatars({ collaborators, size = 10, showLabel = true
             <UserAvatar
               email={collaborator.email}
               name={collaborator.name}
+              fallbackName={collaborator.person_name}
               size={size}
               showBorder={true}
               onClick={() => setDetailCollaborator(collaborator)}
@@ -121,6 +122,7 @@ export function CollaboratorAvatars({ collaborators, size = 10, showLabel = true
               <UserAvatar
                 email={detailCollaborator.email}
                 name={detailCollaborator.name}
+                fallbackName={detailCollaborator.person_name}
                 size={20}
                 coverPhoto={
                   detailCollaborator.cover_photo_id && detailCollaborator.cover_event_slug
@@ -134,7 +136,7 @@ export function CollaboratorAvatars({ collaborators, size = 10, showLabel = true
                 }
               />
               <h3 className="mt-3 text-lg font-semibold text-gray-900 dark:text-white">
-                {detailCollaborator.name || 'Collaborator'}
+                {detailCollaborator.name || detailCollaborator.person_name || 'Collaborator'}
               </h3>
               <p className="text-sm text-gray-500 dark:text-gray-400 capitalize">{detailCollaborator.role}</p>
 
@@ -144,7 +146,7 @@ export function CollaboratorAvatars({ collaborators, size = 10, showLabel = true
                   onClick={() => setDetailCollaborator(null)}
                   className="mt-4 w-full flex items-center justify-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition text-sm font-medium"
                 >
-                  <Images className="w-4 h-4" /> View photos of {(detailCollaborator.name || 'them').split(' ')[0]}
+                  <Images className="w-4 h-4" /> View photos of {(detailCollaborator.name || detailCollaborator.person_name || 'them').split(' ')[0]}
                 </Link>
               ) : (
                 <p className="mt-4 text-xs text-gray-400 dark:text-gray-500 text-center">

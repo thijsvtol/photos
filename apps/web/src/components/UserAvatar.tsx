@@ -18,15 +18,21 @@ interface UserAvatarProps {
   /** Makes the avatar an actual clickable button (e.g. to open a collaborator detail modal)
    *  instead of a plain hover-only display. */
   onClick?: () => void;
+  /** Name of this account's linked person (see person_clusters.linked_user_email), used as a
+   *  display-name fallback when `name` (the account's own name) isn't set yet — still strictly
+   *  better than the generic "Collaborator" placeholder for the exact same real person. Only
+   *  used when `name` is empty; never overrides an account's own name. */
+  fallbackName?: string | null;
 }
 
-export function UserAvatar({ email, name, size = 10, showBorder = false, coverPhoto, onClick }: UserAvatarProps) {
-  const initials = getInitials(name, email);
+export function UserAvatar({ email, name, size = 10, showBorder = false, coverPhoto, onClick, fallbackName }: UserAvatarProps) {
+  const initials = getInitials(name || fallbackName || null, email);
   const colorClass = getAvatarColor(email);
-  // Never show the raw email address in a public-facing tooltip/title — only the display name,
-  // or a generic fallback for someone who hasn't set one yet (see the "force a name on login"
-  // flow, which should make this fallback increasingly rare over time).
-  const displayName = name || 'Collaborator';
+  // Never show the raw email address in a public-facing tooltip/title — only the display name
+  // (this account's own, or its linked person's as a fallback — see `fallbackName`'s doc
+  // comment), or a generic label for someone with neither yet (see the "force a name on login"
+  // flow, which should make this last case increasingly rare over time).
+  const displayName = name || fallbackName || 'Collaborator';
   
   // Generate size classes
   const sizeClass = `h-${size} w-${size}`;

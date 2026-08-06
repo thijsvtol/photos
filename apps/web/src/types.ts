@@ -163,6 +163,12 @@ export interface Collaborator {
    *  the collaborator detail modal offer a "View photos of X" link into the Timeline's people
    *  filter (?people=<person_id>) for this specific person. */
   person_id?: number | null;
+  /** Name of that linked person, if any — used as a display-name FALLBACK when this
+   *  collaborator's own account has no name set (see the "force a name on login" flow, which
+   *  should make this fallback increasingly rare) but has already been identified/named as a
+   *  person elsewhere in the library. Strictly better than the generic "Collaborator"
+   *  placeholder for the same real person. */
+  person_name?: string | null;
 }
 
 export interface InviteCollaboratorRequest {

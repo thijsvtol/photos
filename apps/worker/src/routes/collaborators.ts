@@ -39,12 +39,16 @@ app.use('/*', requireFeature('enableCollaborators'));
  * Get all collaborators for an event
  * Public endpoint - allows anyone who can view the event to see collaborators
  *
- * Includes the collaborator's linked person's id + cover photo (person_clusters, via
+ * Includes the collaborator's linked person's id + cover photo + name (person_clusters, via
  * linked_user_email — see AdminPersonDetail's "Linked account" section for how that link is
  * set) so the public-facing collaborator display (CollaboratorAvatars.tsx) can show an actual
  * photo of them instead of only ever falling back to initials, and so its "View photos of X"
  * detail modal can deep-link into the combined Timeline/Search page's people filter
- * (?people=<person_id>) for that person.
+ * (?people=<person_id>) for that person. `person_name` is specifically a fallback display name
+ * for a collaborator who hasn't set their own account name yet (see the "force a name on
+ * login" flow) but HAS already been identified/named as a person elsewhere in the library —
+ * showing that name is strictly better than the generic "Collaborator" placeholder, and no
+ * less accurate (it's the same real person either way).
  */
 app.get('/api/events/:slug/collaborators', async (c) => {
   const slug = c.req.param('slug')!;
@@ -69,6 +73,7 @@ app.get('/api/events/:slug/collaborators', async (c) => {
         u.email,
         u.name,
         pc.id as person_id,
+        pc.name as person_name,
         p.id as cover_photo_id,
         p.file_type as cover_file_type,
         p.cache_version as cover_cache_version,
