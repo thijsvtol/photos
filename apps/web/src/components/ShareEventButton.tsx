@@ -133,7 +133,7 @@ export function ShareEventButton({ event, slug, photos, canInvite = false }: Sha
     <div className="flex items-center gap-2">
       <button
         onClick={() => void shareEvent()}
-        className="px-3 py-2 sm:px-4 sm:py-2.5 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition flex items-center gap-2 text-sm font-medium"
+        className="px-3 py-2 sm:px-4 sm:py-2.5 bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-200 rounded-full hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors flex items-center gap-2 text-sm font-medium"
         aria-label="Share album"
       >
         <Share2 className="w-4 h-4 sm:w-5 sm:h-5" />
@@ -143,7 +143,7 @@ export function ShareEventButton({ event, slug, photos, canInvite = false }: Sha
       {canInvite && (
         <button
           onClick={() => setShowCollaboratorModal(true)}
-          className="px-3 py-2 sm:px-4 sm:py-2.5 bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-200 rounded-lg hover:bg-gray-200 dark:hover:bg-gray-600 transition flex items-center gap-2 text-sm font-medium"
+          className="px-3 py-2 sm:px-4 sm:py-2.5 bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-200 rounded-full hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors flex items-center gap-2 text-sm font-medium"
           aria-label="Manage collaborators"
         >
           <UserPlus className="w-4 h-4 sm:w-5 sm:h-5" />

@@ -1441,10 +1441,25 @@ const EventGallery: React.FC = () => {
             {event && (
               <div className="flex items-center gap-2 flex-wrap justify-end">
                 {event.visibility === 'collaborators_only' && collaborators.length > 0 && (
-                  <CollaboratorAvatars collaborators={collaborators} size={8} showLabel={false} />
+                  <>
+                    <CollaboratorAvatars collaborators={collaborators} size={8} showLabel={false} />
+                    <div className="w-px h-6 bg-gray-200 dark:bg-gray-700 mx-0.5" />
+                  </>
                 )}
                 {collaboratorRole && !isAdmin && (
                   <span className="text-xs text-gray-500 dark:text-gray-400">({collaboratorRole})</span>
+                )}
+                {/* One consistent style for every action here: neutral gray pills, except
+                    Upload — the single primary/most-frequent action — which is the only blue
+                    one. Ordered by how often each is used (Upload first, Settings last) rather
+                    than the previous ad-hoc order/mismatched colors (blue Share, indigo Upload,
+                    gray everything else) that looked like a mess of unrelated buttons. */}
+                {canUpload && (
+                  <label className="inline-flex items-center gap-2 px-3 py-2 sm:px-4 sm:py-2.5 bg-blue-600 text-white rounded-full hover:bg-blue-700 transition-colors text-sm font-medium cursor-pointer">
+                    <Upload className="w-4 h-4 sm:w-5 sm:h-5" />
+                    <span className="hidden sm:inline">Upload</span>
+                    <input type="file" multiple accept="image/jpeg,video/mp4,.cr2,.cr3,.crw,.nef,.nrw,.arw,.srf,.sr2,.dng,.raf,.orf,.rw2,.pef,.ptx,.srw,.raw,.rwl,.erf,.kdc,.dcr,.mrw,.x3f,.3fr,.mef,.mos,.iiq" onChange={handleFileInput} className="hidden" />
+                  </label>
                 )}
                 {filteredPhotos.length > 0 && (
                   <CastButton
@@ -1466,19 +1481,12 @@ const EventGallery: React.FC = () => {
                   photos={photos}
                   canInvite={event.visibility === 'collaborators_only' && canCreateInvite}
                 />
-                {canUpload && (
-                  <label className="inline-flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-full hover:bg-indigo-700 transition-colors text-sm font-medium shadow-sm cursor-pointer">
-                    <Upload className="w-4 h-4" />
-                    Upload
-                    <input type="file" multiple accept="image/jpeg,video/mp4,.cr2,.cr3,.crw,.nef,.nrw,.arw,.srf,.sr2,.dng,.raf,.orf,.rw2,.pef,.ptx,.srw,.raw,.rwl,.erf,.kdc,.dcr,.mrw,.x3f,.3fr,.mef,.mos,.iiq" onChange={handleFileInput} className="hidden" />
-                  </label>
-                )}
                 {isAdmin && (
                   <button
                     onClick={() => setShowEventSettings(true)}
-                    className="inline-flex items-center gap-2 px-3 py-2 bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300 rounded-full hover:bg-gray-300 dark:hover:bg-gray-600 transition-colors text-sm font-medium"
+                    className="inline-flex items-center gap-2 px-3 py-2 sm:px-4 sm:py-2.5 bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-200 rounded-full hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors text-sm font-medium"
                   >
-                    <Settings className="w-4 h-4" />
+                    <Settings className="w-4 h-4 sm:w-5 sm:h-5" />
                     <span className="hidden sm:inline">Settings</span>
                   </button>
                 )}

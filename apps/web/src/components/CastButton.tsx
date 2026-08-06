@@ -84,12 +84,12 @@ export const CastButton: React.FC<CastButtonProps> = ({ getMedia, slug, classNam
       <button
         onClick={handleClick}
         disabled={busy}
-        className={`flex items-center gap-2 px-3 py-1.5 text-sm font-medium rounded-full transition disabled:opacity-60 ${
-          connected ? 'bg-blue-600 text-white hover:bg-blue-700' : 'bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-300 dark:hover:bg-gray-600'
+        className={`flex items-center gap-2 px-3 py-2 sm:px-4 sm:py-2.5 text-sm font-medium rounded-full transition-colors disabled:opacity-60 ${
+          connected ? 'bg-blue-600 text-white hover:bg-blue-700' : 'bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-200 hover:bg-gray-200 dark:hover:bg-gray-600'
         } ${className}`}
       >
-        <Cast className="w-4 h-4" />
-        {connected ? 'Casting' : 'Cast'}
+        <Cast className="w-4 h-4 sm:w-5 sm:h-5" />
+        <span className="hidden sm:inline">{connected ? 'Casting' : 'Cast'}</span>
       </button>
       {ConfirmDialog}
       </>
