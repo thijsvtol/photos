@@ -33,7 +33,6 @@ export function UserAvatar({ email, name, size = 10, showBorder = false, coverPh
     <div
       className={`
         ${sizeClass} 
-        ${coverPhoto ? '' : colorClass} 
         ${textSizeClass}
         ${showBorder ? 'ring-2 ring-white dark:ring-gray-900' : ''}
         rounded-full 
@@ -48,19 +47,24 @@ export function UserAvatar({ email, name, size = 10, showBorder = false, coverPh
         hover:z-10
         relative
         group
-        overflow-hidden
       `}
       title={displayName}
     >
-      {coverPhoto ? (
-        <img
-          src={getPreviewUrl(coverPhoto.eventSlug, coverPhoto.photoId, coverPhoto.fileType || undefined, coverPhoto.cacheVersion || undefined)}
-          alt={displayName}
-          className="w-full h-full object-cover"
-        />
-      ) : (
-        initials
-      )}
+      {/* overflow-hidden is scoped to this inner wrapper (not the outer div) so it only clips
+          the cover photo image to the circle — putting it on the outer div would also clip the
+          absolutely-positioned tooltip below (a sibling relative to that same container),
+          making it never actually appear on hover despite the CSS otherwise being correct. */}
+      <div className={`w-full h-full rounded-full flex items-center justify-center overflow-hidden ${coverPhoto ? '' : colorClass}`}>
+        {coverPhoto ? (
+          <img
+            src={getPreviewUrl(coverPhoto.eventSlug, coverPhoto.photoId, coverPhoto.fileType || undefined, coverPhoto.cacheVersion || undefined)}
+            alt={displayName}
+            className="w-full h-full object-cover"
+          />
+        ) : (
+          initials
+        )}
+      </div>
       
       {/* Tooltip */}
       <div className="
