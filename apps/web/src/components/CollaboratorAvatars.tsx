@@ -3,9 +3,16 @@ import type { Collaborator } from '../types';
 
 interface CollaboratorAvatarsProps {
   collaborators: Collaborator[];
+  /** Tailwind size value passed to each UserAvatar (default 10, i.e. h-10 w-10). Use a smaller
+   *  value (e.g. 8) to fit inline in a compact header row alongside other actions. */
+  size?: number;
+  /** Whether to show the "N collaborators" text label next to the avatars. Defaults to true;
+   *  set false for a compact inline placement where the count would just be redundant clutter
+   *  (each avatar's tooltip still shows who they are on hover). */
+  showLabel?: boolean;
 }
 
-export function CollaboratorAvatars({ collaborators }: CollaboratorAvatarsProps) {
+export function CollaboratorAvatars({ collaborators, size = 10, showLabel = true }: CollaboratorAvatarsProps) {
   if (collaborators.length === 0) return null;
   
   // Determine stacking strategy based on number of collaborators
@@ -17,6 +24,7 @@ export function CollaboratorAvatars({ collaborators }: CollaboratorAvatarsProps)
   
   // Dynamic spacing: comfortable for ≤5, compact for 6-15
   const overlapClass = total <= 5 ? '-ml-2' : '-ml-3';
+  const moreSizeClass = `h-${size} w-${size}`;
   
   return (
     <div className="flex items-center">
@@ -30,7 +38,7 @@ export function CollaboratorAvatars({ collaborators }: CollaboratorAvatarsProps)
             <UserAvatar
               email={collaborator.email}
               name={collaborator.name}
-              size={10}
+              size={size}
               showBorder={true}
               coverPhoto={
                 collaborator.cover_photo_id && collaborator.cover_event_slug
@@ -50,8 +58,7 @@ export function CollaboratorAvatars({ collaborators }: CollaboratorAvatarsProps)
           <div
             className={`
               ${overlapClass}
-              h-10 
-              w-10 
+              ${moreSizeClass} 
               rounded-full 
               bg-gray-400 
               dark:bg-gray-600 
@@ -74,9 +81,11 @@ export function CollaboratorAvatars({ collaborators }: CollaboratorAvatarsProps)
         )}
       </div>
       
-      <span className="ml-3 text-sm text-gray-600 dark:text-gray-400">
-        {total} {total === 1 ? 'collaborator' : 'collaborators'}
-      </span>
+      {showLabel && (
+        <span className="ml-3 text-sm text-gray-600 dark:text-gray-400">
+          {total} {total === 1 ? 'collaborator' : 'collaborators'}
+        </span>
+      )}
     </div>
   );
 }

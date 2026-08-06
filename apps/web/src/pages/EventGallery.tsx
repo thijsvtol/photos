@@ -45,7 +45,8 @@ const EventGallery: React.FC = () => {
   const [sortBy, setSortBy] = useState('date_desc');
   const [searchQuery, setSearchQuery] = useState('');
   const [mediaTypeFilter, setMediaTypeFilter] = useState<'all' | 'photos' | 'videos'>('all');
-  // People filter (admin-only, see SearchPage.tsx for why full names are gated to admins) —
+  // People filter (admin-only, see Timeline.tsx's people filter for why full names are gated to
+  // admins there but public on the combined Timeline/Search page) —
   // requires ALL selected people to be in a photo (see the worker route's doc comment for why
   // AND, not OR, is the right default for multi-select). Reuses the same `namedPeople` list
   // fetched (lazily, below) for the "Tag people" bulk action.
@@ -1409,9 +1410,13 @@ const EventGallery: React.FC = () => {
             ← Back to Events
           </Link>
           
-          {/* Header: Title, Badge, and Share Button */}
-          <div className="flex justify-between items-start gap-4 mb-3">
-            <div className="flex-1 flex items-center gap-3 flex-wrap">
+          {/* Header: everything about this event (title, badge, collaborators, and every
+              action) lives in ONE wrapping row instead of stacking title/collaborators/actions
+              as three separate full-width rows — this used to eat a lot of vertical space
+              before any photos were even visible, especially once the People filter/action-bar
+              functionality was added on top. */}
+          <div className="flex justify-between items-start gap-3 mb-3 flex-wrap">
+            <div className="flex-1 min-w-0 flex items-center gap-3 flex-wrap">
               <h1 className="text-2xl sm:text-3xl font-semibold tracking-tight text-gray-900 dark:text-white">{event?.name}</h1>
               {event && (
                 <span className={`px-2.5 py-0.5 text-xs font-medium rounded-full ${
@@ -1434,7 +1439,13 @@ const EventGallery: React.FC = () => {
               )}
             </div>
             {event && (
-              <div className="flex items-center gap-2 flex-shrink-0">
+              <div className="flex items-center gap-2 flex-wrap justify-end">
+                {event.visibility === 'collaborators_only' && collaborators.length > 0 && (
+                  <CollaboratorAvatars collaborators={collaborators} size={8} showLabel={false} />
+                )}
+                {collaboratorRole && !isAdmin && (
+                  <span className="text-xs text-gray-500 dark:text-gray-400">({collaboratorRole})</span>
+                )}
                 {filteredPhotos.length > 0 && (
                   <CastButton
                     slug={slug!}
@@ -1455,46 +1466,28 @@ const EventGallery: React.FC = () => {
                   photos={photos}
                   canInvite={event.visibility === 'collaborators_only' && canCreateInvite}
                 />
+                {canUpload && (
+                  <label className="inline-flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-full hover:bg-indigo-700 transition-colors text-sm font-medium shadow-sm cursor-pointer">
+                    <Upload className="w-4 h-4" />
+                    Upload
+                    <input type="file" multiple accept="image/jpeg,video/mp4,.cr2,.cr3,.crw,.nef,.nrw,.arw,.srf,.sr2,.dng,.raf,.orf,.rw2,.pef,.ptx,.srw,.raw,.rwl,.erf,.kdc,.dcr,.mrw,.x3f,.3fr,.mef,.mos,.iiq" onChange={handleFileInput} className="hidden" />
+                  </label>
+                )}
+                {isAdmin && (
+                  <button
+                    onClick={() => setShowEventSettings(true)}
+                    className="inline-flex items-center gap-2 px-3 py-2 bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300 rounded-full hover:bg-gray-300 dark:hover:bg-gray-600 transition-colors text-sm font-medium"
+                  >
+                    <Settings className="w-4 h-4" />
+                    <span className="hidden sm:inline">Settings</span>
+                  </button>
+                )}
               </div>
             )}
           </div>
-
-          {/* Collaborators row */}
-          {event && event.visibility === 'collaborators_only' && collaborators.length > 0 && (
-            <div className="flex items-center gap-3 mb-3">
-              <CollaboratorAvatars collaborators={collaborators} />
-            </div>
-          )}
-
-          {/* Action Buttons Row */}
-          {(canUpload || isAdmin) && (
-            <div className="flex items-center gap-2 flex-wrap">
-              {canUpload && (
-                <label className="inline-flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-full hover:bg-indigo-700 transition-colors text-sm font-medium shadow-sm cursor-pointer">
-                  <Upload className="w-4 h-4" />
-                  Upload
-                  <input type="file" multiple accept="image/jpeg,video/mp4,.cr2,.cr3,.crw,.nef,.nrw,.arw,.srf,.sr2,.dng,.raf,.orf,.rw2,.pef,.ptx,.srw,.raw,.rwl,.erf,.kdc,.dcr,.mrw,.x3f,.3fr,.mef,.mos,.iiq" onChange={handleFileInput} className="hidden" />
-                </label>
-              )}
-              {isAdmin && (
-                <button
-                  onClick={() => setShowEventSettings(true)}
-                  className="inline-flex items-center gap-2 px-3 py-2 bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300 rounded-full hover:bg-gray-300 dark:hover:bg-gray-600 transition-colors text-sm font-medium"
-                >
-                  <Settings className="w-4 h-4" />
-                  <span className="hidden sm:inline">Settings</span>
-                </button>
-              )}
-              {collaboratorRole && !isAdmin && (
-                <span className="text-xs text-gray-500 dark:text-gray-400">
-                  ({collaboratorRole})
-                </span>
-              )}
-            </div>
-          )}
         </div>
 
-        {/* People filter (admin-only — see SearchPage.tsx for why full names aren't shown to
+        {/* People filter (admin-only — see Timeline.tsx for why full names aren't shown to
             everyone) — filters this event's gallery to photos containing every selected person. */}
         {isAdmin && (
           <div className="mb-4">
