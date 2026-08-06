@@ -10,7 +10,7 @@ import AlbumPicker from '../components/AlbumPicker';
 import { addToQueue } from '../uploadQueue';
 import type { UploadQueueItem } from '../types';
 import { backgroundSyncService } from '../services/backgroundSync';
-import { extractMp4CreationTime } from '../utils/videoMetadata';
+import { extractMp4CreationTime, normalizeVideoFileType } from '../utils/videoMetadata';
 
 interface SharedFile {
   name: string;
@@ -302,7 +302,7 @@ export default function ShareUpload() {
           id,
           eventSlug: albumSlug,
           file,
-          fileType: sharedFile.mimeType,
+          fileType: normalizeVideoFileType(sharedFile.mimeType, sharedFile.name),
           status: 'pending',
           progress: 0,
           photoId,

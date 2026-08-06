@@ -71,3 +71,34 @@ export function extractMp4CreationTime(buffer: ArrayBuffer): string | undefined 
     return undefined;
   }
 }
+
+/**
+ * True for any file the app should treat as a video, regardless of the exact
+ * MIME type the browser/OS reported — MOV (QuickTime, `video/quicktime`) is
+ * checked by extension too since Capacitor's SAF file listing and Android's
+ * share-intent MIME resolution don't always agree with what a browser
+ * `<input type="file">` reports.
+ */
+export function isVideoFile(fileType: string | undefined | null, fileName: string | undefined | null): boolean {
+  if (fileType === 'video/mp4' || fileType === 'video/quicktime') return true;
+  return /\.(mp4|mov)$/i.test(fileName || '');
+}
+
+/**
+ * Normalizes any recognized video file to the single `'video/mp4'` MIME type
+ * the rest of the pipeline (R2 storage keys, media routes, the nightly
+ * HEVC-compatibility transcode job, etc.) exclusively understands.
+ *
+ * MOV (QuickTime) and MP4 share the same underlying ISO base media container
+ * format — MOV is effectively QuickTime's own dialect of it — so simply
+ * relabeling a `.mov` file's MIME type to `video/mp4` (without re-encoding)
+ * works for playback in practice; if its actual codec (e.g. HEVC) isn't
+ * Chromecast-compatible, the existing nightly transcode job
+ * (scripts/transcode-videos.sh) already re-encodes any `video/mp4`-typed
+ * photo row exactly the same way it already does for HEVC iPhone videos
+ * uploaded with a native `.mp4` extension — no separate handling needed.
+ * Anything else (image, RAW, or an unrecognized type) is returned unchanged.
+ */
+export function normalizeVideoFileType(fileType: string, fileName: string | undefined | null): string {
+  return isVideoFile(fileType, fileName) ? 'video/mp4' : fileType;
+}

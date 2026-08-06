@@ -13,7 +13,7 @@ import { startUpload, uploadPart, completeUpload, cancelUpload as cancelUploadAp
 import { addToQueue, updateQueueItem, getQueueItems, getPendingUploads, removeFromQueue, clearCompletedUploads } from '../uploadQueue';
 import { createPreview, computeFileHash } from '../imageUtils';
 import { isRawFile, isRawFileType, getRawFileType, createRawPreview, createRawPlaceholder } from '../rawImageUtils';
-import { extractMp4CreationTime } from '../utils/videoMetadata';
+import { extractMp4CreationTime, isVideoFile, normalizeVideoFileType } from '../utils/videoMetadata';
 import type { UploadQueueItem } from '../types';
 
 /** A file the user tried to upload that isn't a supported image/video/RAW type. */
@@ -235,7 +235,7 @@ class UploadManager {
     const rejected: RejectedUploadFile[] = [];
 
     for (const f of Array.from(files)) {
-      if (f.type === 'image/jpeg' || f.type === 'video/mp4' || isRawFile(f)) {
+      if (f.type === 'image/jpeg' || isVideoFile(f.type, f.name) || isRawFile(f)) {
         supportedFiles.push(f);
       } else {
         rejected.push({
@@ -266,7 +266,7 @@ class UploadManager {
       // with `raw/<ext>` so the rest of the pipeline can tell the worker to
       // store the original with its real extension while still generating a
       // normal JPEG preview.
-      const fileType = isRawFile(file) ? getRawFileType(file) : file.type;
+      const fileType = isRawFile(file) ? getRawFileType(file) : normalizeVideoFileType(file.type, file.name);
 
       const item: UploadQueueItem = {
         id,
@@ -497,8 +497,11 @@ class UploadManager {
         await updateQueueItem(item.id, { photoId });
       }
 
-      // Infer fileType from the File object if not set (folder-sync items)
-      const fileType = item.fileType || item.file.type || 'image/jpeg';
+      // Infer fileType from the File object if not set (folder-sync items) — normalized so a
+      // stray 'video/quicktime' (or similar) that slipped through some other enqueue path never
+      // reaches the backend, which only understands 'video/mp4' for video (see
+      // normalizeVideoFileType()'s doc comment in utils/videoMetadata.ts).
+      const fileType = item.fileType || normalizeVideoFileType(item.file.type, item.file.name) || 'image/jpeg';
       if (!item.fileType) {
         this.updateItem(item.id, { fileType });
         await updateQueueItem(item.id, { fileType });

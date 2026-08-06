@@ -9,6 +9,7 @@ import { startUpload, uploadPart, completeUpload, cancelUpload as cancelUploadAp
 import { folderSyncService } from './folderSync';
 import { uploadManager } from './uploadManager';
 import { createPreview, computeFileHash } from '../imageUtils';
+import { normalizeVideoFileType } from '../utils/videoMetadata';
 import ProgressNotification from '../plugins/ProgressNotification';
 import type { UploadQueueItem } from '../types';
 
@@ -370,8 +371,11 @@ class BackgroundSyncService {
         // Generate photoId if not already set
         photoId = upload.photoId || photoId;
 
-        // Perform chunked upload
-        const isVideo = upload.file.type === 'video/mp4';
+        // Perform chunked upload — normalized so a stray 'video/quicktime' (or similar) that
+        // slipped through some enqueue path is treated the same as any other video (see
+        // normalizeVideoFileType()'s doc comment in utils/videoMetadata.ts).
+        const fileType = normalizeVideoFileType(upload.fileType || upload.file.type, upload.file.name);
+        const isVideo = fileType === 'video/mp4';
         const chunkSize = isVideo ? VIDEO_CHUNK_SIZE : CHUNK_SIZE;
         const totalChunks = Math.ceil(upload.file.size / chunkSize);
         // Reserve the last 20% of progress for the preview upload (images
@@ -411,7 +415,7 @@ class BackgroundSyncService {
           upload.longitude,
           upload.blurPlaceholder,
           false,
-          upload.file.type,
+          fileType,
           fileHash
         );
 

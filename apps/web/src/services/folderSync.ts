@@ -225,6 +225,14 @@ class FolderSyncService {
 
   /**
    * Get MIME type from filename
+   *
+   * 'mov' is normalized straight to 'video/mp4' (not 'video/quicktime') since
+   * that's the only video MIME type the rest of the pipeline — R2 storage
+   * keys, media routes, the nightly HEVC-compatibility transcode job —
+   * understands. See normalizeVideoFileType()'s doc comment in
+   * utils/videoMetadata.ts for why relabeling a MOV file this way (without
+   * re-encoding) is safe: MOV and MP4 share the same underlying container
+   * format.
    */
   private getMimeType(filename: string): string {
     const ext = filename.toLowerCase().split('.').pop();
@@ -237,7 +245,7 @@ class FolderSyncService {
       'heic': 'image/heic',
       'heif': 'image/heif',
       'mp4': 'video/mp4',
-      'mov': 'video/quicktime',
+      'mov': 'video/mp4',
       'avi': 'video/x-msvideo',
       'mkv': 'video/x-matroska',
     };
