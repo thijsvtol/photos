@@ -485,6 +485,31 @@ export const getPeople = async (includeSingles = false): Promise<Person[]> => {
   return response.data.people;
 };
 
+export interface UnattachedPhoto extends Photo {
+  event_slug: string;
+  event_name: string;
+  /** true when this photo has one or more detected-but-unclustered faces (as opposed to zero
+   *  faces detected at all) — see getUnattachedPhotos()'s doc comment in
+   *  apps/worker/src/faceClustering.ts for why both cases still qualify as "unattached" but are
+   *  worth distinguishing in the UI's messaging. */
+  has_unclustered_faces: boolean;
+}
+
+/** Fetches ONE PAGE of photos with no person attached at all (neither an auto-detected face
+ *  assigned to a person nor a manual tag) — powers the People admin page's "Unattached photos"
+ *  view. Cursor-paginated by capture_time, same shape as getTimeline(): pass the previous
+ *  response's `nextCursor` to fetch the next page, `null` once exhausted. */
+export const getUnattachedPhotos = async (
+  cursor: string | null = null,
+  limit = 100
+): Promise<{ photos: UnattachedPhoto[]; nextCursor: string | null }> => {
+  const response = await api.get<{ photos: UnattachedPhoto[]; nextCursor: string | null }>(
+    '/admin/people/unattached-photos',
+    { params: { ...(cursor ? { cursor } : undefined), limit }, headers: getAdminHeaders() }
+  );
+  return response.data;
+};
+
 export interface ClusterDataFace {
   id: number;
   photoId: string;

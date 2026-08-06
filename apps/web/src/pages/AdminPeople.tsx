@@ -436,6 +436,13 @@ const AdminPeople: React.FC = () => {
                   <GraduationCap className="w-4 h-4" /> Learn from Tags
                 </button>
               )}
+              <Link
+                to="/admin/people/unattached"
+                title="Browse photos with nobody identified yet and bulk-assign them to a person"
+                className="px-4 py-2 bg-gray-200 dark:bg-gray-700 text-gray-800 dark:text-gray-200 rounded-lg hover:bg-gray-300 dark:hover:bg-gray-600 transition flex items-center gap-2"
+              >
+                <Users className="w-4 h-4" /> Unattached Photos
+              </Link>
             </div>
           )}
         </div>

@@ -37,6 +37,7 @@ const CastReceiver = lazyWithReload(() => import('./pages/CastReceiver'));
 const SearchPage = lazyWithReload(() => import('./pages/SearchPage'));
 const AdminPeople = lazyWithReload(() => import('./pages/AdminPeople'));
 const AdminPersonDetail = lazyWithReload(() => import('./pages/AdminPersonDetail'));
+const AdminUnattachedPhotos = lazyWithReload(() => import('./pages/AdminUnattachedPhotos'));
 const AdminDashboard = lazyWithReload(() => import('./pages/AdminDashboard'));
 const AdminPhotoManager = lazyWithReload(() => import('./pages/AdminPhotoManager'));
 const AdminTagManager = lazyWithReload(() => import('./pages/AdminTagManager'));
@@ -292,6 +293,7 @@ function App() {
                       <Route path="/cast-receiver" element={<CastReceiver />} />
                       <Route path="/search" element={<SearchPage />} />
                       <Route path="/admin/people" element={<AdminPeople />} />
+                      <Route path="/admin/people/unattached" element={<AdminUnattachedPhotos />} />
                       <Route path="/admin/people/:personId" element={<AdminPersonDetail />} />
                       <Route path="/admin" element={<AdminDashboard />} />
                       <Route path="/admin/tags" element={<AdminTagManager />} />

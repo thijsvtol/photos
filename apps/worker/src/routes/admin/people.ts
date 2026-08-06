@@ -1,7 +1,7 @@
 import { Hono } from 'hono';
 import type { Env, User } from '../../types';
 import { requireAdmin } from '../../auth';
-import { getClusterData, applyClusteringResults, countUnclusteredFaces, getLegacyFaceStats, resetLegacyFaces, mergeClusters, assignPhotosToPerson, resetAllClusters, learnFromManualTags } from '../../faceClustering';
+import { getClusterData, applyClusteringResults, countUnclusteredFaces, getLegacyFaceStats, resetLegacyFaces, mergeClusters, assignPhotosToPerson, resetAllClusters, learnFromManualTags, getUnattachedPhotos } from '../../faceClustering';
 import type { ClusterResult } from '../../faceClustering';
 
 type Variables = {
@@ -160,6 +160,28 @@ app.get('/embedding-model', async (c) => {
   } catch (error) {
     console.error('Error fetching embedding model:', error);
     return c.json({ error: 'Failed to fetch embedding model' }, 500);
+  }
+});
+
+/**
+ * GET /people/unattached-photos
+ *
+ * Paginated list of photos with NO person attached at all (see getUnattachedPhotos()'s doc
+ * comment in faceClustering.ts) — powers the People admin page's "Unattached photos" view, which
+ * lets an admin browse/bulk-select these otherwise-easy-to-miss photos and assign them to a
+ * person directly (reusing POST /people/:personId/photos, the same "Assign to this person"
+ * action already used elsewhere). Cursor-paginated by capture_time, same shape as GET
+ * /api/timeline (`?cursor=`/`?limit=`, response's `nextCursor` is null once exhausted).
+ */
+app.get('/unattached-photos', async (c) => {
+  try {
+    const cursor = c.req.query('cursor') || null;
+    const limit = Math.min(parseInt(c.req.query('limit') || '100', 10) || 100, 300);
+    const result = await getUnattachedPhotos(c.env, cursor, limit);
+    return c.json(result);
+  } catch (error) {
+    console.error('Error fetching unattached photos:', error);
+    return c.json({ error: 'Failed to fetch unattached photos' }, 500);
   }
 });
 

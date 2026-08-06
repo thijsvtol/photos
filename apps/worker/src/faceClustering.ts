@@ -190,6 +190,75 @@ export async function getClusterData(
   return { faces, clusters, nextClusterCursor, nextFaceCursor };
 }
 
+export interface UnattachedPhoto {
+  id: string;
+  original_filename: string;
+  file_type: string;
+  capture_time: string;
+  width: number | null;
+  height: number | null;
+  blur_placeholder: string | null;
+  cache_version: number | null;
+  event_slug: string;
+  event_name: string;
+  has_unclustered_faces: boolean;
+}
+
+/**
+ * Returns ONE PAGE of photos with NO PERSON attached at all — neither an auto-detected face
+ * assigned to a person (photo_faces.person_id) nor a manual tag (photo_person_tags) — across
+ * every event, admin-wide (visibility doesn't matter here; this is admin-only tooling, same as
+ * every other /admin/people/* route). This is the "unattached photos" list surfaced by the
+ * People admin page so an admin can find photos that clustering/tagging has never touched and
+ * bulk-assign them to a person, rather than only ever discovering them one event/photo at a
+ * time. Cursor-paginated by `capture_time` (same descending-cursor pattern as GET /api/timeline)
+ * since a library can have thousands of qualifying photos.
+ *
+ * Deliberately includes photos with detected-but-still-unclustered faces (`photo_faces` rows
+ * that exist but have `person_id IS NULL`) — those photos are just as "nobody to look up by"
+ * from an admin's perspective as photos with zero detected faces (e.g. faces too small/blurry to
+ * cluster confidently yet, or the photo simply predates face detection running on it). The
+ * returned `has_unclustered_faces` flag lets the UI distinguish the two cases in its messaging
+ * (e.g. "3 faces detected, not yet identified" vs. "no faces detected") without changing which
+ * photos qualify — both still need an admin to manually assign them to move forward.
+ */
+export async function getUnattachedPhotos(
+  env: Env,
+  cursor: string | null,
+  limit: number
+): Promise<{ photos: UnattachedPhoto[]; nextCursor: string | null }> {
+  const cursorClause = cursor ? 'AND p.capture_time < ?' : '';
+  const bindings: (string | number)[] = cursor ? [cursor, limit + 1] : [limit + 1];
+
+  const { results } = await env.DB
+    .prepare(`
+      SELECT p.id, p.original_filename, p.file_type, p.capture_time, p.width, p.height,
+             p.blur_placeholder, p.cache_version, e.slug as event_slug, e.name as event_name,
+             EXISTS(SELECT 1 FROM photo_faces pf WHERE pf.photo_id = p.id) as has_unclustered_faces
+      FROM photos p
+      JOIN events e ON p.event_id = e.id
+      WHERE p.deleted_at IS NULL
+        AND p.upload_complete = 1
+        AND p.id NOT IN (
+          SELECT photo_id FROM photo_faces WHERE person_id IS NOT NULL
+          UNION
+          SELECT photo_id FROM photo_person_tags
+        )
+        ${cursorClause}
+      ORDER BY p.capture_time DESC
+      LIMIT ?
+    `)
+    .bind(...bindings)
+    .all<Omit<UnattachedPhoto, 'has_unclustered_faces'> & { has_unclustered_faces: number }>();
+
+  const rows = results || [];
+  const photos = rows.slice(0, limit).map((r) => ({ ...r, has_unclustered_faces: !!r.has_unclustered_faces }));
+  const hasMore = rows.length > limit;
+  const nextCursor = hasMore && photos.length > 0 ? photos[photos.length - 1].capture_time : null;
+
+  return { photos, nextCursor };
+}
+
 /**
  * Unassigns every face from its person and deletes every person cluster — used before a full
  * "Rebuild All (Deep)" reclustering pass, which recomputes every cluster from scratch using
