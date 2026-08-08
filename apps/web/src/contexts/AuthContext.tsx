@@ -2,6 +2,7 @@ import React, { createContext, useContext, useState, useEffect } from 'react';
 import { Capacitor } from '@capacitor/core';
 import { MobileAuthService } from '../services/mobileAuth';
 import { clearTimelineCache } from '../services/timelineCache';
+import { getUserProfile } from '../api';
 
 export interface User {
   id: string;
@@ -45,15 +46,52 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
       if (Capacitor.isNativePlatform()) {
         const storedUser = await MobileAuthService.getUser();
         const hasToken = await MobileAuthService.isAuthenticated();
-        
-        if (storedUser && hasToken) {
-          setUser(storedUser);
+
+        if (!hasToken) {
+          setUser(null);
           setLoading(false);
           return;
         }
-        
-        setUser(null);
-        setLoading(false);
+
+        // Paint from the locally cached user first so startup isn't blocked on
+        // the network.
+        if (storedUser) {
+          setUser(storedUser);
+          setLoading(false);
+        }
+
+        // Then reconcile against the server, which is the source of truth for
+        // `name` and `isAdmin`. The cached copy is written ONCE, at OAuth
+        // callback time, from the token's claims — so anything the user
+        // changes afterwards (notably setting their name via
+        // RequireProfileName) was invisible to it. That made the "enter your
+        // full name" modal reappear on every cold start forever: the name was
+        // saved server-side, but this cache still said `name: undefined`, so
+        // the modal's `!user.name` check kept firing. Refreshing here also
+        // self-heals devices already stuck in that state, without making the
+        // user type their name again.
+        try {
+          const freshUser = await getUserProfile();
+          if (freshUser) {
+            setUser(freshUser);
+            await MobileAuthService.storeUser({
+              id: freshUser.id,
+              email: freshUser.email,
+              name: freshUser.name ?? undefined,
+              isAdmin: freshUser.isAdmin,
+            });
+          } else if (!storedUser) {
+            // Server says nobody is signed in and there's nothing cached.
+            setUser(null);
+          }
+        } catch (err) {
+          // Offline or a transient server error must not sign the user out —
+          // keep whatever was cached.
+          console.warn('[AuthContext] Could not refresh profile, using cached user:', err);
+          if (!storedUser) setUser(null);
+        } finally {
+          setLoading(false);
+        }
         return;
       }
 
@@ -193,6 +231,20 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
   const updateUser = (updatedUser: User) => {
     console.log('[AuthContext] Updating user directly:', updatedUser);
     setUser(updatedUser);
+
+    // Also write through to the native cache. Without this the update lived
+    // only in React state and was lost on the next cold start — the reason
+    // RequireProfileName kept demanding a name the user had already given.
+    if (Capacitor.isNativePlatform()) {
+      MobileAuthService.storeUser({
+        id: updatedUser.id,
+        email: updatedUser.email,
+        name: updatedUser.name ?? undefined,
+        isAdmin: updatedUser.isAdmin,
+      }).catch((err) => {
+        console.warn('[AuthContext] Failed to persist updated user:', err);
+      });
+    }
   };
 
   const value: AuthContextType = {

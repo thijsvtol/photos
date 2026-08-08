@@ -40,10 +40,8 @@ public class SyncNotifier {
     /** Progress updates are coalesced to at most one per this interval. */
     private static final long UPDATE_THROTTLE_MS = 1000L;
 
-    /** Stops the run in flight, leaving the schedule alone. */
+    /** Stops the run in flight, leaving the schedule and all settings alone. */
     public static final String ACTION_STOP_SYNC = "nl.thijsvtol.photos.action.STOP_SYNC";
-    /** Turns background sync off entirely until the user re-enables it. */
-    public static final String ACTION_PAUSE_SYNC = "nl.thijsvtol.photos.action.PAUSE_SYNC";
 
     private final Context context;
     private final NotificationManager manager;
@@ -91,16 +89,29 @@ public class SyncNotifier {
     /**
      * Base progress notification.
      *
-     * Both actions exist to satisfy the Play foreground-service requirement
-     * that the user can terminate the work: "Stop" ends the run in flight,
-     * "Turn off" disables background sync entirely. The title names the
-     * concrete action rather than a generic "working…", so the notification is
-     * genuinely informative about what the app is doing with the permission.
+     * "Stop" is the only action, and it ends the current run without changing
+     * any setting. That satisfies the Play requirement that the user can
+     * terminate the work, and it's the action a user actually wants from a
+     * progress notification.
+     *
+     * There is deliberately NO "Turn off" action here. It was one tap away
+     * from silently disabling background sync entirely, which is far more
+     * destructive than a progress notification's buttons should be — a user
+     * reaching for "make this stop" would disable the feature and then have to
+     * discover the toggle buried in event settings to get it back. Permanently
+     * disabling sync belongs in the app's sync settings, where it is labelled
+     * and reversible in place.
      *
      * setOngoing(true) only while this run holds a foreground service — an
      * ordinary background run's notification must stay dismissible, since a
      * non-dismissible notification for work the user didn't start is the exact
      * pattern the policy is written against.
+     *
+     * setLocalOnly(true) keeps progress off paired wearables. A progress bar
+     * refreshed once a second is bridged to a watch as a stream of separate
+     * notifications, which buzzes the user's wrist continuously for the whole
+     * upload. setOnlyAlertOnce() does not prevent this — it only suppresses
+     * re-alerting on the phone.
      */
     private NotificationCompat.Builder progressBuilder(String title, String text, boolean ongoing) {
         return new NotificationCompat.Builder(context, CHANNEL_ID)
@@ -109,9 +120,10 @@ public class SyncNotifier {
             .setSmallIcon(R.drawable.ic_notification)
             .setOngoing(ongoing)
             .setOnlyAlertOnce(true)
+            .setLocalOnly(true)
+            .setSilent(true)
             .setContentIntent(contentIntent(null))
-            .addAction(0, "Stop", actionIntent(ACTION_STOP_SYNC, 1))
-            .addAction(0, "Turn off", actionIntent(ACTION_PAUSE_SYNC, 2));
+            .addAction(0, "Stop", actionIntent(ACTION_STOP_SYNC, 1));
     }
 
     /**
@@ -221,33 +233,44 @@ public class SyncNotifier {
         manager.notify(SUMMARY_NOTIFICATION_ID, builder.build());
     }
 
-    /** End-of-run result. Silent when a run found nothing to do. */
-    public void showRunSummary(int uploaded, int duplicates, int failed, int quarantined, String eventSlug) {
-        if (uploaded == 0 && failed == 0 && quarantined == 0) return;
+    /**
+     * End-of-run result.
+     *
+     * Deliberately quiet. A background sync runs every hour, so anything shown
+     * here is shown repeatedly — it must be worth interrupting the user for.
+     * Only two things are:
+     *
+     *  - photos actually got uploaded, and
+     *  - a file was given up on and needs the user to decide.
+     *
+     * Everything else stays silent: a run that found nothing, a run that was
+     * stopped, and transient failures that will simply be retried. Reporting
+     * those is how "✗ Folder sync failed — 1 photo failed" ended up firing on
+     * essentially every run.
+     */
+    public void showRunSummary(
+        int uploaded, int duplicates, int failed, int quarantined, boolean stopped, String eventSlug
+    ) {
+        if (stopped && quarantined == 0) return;
+        if (uploaded == 0 && quarantined == 0) return;
 
         String title;
         StringBuilder body = new StringBuilder();
 
-        if (failed == 0 && quarantined == 0) {
-            title = "✓ Folder sync complete";
+        if (quarantined == 0) {
+            title = "✓ Photos uploaded";
             body.append(uploaded).append(uploaded == 1 ? " photo uploaded" : " photos uploaded");
-        } else if (uploaded > 0) {
-            title = "Folder sync finished";
-            body.append(uploaded).append(" uploaded, ").append(failed + quarantined).append(" failed");
+            if (duplicates > 0) {
+                body.append(" · ").append(duplicates).append(" already synced");
+            }
         } else {
-            title = "✗ Folder sync failed";
-            body.append(failed + quarantined).append(failed + quarantined == 1 ? " photo failed" : " photos failed");
-        }
-
-        if (duplicates > 0) {
-            body.append(" · ").append(duplicates).append(" already synced");
-        }
-        if (quarantined > 0) {
-            body.append("\n").append(quarantined)
+            title = uploaded > 0 ? "Some photos couldn't be uploaded" : "Photos couldn't be uploaded";
+            if (uploaded > 0) {
+                body.append(uploaded).append(" uploaded. ");
+            }
+            body.append(quarantined)
                 .append(quarantined == 1 ? " file was skipped after repeated failures" : " files were skipped after repeated failures")
-                .append(" — open the app to retry them.");
-        } else if (failed > 0) {
-            body.append("\nWill retry automatically.");
+                .append(" — open the app to see why and retry.");
         }
 
         showSummary(title, body.toString(), eventSlug);

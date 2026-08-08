@@ -81,6 +81,13 @@ public class ProgressNotificationPlugin extends Plugin {
             .setSmallIcon(R.drawable.ic_notification)
             .setOngoing(ongoing)
             .setOnlyAlertOnce(true) // Don't make sound/vibration on updates
+            // Keep upload progress off paired wearables. A progress bar that
+            // refreshes as chunks land is bridged to a watch as a stream of
+            // separate notifications, buzzing the user's wrist for the whole
+            // upload. setOnlyAlertOnce() doesn't prevent that — it only
+            // suppresses re-alerting on the phone itself.
+            .setLocalOnly(ongoing)
+            .setSilent(ongoing)
             .setContentIntent(pendingIntent)
             .setAutoCancel(!ongoing);
 

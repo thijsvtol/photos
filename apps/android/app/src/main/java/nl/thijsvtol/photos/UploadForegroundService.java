@@ -84,6 +84,10 @@ public class UploadForegroundService extends Service {
             .setSmallIcon(R.drawable.ic_notification)
             .setOngoing(true)
             .setOnlyAlertOnce(true)
+            // Progress belongs on the phone, not buzzing a paired watch for the
+            // duration of the upload — see ProgressNotificationPlugin.show().
+            .setLocalOnly(true)
+            .setSilent(true)
             .setContentIntent(contentIntent)
             .addAction(0, "Cancel uploads", cancelIntent)
             .build();

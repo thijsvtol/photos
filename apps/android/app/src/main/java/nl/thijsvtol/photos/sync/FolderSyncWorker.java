@@ -170,7 +170,8 @@ public class FolderSyncWorker extends Worker {
         config.setLastRunAt(System.currentTimeMillis());
         notifier.clearProgress();
         notifier.showRunSummary(
-            stats.uploaded, stats.duplicates, stats.failed, stats.quarantined, stats.lastEventSlug
+            stats.uploaded, stats.duplicates, stats.failed, stats.quarantined,
+            stats.stopped || isStopped(), stats.lastEventSlug
         );
 
         // Backlog left over (time/count cap hit)? Continue in another run rather
@@ -304,12 +305,41 @@ public class FolderSyncWorker extends Worker {
             } catch (PhotosApiClient.AuthExpiredException e) {
                 // Nothing else in this run can succeed either.
                 throw e;
+            } catch (SyncStoppedException e) {
+                // Not a failure: the run was stopped out from under us. Put the
+                // file back in the queue with its resume state and WITHOUT
+                // burning a retry, then leave quietly.
+                //
+                // This used to fall into the generic catch below, so every
+                // interrupted run reported "1 photo failed" — the in-flight
+                // file — and consumed one of its five attempts. Scheduled runs
+                // are deferrable jobs now, so the OS stops them routinely and
+                // that notification fired constantly.
+                ledger.markInterrupted(entry.id);
+                stats.stopped = true;
+                break;
             } catch (Exception | OutOfMemoryError e) {
                 recordFailure(entry, api, e, stats);
             }
         }
 
-        notifier.showUploadProgress(Math.min(stats.uploaded, total), total, null, null, -1, stats.lastEventSlug, true);
+        if (!stats.stopped) {
+            notifier.showUploadProgress(
+                Math.min(stats.uploaded, total), total, null, null, -1, stats.lastEventSlug, true
+            );
+        }
+    }
+
+    /**
+     * Thrown when WorkManager stops the run mid-file — the OS reclaimed a
+     * deferrable job, a constraint (Wi-Fi, battery) was lost, or the user
+     * tapped Stop. Distinct from a real failure so it neither consumes a retry
+     * attempt nor reports an error to the user.
+     */
+    private static class SyncStoppedException extends IOException {
+        SyncStoppedException() {
+            super("Sync stopped");
+        }
     }
 
     /** Progress sink for a single file's chunk uploads. */
@@ -399,7 +429,7 @@ public class FolderSyncWorker extends Worker {
 
         for (int partNumber = 1; partNumber <= totalParts; partNumber++) {
             if (done.contains(partNumber)) continue;
-            if (isStopped()) throw new IOException("Sync stopped");
+            if (isStopped()) throw new SyncStoppedException();
 
             long offset = (long) (partNumber - 1) * chunkSize;
             long length = Math.min(chunkSize, entry.size - offset);
@@ -525,6 +555,8 @@ public class FolderSyncWorker extends Worker {
         int failed = 0;
         /** Failed past MAX_RETRIES — needs the user to intervene. */
         int quarantined = 0;
+        /** The run was stopped rather than finishing. Suppresses the summary. */
+        boolean stopped = false;
         String lastEventSlug = null;
 
         void note(String ignored) {

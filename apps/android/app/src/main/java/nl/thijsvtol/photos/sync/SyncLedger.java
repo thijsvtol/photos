@@ -37,7 +37,7 @@ import java.util.Locale;
 public class SyncLedger extends SQLiteOpenHelper {
 
     private static final String DB_NAME = "sync_ledger.db";
-    private static final int DB_VERSION = 1;
+    private static final int DB_VERSION = 2;
     public static final String TABLE = "synced_files";
 
     // ── state values ──
@@ -107,10 +107,31 @@ public class SyncLedger extends SQLiteOpenHelper {
 
     @Override
     public void onUpgrade(SQLiteDatabase db, int oldVersion, int newVersion) {
-        // v1 is the first shipped schema; nothing to migrate yet. Future
-        // versions must migrate rather than drop — losing this table means
-        // re-uploading (or, with the server hash pre-check, at least re-hashing)
-        // every file the user has ever synced.
+        // Migrate, never drop — losing this table means re-uploading (or, with
+        // the server hash pre-check, at least re-hashing) every file the user
+        // has ever synced.
+
+        if (oldVersion < 2) {
+            // Undo the damage from treating an interrupted run as a failure.
+            //
+            // v1 recorded the literal IOException message "Sync stopped" as the
+            // row's error and incremented its retry count every time
+            // WorkManager stopped the run mid-file. Because scheduled runs are
+            // ordinary deferrable jobs, that happened constantly, so files were
+            // quarantined after five interruptions without anything actually
+            // being wrong with them. That exact error string identifies those
+            // rows precisely, so they — and only they — go back in the queue
+            // with a clean slate. Genuine failures keep their history.
+            db.execSQL(
+                "UPDATE " + TABLE + " SET"
+                    + " retries = 0,"
+                    + " error = NULL,"
+                    + " last_attempt = NULL,"
+                    + " state = CASE WHEN file_hash IS NULL THEN '" + STATE_PENDING + "'"
+                    + "              ELSE '" + STATE_HASHED + "' END"
+                    + " WHERE state = '" + STATE_FAILED + "' AND error = 'Sync stopped'"
+            );
+        }
     }
 
     /** A row of the ledger, as consumed by the sync worker. */
@@ -337,6 +358,26 @@ public class SyncLedger extends SQLiteOpenHelper {
             v.putNull("upload_id");
             v.putNull("parts_json");
         }
+        update(id, v);
+    }
+
+    /**
+     * Returns a file to the queue after its run was cleanly stopped — the OS
+     * reclaimed a deferrable job, a constraint was lost, or the user tapped
+     * Stop.
+     *
+     * Deliberately does NOT touch the retry counter, and does not record an
+     * error: being interrupted is not a failure, and counting it as one meant
+     * a file could be quarantined purely because sync kept getting stopped —
+     * which happens routinely now that scheduled runs are ordinary deferrable
+     * work rather than a foreground service. Resume state is kept, so the next
+     * run continues from the last completed part.
+     */
+    public void markInterrupted(long id) {
+        Entry e = byId(id);
+        ContentValues v = new ContentValues();
+        v.put("state", e != null && e.fileHash != null ? STATE_HASHED : STATE_PENDING);
+        v.putNull("error");
         update(id, v);
     }
 

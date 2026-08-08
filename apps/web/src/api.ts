@@ -1746,6 +1746,18 @@ export const getUserCollaborations = async () => {
   return response.data;
 };
 
+/** The signed-in user as the SERVER sees them, or null if not authenticated.
+ *
+ *  Goes through the shared `api` instance, so on native the bearer-token
+ *  interceptor authenticates it — unlike AuthContext's web path, which uses a
+ *  raw cookie-authenticated fetch(). Used on native to reconcile the locally
+ *  cached user (written once at OAuth callback time) against the database,
+ *  which is the source of truth for `name` and `isAdmin`. */
+export const getUserProfile = async () => {
+  const response = await api.get<{ user: User | null }>('/user/profile');
+  return response.data.user;
+};
+
 export const updateUserProfile = async (data: { name?: string }) => {
   const response = await api.put<{ user: User }>('/user/profile', data);
   return response.data.user;
