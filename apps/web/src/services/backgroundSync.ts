@@ -20,6 +20,17 @@ const MAX_RETRIES = 5; // Maximum retry attempts (increased from 3)
 const RETRY_DELAY_MS = 2000; // Initial retry delay: 2 seconds
 const MAX_CHUNK_RETRIES = 3; // Retry individual chunks up to 3 times
 
+/** Thrown to unwind out of an in-flight upload when the user taps "Cancel
+ *  uploads" on the progress notification. Handled distinctly from a real
+ *  failure so a deliberate cancel doesn't burn a retry attempt or get reported
+ *  to the user as an error. */
+class UploadsCancelledError extends Error {
+  constructor() {
+    super('Uploads cancelled by user');
+    this.name = 'UploadsCancelledError';
+  }
+}
+
 /**
  * Background sync service for uploads the JS layer owns: files the user picked
  * manually, and files shared into the app via a share intent.
@@ -213,6 +224,18 @@ class BackgroundSyncService {
     uploadManager.syncItemProgress(id, updates);
   }
 
+  /** Whether the user tapped "Cancel uploads" on the progress notification.
+   *  Reads and clears the native flag, so one tap cancels one batch. */
+  private async isCancelRequested(): Promise<boolean> {
+    try {
+      const { cancelled } = await ProgressNotification.consumeCancelRequest();
+      return cancelled;
+    } catch {
+      // An older native build without this method must not block uploads.
+      return false;
+    }
+  }
+
   /**
    * Process all pending uploads in the queue.
    *
@@ -310,9 +333,20 @@ class BackgroundSyncService {
   ) {
     let successCount = 0;
     let failCount = 0;
+    let cancelled = false;
 
     for (let idx = 0; idx < pendingUploads.length; idx++) {
       const upload = pendingUploads[idx];
+
+      // Stop if the user tapped "Cancel uploads" on the notification. Checked
+      // between files (and between chunk batches below) so a cancel takes
+      // effect promptly without abandoning a chunk mid-flight. Items keep
+      // their multipart resume state, so retrying later continues rather than
+      // restarting from 0%.
+      if (isNative && await this.isCancelRequested()) {
+        cancelled = true;
+        break;
+      }
 
       // Hoisted so the catch block below can reference them (they are
       // otherwise only assigned inside the try block).
@@ -445,6 +479,14 @@ class BackgroundSyncService {
 
             // Upload chunks in parallel batches for speed
             for (let batchStart = 0; batchStart < remaining.length; batchStart += PARALLEL_CHUNKS) {
+              // A large video is a long time to keep uploading after the user
+              // asked to stop, so check between chunk batches too, not just
+              // between files. Throwing unwinds into the normal failure path,
+              // which preserves uploadId/parts for a later resume.
+              if (isNative && await this.isCancelRequested()) {
+                throw new UploadsCancelledError();
+              }
+
               const batchNumbers = remaining.slice(batchStart, batchStart + PARALLEL_CHUNKS);
               const batch = batchNumbers.map(partNumber => {
                 const start = (partNumber - 1) * chunkSize;
@@ -534,8 +576,17 @@ class BackgroundSyncService {
 
         successCount++;
       } catch (error) {
+        // A user-requested cancel is not a failure: return the item to
+        // 'pending' with its uploadId/parts intact so a later run resumes from
+        // the last completed chunk, and don't consume a retry attempt.
+        if (error instanceof UploadsCancelledError) {
+          await this.updateQueueItemAndSync(upload.id, { status: 'pending' });
+          cancelled = true;
+          break;
+        }
+
         console.error(`Failed to upload ${upload.file.name}:`, error);
-        
+
         const currentRetries = upload.retries || 0;
         
         // If retries remaining, reschedule for retry with exponential backoff
@@ -589,8 +640,22 @@ class BackgroundSyncService {
     if (isNative) {
       // First cancel the progress notification
       await ProgressNotification.cancel({ id: notificationId });
-      
-      if (successCount > 0 && failCount === 0) {
+
+      if (cancelled) {
+        // The user stopped this deliberately — confirm it and say what happens
+        // to the rest, rather than reporting it as a failure.
+        const remaining = pendingUploads.length - successCount;
+        await LocalNotifications.schedule({
+          notifications: [{
+            title: 'Uploads stopped',
+            body: successCount > 0
+              ? `${successCount} uploaded. ${remaining} still waiting — they'll resume next time you upload.`
+              : 'No photos were uploaded. They\'ll resume next time you upload.',
+            id: notificationId,
+            ongoing: false,
+          }],
+        });
+      } else if (successCount > 0 && failCount === 0) {
         // All succeeded
         await LocalNotifications.schedule({
           notifications: [{

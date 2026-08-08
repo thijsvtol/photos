@@ -191,12 +191,17 @@ class FolderSyncService {
    * Ask the native engine to scan now. Returns immediately — the run happens
    * in a WorkManager job and reports progress via its own notification, so
    * there is no count to hand back here.
+   *
+   * @param userInitiated true only when the user actually asked for this
+   *        (tapped "Sync now", or added a folder). App launch/resume must pass
+   *        false: only a genuinely user-initiated run may take a foreground
+   *        service, per Google Play's foreground-service policy.
    */
-  async syncNow(): Promise<void> {
+  async syncNow(userInitiated = false): Promise<void> {
     if (!Capacitor.isNativePlatform()) {
       throw new Error('Folder sync only available on mobile');
     }
-    await FolderSync.syncNow();
+    await FolderSync.syncNow({ userInitiated });
   }
 
   /** Live engine status: settings, queue counts and quarantined files. */

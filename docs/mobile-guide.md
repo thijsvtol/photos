@@ -220,7 +220,7 @@ WorkManager job. The web layer only stores configuration and hands it down.
 | Piece | Role |
 | --- | --- |
 | `SyncScheduler` | Periodic `PeriodicWorkRequest` (default hourly) + one-shot "sync now" runs, all under one unique work name |
-| `FolderSyncWorker` | The run itself: scan → hash → dedupe → upload, as a `dataSync` foreground service |
+| `FolderSyncWorker` | The run itself: scan → hash → dedupe → upload |
 | `SafScanner` | Recursive `DocumentsContract` walk of a SAF tree URI (also backs `SafDirectoryPlugin.listFiles`) |
 | `MediaProbe` | Streaming SHA-256, subsampled preview JPEG, EXIF — never holds a whole file |
 | `PhotosApiClient` | OkHttp client for the same `/uploads/*` endpoints the web app uses; part bodies stream off the `content://` URI |
@@ -230,6 +230,44 @@ WorkManager job. The web layer only stores configuration and hands it down.
 
 Why native: the previous JS implementation used `BackgroundTask.beforeExit`, a one-shot grant that
 was never re-registered, so it ran at most once per launch and never with the app swiped away.
+
+### Foreground services and Play policy
+
+Version 49 was rejected under Google Play's foreground-service policy, so where a foreground
+service is and isn't used is a deliberate, load-bearing distinction — not an implementation detail.
+
+**A foreground service (`dataSync`) is used only for work the user just asked for:**
+
+- tapping "Sync now", adding a folder, or retrying a quarantined file
+- manual file picks and share-to-app uploads (`UploadForegroundService`)
+
+**Scheduled work never takes one.** The periodic scan runs as an ordinary WorkManager job — no
+`setForeground()`, not expedited. Holding a `dataSync` foreground service on a timer is not
+user-initiated and not user-perceptible, which is exactly what the policy prohibits. Scheduled sync
+is deferrable by definition, so the OS may run it in a maintenance window. Continuations of a
+user-initiated run are also *not* user-initiated: a tap authorises the work the user waited for, not
+an open-ended chain of foreground services draining a multi-thousand-photo backlog.
+
+`SyncScheduler.KEY_USER_INITIATED` carries this through the work request, and
+`FolderSyncPlugin.syncNow({ userInitiated })` exposes it to the web layer. App launch/resume passes
+`false`.
+
+Both kinds of run show a progress notification, so sync is always visible; only the foreground one
+is `ongoing` (non-dismissible). Every progress notification names the concrete action ("Uploading
+photos to your library"), opens the app when tapped, and carries actions that genuinely stop the
+work — **Stop** (ends the current run, resume state preserved) and **Turn off** (disables background
+sync until re-enabled in settings); the manual-upload notification has **Cancel uploads**.
+
+Cancelling a manual upload crosses a process boundary: the notification action is handled natively
+by `UploadActionReceiver` while the upload loop runs in the WebView, which may not be alive. The
+receiver records a flag that the JS loop polls between files and between chunk batches via
+`ProgressNotification.consumeCancelRequest()`, then stops cleanly with each item's multipart resume
+state intact.
+
+**Play Console declaration.** The `dataSync` use case must be declared as *uploading the user's
+photos to their own server, initiated by the user* — not "Local Processing: Import Export", which is
+what version 49 declared and is for on-device import/export. The demo video must show a user
+starting an upload and the resulting notification, including stopping it.
 
 ### Duplicate detection
 

@@ -25,6 +25,13 @@ export interface ProgressNotificationPlugin {
 
   /** Stop the upload foreground service started by startForeground(). */
   stopForeground(): Promise<void>;
+
+  /** Whether the user tapped "Cancel uploads" on the progress notification
+   *  since the last call. Reads and clears the flag, so one tap cancels one
+   *  batch. The upload loop polls this between files and between chunk
+   *  batches — being able to stop the work from the notification is required
+   *  by Google Play's foreground-service policy. */
+  consumeCancelRequest(): Promise<{ cancelled: boolean }>;
 }
 
 const ProgressNotification = registerPlugin<ProgressNotificationPlugin>('ProgressNotification', {
@@ -35,6 +42,7 @@ const ProgressNotification = registerPlugin<ProgressNotificationPlugin>('Progres
       cancel: async () => {},
       startForeground: async () => {},
       stopForeground: async () => {},
+      consumeCancelRequest: async () => ({ cancelled: false }),
     };
   },
 });

@@ -40,6 +40,9 @@ public class SyncNotifier {
     /** Progress updates are coalesced to at most one per this interval. */
     private static final long UPDATE_THROTTLE_MS = 1000L;
 
+    /** Stops the run in flight, leaving the schedule alone. */
+    public static final String ACTION_STOP_SYNC = "nl.thijsvtol.photos.action.STOP_SYNC";
+    /** Turns background sync off entirely until the user re-enables it. */
     public static final String ACTION_PAUSE_SYNC = "nl.thijsvtol.photos.action.PAUSE_SYNC";
 
     private final Context context;
@@ -77,23 +80,38 @@ public class SyncNotifier {
         );
     }
 
-    private PendingIntent pauseIntent() {
-        Intent intent = new Intent(context, SyncActionReceiver.class).setAction(ACTION_PAUSE_SYNC);
+    private PendingIntent actionIntent(String action, int requestCode) {
+        Intent intent = new Intent(context, SyncActionReceiver.class).setAction(action);
         return PendingIntent.getBroadcast(
-            context, 0, intent,
+            context, requestCode, intent,
             PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE
         );
     }
 
-    private NotificationCompat.Builder progressBuilder(String title, String text) {
+    /**
+     * Base progress notification.
+     *
+     * Both actions exist to satisfy the Play foreground-service requirement
+     * that the user can terminate the work: "Stop" ends the run in flight,
+     * "Turn off" disables background sync entirely. The title names the
+     * concrete action rather than a generic "working…", so the notification is
+     * genuinely informative about what the app is doing with the permission.
+     *
+     * setOngoing(true) only while this run holds a foreground service — an
+     * ordinary background run's notification must stay dismissible, since a
+     * non-dismissible notification for work the user didn't start is the exact
+     * pattern the policy is written against.
+     */
+    private NotificationCompat.Builder progressBuilder(String title, String text, boolean ongoing) {
         return new NotificationCompat.Builder(context, CHANNEL_ID)
             .setContentTitle(title)
             .setContentText(text)
             .setSmallIcon(R.drawable.ic_notification)
-            .setOngoing(true)
+            .setOngoing(ongoing)
             .setOnlyAlertOnce(true)
             .setContentIntent(contentIntent(null))
-            .addAction(0, "Pause sync", pauseIntent());
+            .addAction(0, "Stop", actionIntent(ACTION_STOP_SYNC, 1))
+            .addAction(0, "Turn off", actionIntent(ACTION_PAUSE_SYNC, 2));
     }
 
     /**
@@ -103,8 +121,9 @@ public class SyncNotifier {
      * through a large batch.
      */
     public ForegroundInfo initialForegroundInfo() {
-        NotificationCompat.Builder builder = progressBuilder("Syncing photos", "Checking folders for new photos…")
-            .setProgress(0, 0, true);
+        NotificationCompat.Builder builder =
+            progressBuilder("Uploading photos to your library", "Checking folders for new photos…", true)
+                .setProgress(0, 0, true);
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             return new ForegroundInfo(
@@ -114,11 +133,34 @@ public class SyncNotifier {
         return new ForegroundInfo(PROGRESS_NOTIFICATION_ID, builder.build());
     }
 
-    /** Indeterminate "scanning" state, shown before the total count is known. */
+    /**
+     * Whether the current run holds a foreground service. Controls only
+     * whether the progress notification is ongoing (non-dismissible) — the
+     * notification itself is shown either way, so a scheduled run is just as
+     * visible to the user as one they started.
+     */
+    private boolean foreground = false;
+
+    public void setForeground(boolean foreground) {
+        this.foreground = foreground;
+    }
+
+    /**
+     * Indeterminate "scanning" state, shown before the total count is known.
+     *
+     * Suppressed on scheduled runs: those happen every hour and usually find
+     * nothing, so posting and then immediately clearing a notification each
+     * time would be pure noise. Once a scheduled run has actual files to
+     * upload it does show progress, via showUploadProgress().
+     */
     public void showScanning(String detail) {
+        if (!foreground) return;
         notifyProgress(
-            progressBuilder("Syncing photos", detail != null ? detail : "Checking folders for new photos…")
-                .setProgress(0, 0, true),
+            progressBuilder(
+                "Uploading photos to your library",
+                detail != null ? detail : "Checking folders for new photos…",
+                true
+            ).setProgress(0, 0, true),
             true
         );
     }
@@ -134,14 +176,16 @@ public class SyncNotifier {
         int done, int total, String folderLabel, String filename, int filePercent,
         String eventSlug, boolean force
     ) {
-        String text = done + " of " + total + (folderLabel != null ? " • " + folderLabel : "");
-        NotificationCompat.Builder builder = progressBuilder("Syncing photos", text)
+        String title = "Uploading photos to your library";
+        String text = "Photo " + (done + 1) + " of " + total
+            + (folderLabel != null ? " • " + folderLabel : "");
+        NotificationCompat.Builder builder = progressBuilder(title, text, foreground)
             .setProgress(Math.max(total, 1), done, false)
             .setContentIntent(contentIntent(eventSlug));
 
         if (filename != null) {
             builder.setStyle(new NotificationCompat.BigTextStyle()
-                .setBigContentTitle("Syncing photos")
+                .setBigContentTitle(title)
                 .bigText(filename + (filePercent >= 0 ? " (" + filePercent + "%)" : "")));
         }
 

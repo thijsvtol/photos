@@ -92,10 +92,14 @@
             android:exported="false"
             android:foregroundServiceType="dataSync" />
 
-        <!-- "Pause sync" action on the folder-sync progress notification.
-             Not exported: only our own notification triggers it. -->
+        <!-- "Stop" / "Turn off" actions on the folder-sync progress
+             notification, and "Cancel uploads" on the manual-upload one.
+             Not exported: only our own notifications trigger them. -->
         <receiver
             android:name=".sync.SyncActionReceiver"
+            android:exported="false" />
+        <receiver
+            android:name=".UploadActionReceiver"
             android:exported="false" />
 
         <!-- FolderSyncWorker runs as a long-running foreground job (see

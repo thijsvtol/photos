@@ -107,12 +107,23 @@ public class FolderSyncWorker extends Worker {
             return Result.success();
         }
 
-        try {
-            setForegroundAsync(notifier.initialForegroundInfo());
-        } catch (Exception e) {
-            // Foreground promotion can be refused (e.g. background-start
-            // restrictions). Continue anyway — we just lose the "don't throttle
-            // me" hint and the visible progress bar.
+        // Only a run the user explicitly asked for may hold a foreground
+        // service. A scheduled run is deferrable work and takes none — see
+        // SyncScheduler.KEY_USER_INITIATED for why (Play policy: FGS must be
+        // user-initiated or user-perceptible; a timer is neither). Either way
+        // the user sees an ordinary progress notification, so the sync is
+        // always visible and always stoppable.
+        boolean userInitiated = getInputData().getBoolean(SyncScheduler.KEY_USER_INITIATED, false);
+        notifier.setForeground(userInitiated);
+        if (userInitiated) {
+            try {
+                setForegroundAsync(notifier.initialForegroundInfo());
+            } catch (Exception e) {
+                // Foreground promotion can be refused (e.g. background-start
+                // restrictions). Continue anyway — we just lose the "don't
+                // throttle me" hint; the work itself is unaffected.
+                notifier.setForeground(false);
+            }
         }
 
         config.setRunning(true);

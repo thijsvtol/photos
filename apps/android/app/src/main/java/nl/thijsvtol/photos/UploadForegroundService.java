@@ -3,6 +3,7 @@ package nl.thijsvtol.photos;
 import android.app.Notification;
 import android.app.NotificationChannel;
 import android.app.NotificationManager;
+import android.app.PendingIntent;
 import android.app.Service;
 import android.content.Context;
 import android.content.Intent;
@@ -58,12 +59,33 @@ public class UploadForegroundService extends Service {
             ? intent.getStringExtra(EXTRA_BODY)
             : "Upload in progress";
 
+        // Tapping opens the app, and "Cancel uploads" stops them. Google Play's
+        // foreground-service policy requires that the user can terminate the
+        // work and that the notification clearly conveys what is happening;
+        // this notification previously had neither a tap target nor a stop
+        // action, which is part of what got version 49 rejected.
+        PendingIntent contentIntent = PendingIntent.getActivity(
+            this,
+            notificationId,
+            new Intent(this, MainActivity.class)
+                .setFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TOP),
+            PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE
+        );
+        PendingIntent cancelIntent = PendingIntent.getBroadcast(
+            this,
+            notificationId,
+            new Intent(this, UploadActionReceiver.class).setAction(UploadActionReceiver.ACTION_CANCEL_UPLOADS),
+            PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE
+        );
+
         Notification notification = new NotificationCompat.Builder(this, CHANNEL_ID)
             .setContentTitle(title)
             .setContentText(body)
             .setSmallIcon(R.drawable.ic_notification)
             .setOngoing(true)
             .setOnlyAlertOnce(true)
+            .setContentIntent(contentIntent)
+            .addAction(0, "Cancel uploads", cancelIntent)
             .build();
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {

@@ -15,6 +15,7 @@ import com.getcapacitor.PluginMethod;
 import com.getcapacitor.annotation.CapacitorPlugin;
 import nl.thijsvtol.photos.MainActivity;
 import nl.thijsvtol.photos.R;
+import nl.thijsvtol.photos.UploadActionReceiver;
 import nl.thijsvtol.photos.UploadForegroundService;
 
 @CapacitorPlugin(name = "ProgressNotification")
@@ -146,6 +147,25 @@ public class ProgressNotificationPlugin extends Plugin {
     @PluginMethod
     public void stopForeground(PluginCall call) {
         getContext().stopService(new Intent(getContext(), UploadForegroundService.class));
+        UploadActionReceiver.setCancelRequested(getContext(), false);
         call.resolve();
+    }
+
+    /**
+     * Whether the user tapped "Cancel uploads" on the progress notification
+     * since this was last called. Reads and clears the flag, so one tap
+     * cancels one batch.
+     *
+     * The upload loop lives in JS but the notification action is delivered
+     * natively (and possibly while the WebView is gone), so the two are
+     * connected through this flag rather than an event. Being able to stop the
+     * work from the notification is required by Play's foreground-service
+     * policy.
+     */
+    @PluginMethod
+    public void consumeCancelRequest(PluginCall call) {
+        JSObject result = new JSObject();
+        result.put("cancelled", UploadActionReceiver.consumeCancelRequest(getContext()));
+        call.resolve(result);
     }
 }

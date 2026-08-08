@@ -90,7 +90,7 @@ export default function FolderSyncManager({ eventSlug }: Props) {
       // Store the raw content:// tree URI — the SAF plugin needs it as-is
       await folderSyncService.addFolderSync(eventSlug, result.path);
       loadFolderSyncs();
-      await folderSyncService.syncNow();
+      await folderSyncService.syncNow(true);
       await refreshStatus();
     } catch (error) {
       console.error('Error adding folder:', error);
@@ -121,7 +121,7 @@ export default function FolderSyncManager({ eventSlug }: Props) {
 
   const handleSyncNow = async () => {
     try {
-      await folderSyncService.syncNow();
+      await folderSyncService.syncNow(true);
       await refreshStatus();
     } catch (error) {
       alert('Failed to start sync: ' + (error instanceof Error ? error.message : 'Unknown error'));
@@ -137,7 +137,7 @@ export default function FolderSyncManager({ eventSlug }: Props) {
 
     try {
       await folderSyncService.forgetSyncHistory(folderPath);
-      await folderSyncService.syncNow();
+      await folderSyncService.syncNow(true);
       await refreshStatus();
     } catch (error) {
       alert('Failed to reset sync history: ' + (error instanceof Error ? error.message : 'Unknown error'));

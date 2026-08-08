@@ -69,8 +69,16 @@ export interface FolderSyncPlugin {
     intervalMinutes?: number;
   }): Promise<void>;
 
-  /** Queues an immediate scan. No-op if one is already running. */
-  syncNow(): Promise<void>;
+  /**
+   * Queues an immediate scan. No-op if one is already running.
+   *
+   * Pass `userInitiated: true` ONLY when the user actually asked for it
+   * (tapping "Sync now", or adding a folder) — that is the only case allowed
+   * to take a foreground service under Google Play's foreground-service
+   * policy. App launch/resume must leave it false, so the scan runs as
+   * ordinary deferrable work.
+   */
+  syncNow(options?: { userInitiated?: boolean }): Promise<void>;
 
   getStatus(options?: { eventSlug?: string }): Promise<FolderSyncStatus>;
 

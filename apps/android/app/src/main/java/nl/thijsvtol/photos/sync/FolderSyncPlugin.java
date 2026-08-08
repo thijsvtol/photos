@@ -75,10 +75,21 @@ public class FolderSyncPlugin extends Plugin {
         call.resolve();
     }
 
-    /** Runs a scan now (app launch/resume, or the user tapping "Sync now"). */
+    /**
+     * Runs a scan now.
+     *
+     * `userInitiated` distinguishes the user tapping "Sync now" or adding a
+     * folder (true — may take a foreground service) from the app merely being
+     * opened or resumed (false — ordinary deferrable work). Only the former
+     * counts as user-initiated under Play's foreground-service policy.
+     */
     @PluginMethod
     public void syncNow(PluginCall call) {
-        SyncScheduler.runNow(getContext());
+        if (Boolean.TRUE.equals(call.getBoolean("userInitiated", false))) {
+            SyncScheduler.runNow(getContext());
+        } else {
+            SyncScheduler.runOnAppOpen(getContext());
+        }
         call.resolve();
     }
 
