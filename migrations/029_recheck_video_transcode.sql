@@ -1,0 +1,22 @@
+-- Re-evaluate every video's playability.
+--
+-- video_transcode_status used to record a CODEC-only verdict: anything already
+-- H.264 was marked 'compatible' and never looked at again. Resolution was never
+-- considered, so an 8K H.264 file counts as "fine" in the database while the
+-- Android WebView cannot decode it at all — measured in production as
+-- PIPELINE_ERROR_DECODE on 7 of 10 visible gallery tiles.
+--
+-- scripts/transcode-videos.sh now judges on codec AND height, and writes a 1080p
+-- H.264 derivative to preview/<slug>/<id>.mp4 instead of overwriting the
+-- original. Clearing the status is what lets it revisit everything under the new
+-- rule.
+--
+-- Deliberately not selective: only 148 of 613 video rows carry width/height, so
+-- the database cannot tell which of the rest are oversized. ffprobe can, which
+-- means re-checking them all. That costs a download per video (R2 egress is free)
+-- and CI time, once.
+--
+-- Rows previously marked 'transcoded' had their ORIGINAL overwritten by the old
+-- in-place behaviour. That is not recoverable here; those files stay as they are,
+-- and this simply lets them get a proper derivative if they still need one.
+UPDATE photos SET video_transcode_status = NULL WHERE file_type = 'video/mp4';

@@ -59,7 +59,7 @@ describe('permanentlyDeletePhotos', () => {
     expect(db.deleteStatements).toHaveLength(0);
   });
 
-  it('deletes all four R2 object variants for a non-copied photo', async () => {
+  it('deletes every R2 object variant for a non-copied photo', async () => {
     const bucket = makeFakeBucket();
     const db = makeFakeDb();
     const photo: DeletablePhotoRef = { id: 'photo-1', slug: 'my-event', source_photo_id: null };
@@ -71,6 +71,10 @@ describe('permanentlyDeletePhotos', () => {
         'original/my-event/photo-1.jpg',
         'original/my-event/photo-1.mp4',
         'preview/my-event/photo-1.jpg',
+        // The 1080p H.264 derivative the playability job writes for videos that
+        // the WebView cannot decode. Missing this stranded one derivative in R2
+        // per deleted video — silent, and only visible much later as storage.
+        'preview/my-event/photo-1.mp4',
         'ig/my-event/photo-1.jpg',
       ])
     );

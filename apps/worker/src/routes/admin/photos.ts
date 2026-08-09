@@ -544,6 +544,32 @@ app.put('/:photoId/replace', async (c) => {
         // Ignore if ig version doesn't exist
       }
     };
+    /**
+     * Replacing a VIDEO's original invalidates its playable derivative.
+     *
+     * scripts/transcode-videos.sh writes a 1080p H.264 version to the preview
+     * key, and media.ts prefers that key over the original — so leaving it in
+     * place after a replace would keep serving the OLD footage indefinitely,
+     * with the new original sitting there unused and no error anywhere.
+     *
+     * Drop the derivative and clear video_transcode_status so the job rebuilds
+     * one from the new source on its next run. Until then media.ts falls back to
+     * the original, which is correct, just heavier.
+     */
+    const invalidateVideoPreview = async (deleteObject: boolean) => {
+      if (!isVideo) return;
+      if (deleteObject) {
+        try {
+          await c.env.PHOTOS_BUCKET.delete(previewKey);
+        } catch {
+          // Nothing to invalidate.
+        }
+      }
+      await c.env.DB
+        .prepare('UPDATE photos SET video_transcode_status = NULL WHERE id = ?')
+        .bind(photoId)
+        .run();
+    };
     // Both the raw-body and legacy multipart paths end in a successful replace,
     // so log from one place rather than duplicating the call at each return.
     const logReplace = (target: string) =>
@@ -576,6 +602,9 @@ app.put('/:photoId/replace', async (c) => {
       if (target === 'original') {
         await c.env.PHOTOS_BUCKET.put(originalKey, body, { httpMetadata: { contentType } });
         await deleteStaleIg();
+        // Delete the derivative too: nothing else is going to overwrite it on
+        // this path, so it would keep being served in place of the new original.
+        await invalidateVideoPreview(true);
       } else {
         await c.env.PHOTOS_BUCKET.put(previewKey, body, { httpMetadata: { contentType } });
       }
@@ -609,6 +638,10 @@ app.put('/:photoId/replace', async (c) => {
     });
 
     await deleteStaleIg();
+    // This path just wrote the preview key itself, so the object must NOT be
+    // deleted — only the status is cleared, so the playability job re-judges the
+    // new original (the caller-supplied preview may well be oversized or HEVC).
+    await invalidateVideoPreview(false);
     await bumpCacheVersion();
 
     await logReplace('multipart');

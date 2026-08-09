@@ -26,10 +26,17 @@ export async function permanentlyDeletePhotos(env: Env, photos: DeletablePhotoRe
     const batch = originals.slice(i, i + R2_DELETE_BATCH_SIZE);
     await Promise.allSettled(
       batch.map(async (photo) => {
+        // The extension varies per derivative, so each variant needs its own
+        // delete: images store .jpg, video originals .mp4, and — since the
+        // playability job started writing 1080p H.264 derivatives — video
+        // previews .mp4 as well. That last one was missing, which would have
+        // stranded a derivative in R2 for every video ever deleted; nothing
+        // fails when that happens, it just quietly accrues storage.
         await Promise.all([
           env.PHOTOS_BUCKET.delete(`original/${photo.slug}/${photo.id}.jpg`),
           env.PHOTOS_BUCKET.delete(`original/${photo.slug}/${photo.id}.mp4`),
           env.PHOTOS_BUCKET.delete(`preview/${photo.slug}/${photo.id}.jpg`),
+          env.PHOTOS_BUCKET.delete(`preview/${photo.slug}/${photo.id}.mp4`),
           env.PHOTOS_BUCKET.delete(`ig/${photo.slug}/${photo.id}.jpg`),
         ]);
       })

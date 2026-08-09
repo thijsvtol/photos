@@ -1,13 +1,24 @@
 #!/bin/bash
 set -euo pipefail
 
-# Nightly video-compatibility job.
+# Nightly video-playability job.
 #
-# Google Cast (Chromecast) devices frequently lack HEVC/H.265 hardware
-# decode support — videos recorded in HEVC ("High Efficiency") by phone
-# cameras fail to cast with DEMUXER_ERROR_NO_SUPPORTED_STREAMS, while H.264
-# videos work fine. This script finds videos that haven't been checked yet,
-# and transcodes any HEVC/incompatible ones to H.264 IN PLACE in R2.
+# Builds a playable 1080p H.264 derivative at preview/<slug>/<id>.mp4 for any
+# video the browser/WebView cannot handle as-is, and leaves the ORIGINAL
+# untouched. media.ts already prefers that key and falls back to original/, so
+# nothing else has to change for playback to use it; "download original" still
+# serves the real file.
+#
+# Two things make a video unplayable here, and both are checked:
+#  - CODEC: HEVC/H.265 ("High Efficiency" on phone cameras) is not decodable in
+#    the Android WebView, and Chromecast reports DEMUXER_ERROR_NO_SUPPORTED_STREAMS.
+#  - RESOLUTION: an 8K stream defeats the decoder regardless of codec. Measured
+#    on production: 7 of 10 visible gallery tiles failed with
+#    PIPELINE_ERROR_DECODE, and the file probed was 7680x4320 HEVC, 398MB.
+#
+# This script used to re-encode in place, overwriting the source. That ruled out
+# ever capping resolution — doing so would have destroyed the user's 8K footage —
+# so it produced 8K H.264 files that were just as unplayable as the HEVC ones.
 #
 # Deliberately runs here (a GitHub Actions runner, via real native
 # ffmpeg/ffprobe) rather than:
@@ -22,6 +33,10 @@ set -euo pipefail
 # Usage: ./scripts/transcode-videos.sh [batch-size]
 
 BATCH_SIZE="${1:-15}"
+# Longest side of the generated derivative. 1080p plays everywhere and is ample
+# for a gallery tile or full-screen phone playback; the untouched original stays
+# available for download.
+MAX_PREVIEW_HEIGHT=1080
 DB_NAME="photos-db"
 R2_BUCKET="photos-storage"
 
@@ -63,14 +78,22 @@ echo "$RESULT_JSON" | jq -c '.[0].results[]' | while IFS= read -r row; do
 
   R2_SLUG="${SOURCE_EVENT_SLUG:-$EVENT_SLUG}"
   R2_PHOTO_ID="${SOURCE_PHOTO_ID:-$ID}"
-  R2_KEY="original/$R2_SLUG/$R2_PHOTO_ID.mp4"
+  SOURCE_KEY="original/$R2_SLUG/$R2_PHOTO_ID.mp4"
+  # The playable derivative goes to its OWN key. media.ts already looks for
+  # preview/<slug>/<id>.mp4 before falling back to original/, so writing here is
+  # all that is needed for the gallery and photo detail to pick it up.
+  #
+  # This used to overwrite SOURCE_KEY in place. That was destructive on its own
+  # terms — the re-encode is lossy — and it made capping resolution impossible
+  # without permanently destroying the user's source footage.
+  PREVIEW_KEY="preview/$R2_SLUG/$R2_PHOTO_ID.mp4"
 
-  echo "--- Photo $ID ($R2_KEY) ---"
+  echo "--- Photo $ID ($SOURCE_KEY) ---"
 
   INPUT_FILE="$WORKDIR/$ID-input.mp4"
   OUTPUT_FILE="$WORKDIR/$ID-output.mp4"
 
-  if ! wrangler r2 object get "$R2_BUCKET/$R2_KEY" --file "$INPUT_FILE" --remote >/dev/null 2>&1; then
+  if ! wrangler r2 object get "$R2_BUCKET/$SOURCE_KEY" --file "$INPUT_FILE" --remote >/dev/null 2>&1; then
     echo "  Could not download from R2 — marking failed."
     mark_status "$ID" "failed" "false"
     continue
@@ -85,8 +108,10 @@ echo "$RESULT_JSON" | jq -c '.[0].results[]' | while IFS= read -r row; do
   # as a run time of 1h21m (one file took 38 minutes) against the usual 30s-3m.
   # That waste also starved the batch: at 15 videos per nightly run, real work
   # queued behind pointless re-encodes.
-  CODEC=$(ffprobe -v error -select_streams v:0 -show_entries stream=codec_name -of csv=p=0 "$INPUT_FILE" 2>/dev/null \
-    | head -n1 | tr -d '\r' | cut -d, -f1 | tr -d '[:space:]' || echo "")
+  PROBE=$(ffprobe -v error -select_streams v:0 -show_entries stream=codec_name,height -of csv=p=0 "$INPUT_FILE" 2>/dev/null | head -n1 | tr -d '\r')
+  CODEC=$(echo "$PROBE" | cut -d, -f1 | tr -d '[:space:]')
+  HEIGHT=$(echo "$PROBE" | cut -d, -f2 | tr -d '[:space:]')
+  [ -z "$HEIGHT" ] && HEIGHT=0
 
   if [ -z "$CODEC" ]; then
     echo "  Could not determine video codec — marking failed."
@@ -95,29 +120,43 @@ echo "$RESULT_JSON" | jq -c '.[0].results[]' | while IFS= read -r row; do
     continue
   fi
 
-  if [ "$CODEC" = "h264" ]; then
-    echo "  Codec is h264 — already compatible, no action needed."
+  # RESOLUTION matters as much as codec, which the old rule missed entirely.
+  # An 8K H.264 file was marked "compatible" and never looked at again, yet the
+  # Android WebView cannot decode it any more than it can decode 8K HEVC — the
+  # gallery reported PIPELINE_ERROR_DECODE on 7 of 10 visible tiles, and the one
+  # probed locally was 7680x4320 HEVC, 398MB, 39s.
+  if [ "$CODEC" = "h264" ] && [ "$HEIGHT" -le "$MAX_PREVIEW_HEIGHT" ] && [ "$HEIGHT" -gt 0 ]; then
+    echo "  h264 at ${HEIGHT}p — plays as-is, no derivative needed."
     mark_status "$ID" "compatible" "false"
     rm -f "$INPUT_FILE"
     continue
   fi
 
-  echo "  Codec is $CODEC — transcoding to H.264..."
+  echo "  $CODEC at ${HEIGHT}p — building ${MAX_PREVIEW_HEIGHT}p H.264 derivative..."
+  # scale='-2:min(H,ih)' keeps the aspect ratio, only ever downscales (never
+  # upscales a small clip), and -2 keeps the width even, which H.264 requires.
+  # `veryfast` rather than `medium`: decoding 8K source is slow enough on its own
+  # and a GitHub runner is capped at 6 hours per job.
+  # +faststart puts the moov atom first — without it a player must fetch the whole
+  # file before it can show anything, which is half of what made these tiles hang.
   if ffmpeg -nostdin -y -loglevel error -i "$INPUT_FILE" \
-      -c:v libx264 -preset medium -crf 20 -pix_fmt yuv420p \
-      -c:a aac -b:a 160k \
+      -vf "scale='-2:min($MAX_PREVIEW_HEIGHT,ih)'" \
+      -c:v libx264 -preset veryfast -crf 23 -pix_fmt yuv420p \
+      -c:a aac -b:a 128k \
       -movflags +faststart \
       "$OUTPUT_FILE"; then
-    echo "  Transcode succeeded — uploading replacement..."
-    if wrangler r2 object put "$R2_BUCKET/$R2_KEY" --file "$OUTPUT_FILE" --content-type "video/mp4" --remote >/dev/null; then
-      mark_status "$ID" "transcoded" "true"
-      echo "  Done — R2 file replaced, cache_version bumped."
+    IN_MB=$(( $(wc -c < "$INPUT_FILE") / 1000000 ))
+    OUT_MB=$(( $(wc -c < "$OUTPUT_FILE") / 1000000 ))
+    echo "  Encoded ${IN_MB}MB -> ${OUT_MB}MB, uploading derivative..."
+    if wrangler r2 object put "$R2_BUCKET/$PREVIEW_KEY" --file "$OUTPUT_FILE" --content-type "video/mp4" --remote >/dev/null; then
+      mark_status "$ID" "preview" "true"
+      echo "  Done — $PREVIEW_KEY written, original untouched, cache_version bumped."
     else
       echo "  Upload to R2 failed — marking failed."
       mark_status "$ID" "failed" "false"
     fi
   else
-    echo "  ffmpeg transcode failed — marking failed."
+    echo "  ffmpeg encode failed — marking failed."
     mark_status "$ID" "failed" "false"
   fi
 
