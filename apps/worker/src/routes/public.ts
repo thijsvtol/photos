@@ -26,6 +26,40 @@ const PREVIEW_GRACE_MINUTES = 10;
 const PREVIEW_READY_CLAUSE =
   `(p.preview_complete = 1 OR p.uploaded_at <= datetime('now', '-${PREVIEW_GRACE_MINUTES} minutes'))`;
 
+/**
+ * Shows a photo ONCE in the library-wide chronological views (timeline,
+ * memories), even when it exists in several albums.
+ *
+ * Copying a photo to another album (POST /admin/photos/bulk-copy) creates a real
+ * second `photos` row pointing at the original's R2 file via `source_photo_id`.
+ * That is right for the albums themselves — the photo genuinely belongs to both —
+ * but the timeline is one chronological pass over the whole library, so the same
+ * picture appearing twice there is just noise. Measured on a real 500-item
+ * timeline: one such pair (`34643.mp4`, copied from `itali-2026` into `tbt`).
+ *
+ * The ORIGINAL wins, and the copy takes over if the original is gone, so removing
+ * the source never leaves a hole.
+ *
+ * Genuine double uploads — the same file uploaded twice as two independent rows,
+ * each with its own R2 object and no source_photo_id — are deliberately NOT
+ * affected. Those are real duplicates the user should still see (and the same
+ * timeline showed three of them). Hiding those would paper over a problem instead
+ * of surfacing it.
+ *
+ * Correlated on the column, so it adds NO bound parameters: the accessible-event
+ * id list already consumes one per event and D1 caps a statement at 100.
+ *
+ * Known limitation: the subquery checks that the source EXISTS, not that the
+ * viewer can see it. If the original sits in an event this viewer has no access
+ * to, its copy is hidden too. Filtering by accessibility would mean binding the
+ * event-id list a second time, which is what the parameter cap forbids. Rare
+ * enough for a personal library with collaborators; revisit if sharing grows.
+ */
+const SINGLE_COPY_CLAUSE =
+  `(p.source_photo_id IS NULL OR NOT EXISTS (
+      SELECT 1 FROM photos s WHERE s.id = p.source_photo_id AND s.deleted_at IS NULL
+    ))`;
+
 
 // GET /api/search's FTS branch fetches candidates WITHOUT an `event_id IN (...)` clause (access
 // filtering happens afterward in JS against `eventMap` — see that route's doc comment for why:
@@ -592,6 +626,7 @@ app.get('/api/timeline', optionalAuth, async (c) => {
           AND p.upload_complete = 1
           AND p.deleted_at IS NULL
           AND p.archived_at IS NULL
+          AND ${SINGLE_COPY_CLAUSE}
           AND ${PREVIEW_READY_CLAUSE}
           AND p.capture_time < ?
         ORDER BY p.capture_time DESC
@@ -609,6 +644,7 @@ app.get('/api/timeline', optionalAuth, async (c) => {
           AND p.upload_complete = 1
           AND p.deleted_at IS NULL
           AND p.archived_at IS NULL
+          AND ${SINGLE_COPY_CLAUSE}
           AND ${PREVIEW_READY_CLAUSE}
         ORDER BY p.capture_time DESC
         LIMIT ?
@@ -688,6 +724,7 @@ app.get('/api/memories', optionalAuth, async (c) => {
           AND p.upload_complete = 1
           AND p.deleted_at IS NULL
           AND p.archived_at IS NULL
+          AND ${SINGLE_COPY_CLAUSE}
           AND ${PREVIEW_READY_CLAUSE}
           AND strftime('%m-%d', p.capture_time) = strftime('%m-%d', 'now')
           AND strftime('%Y', p.capture_time) < strftime('%Y', 'now')

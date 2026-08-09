@@ -27,7 +27,17 @@ class TimelineCacheDatabase extends Dexie {
   photos!: Table<Photo, string>;
 
   constructor() {
-    super('PhotosTimelineCache');
+    // Database NAME bumped (not just the Dexie version) on 2026-08-09 to force a
+    // one-time rebuild.
+    //
+    // The timeline now returns a photo once even when it sits in several albums
+    // (see SINGLE_COPY_CLAUSE in apps/worker/src/routes/public.ts). This cache
+    // only ever bulkPut()s and never deletes — unlike eventPhotoCache, which can
+    // reconcile because the gallery endpoint returns a complete set, while the
+    // timeline is paginated and the client therefore never holds the whole truth.
+    // So copies already cached would have kept rendering forever, and the bug
+    // would have looked unfixed on exactly the devices that had seen it.
+    super('PhotosTimelineCacheV2');
     this.version(1).stores({
       photos: 'id, capture_time',
     });
@@ -35,6 +45,13 @@ class TimelineCacheDatabase extends Dexie {
 }
 
 const db = new TimelineCacheDatabase();
+
+// Drop the pre-V2 database. Renaming leaves the old one on disk, and it is not
+// harmless: it still holds photos from private/collaborator-only events, and
+// clearTimelineCache() below no longer points at it — so a logout would leave
+// that content behind on a shared device. Best-effort and non-blocking; a browser
+// that refuses the delete just keeps some dead storage.
+void Dexie.delete('PhotosTimelineCache').catch(() => { /* nothing to reclaim */ });
 
 /** Returns all cached photos, newest capture_time first (matches /api/timeline's order). */
 export async function getCachedTimelinePhotos(): Promise<Photo[]> {

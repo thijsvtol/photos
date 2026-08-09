@@ -206,6 +206,15 @@ app.get('/missing-file-hash', async (c) => {
           AND p.upload_complete = 1
           AND p.file_hash IS NULL
           AND p.file_type NOT IN ('video/mp4')
+          -- Never hash a COPY (bulk-copy rows point at another photo's R2 file
+          -- via source_photo_id and are created without a file_hash on purpose).
+          -- The media route serves a copy the SOURCE file, so hashing one just
+          -- re-downloads the original and stores the original's hash — which then
+          -- made GET /duplicates group a deliberate copy together with the photo
+          -- it was copied from. That is not a duplicate, and the duplicates page's
+          -- "keep an album" action would have trashed exactly the copies the user
+          -- meant to create.
+          AND p.source_photo_id IS NULL
           ${cursorClause}
         ORDER BY p.id ASC
         LIMIT ?
@@ -273,9 +282,15 @@ app.get('/duplicates', async (c) => {
         JOIN events e ON p.event_id = e.id
         WHERE p.deleted_at IS NULL
           AND p.file_hash IS NOT NULL
+          -- Copies are not duplicates. Migration 028 cleared the hashes that the
+          -- backfill had already written onto copies, so this is belt-and-braces
+          -- — but it keeps the guarantee in the query that depends on it, rather
+          -- than resting on the assumption that nothing will ever set a hash on a
+          -- copy again.
+          AND p.source_photo_id IS NULL
           AND p.file_hash IN (
             SELECT file_hash FROM photos
-            WHERE deleted_at IS NULL AND file_hash IS NOT NULL
+            WHERE deleted_at IS NULL AND file_hash IS NOT NULL AND source_photo_id IS NULL
             GROUP BY file_hash
             HAVING COUNT(*) > 1
           )

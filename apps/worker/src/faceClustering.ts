@@ -828,26 +828,72 @@ export async function getPhotoPeople(env: Env, photoId: string): Promise<PhotoPe
  * once every duplicate group is already fully in sync) since it uses `INSERT OR IGNORE`.
  */
 export async function syncPeopleAcrossDuplicates(env: Env): Promise<{ groupsSynced: number; tagsAdded: number }> {
+  // Two ways photos can share an image, and BOTH matter here:
+  //
+  //  - same file_hash: the same file uploaded twice, independently.
+  //  - copy relationship: a bulk-copy row and the photo it points at via
+  //    source_photo_id (plus any sibling copies of the same source).
+  //
+  // The copy case has to be listed explicitly because copies deliberately carry
+  // no file_hash — see migration 028 and GET /missing-file-hash. Grouping on the
+  // hash alone would silently stop syncing people onto copies, which is the one
+  // place copies genuinely SHOULD be treated as the same picture: it is literally
+  // the same file, so it shows the same faces.
+  //
+  // Note the asymmetry this encodes, and it is the point: copies belong together
+  // for CONTENT purposes (people), but not for CLEANUP purposes (the duplicates
+  // page, which offers to delete all but one of a group).
   const { results: dupPhotoRows } = await env.DB
     .prepare(`
-      SELECT id, file_hash
+      SELECT id, file_hash, source_photo_id
       FROM photos
       WHERE deleted_at IS NULL
-        AND file_hash IS NOT NULL
-        AND file_hash IN (
-          SELECT file_hash FROM photos
-          WHERE deleted_at IS NULL AND file_hash IS NOT NULL
-          GROUP BY file_hash
-          HAVING COUNT(*) > 1
+        AND (
+          file_hash IN (
+            SELECT file_hash FROM photos
+            WHERE deleted_at IS NULL AND file_hash IS NOT NULL
+            GROUP BY file_hash
+            HAVING COUNT(*) > 1
+          )
+          OR source_photo_id IS NOT NULL
+          OR id IN (SELECT source_photo_id FROM photos WHERE source_photo_id IS NOT NULL AND deleted_at IS NULL)
         )
     `)
-    .all<{ id: string; file_hash: string }>();
+    .all<{ id: string; file_hash: string | null; source_photo_id: string | null }>();
+
+  // Grouping needs a union, not a single key: a SOURCE photo has a file_hash (it
+  // is a real upload) while its copies have none, so keying each row on "hash, or
+  // else root id" would file them into separate groups and sync nothing between
+  // them — the exact case this function exists for.
+  //
+  // Union by root id where a copy relationship exists, by hash otherwise, then
+  // merge the two whenever one photo carries both (a photo that was uploaded
+  // twice AND copied elsewhere).
+  const rows = dupPhotoRows || [];
+  const rootOf = new Map<string, string>();
+  for (const row of rows) rootOf.set(row.id, row.source_photo_id ?? row.id);
+
+  const groupKeyOf = new Map<string, string>();   // photo id -> group key
+  const hashGroupKey = new Map<string, string>(); // file_hash -> group key
+  for (const row of rows) {
+    const root = rootOf.get(row.id)!;
+    const key = `root:${root}`;
+    groupKeyOf.set(row.id, key);
+    // A hash seen on any member ties that whole hash-group to this key too.
+    if (row.file_hash && !hashGroupKey.has(row.file_hash)) hashGroupKey.set(row.file_hash, key);
+  }
+  for (const row of rows) {
+    if (!row.file_hash) continue;
+    const viaHash = hashGroupKey.get(row.file_hash);
+    if (viaHash) groupKeyOf.set(row.id, viaHash);
+  }
 
   const photosByHash = new Map<string, string[]>();
-  for (const row of dupPhotoRows || []) {
-    const list = photosByHash.get(row.file_hash) || [];
+  for (const row of rows) {
+    const key = groupKeyOf.get(row.id)!;
+    const list = photosByHash.get(key) || [];
     list.push(row.id);
-    photosByHash.set(row.file_hash, list);
+    photosByHash.set(key, list);
   }
 
   let groupsSynced = 0;

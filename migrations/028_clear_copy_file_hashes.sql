@@ -1,0 +1,20 @@
+-- Clear file_hash on copied photos.
+--
+-- A copy (POST /admin/photos/bulk-copy) is a photos row pointing at another
+-- photo's R2 file via source_photo_id; it is created WITHOUT a file_hash
+-- precisely because it has no file of its own.
+--
+-- GET /admin/photos/missing-file-hash did not exclude copies, so the client-side
+-- backfill (the repair button on /admin/duplicates) hashed them too. Since the
+-- media route serves a copy the SOURCE file, that produced the original's hash —
+-- and from then on GET /admin/photos/duplicates grouped a deliberate copy with
+-- the photo it was copied from.
+--
+-- That was worse than cosmetic: the duplicates page's "keep an album" action
+-- trashes every photo in a group except those in the chosen album, so it would
+-- have deleted exactly the copies the user set out to create.
+--
+-- Safe: file_hash exists only for duplicate detection, and on a copy the stored
+-- value described a different row's file. Both the backfill and the duplicates
+-- query now skip copies, so nothing rewrites these.
+UPDATE photos SET file_hash = NULL WHERE source_photo_id IS NOT NULL;
