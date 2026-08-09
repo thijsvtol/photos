@@ -22,6 +22,11 @@ export interface RejectedUploadFile {
   reason: string;
 }
 
+/** Whether a file is one of the plain (non-RAW) image types we accept as-is. */
+export function isSupportedImageType(file: File): boolean {
+  return file.type === 'image/jpeg' || file.type === 'image/png';
+}
+
 /**
  * HTTP status codes that indicate the request itself is invalid/rejected
  * rather than a transient network/server problem — retrying the exact same
@@ -235,7 +240,7 @@ class UploadManager {
     const rejected: RejectedUploadFile[] = [];
 
     for (const f of Array.from(files)) {
-      if (f.type === 'image/jpeg' || isVideoFile(f.type, f.name) || isRawFile(f)) {
+      if (isSupportedImageType(f) || isVideoFile(f.type, f.name) || isRawFile(f)) {
         supportedFiles.push(f);
       } else {
         rejected.push({

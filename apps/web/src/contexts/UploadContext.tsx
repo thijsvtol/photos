@@ -30,12 +30,18 @@ interface UploadContextValue {
   totalCount: number;
   /** 0-100 overall progress */
   overallProgress: number;
+  /** Whether a file is currently being dragged over the page. Shared across
+   *  every `useUpload()` consumer so the drag overlay reflects a single,
+   *  page-wide drag state instead of each consumer tracking its own. */
+  isDragging: boolean;
+  setIsDragging: (dragging: boolean) => void;
 }
 
 const UploadContext = createContext<UploadContextValue | null>(null);
 
 export const UploadProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [queueItems, setQueueItems] = useState<UploadQueueItem[]>([]);
+  const [isDragging, setIsDragging] = useState(false);
   const initRef = useRef(false);
 
   useEffect(() => {
@@ -46,6 +52,23 @@ export const UploadProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     // Subscribe to all state changes from the manager
     const unsubscribe = uploadManager.subscribe(setQueueItems);
     return unsubscribe;
+  }, []);
+
+  // Fallback safety net: if a drag lands outside a dropzone's own
+  // dragover/drop handlers (e.g. on the navbar, or on a short page with empty
+  // space below the content), the browser's default action is to navigate to
+  // the dropped file, discarding the current page. Swallowing dragover/drop
+  // at the window level everywhere prevents that regardless of where the
+  // drop actually lands.
+  useEffect(() => {
+    const handleWindowDragOver = (e: DragEvent) => { e.preventDefault(); };
+    const handleWindowDrop = (e: DragEvent) => { e.preventDefault(); };
+    window.addEventListener('dragover', handleWindowDragOver);
+    window.addEventListener('drop', handleWindowDrop);
+    return () => {
+      window.removeEventListener('dragover', handleWindowDragOver);
+      window.removeEventListener('drop', handleWindowDrop);
+    };
   }, []);
 
   const addFiles = useCallback(
@@ -99,6 +122,8 @@ export const UploadProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     completedCount,
     totalCount,
     overallProgress,
+    isDragging,
+    setIsDragging,
   };
 
   return <UploadContext.Provider value={value}>{children}</UploadContext.Provider>;

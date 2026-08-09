@@ -36,7 +36,7 @@ export interface Photo {
   id: string;
   event_id: number;
   original_filename: string;
-  file_type: string; // MIME type: 'image/jpeg', 'video/mp4', or 'raw/<ext>' (e.g. 'raw/cr2') for camera RAW photos
+  file_type: string; // MIME type: 'image/jpeg', 'image/png', 'video/mp4', or 'raw/<ext>' (e.g. 'raw/cr2') for camera RAW photos
   capture_time: string;
   uploaded_at: string;
   uploaded_by: string | null; // Uploader's email (matches users.email for the uploader_name JOIN and notification-exclusion logic)

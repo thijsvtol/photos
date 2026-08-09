@@ -1543,7 +1543,7 @@ const EventGallery: React.FC = () => {
                   <label className="inline-flex items-center gap-2 px-3 py-2 sm:px-4 sm:py-2.5 bg-blue-600 text-white rounded-full hover:bg-blue-700 transition-colors text-sm font-medium cursor-pointer">
                     <Upload className="w-4 h-4 sm:w-5 sm:h-5" />
                     <span className="hidden sm:inline">Upload</span>
-                    <input type="file" multiple accept="image/jpeg,video/mp4,video/quicktime,.mov,.cr2,.cr3,.crw,.nef,.nrw,.arw,.srf,.sr2,.dng,.raf,.orf,.rw2,.pef,.ptx,.srw,.raw,.rwl,.erf,.kdc,.dcr,.mrw,.x3f,.3fr,.mef,.mos,.iiq" onChange={handleFileInput} className="hidden" />
+                    <input type="file" multiple accept="image/jpeg,image/png,video/mp4,video/quicktime,.mov,.cr2,.cr3,.crw,.nef,.nrw,.arw,.srf,.sr2,.dng,.raf,.orf,.rw2,.pef,.ptx,.srw,.raw,.rwl,.erf,.kdc,.dcr,.mrw,.x3f,.3fr,.mef,.mos,.iiq" onChange={handleFileInput} className="hidden" />
                   </label>
                 )}
                 {filteredPhotos.length > 0 && (

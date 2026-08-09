@@ -1,4 +1,4 @@
-import { useState, useCallback } from 'react';
+import { useCallback } from 'react';
 import { useUploadContext } from '../contexts/UploadContext';
 import { useToast } from '../components/Toast';
 import type { UploadQueueItem } from '../types';
@@ -7,12 +7,13 @@ import type { UploadQueueItem } from '../types';
  * Thin wrapper around the global UploadContext.
  * Provides drag-drop/file-input handlers scoped to a specific event slug.
  * Upload processing itself happens in the global UploadManager singleton
- * so it survives page navigation.
+ * so it survives page navigation. `isDragging` lives in the context so every
+ * consumer (this hook may be called by multiple components) shares one flag.
  */
 export function useUpload(slug: string | undefined) {
   const ctx = useUploadContext();
   const toast = useToast();
-  const [isDragging, setIsDragging] = useState(false);
+  const { isDragging, setIsDragging } = ctx;
 
   const queueItems = slug ? ctx.getItemsForSlug(slug) : ctx.queueItems;
   const hasActiveUploads = queueItems.some(i => i.status === 'uploading' || i.status === 'pending');
@@ -27,8 +28,8 @@ export function useUpload(slug: string | undefined) {
       const names = rejected.map(r => r.name).join(', ');
       toast.showError(
         rejected.length === 1
-          ? `Couldn't upload "${names}": unsupported file type. Only JPEG/RAW photos and MP4 videos are supported.`
-          : `Couldn't upload ${rejected.length} files (${names}): unsupported file type. Only JPEG/RAW photos and MP4 videos are supported.`
+          ? `Couldn't upload "${names}": unsupported file type. Only JPEG/PNG/RAW photos and MP4 videos are supported.`
+          : `Couldn't upload ${rejected.length} files (${names}): unsupported file type. Only JPEG/PNG/RAW photos and MP4 videos are supported.`
       );
     }
   }, [slug, ctx, toast]);

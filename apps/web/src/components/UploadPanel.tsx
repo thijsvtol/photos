@@ -43,7 +43,7 @@ const UploadPanel: React.FC<UploadPanelProps> = ({ slug, onUploadsComplete }) =>
           <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-xl p-8 text-center border-4 border-dashed border-blue-500">
             <Upload className="w-12 h-12 text-blue-600 mx-auto mb-3" />
             <p className="text-lg font-semibold text-gray-900 dark:text-white">Drop files here</p>
-            <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">JPEG images and MP4 videos</p>
+            <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">JPEG/PNG/RAW images and MP4 videos</p>
           </div>
         </div>
       )}
