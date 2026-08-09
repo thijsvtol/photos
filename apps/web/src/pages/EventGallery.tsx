@@ -77,6 +77,11 @@ const EventGallery: React.FC = () => {
   const loadMoreRef = useRef<HTMLDivElement | null>(null);
   const lastScrollYRef = useRef(0);
   const prefetchedPhotoIdsRef = useRef<Set<string>>(new Set());
+  /** Where to scroll back to after returning from PhotoDetail, held for the whole
+   *  restore rather than read-and-consumed from sessionStorage — see the restore
+   *  effect for why (the photo list arrives twice: cache, then network). Null when
+   *  no restore is pending. */
+  const restoreTargetRef = useRef<{ scrollY: number; photoId: string | null } | null>(null);
   const canUpload = isAdmin || collaboratorRole === 'uploader' || collaboratorRole === 'editor' || collaboratorRole === 'admin';
   const canDelete = isAdmin || collaboratorRole === 'editor' || collaboratorRole === 'admin';
   const canCreateInvite = isAdmin || collaboratorRole === 'editor' || collaboratorRole === 'admin';
@@ -939,10 +944,23 @@ const EventGallery: React.FC = () => {
     return true;
   }, [photos, sortBy]);
 
+  // Navigating to a different event invalidates any pending restore — its target
+  // photo belongs to the previous gallery. Without this the stale ref would block
+  // the new event from reading its own saved position.
+  useEffect(() => {
+    restoreTargetRef.current = null;
+  }, [slug]);
+
   // Reset lazy-render windows when gallery context changes.
   // If restoring scroll position, expand window to include the target photo.
   useEffect(() => {
-    const savedPhotoId = sessionStorage.getItem(`gallery_photo_${slug}`);
+    // Prefer the in-progress restore target over sessionStorage: the restore
+    // effect clears sessionStorage once it lands, and this effect re-runs on
+    // every photos.length change (cache paint, then network). Reading only
+    // sessionStorage meant the second run saw nothing and collapsed the window
+    // back to 140 photos — dropping the very element the restore was scrolling to.
+    const savedPhotoId = restoreTargetRef.current?.photoId
+      ?? sessionStorage.getItem(`gallery_photo_${slug}`);
     if (savedPhotoId && photos.length > 0) {
       const found = expandWindowForPhotoId(savedPhotoId);
       if (!found) {
@@ -987,12 +1005,36 @@ const EventGallery: React.FC = () => {
   // Restore scroll position when returning to gallery
   useEffect(() => {
     if (slug && !loading && photos.length > 0) {
-      const savedScroll = sessionStorage.getItem(`gallery_scroll_${slug}`);
-      const savedPhotoId = sessionStorage.getItem(`gallery_photo_${slug}`);
-      if (savedScroll || savedPhotoId) {
-        const target = savedScroll ? parseInt(savedScroll, 10) : 0;
-        sessionStorage.removeItem(`gallery_scroll_${slug}`);
-        sessionStorage.removeItem(`gallery_photo_${slug}`);
+      // Read through a ref, and DON'T consume sessionStorage here.
+      //
+      // This effect depends on `photos`, so it re-runs whenever the array
+      // identity changes — which now happens twice on every open: once painting
+      // from the IndexedDB cache, once when the network response replaces it.
+      // Clearing sessionStorage on the first pass meant the second pass found
+      // nothing, cancelled the in-flight restore via its cleanup, and never
+      // restarted it. The user landed wherever the collapsed render window
+      // happened to leave them. Small events hid this: their target photo is
+      // inside the initial 140-photo window either way.
+      //
+      // The keys are cleared in finishRestore() instead, once the restore has
+      // actually landed or definitively given up, so a re-run resumes it.
+      if (!restoreTargetRef.current) {
+        const savedScroll = sessionStorage.getItem(`gallery_scroll_${slug}`);
+        const savedPhotoId = sessionStorage.getItem(`gallery_photo_${slug}`);
+        if (savedScroll || savedPhotoId) {
+          restoreTargetRef.current = { scrollY: savedScroll ? parseInt(savedScroll, 10) : 0, photoId: savedPhotoId };
+        }
+      }
+
+      const restoreTarget = restoreTargetRef.current;
+      if (restoreTarget) {
+        const target = restoreTarget.scrollY;
+        const savedPhotoId = restoreTarget.photoId;
+        const finishRestore = () => {
+          restoreTargetRef.current = null;
+          sessionStorage.removeItem(`gallery_scroll_${slug}`);
+          sessionStorage.removeItem(`gallery_photo_${slug}`);
+        };
 
         // Poll until the target photo element exists or page is tall enough
         let attempts = 0;
@@ -1032,6 +1074,7 @@ const EventGallery: React.FC = () => {
                 setTimeout(() => {
                   el.classList.remove('ring-4', 'ring-blue-500', 'ring-offset-2', 'dark:ring-offset-gray-900', 'transition-shadow');
                 }, 1500);
+                finishRestore();
                 return;
               }
               attempts++;
@@ -1054,6 +1097,7 @@ const EventGallery: React.FC = () => {
               if (!found) {
                 // Photo no longer exists in this event (e.g. deleted) — nothing to
                 // scroll to; stop polling instead of guessing a scroll position.
+                finishRestore();
                 return;
               }
             }
@@ -1064,12 +1108,14 @@ const EventGallery: React.FC = () => {
           if (!savedPhotoId) {
             if (document.documentElement.scrollHeight >= target + window.innerHeight * 0.5 || attempts >= 60) {
               window.scrollTo(0, target);
+              finishRestore();
               return;
             }
           } else if (attempts >= 150) {
             // Expanded the window but the element still never showed up (e.g. it's
             // filtered out by the current search/media-type filter) — give up
             // gracefully rather than polling forever.
+            finishRestore();
             return;
           }
           attempts++;

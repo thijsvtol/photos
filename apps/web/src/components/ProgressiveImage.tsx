@@ -53,26 +53,51 @@ const ProgressiveImage: React.FC<ProgressiveImageProps> = ({
   }, [src]);
 
   // Use IntersectionObserver (web + native) to set src only once the tile is near the
-  // viewport, so images load in the order the user is scrolling through them.
+  // viewport, so images load in the order the user is scrolling through them — and to
+  // drop it again once the tile is far away.
+  //
+  // Releasing matters as much as loading here. This observer used to disconnect after
+  // the first intersection, so every tile the user scrolled past kept its <img src>
+  // set for the lifetime of the page. Grid tiles are served the 1920px preview (there
+  // is no smaller derivative), which decodes to roughly 11MB of pixels each, so a few
+  // hundred tiles of scrolling accumulated enough decoded bitmaps to make scrolling
+  // stutter — and on this app that memory pressure has already proven able to take the
+  // Android WebView's renderer process down entirely.
+  //
+  // Dropping activeSrc lets the browser reclaim the decode; the blur placeholder takes
+  // over again, and scrolling back re-requests a URL that is cached for a year
+  // (Cache-Control on /media), so the refetch is local and cheap.
+  //
+  // Two observers because load and unload need different thresholds — sharing one edge
+  // would thrash on small scroll jitter. Load at 300px, release only past 1500px.
   useEffect(() => {
     const el = containerRef.current;
-    if (!el || activeSrc) return;
+    if (!el) return;
 
-    const observer = new IntersectionObserver(
+    const loadObserver = new IntersectionObserver(
       (entries) => {
-        for (const entry of entries) {
-          if (entry.isIntersecting) {
-            setActiveSrc(src);
-            observer.disconnect();
-          }
-        }
+        if (entries.some((entry) => entry.isIntersecting)) setActiveSrc(src);
       },
       { rootMargin: priority ? '0px' : '300px 0px' }
     );
 
-    observer.observe(el);
-    return () => observer.disconnect();
-  }, [src, activeSrc, priority]);
+    const unloadObserver = new IntersectionObserver(
+      (entries) => {
+        if (entries.every((entry) => !entry.isIntersecting)) {
+          setActiveSrc(null);
+          setImageLoaded(false);
+        }
+      },
+      { rootMargin: '1500px 0px' }
+    );
+
+    loadObserver.observe(el);
+    unloadObserver.observe(el);
+    return () => {
+      loadObserver.disconnect();
+      unloadObserver.disconnect();
+    };
+  }, [src, priority]);
 
   // Check if image was already cached
   useEffect(() => {

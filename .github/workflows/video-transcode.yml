@@ -13,7 +13,7 @@ on:
       batch_size:
         description: 'Max number of videos to check/transcode this run'
         required: false
-        default: '15'
+        default: '100'
 
 jobs:
   transcode:
@@ -31,4 +31,15 @@ jobs:
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-        run: ./scripts/transcode-videos.sh "${{ github.event.inputs.batch_size || '15' }}"
+        # 100, not 15. Most of a batch is a cheap ffprobe that finds H.264 and
+        # marks it compatible without re-encoding; only genuine HEVC costs real
+        # time. 15/night could not keep up with a bulk import (one folder sync
+        # added 109 videos in a day), leaving videos that the WebView cannot
+        # decode sitting unconverted for a week — which is what users see as
+        # "videos don't load".
+        #
+        # This is only safe now that the codec comparison actually matches (see
+        # scripts/transcode-videos.sh): before that fix every already-compatible
+        # H.264 file was needlessly re-encoded, so a batch of 100 would have run
+        # for many hours instead of minutes.
+        run: ./scripts/transcode-videos.sh "${{ github.event.inputs.batch_size || '100' }}"

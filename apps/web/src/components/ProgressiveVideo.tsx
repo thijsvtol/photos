@@ -30,6 +30,9 @@ const ProgressiveVideo: React.FC<ProgressiveVideoProps> = ({
   const isNative = Capacitor.isNativePlatform();
   const retryCountRef = useRef(0);
   const retryTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  /** True while we are deliberately tearing the <video> down, so the `error`
+   *  event that provokes isn't mistaken for a failed load — see handleVideoError. */
+  const isUnloadingRef = useRef(false);
 
   useEffect(() => {
     setIsNearViewport(false);
@@ -57,6 +60,15 @@ const ProgressiveVideo: React.FC<ProgressiveVideoProps> = ({
   }, []);
 
   const handleVideoError = useCallback(() => {
+    // Ignore the error our own unload provokes. Clearing `src` and calling
+    // load() to release the decoder makes Chromium fire `error`
+    // (MEDIA_ELEMENT_ERROR: Empty src attribute) on the way out. Treating that
+    // as a real failure burned retry attempts and, after three of them, latched
+    // videoError — so a tile that had merely scrolled out of view came back
+    // showing the "Retry" placeholder instead of the video. That is precisely
+    // the "some videos don't load" symptom, manufactured by the cleanup itself.
+    if (isUnloadingRef.current) return;
+
     if (retryCountRef.current < AUTO_RETRY_LIMIT) {
       retryCountRef.current += 1;
       const delay = AUTO_RETRY_BASE_DELAY_MS * retryCountRef.current;
@@ -76,31 +88,84 @@ const ProgressiveVideo: React.FC<ProgressiveVideoProps> = ({
     return () => mq.removeEventListener('change', handler);
   }, []);
 
+  /**
+   * Mount the <video> when the tile comes near the viewport, and UNMOUNT it again
+   * once it is far away.
+   *
+   * This used to be one-way: the observer set isNearViewport(true) and then
+   * disconnected, so every tile the user ever scrolled past kept a live <video>
+   * with `preload="metadata"` for the lifetime of the page. In this library that
+   * is brutal — the gallery serves the ORIGINAL file for video tiles (videos get
+   * no separate preview), and the synced videos average ~70MB, with 147 between
+   * 50-200MB and 22 over 200MB (avg 550MB). Scrolling through a few hundred of
+   * them left a few hundred concurrent metadata fetches against very large files,
+   * which is what exhausted connections (videos stuck not loading) and stalled
+   * scrolling for seconds at a time.
+   *
+   * Two observers rather than one, because a single rootMargin can only express
+   * one threshold and load/unload must not share an edge — that would thrash on
+   * any small scroll jitter. Loading at 200px and releasing only past 1500px
+   * gives a wide hysteresis band, so normal back-and-forth scrolling never
+   * re-fetches.
+   */
   useEffect(() => {
     const el = containerRef.current;
-    if (!el || isNearViewport) return;
+    if (!el) return;
 
-    const observer = new IntersectionObserver(
+    const loadObserver = new IntersectionObserver(
       (entries) => {
-        entries.forEach((entry) => {
-          if (entry.isIntersecting) {
-            setIsNearViewport(true);
-            observer.disconnect();
-          }
-        });
+        if (entries.some((entry) => entry.isIntersecting)) {
+          isUnloadingRef.current = false;
+          setIsNearViewport(true);
+        }
       },
       { rootMargin: '200px 0px' }
     );
 
-    observer.observe(el);
-    return () => observer.disconnect();
-  }, [src, isNearViewport]);
+    const unloadObserver = new IntersectionObserver(
+      (entries) => {
+        if (entries.every((entry) => !entry.isIntersecting)) {
+          // Release the decoder and any in-flight range request explicitly.
+          // Unmounting alone leaves that to the browser's discretion, which is
+          // exactly the "eventually" this fix exists to avoid.
+          const video = videoRef.current;
+          if (video) {
+            isUnloadingRef.current = true;
+            video.pause();
+            video.removeAttribute('src');
+            video.load();
+          }
+          setIsNearViewport(false);
+          setIsPlaying(false);
+          setMetadataLoaded(false);
+          // A tile coming back into view deserves a clean slate: drop any
+          // pending retry and the error state, so an earlier genuine failure
+          // (or a load cut short by scrolling) doesn't persist as a dead tile.
+          if (retryTimeoutRef.current) {
+            clearTimeout(retryTimeoutRef.current);
+            retryTimeoutRef.current = null;
+          }
+          retryCountRef.current = 0;
+          setVideoError(false);
+        }
+      },
+      { rootMargin: '1500px 0px' }
+    );
+
+    loadObserver.observe(el);
+    unloadObserver.observe(el);
+    return () => {
+      loadObserver.disconnect();
+      unloadObserver.disconnect();
+    };
+  }, [src]);
 
   // Abort video preload on unmount to free browser connections
   useEffect(() => {
     return () => {
       const video = videoRef.current;
       if (video) {
+        isUnloadingRef.current = true;
         video.pause();
         video.removeAttribute('src');
         video.load();

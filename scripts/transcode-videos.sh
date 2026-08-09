@@ -76,7 +76,17 @@ echo "$RESULT_JSON" | jq -c '.[0].results[]' | while IFS= read -r row; do
     continue
   fi
 
-  CODEC=$(ffprobe -v error -select_streams v:0 -show_entries stream=codec_name -of csv=p=0 "$INPUT_FILE" 2>/dev/null || echo "")
+  # Normalize before comparing. `-of csv=p=0` can emit a trailing separator (and
+  # more than one line when a file carries extra streams), so the raw value comes
+  # back as e.g. "h264," rather than "h264". That never equalled "h264" below, so
+  # already-compatible H.264 videos were re-encoded to H.264 on every run —
+  # visible in the 2026-08-09 job log as "Codec is h264, — transcoding to
+  # H.264..." alongside correct "Codec is h264 — already compatible" lines, and
+  # as a run time of 1h21m (one file took 38 minutes) against the usual 30s-3m.
+  # That waste also starved the batch: at 15 videos per nightly run, real work
+  # queued behind pointless re-encodes.
+  CODEC=$(ffprobe -v error -select_streams v:0 -show_entries stream=codec_name -of csv=p=0 "$INPUT_FILE" 2>/dev/null \
+    | head -n1 | tr -d '\r' | cut -d, -f1 | tr -d '[:space:]' || echo "")
 
   if [ -z "$CODEC" ]; then
     echo "  Could not determine video codec — marking failed."

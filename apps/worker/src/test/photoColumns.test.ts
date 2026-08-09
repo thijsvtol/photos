@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { GALLERY_PHOTO_COLUMNS } from '../photoColumns';
+import { GALLERY_PHOTO_COLUMNS, PHOTO_COLUMNS_WITH_BLUR } from '../photoColumns';
 
 /**
  * Guards the payload-size fix from 2026-08-09.
@@ -39,14 +39,28 @@ describe('GALLERY_PHOTO_COLUMNS', () => {
 
   it('keeps the columns the gallery genuinely needs', () => {
     // file_hash/phash drive duplicate grouping in EventGallery.tsx;
-    // blur_placeholder is the blur-up placeholder; cache_version busts media URLs.
+    // cache_version busts media URLs after an edit/transcode.
     for (const required of [
       'p.id', 'p.event_id', 'p.original_filename', 'p.file_type', 'p.capture_time',
-      'p.width', 'p.height', 'p.blur_placeholder', 'p.cache_version',
+      'p.width', 'p.height', 'p.cache_version',
       'p.is_featured', 'p.favorites_count', 'p.file_hash', 'p.phash',
     ]) {
       expect(columns).toContain(required);
     }
+  });
+
+  it('omits blur_placeholder — it was 81% of a full-event response', () => {
+    // 5.31MB of an 8.08MB body for 4102 photos, ~1470 bytes per row. A 16x16
+    // JPEG cannot be made meaningfully smaller (fixed JPEG tables + base64), so
+    // the column comes out of the big listing entirely.
+    expect(columns).not.toContain('p.blur_placeholder');
+  });
+
+  it('still offers a blur-bearing variant for short lists', () => {
+    // featured / most-favorited are LIMIT ~20, where the blur-up is nearly free.
+    expect(PHOTO_COLUMNS_WITH_BLUR).toContain('p.blur_placeholder');
+    // ...and it must otherwise stay in step with the gallery list.
+    for (const column of columns) expect(PHOTO_COLUMNS_WITH_BLUR).toContain(column);
   });
 
   it('qualifies every column with the photos alias, so it can join without ambiguity', () => {

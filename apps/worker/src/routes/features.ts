@@ -2,7 +2,7 @@ import { Hono } from 'hono';
 import { cors } from 'hono/cors';
 import type { Env } from '../types';
 import { logger } from '../logger';
-import { GALLERY_PHOTO_COLUMNS } from '../photoColumns';
+import { PHOTO_COLUMNS_WITH_BLUR } from '../photoColumns';
 
 const app = new Hono<{ Bindings: Env }>();
 
@@ -56,7 +56,7 @@ app.get('/api/photos/featured', async (c) => {
     // homepage, and password-protected previews can't load anonymously.
     let photos = await c.env.DB
       .prepare(`
-        SELECT ${GALLERY_PHOTO_COLUMNS}, e.slug as event_slug, e.name as event_name
+        SELECT ${PHOTO_COLUMNS_WITH_BLUR}, e.slug as event_slug, e.name as event_name
         FROM photos p
         JOIN events e ON p.event_id = e.id
         WHERE p.is_featured = 1 AND p.deleted_at IS NULL AND e.visibility = 'public' AND e.password_hash IS NULL
@@ -70,7 +70,7 @@ app.get('/api/photos/featured', async (c) => {
     if (!photos.results || photos.results.length === 0) {
       photos = await c.env.DB
         .prepare(`
-          SELECT ${GALLERY_PHOTO_COLUMNS}, e.slug as event_slug, e.name as event_name
+          SELECT ${PHOTO_COLUMNS_WITH_BLUR}, e.slug as event_slug, e.name as event_name
           FROM photos p
           JOIN events e ON p.event_id = e.id
           WHERE e.visibility = 'public' AND e.password_hash IS NULL AND p.deleted_at IS NULL
@@ -98,7 +98,7 @@ app.get('/api/photos/most-favorited', async (c) => {
     
     const photos = await c.env.DB
       .prepare(`
-        SELECT ${GALLERY_PHOTO_COLUMNS}, e.slug as event_slug, e.name as event_name
+        SELECT ${PHOTO_COLUMNS_WITH_BLUR}, e.slug as event_slug, e.name as event_name
         FROM photos p
         JOIN events e ON p.event_id = e.id
         WHERE e.visibility = 'public' AND e.password_hash IS NULL AND p.deleted_at IS NULL
