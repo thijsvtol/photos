@@ -21,6 +21,7 @@ import { useUpload } from '../hooks/useUpload';
 import { getEvent, getPhotos, loginToEvent, getPreviewUrl, getCastPreviewUrl, requestZip, downloadZip, setPhotoFeatured, getUserFavoriteIds, toggleFavorite as toggleFavoriteAPI, bulkDeletePhotos, bulkCopyPhotos, bulkUpdatePhotoLocation, bulkTagPeopleOnPhotos, getCollaborators, getNamedPeople } from '../api';
 import type { NamedPerson } from '../api';
 import type { Event, Photo, Collaborator } from '../types';
+import { getCachedEventPhotos, cacheEventPhotos } from '../services/eventPhotoCache';
 import { CollaboratorAvatars } from '../components/CollaboratorAvatars';
 import { useAuth } from '../contexts/AuthContext';
 import { usePhotoSelection } from '../hooks/usePhotoSelection';
@@ -235,14 +236,37 @@ const EventGallery: React.FC = () => {
   const loadEvent = async () => {
     try {
       setLoading(true);
+
+      // Paint from the IndexedDB cache before the network is consulted at all.
+      // Without this, opening a large event showed nothing until a full round-trip
+      // completed — every single time. The fetch below still runs and reconciles;
+      // this only removes the wait before the first photo appears.
+      //
+      // Deliberately not gated on `authenticated`: a cache entry can only exist if
+      // this browser previously loaded the event successfully, which required
+      // access then. The real access check still happens server-side on the fetch,
+      // and logout wipes the cache (see AuthContext).
+      if (isUnfilteredListing) {
+        try {
+          const cached = await getCachedEventPhotos(slug!);
+          if (cached.length > 0) {
+            setPhotos(cached);
+            setLoading(false);
+          }
+        } catch (err) {
+          console.error('Failed to read event photo cache:', err);
+        }
+      }
+
       const eventData = await getEvent(slug!);
       setEvent(eventData);
-      
+
       // If event doesn't require password, load photos immediately
       if (!eventData.requires_password) {
         try {
           const photoData = await getPhotos(slug!, sortBy, Array.from(peopleFilterIds));
           setPhotos(photoData);
+          if (isUnfilteredListing) void cacheEventPhotos(slug!, photoData);
           setAuthenticated(true);
         } catch (err) {
           console.error('Failed to load photos for public event:', err);
@@ -252,13 +276,16 @@ const EventGallery: React.FC = () => {
         try {
           const photoData = await getPhotos(slug!, sortBy, Array.from(peopleFilterIds));
           setPhotos(photoData);
+          if (isUnfilteredListing) void cacheEventPhotos(slug!, photoData);
           setAuthenticated(true);
         } catch {
-          // Not authenticated yet
+          // Not authenticated yet. Drop anything painted from cache — the session
+          // that could see these photos has ended.
+          setPhotos([]);
           setAuthenticated(false);
         }
       }
-      
+
       setError(null);
     } catch (err) {
       setError('Failed to load event');
@@ -274,10 +301,22 @@ const EventGallery: React.FC = () => {
     await loadPhotos();
   };
 
+  /**
+   * True only for an unfiltered listing, i.e. the complete set of photos for this
+   * event.
+   *
+   * cacheEventPhotos() deletes any cached row the response doesn't contain, so
+   * handing it a people-filtered subset would wipe every other photo from the
+   * cache. Reading is gated the same way: showing a cached full set while a
+   * filter is active would render photos the filter excludes.
+   */
+  const isUnfilteredListing = peopleFilterIds.size === 0;
+
   const loadPhotos = async () => {
     try {
       const photoData = await getPhotos(slug!, sortBy, Array.from(peopleFilterIds));
       setPhotos(photoData);
+      if (isUnfilteredListing) void cacheEventPhotos(slug!, photoData);
     } catch (err) {
       console.error(err);
     }

@@ -70,6 +70,24 @@ const EventFormModal: React.FC<EventFormModalProps> = ({ isOpen, onClose, event,
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+
+    // Only the save button may submit this form.
+    //
+    // The form wraps TagManager, CollaboratorManager, CollaborationHistory and
+    // FolderSyncManager, and a <button> without an explicit type defaults to
+    // type="submit". So any bare button inside those components silently saved the
+    // event and closed the modal — clicking "invite collaborator" or a folder-sync
+    // control popped a "Event updated" toast and dismissed everything.
+    //
+    // Every such button now carries type="button", but that fix has to be repeated
+    // for every button anyone adds to those components in future, and forgetting is
+    // invisible until someone clicks it. This guard makes the form ignore anything
+    // that isn't the one button meant to submit it.
+    const submitter = (e.nativeEvent as SubmitEvent).submitter;
+    if (submitter && submitter.getAttribute('data-event-form-submit') === null) {
+      return;
+    }
+
     if (!name.trim()) {
       toast.showError('Name is required');
       return;
@@ -355,6 +373,7 @@ const EventFormModal: React.FC<EventFormModalProps> = ({ isOpen, onClose, event,
             <div className="flex gap-3 pt-2">
               <button
                 type="submit"
+                data-event-form-submit
                 disabled={saving}
                 className="flex-1 px-4 py-2.5 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition disabled:bg-gray-400 font-medium flex items-center justify-center gap-2"
               >

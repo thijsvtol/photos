@@ -2,8 +2,11 @@ package nl.thijsvtol.photos;
 
 import android.content.Intent;
 import android.os.Bundle;
+import android.webkit.RenderProcessGoneDetail;
+import android.webkit.WebView;
 import com.getcapacitor.BridgeActivity;
 import com.getcapacitor.Plugin;
+import com.getcapacitor.WebViewListener;
 import nl.thijsvtol.photos.plugins.SafDirectoryPlugin;
 import nl.thijsvtol.photos.plugins.ShareHandlerPlugin;
 import nl.thijsvtol.photos.plugins.ProgressNotificationPlugin;
@@ -34,10 +37,60 @@ public class MainActivity extends BridgeActivity {
         registerPlugin(FolderSyncPlugin.class);
         super.onCreate(savedInstanceState);
         
+        registerRenderProcessRecovery();
+
         android.util.Log.d("MainActivity", "onCreate completed, handling intent immediately");
-        
+
         // Handle initial share intent if app was launched via share
         handleIntent(getIntent());
+    }
+
+    /**
+     * Survives a WebView renderer death instead of letting it kill the app.
+     *
+     * The WebView runs its renderer in a separate, sandboxed process. When that process dies —
+     * almost always because Android reclaimed it under memory pressure — the platform asks the
+     * app whether it handled the loss. Declining (the default) means Android kills the entire
+     * app process, which is what produced this in logcat:
+     *
+     *   Render process (N) kill (OOM or update) wasn't handed by all associated webviews,
+     *   killing application
+     *   PROCESS ENDED for package nl.thijsvtol.photos
+     *
+     * The app simply vanished from the user's screen with no message. Returning true here
+     * claims the event so the process survives, and reloading rebuilds the WebView's state
+     * from scratch — a visible reload, but the app stays alive.
+     *
+     * This is a SAFETY NET, not the fix. The renderer was running out of memory because face
+     * detection ran unbounded and on full-resolution images; that root cause is addressed in
+     * apps/web/src/faceDetectionQueue.ts (one detection at a time) and faceDetection.ts (input
+     * capped to DETECTION_MAX_DIMENSION). This stays because other paths can still spike memory
+     * (video editing reads whole blobs into the renderer), and because "reload" beats "die".
+     */
+    private void registerRenderProcessRecovery() {
+        // Same null-guard rationale as handleIntent(): the bridge is created by
+        // super.onCreate(), but bail loudly rather than NPE if that ever changes.
+        if (getBridge() == null) {
+            android.util.Log.e("MainActivity", "registerRenderProcessRecovery: bridge is null, renderer crashes will kill the app");
+            return;
+        }
+
+        getBridge().addWebViewListener(new WebViewListener() {
+            @Override
+            public boolean onRenderProcessGone(WebView webView, RenderProcessGoneDetail detail) {
+                // didCrash() false => the renderer was KILLED by the system (the OOM case we
+                // expect); true => it crashed on its own. Logged so future reports say which.
+                android.util.Log.e(
+                    "MainActivity",
+                    "WebView renderer process gone (didCrash=" + detail.didCrash() + "), reloading instead of dying"
+                );
+
+                if (webView != null) {
+                    webView.reload();
+                }
+                return true; // handled — do not kill the app process
+            }
+        });
     }
 
     @Override

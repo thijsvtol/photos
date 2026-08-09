@@ -11,7 +11,6 @@ import RequireProfileName from './components/RequireProfileName';
 import { OfflineBanner } from './components/OfflineBanner';
 import { ToastProvider } from './components/Toast';
 import ErrorBoundary from './components/ErrorBoundary';
-import PullToRefresh from './components/PullToRefresh';
 import { AndroidAppPrompt } from './components/AndroidAppPrompt';
 import { initAnalytics, trackPageView } from './services/analytics';
 import { useAndroidBackButton } from './hooks/useAndroidBackButton';
@@ -274,9 +273,8 @@ function App() {
                 <BrowserRouter>
                   <ShareIntentHandler />
                   <PageViewTracker />
-                  <PullToRefresh>
-                    <Suspense fallback={<LoadingFallback />}>
-                      <Routes>
+                  <Suspense fallback={<LoadingFallback />}>
+                    <Routes>
                       <Route path="/" element={<Landing />} />
                       <Route path="/events" element={<EventList />} />
                       <Route path="/events/:slug" element={<EventGallery />} />
@@ -300,9 +298,8 @@ function App() {
                       <Route path="/admin/duplicates" element={<AdminDuplicates />} />
                       <Route path="/admin/activity" element={<AdminActivity />} />
                       <Route path="/admin/events/:slug/photos" element={<AdminPhotoManager />} />
-                    </Routes>
-                    </Suspense>
-                  </PullToRefresh>
+                  </Routes>
+                  </Suspense>
                   <AndroidAppPrompt />
                   <GlobalUploadIndicator />
                   <OfflineBanner />

@@ -86,7 +86,12 @@ public class ProgressNotificationPlugin extends Plugin {
             // separate notifications, buzzing the user's wrist for the whole
             // upload. setOnlyAlertOnce() doesn't prevent that — it only
             // suppresses re-alerting on the phone itself.
-            .setLocalOnly(ongoing)
+            //
+            // Unconditional, not setLocalOnly(ongoing): the terminal (!ongoing)
+            // "upload complete" notification was the one case still reaching the
+            // watch, and a batch upload posts one of those per batch. Upload
+            // results belong on the phone.
+            .setLocalOnly(true)
             .setSilent(ongoing)
             .setContentIntent(pendingIntent)
             .setAutoCancel(!ongoing);

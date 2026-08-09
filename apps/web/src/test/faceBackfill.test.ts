@@ -2,18 +2,18 @@ import { describe, expect, it, vi, beforeEach } from 'vitest';
 
 const getFacesPendingPhotosMock = vi.fn();
 const saveBackfilledFacesMock = vi.fn();
-const getOriginalUrlMock = vi.fn((..._args: unknown[]) => 'https://example.com/original.jpg');
+const getPreviewUrlMock = vi.fn((..._args: unknown[]) => 'https://example.com/preview.jpg');
 const detectFacesMock = vi.fn();
 
 vi.mock('../api', () => ({
   getFacesPendingPhotos: (limit?: number) => getFacesPendingPhotosMock(limit),
   saveBackfilledFaces: (photoId: string, faces: unknown) => saveBackfilledFacesMock(photoId, faces),
-  getOriginalUrl: (slug: string, photoId: string, fileType?: string, cacheVersion?: number) =>
-    getOriginalUrlMock(slug, photoId, fileType, cacheVersion),
+  getPreviewUrl: (slug: string, photoId: string, fileType?: string, cacheVersion?: number) =>
+    getPreviewUrlMock(slug, photoId, fileType, cacheVersion),
 }));
 
 vi.mock('../faceDetection', () => ({
-  detectFaces: (url: string) => detectFacesMock(url),
+  detectFaces: (source: Blob | string) => detectFacesMock(source),
 }));
 
 import { runBackfillScan } from '../faceBackfill';
@@ -24,6 +24,7 @@ beforeEach(() => {
   getFacesPendingPhotosMock.mockReset();
   saveBackfilledFacesMock.mockReset();
   detectFacesMock.mockReset();
+  getPreviewUrlMock.mockClear();
   global.fetch = vi.fn();
   global.URL.createObjectURL = vi.fn(() => 'blob://fake');
   global.URL.revokeObjectURL = vi.fn();
@@ -111,5 +112,27 @@ describe('runBackfillScan', () => {
     await runBackfillScan(() => false);
 
     expect(getFacesPendingPhotosMock).toHaveBeenCalledTimes(1);
+  });
+
+  /**
+   * Scanning originals is what exhausted the Android WebView renderer and killed the app
+   * (2026-08-08). See faceBackfill.ts's HISTORY note before changing this back — it has now
+   * flipped twice.
+   */
+  it('scans the preview, not the original, and hands the blob straight to detectFaces', async () => {
+    const blob = new Blob(['x'], { type: 'image/jpeg' });
+    (global.fetch as ReturnType<typeof vi.fn>).mockResolvedValue({ ok: true, blob: async () => blob });
+    detectFacesMock.mockResolvedValue([]);
+    getFacesPendingPhotosMock
+      .mockResolvedValueOnce({ photos: [photo('p1')], remaining: 1 })
+      .mockResolvedValueOnce({ photos: [], remaining: 0 });
+
+    await runBackfillScan(() => {});
+
+    expect(getPreviewUrlMock).toHaveBeenCalledWith('my-event', 'p1', 'image/jpeg', 1);
+    expect(global.fetch).toHaveBeenCalledWith('https://example.com/preview.jpg');
+    // No object URL: detectFaces() does its own bounded decode from the blob.
+    expect(detectFacesMock).toHaveBeenCalledWith(blob);
+    expect(global.URL.createObjectURL).not.toHaveBeenCalled();
   });
 });

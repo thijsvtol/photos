@@ -185,6 +185,7 @@ export default function FolderSyncManager({ eventSlug }: Props) {
         <div className="flex items-center gap-2">
           {folderSyncs.length > 0 && (
             <button
+              type="button"
               onClick={handleSyncNow}
               disabled={status?.running}
               className="flex items-center gap-2 px-3 py-1.5 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-200 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors text-sm disabled:opacity-50"
@@ -195,6 +196,7 @@ export default function FolderSyncManager({ eventSlug }: Props) {
             </button>
           )}
           <button
+            type="button"
             onClick={handleAddFolder}
             className="flex items-center gap-2 px-3 py-1.5 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors text-sm"
           >
@@ -241,6 +243,7 @@ export default function FolderSyncManager({ eventSlug }: Props) {
 
               <div className="flex items-center gap-2 shrink-0 ml-2">
                 <button
+                  type="button"
                   onClick={() => handleForgetHistory(sync.folderPath)}
                   className="p-2 text-gray-500 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-700 rounded-lg transition-colors"
                   title="Forget sync history for this folder"
@@ -248,6 +251,7 @@ export default function FolderSyncManager({ eventSlug }: Props) {
                   <History className="w-4 h-4" />
                 </button>
                 <button
+                  type="button"
                   onClick={() => handleRemoveFolder(sync.folderPath)}
                   className="p-2 text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg transition-colors"
                   title="Remove folder"
@@ -293,6 +297,7 @@ export default function FolderSyncManager({ eventSlug }: Props) {
       {quarantined.length > 0 && (
         <div className="bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-lg p-3">
           <button
+            type="button"
             onClick={() => setShowQuarantined(v => !v)}
             className="flex items-center gap-2 w-full text-left text-sm text-amber-900 dark:text-amber-200"
           >
@@ -314,6 +319,7 @@ export default function FolderSyncManager({ eventSlug }: Props) {
                     )}
                   </div>
                   <button
+                    type="button"
                     onClick={() => handleRetryQuarantined(file.id)}
                     className="shrink-0 px-2 py-1 border border-amber-300 dark:border-amber-700 rounded text-amber-900 dark:text-amber-200 hover:bg-amber-100 dark:hover:bg-amber-900/40 transition-colors"
                   >

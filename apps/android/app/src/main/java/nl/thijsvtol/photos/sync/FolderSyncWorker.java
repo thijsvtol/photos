@@ -2,7 +2,11 @@ package nl.thijsvtol.photos.sync;
 
 import android.content.ContentResolver;
 import android.content.Context;
+import android.net.ConnectivityManager;
+import android.net.Network;
+import android.net.NetworkCapabilities;
 import android.net.Uri;
+import android.util.Log;
 
 import androidx.annotation.NonNull;
 import androidx.work.ForegroundInfo;
@@ -43,6 +47,17 @@ import java.util.UUID;
  *    drains across runs rather than one run being killed for overrunning.
  */
 public class FolderSyncWorker extends Worker {
+
+    /**
+     * Single tag for the whole sync engine, so `adb logcat -s FolderSync` shows a
+     * complete picture of a run.
+     *
+     * This package logged NOTHING until 2026-08-08, which is why a sync that had
+     * stalled for hours could only be diagnosed by pulling the ledger and
+     * WorkManager's own SQLite databases off the device. Logging is at run/phase
+     * boundaries only — per-file logging would flood logcat on a 4000-file scan.
+     */
+    static final String TAG = "FolderSync";
 
     /**
      * Wall-clock budget per run. Comfortably inside WorkManager's 10-minute
@@ -92,10 +107,33 @@ public class FolderSyncWorker extends Worker {
     public Result doWork() {
         this.deadline = System.currentTimeMillis() + MAX_RUN_MILLIS;
 
-        if (!config.isEnabled()) return Result.success();
+        // These three paths return without reaching finish(), so they clear the
+        // progress notification themselves. finish() now KEEPS it alive between
+        // runs while a backlog drains (see there), which means "we are not going
+        // to sync at all" has to take the notification down explicitly —
+        // otherwise disabling sync, removing the last folder, or a token expiry
+        // would strand a progress bar on screen indefinitely.
+        if (!config.isEnabled()) {
+            notifier.clearProgress();
+            return Result.success();
+        }
 
         List<SyncConfig.Folder> folders = config.getEnabledFolders();
-        if (folders.isEmpty()) return Result.success();
+        if (folders.isEmpty()) {
+            notifier.clearProgress();
+            return Result.success();
+        }
+
+        // The Wi-Fi-only rule lives here, not in the WorkRequest's constraints —
+        // see SyncScheduler.constraintsFrom() for why a network constraint made
+        // the OS chop every run to pieces. Returning success (not retry) is
+        // deliberate: being on cellular is a normal state, not a failure, and a
+        // retry would grow the very backoff this whole change exists to avoid.
+        if (!networkAllowsSync()) {
+            Log.i(TAG, "skipping run: wifiOnly is on and the active network is metered/absent");
+            notifier.clearProgress();
+            return Result.success();
+        }
 
         String token = config.getAuthToken();
         String baseUrl = config.getApiBaseUrl();
@@ -103,6 +141,7 @@ public class FolderSyncWorker extends Worker {
             // Not signed in (or the app has never handed us a base URL yet).
             // Not an error worth retrying on a timer — the next configure()
             // call from JS will kick a fresh run.
+            notifier.clearProgress();
             if (token == null) notifier.showAuthExpired();
             return Result.success();
         }
@@ -132,19 +171,37 @@ public class FolderSyncWorker extends Worker {
         PhotosApiClient api = new PhotosApiClient(resolver, baseUrl, token);
         RunStats stats = new RunStats();
 
+        // Sampled once, before any scanning adds to it — see scanFolder(incremental).
+        int startPending = ledger.countByState(SyncLedger.STATE_PENDING, null);
+        int startHashed = ledger.countByState(SyncLedger.STATE_HASHED, null);
+        boolean incrementalScan = startPending > 0 || startHashed > 0;
+
+        Log.i(TAG, "run start: userInitiated=" + userInitiated
+            + " folders=" + folders.size()
+            + " backlog(pending=" + startPending + " hashed=" + startHashed + ")"
+            + " scan=" + (incrementalScan ? "incremental" : "full"));
+
         try {
             // Anything a previous (crashed/killed) run left mid-flight goes back
             // in the queue with its resume state, before we add new work.
             int recovered = ledger.recoverInterrupted();
             if (recovered > 0) {
                 stats.note("recovered " + recovered + " interrupted file(s)");
+                Log.i(TAG, "recovered " + recovered + " interrupted file(s)");
             }
 
             notifier.showScanning(null);
             for (SyncConfig.Folder folder : folders) {
-                if (isStopped()) return Result.success();
-                scanFolder(folder, stats);
+                // Via finish(), not a bare return: finish() is what enqueues the
+                // continuation, leaves the progress notification in the right
+                // state and logs the outcome. Returning straight out of the scan
+                // loop skipped all three, so a run interrupted here (which is
+                // common — the OS stops these jobs constantly) went silent and
+                // scheduled no follow-up at all.
+                if (isStopped()) return finish(stats, Result.success());
+                scanFolder(folder, stats, incrementalScan);
             }
+            Log.i(TAG, "scan done: discovered=" + stats.discovered);
 
             for (SyncConfig.Folder folder : folders) {
                 if (isStopped() || outOfTime()) break;
@@ -154,12 +211,27 @@ public class FolderSyncWorker extends Worker {
             uploadReady(api, stats);
 
         } catch (PhotosApiClient.AuthExpiredException e) {
+            Log.w(TAG, "auth expired mid-run");
             notifier.showAuthExpired();
             config.setLastError("Session expired — sign in again");
             return finish(stats, Result.success());
         } catch (Exception e) {
+            // Deliberately SUCCESS, not retry.
+            //
+            // Result.retry() feeds WorkManager's run_attempt_count, and with the
+            // backoff that implies, a handful of transient failures pushed the next
+            // attempt hours out — on 2026-08-08 a run reached attempt 10, which
+            // clamps to WorkManager's 5-hour maximum, with three continuations
+            // stuck BLOCKED behind it. Sync looked dead for the rest of the day.
+            //
+            // There is nothing to gain from a run-level retry: every file's state,
+            // resume position and retry count already live in the ledger, so the
+            // next run re-offers exactly the work this one didn't finish. The
+            // continuation enqueued by finish() is the non-escalating way to try
+            // again, and the hourly periodic run is the backstop beneath that.
+            Log.w(TAG, "run failed (continuing via continuation, not WorkManager retry)", e);
             config.setLastError(e.getMessage() != null ? e.getMessage() : e.toString());
-            return finish(stats, Result.retry());
+            return finish(stats, Result.success());
         }
 
         return finish(stats, Result.success());
@@ -168,21 +240,89 @@ public class FolderSyncWorker extends Worker {
     private Result finish(RunStats stats, Result result) {
         config.setRunning(false);
         config.setLastRunAt(System.currentTimeMillis());
-        notifier.clearProgress();
+
+        // Backlog left over (time/count cap hit)? Continue in another run rather
+        // than letting this one overrun and be killed.
+        int pending = ledger.countByState(SyncLedger.STATE_PENDING, null);
+        int hashed = ledger.countByState(SyncLedger.STATE_HASHED, null);
+        boolean backlog = pending > 0 || hashed > 0;
+        boolean continuing = backlog && !isStopped();
+
+        // Keyed on BACKLOG, not on `continuing`.
+        //
+        // Cancelling the progress notification between runs is what flooded
+        // paired smartwatches: a cancel followed by a fresh post is a NEW
+        // notification to a watch, not an update, so setLocalOnly() and
+        // setOnlyAlertOnce() don't suppress it — those only govern re-alerting on
+        // an existing notification.
+        //
+        // This first used `continuing` (backlog && !isStopped()), which fixed
+        // nothing: runs currently end every 5-12 seconds because Android 14+
+        // calls JobService.onNetworkChanged() on each network re-evaluation and
+        // WorkManager's SystemJobService doesn't implement it, so the platform
+        // stops and reschedules any job with a network constraint. isStopped() is
+        // therefore true on almost every run that still has work left — exactly
+        // the case the notification must survive.
+        //
+        // Backlog is the honest signal: files are still queued, the upload is
+        // still going, so the progress bar stays. It comes down only when the
+        // queue is empty (or sync stops entirely — see the early returns in
+        // doWork(), which clear it themselves).
+        if (!backlog) {
+            notifier.clearProgress();
+        }
+
         notifier.showRunSummary(
             stats.uploaded, stats.duplicates, stats.failed, stats.quarantined,
             stats.stopped || isStopped(), stats.lastEventSlug
         );
 
-        // Backlog left over (time/count cap hit)? Continue in another run rather
-        // than letting this one overrun and be killed.
-        boolean backlog = ledger.countByState(SyncLedger.STATE_PENDING, null) > 0
-            || ledger.countByState(SyncLedger.STATE_HASHED, null) > 0;
-        if (backlog && !isStopped()) {
+        Log.i(TAG, "run end: uploaded=" + stats.uploaded
+            + " duplicates=" + stats.duplicates
+            + " failed=" + stats.failed
+            + " quarantined=" + stats.quarantined
+            + " reason=" + (isStopped() || stats.stopped ? "stopped" : outOfTime() ? "outOfTime" : "finished")
+            + " backlog(pending=" + pending + " hashed=" + hashed + ")"
+            + " continuation=" + continuing
+            + " progressNotification=" + (backlog ? "kept" : "cleared"));
+
+        if (continuing) {
             SyncScheduler.enqueueContinuation(getApplicationContext());
         }
 
         return result;
+    }
+
+    /**
+     * Whether the current network satisfies the user's Wi-Fi-only setting.
+     *
+     * Mirrors what NetworkType.UNMETERED used to express as a WorkManager
+     * constraint, but evaluated once here rather than being watched by the
+     * platform — the watching is what caused the restart storm.
+     *
+     * NOT_METERED rather than "is it Wi-Fi": a metered hotspot must not count as
+     * Wi-Fi, and an explicitly unmetered cellular plan legitimately does count.
+     * That matches the old constraint's semantics exactly.
+     *
+     * Fails OPEN when connectivity can't be read: a run that tries and fails on a
+     * network error is recoverable per-file, whereas skipping forever because a
+     * capability lookup returned null is not.
+     */
+    private boolean networkAllowsSync() {
+        if (!config.isWifiOnly()) return true;
+
+        ConnectivityManager cm =
+            (ConnectivityManager) getApplicationContext().getSystemService(Context.CONNECTIVITY_SERVICE);
+        if (cm == null) return true;
+
+        Network active = cm.getActiveNetwork();
+        if (active == null) return false; // no network at all: nothing to upload over
+
+        NetworkCapabilities caps = cm.getNetworkCapabilities(active);
+        if (caps == null) return true;
+
+        return caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_NOT_METERED)
+            && caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET);
     }
 
     private boolean outOfTime() {
@@ -191,18 +331,59 @@ public class FolderSyncWorker extends Worker {
 
     // ── 1. scan ──
 
-    private void scanFolder(SyncConfig.Folder folder, RunStats stats) {
+    /**
+     * @param incremental use each folder's mtime watermark instead of walking it
+     *                    in full. Decided ONCE per run by the caller, not per
+     *                    folder — scanning folder A queues work, which would flip
+     *                    a per-folder check and silently make folder B incremental
+     *                    on a run that started with an empty queue.
+     */
+    private void scanFolder(SyncConfig.Folder folder, RunStats stats, boolean incremental) {
+        // Incremental only while there is a backlog. That is the case where the
+        // scan is pure overhead — we already know we have work queued, and every
+        // second spent re-walking ~4000 known files is a second not spent
+        // uploading them, out of the same MAX_RUN_MILLIS budget.
+        //
+        // When the queue is drained, scan EVERYTHING. The watermark is an mtime
+        // floor, and a file copied into the folder keeps its original (older)
+        // mtime, so it would sit below the floor and be missed indefinitely by an
+        // incremental scan. Tying the optimisation to "backlog exists" bounds that
+        // risk: anything skipped is picked up on the next run after the queue
+        // empties. SafScanner's own contract says the same thing — the filter is
+        // "an optimisation only — the ledger, not this filter, decides what is
+        // actually new" — and idx_identity is what actually prevents re-uploads.
+        long since = incremental ? config.getScanWatermark(folder.treeUri) : 0L;
+
         List<SafScanner.SafFile> files = SafScanner.scan(
-            resolver, folder.treeUri, true, 0L, MAX_SCAN_RESULTS
+            resolver, folder.treeUri, true, since, MAX_SCAN_RESULTS
         );
+
+        long maxMtime = since;
+        int newHere = 0;
         for (SafScanner.SafFile file : files) {
             // recordDiscovered() is a no-op for anything this event has already
             // seen — which is what makes re-adding or reassigning a folder free
             // instead of re-uploading everything in it.
             if (ledger.recordDiscovered(file, folder.eventSlug, folder.treeUri)) {
                 stats.discovered++;
+                newHere++;
             }
+            if (file.mtime > maxMtime) maxMtime = file.mtime;
         }
+
+        // Only advance the watermark when the scan saw the whole folder. A scan
+        // truncated by MAX_SCAN_RESULTS stopped early, so files beyond the cap
+        // were never looked at — moving the floor past them would skip them for good.
+        boolean truncated = files.size() >= MAX_SCAN_RESULTS;
+        if (!truncated && maxMtime > since) {
+            config.setScanWatermark(folder.treeUri, maxMtime);
+        }
+
+        Log.i(TAG, "scanned " + folder.eventSlug + ": walked=" + files.size()
+            + " new=" + newHere
+            + (incremental ? " since=" + since : " (full scan)")
+            + (truncated ? " TRUNCATED at " + MAX_SCAN_RESULTS + ", watermark held" : ""));
+
         stats.lastEventSlug = folder.eventSlug;
     }
 
@@ -214,6 +395,7 @@ public class FolderSyncWorker extends Worker {
         if (pending.isEmpty()) return;
 
         notifier.showScanning("Checking " + pending.size() + " new file(s)…");
+        Log.i(TAG, "hashing " + pending.size() + " file(s) for " + folder.eventSlug);
 
         List<SyncLedger.Entry> needsServerCheck = new ArrayList<>();
 
@@ -285,9 +467,14 @@ public class FolderSyncWorker extends Worker {
     private void uploadReady(PhotosApiClient api, RunStats stats)
             throws PhotosApiClient.AuthExpiredException {
         List<SyncLedger.Entry> ready = ledger.readyToUpload(MAX_UPLOADS_PER_RUN);
-        if (ready.isEmpty()) return;
+        if (ready.isEmpty()) {
+            Log.i(TAG, "nothing ready to upload");
+            return;
+        }
 
         int total = ready.size();
+        Log.i(TAG, "uploading up to " + total + " file(s), "
+            + ((deadline - System.currentTimeMillis()) / 1000) + "s of budget left");
         for (int i = 0; i < total; i++) {
             if (isStopped() || outOfTime()) break;
 
@@ -429,7 +616,18 @@ public class FolderSyncWorker extends Worker {
 
         for (int partNumber = 1; partNumber <= totalParts; partNumber++) {
             if (done.contains(partNumber)) continue;
-            if (isStopped()) throw new SyncStoppedException();
+            // The clock is checked HERE, not just between files, because a single
+            // large file can outlast the whole budget on its own — the remaining
+            // backlog includes 100MB-1GB+ videos. Without this, such a file runs
+            // past MAX_RUN_MILLIS until WorkManager force-stops the worker at its
+            // 10-minute hard limit, which is both an abrupt kill and an increment
+            // of run_attempt_count (i.e. more backoff).
+            //
+            // Stopping at a part boundary instead is clean: SyncStoppedException is
+            // caught by uploadReady(), which calls markInterrupted() — resume state
+            // is kept and no retry is burned, so the next run picks this file up
+            // from its last completed part.
+            if (isStopped() || outOfTime()) throw new SyncStoppedException();
 
             long offset = (long) (partNumber - 1) * chunkSize;
             long length = Math.min(chunkSize, entry.size - offset);

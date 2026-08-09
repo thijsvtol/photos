@@ -89,7 +89,8 @@ export default function EventLocationPicker({ isOpen, onClose, onSetLocation }: 
               Click on the map to select a location. This will update photos without GPS data.
             </p>
           </div>
-          <button 
+          <button
+            type="button"
             onClick={handleClose} 
             className="text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-200 p-1 hover:bg-gray-100 dark:hover:bg-gray-700 rounded transition"
             aria-label="Close modal"
@@ -124,12 +125,14 @@ export default function EventLocationPicker({ isOpen, onClose, onSetLocation }: 
           </div>
           <div className="flex gap-2">
             <button
+              type="button"
               onClick={handleClose}
               className="flex-1 sm:flex-none px-4 py-2 bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300 rounded-lg hover:bg-gray-300 dark:hover:bg-gray-600 transition text-sm sm:text-base"
             >
               Cancel
             </button>
             <button
+              type="button"
               onClick={handleSetLocation}
               disabled={!selectedLocation}
               className="flex-1 sm:flex-none px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:bg-gray-400 dark:disabled:bg-gray-600 disabled:cursor-not-allowed transition flex items-center justify-center gap-2 text-sm sm:text-base"

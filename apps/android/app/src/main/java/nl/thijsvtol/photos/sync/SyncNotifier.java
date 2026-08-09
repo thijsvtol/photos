@@ -219,6 +219,16 @@ public class SyncNotifier {
 
     // ── terminal notifications ──
 
+    /**
+     * setLocalOnly(true), same as progressBuilder().
+     *
+     * This builder is separate from progressBuilder() and was missing the flag,
+     * so end-of-run summaries and the auth-expired notice were the only sync
+     * notifications still bridged to a paired watch. A summary fires per run that
+     * uploaded something — hourly at least, and far more often while a backlog is
+     * draining across continuations — which is wrist-buzzing for information the
+     * user can read on the phone whenever they like.
+     */
     private void showSummary(String title, String body, String eventSlug) {
         if (manager == null) return;
         NotificationCompat.Builder builder = new NotificationCompat.Builder(context, CHANNEL_ID)
@@ -229,6 +239,7 @@ public class SyncNotifier {
             .setOngoing(false)
             .setAutoCancel(true)
             .setOnlyAlertOnce(true)
+            .setLocalOnly(true)
             .setContentIntent(contentIntent(eventSlug));
         manager.notify(SUMMARY_NOTIFICATION_ID, builder.build());
     }

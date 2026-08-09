@@ -5,6 +5,7 @@ import { hasEventSessionAccess } from '../cookies';
 import { optionalAuth, getUser, isAdmin, getCollaboratorRoleByEventId } from '../auth';
 import { cosineSimilarity, embedSearchQuery } from '../aiEnrichment';
 import { getPhotoPeople } from '../faceClustering';
+import { GALLERY_PHOTO_COLUMNS } from '../photoColumns';
 
 const app = new Hono<{ Bindings: Env }>();
 
@@ -24,6 +25,7 @@ const isValidSlug = (slug: string): boolean => /^[a-z0-9][a-z0-9\-]*[a-z0-9]$|^[
 const PREVIEW_GRACE_MINUTES = 10;
 const PREVIEW_READY_CLAUSE =
   `(p.preview_complete = 1 OR p.uploaded_at <= datetime('now', '-${PREVIEW_GRACE_MINUTES} minutes'))`;
+
 
 // GET /api/search's FTS branch fetches candidates WITHOUT an `event_id IN (...)` clause (access
 // filtering happens afterward in JS against `eventMap` — see that route's doc comment for why:
@@ -336,7 +338,7 @@ app.get('/api/events/:slug/photos', optionalAuth, async (c) => {
       : '';
 
     const query = `
-      SELECT p.*, COALESCE(
+      SELECT ${GALLERY_PHOTO_COLUMNS}, COALESCE(
         u.name,
         CASE WHEN instr(p.uploaded_by, '@') > 0
           THEN substr(p.uploaded_by, 1, instr(p.uploaded_by, '@') - 1)

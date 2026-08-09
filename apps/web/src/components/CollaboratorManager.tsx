@@ -343,6 +343,7 @@ const CollaboratorManager: React.FC<CollaboratorManagerProps> = ({ eventSlug, ev
             <p className="text-sm text-gray-600 dark:text-gray-400">Create shareable links for collaboration</p>
           </div>
           <button
+            type="button"
             onClick={handleCreateLink}
             disabled={creatingLink}
             className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition flex items-center gap-2"
@@ -403,6 +404,7 @@ const CollaboratorManager: React.FC<CollaboratorManagerProps> = ({ eventSlug, ev
                 </div>
                 <div className="flex items-center gap-2">
                   <button
+                    type="button"
                     onClick={() => handleCopyLink(link.token)}
                     className="p-2 text-blue-600 dark:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-900/30 rounded-lg transition-colors"
                     title="Copy link"
@@ -414,6 +416,7 @@ const CollaboratorManager: React.FC<CollaboratorManagerProps> = ({ eventSlug, ev
                     )}
                   </button>
                   <button
+                    type="button"
                     onClick={() => handleRevokeLink(link.token)}
                     className="p-2 text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/30 rounded-lg transition-colors"
                     title="Revoke link"
@@ -480,6 +483,7 @@ const CollaboratorManager: React.FC<CollaboratorManagerProps> = ({ eventSlug, ev
                 <option value="admin">Admin</option>
               </select>
               <button
+                type="button"
                 onClick={() => handleRemove(collaborator.email)}
                 className="ml-3 p-2 text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/30 rounded-lg transition-colors"
                 title="Remove collaborator"

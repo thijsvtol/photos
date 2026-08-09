@@ -43,6 +43,8 @@ public class SyncConfig {
     private static final String KEY_LAST_RUN_AT = "lastRunAt";
     private static final String KEY_LAST_ERROR = "lastError";
     private static final String KEY_RUNNING = "running";
+    /** Prefixed per tree URI — see getScanWatermark(). */
+    private static final String KEY_SCAN_WATERMARK_PREFIX = "scanMtime:";
 
     public static final long DEFAULT_INTERVAL_MINUTES = 60L;
     /** WorkManager refuses periodic intervals below 15 minutes. */
@@ -169,6 +171,29 @@ public class SyncConfig {
             if (f.enabled) out.add(f);
         }
         return out;
+    }
+
+    // ── per-folder scan watermark ──
+
+    /**
+     * Highest file mtime seen by a completed scan of this folder, used as
+     * SafScanner's `sinceMtime` floor so a run with a backlog doesn't spend its
+     * budget re-walking thousands of already-known files.
+     *
+     * Stored under its own key per tree URI rather than inside the `folders` JSON,
+     * because that JSON is a contract shared with the JS bridge (see
+     * FolderSyncPlugin.configure) and this is purely an internal optimisation.
+     *
+     * Returns 0 (scan everything) when unset. Callers must NOT treat this as a
+     * correctness mechanism — see FolderSyncWorker.scanFolder for why a full scan
+     * still happens whenever the queue is drained.
+     */
+    public long getScanWatermark(String treeUri) {
+        return prefs.getLong(KEY_SCAN_WATERMARK_PREFIX + treeUri, 0L);
+    }
+
+    public void setScanWatermark(String treeUri, long mtime) {
+        prefs.edit().putLong(KEY_SCAN_WATERMARK_PREFIX + treeUri, mtime).apply();
     }
 
     // ── run status (surfaced by FolderSyncPlugin.getStatus()) ──

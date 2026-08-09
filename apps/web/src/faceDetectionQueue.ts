@@ -26,6 +26,28 @@ import type { UploadQueueItem } from './types';
 const processedIds = new Set<string>();
 const MAX_TRACKED_IDS = 500;
 
+/**
+ * Detection tasks run STRICTLY ONE AT A TIME through this chain.
+ *
+ * Previously each completed upload was launched with a bare `void processItem(item)`. Since
+ * uploadManager.notify() hands every listener the whole queue snapshot, a bulk upload started
+ * a detection for each photo the moment it completed — with no cap. Detection takes seconds
+ * per photo on a phone (BlazeFace + FaceMesh + an ArcFace ResNet100 ONNX inference) while
+ * uploads finish 2-6 at a time, so tasks piled up faster than they drained. Each one holds a
+ * decoded image plus model tensors, which is what exhausted the Android WebView's renderer
+ * process and killed the whole app. Uploads themselves have had a concurrency cap for exactly
+ * this reason (see MAX_CONCURRENT_UPLOADS in services/uploadManager.ts); this is the same
+ * discipline applied to the work that follows them.
+ *
+ * A plain promise chain rather than a worker pool: the correct concurrency here is 1, and
+ * anything that keeps two detections alive at once reintroduces the bug.
+ */
+let detectionChain: Promise<void> = Promise.resolve();
+
+function enqueueDetection(task: () => Promise<void>): void {
+  detectionChain = detectionChain.then(task, task);
+}
+
 function isImage(item: UploadQueueItem): boolean {
   const fileType = item.fileType || item.file?.type || '';
   return fileType.startsWith('image/') && fileType !== 'image/gif';
@@ -34,17 +56,17 @@ function isImage(item: UploadQueueItem): boolean {
 async function processItem(item: UploadQueueItem): Promise<void> {
   if (!item.photoId || !item.file) return;
 
-  const objectUrl = URL.createObjectURL(item.file);
   try {
-    const faces = await detectFaces(objectUrl);
+    // The File is passed straight through — detectFaces() decodes it itself, capped at
+    // ~1920px (see faceDetection.ts's DETECTION_MAX_DIMENSION), so no object URL and no
+    // full-resolution decode is needed here.
+    const faces = await detectFaces(item.file);
     if (faces.length > 0) {
       await saveFaces(item.eventSlug, item.photoId, faces);
     }
   } catch (err) {
     // Best-effort only — never let a face-detection failure surface anywhere.
     console.warn('[faceDetectionQueue] Failed to process item:', err);
-  } finally {
-    URL.revokeObjectURL(objectUrl);
   }
 }
 
@@ -71,14 +93,9 @@ async function drainNativeFaceJobs(): Promise<void> {
       try {
         const { data } = await SafDirectory.readPreview({ uri: job.uri });
         const blob = base64ToBlob(data, 'image/jpeg');
-        const objectUrl = URL.createObjectURL(blob);
-        try {
-          const faces = await detectFaces(objectUrl);
-          if (faces.length > 0) {
-            await saveFaces(job.eventSlug, job.photoId, faces);
-          }
-        } finally {
-          URL.revokeObjectURL(objectUrl);
+        const faces = await detectFaces(blob);
+        if (faces.length > 0) {
+          await saveFaces(job.eventSlug, job.photoId, faces);
         }
         await FolderSync.clearFaceJob({ photoId: job.photoId });
       } catch (err) {
@@ -112,11 +129,14 @@ export function startFaceDetectionQueue(): void {
   started = true;
 
   if (Capacitor.isNativePlatform()) {
-    void drainNativeFaceJobs();
+    // Through the same chain as upload-triggered detections: a resume can land
+    // mid-upload, and two detections alive at once is the exact condition that
+    // exhausts the renderer.
+    enqueueDetection(drainNativeFaceJobs);
     // Also drain on resume — a background sync run may have uploaded photos
     // while the app was closed.
     App.addListener('appStateChange', ({ isActive }) => {
-      if (isActive) void drainNativeFaceJobs();
+      if (isActive) enqueueDetection(drainNativeFaceJobs);
     }).catch(() => { /* listener registration is best-effort */ });
   }
 
@@ -140,8 +160,9 @@ export function startFaceDetectionQueue(): void {
         toDrop.forEach((id) => processedIds.delete(id));
       }
 
-      // Fire-and-forget: uploads must never wait on face detection.
-      void processItem(item);
+      // Queued, not awaited: uploads must never wait on face detection, but the
+      // detections themselves run one at a time (see enqueueDetection).
+      enqueueDetection(() => processItem(item));
     }
   });
 }

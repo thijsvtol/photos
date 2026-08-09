@@ -7,26 +7,33 @@
  * (AI captions/embeddings, trash purge, face clustering — all pure server
  * crons), this cannot run purely on a schedule inside the Worker. Instead:
  *   - GET /admin/photos/faces-pending enumerates unprocessed photos
- *   - this module fetches each photo's ORIGINAL image (same full-resolution
- *     file that upload-time detection — faceDetectionQueue.ts — already
- *     uses) as a same-origin blob, runs detectFaces() on it in the browser,
- *     and posts results to POST /admin/photos/:photoId/faces
+ *   - this module fetches each photo's 1920px PREVIEW image as a same-origin
+ *     blob, runs detectFaces() on it in the browser, and posts results to
+ *     POST /admin/photos/:photoId/faces
  *
- * IMPORTANT: this used to fetch the 1920px-capped PREVIEW image instead of the original —
- * fixed 2026-08-06 after admins found that a large fraction of manually-tagged photos had
- * been "scanned" (faces_processed_at set) yet detected zero faces despite clearly containing
- * visible people. Upload-time detection (faceDetectionQueue.ts) has always run against the
- * full original file; this backfill scan alone was silently working with strictly less pixel
- * data, which cost real recall specifically for small/distant faces in group or action-sports
- * shots — precisely the kind of face this app's content skews toward (see faceDetection.ts's
- * top-of-file doc comment) and precisely the case the preview's downscale would blur away
- * before the detector ever saw it. Slower per-photo (bigger download) but strictly more
- * accurate, matching upload-time detection's quality.
+ * HISTORY — this flipped twice; read before flipping it a third time:
+ *
+ * It originally used the preview, was switched to the ORIGINAL on 2026-08-06 after admins
+ * found photos "scanned" (faces_processed_at set) yet with zero faces despite clearly
+ * containing visible people, and was switched BACK to the preview on 2026-08-08.
+ *
+ * The 2026-08-06 reasoning still holds on its own terms: the preview's downscale genuinely
+ * does blur away small/distant faces in group and action-sports shots, which is precisely
+ * what this app's content skews toward, so this scan does find fewer faces than it would on
+ * originals. What that change missed was the cost. Decoding full-resolution originals is what
+ * made the Android WebView's renderer process run out of memory and take the entire app
+ * process down with it ("Render process kill (OOM) wasn't handed by all associated webviews,
+ * killing application"). A 12MP photo is ~48MB decoded and this app ingests up to 108MP
+ * originals. Recall on distant faces is worth less than the app not crashing.
+ *
+ * The cap now lives in ONE place — DETECTION_MAX_DIMENSION in faceDetection.ts, which every
+ * detection path inherits — so fetching the preview here is really just avoiding the pointless
+ * download of an original that detectFaces() would immediately downscale anyway.
  *
  * Exposed as an explicit "Scan Library" action on the People admin page
  * (immediate, user-controlled, with progress) — see AdminPeople.tsx.
  */
-import { getFacesPendingPhotos, saveBackfilledFaces, getOriginalUrl } from './api';
+import { getFacesPendingPhotos, saveBackfilledFaces, getPreviewUrl } from './api';
 import { detectFaces } from './faceDetection';
 
 const BATCH_SIZE = 8;
@@ -38,22 +45,18 @@ export interface BackfillProgress {
 }
 
 async function processPhoto(photo: { id: string; file_type: string; cache_version: number; event_slug: string }): Promise<void> {
-  const originalUrl = getOriginalUrl(photo.event_slug, photo.id, photo.file_type, photo.cache_version);
+  const previewUrl = getPreviewUrl(photo.event_slug, photo.id, photo.file_type, photo.cache_version);
 
   try {
-    // Fetch as a blob first (same pattern used by ImageEditorModal/auto-enhance)
-    // so @vladmandic/human always operates on a same-origin blob URL, avoiding any
-    // cross-origin canvas-tainting issues on native.
-    const res = await fetch(originalUrl);
-    if (!res.ok) throw new Error(`Failed to fetch original (${res.status})`);
+    // Fetch as a blob first (same pattern used by ImageEditorModal/auto-enhance) so
+    // @vladmandic/human always operates on same-origin pixels, avoiding any cross-origin
+    // canvas-tainting issues on native. The blob goes straight to detectFaces(), which does
+    // its own bounded decode — no object URL needed.
+    const res = await fetch(previewUrl);
+    if (!res.ok) throw new Error(`Failed to fetch preview (${res.status})`);
     const blob = await res.blob();
-    const objectUrl = URL.createObjectURL(blob);
-    try {
-      const faces = await detectFaces(objectUrl);
-      await saveBackfilledFaces(photo.id, faces);
-    } finally {
-      URL.revokeObjectURL(objectUrl);
-    }
+    const faces = await detectFaces(blob);
+    await saveBackfilledFaces(photo.id, faces);
   } catch (err) {
     // A photo whose preview/original image can no longer be fetched or decoded (e.g. an
     // orphaned row whose R2 object was removed, or a corrupt file) will NEVER succeed on

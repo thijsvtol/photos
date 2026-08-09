@@ -2,6 +2,7 @@ import React, { createContext, useContext, useState, useEffect } from 'react';
 import { Capacitor } from '@capacitor/core';
 import { MobileAuthService } from '../services/mobileAuth';
 import { clearTimelineCache } from '../services/timelineCache';
+import { clearAllEventPhotoCaches } from '../services/eventPhotoCache';
 import { getUserProfile } from '../api';
 
 export interface User {
@@ -196,10 +197,11 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
   };
 
   const logout = () => {
-    // Timeline photos may include private/collaborator-only events visible
-    // only to the logged-in user; clear the IndexedDB cache so they don't
-    // leak to whoever uses this device/browser next.
+    // Timeline and event-gallery photos may include private/collaborator-only
+    // events visible only to the logged-in user; clear the IndexedDB caches so
+    // they don't leak to whoever uses this device/browser next.
     void clearTimelineCache();
+    void clearAllEventPhotoCaches();
 
     if (Capacitor.isNativePlatform()) {
       // Clear token and user state
