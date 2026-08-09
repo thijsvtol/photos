@@ -1,0 +1,71 @@
+name: Apply DB Migration
+
+# Applies one numbered SQL file from migrations/ to the production D1 database.
+#
+# This project applies plain numbered SQL files directly rather than using
+# Wrangler's migrations-tracking system (see docs/architecture.md), and the
+# deploy workflow deliberately does not run them — schema changes stay a
+# conscious, separate act.
+#
+# It lives here rather than being run from a laptop because the D1 credentials
+# do: the CLOUDFLARE_API_TOKEN secret already carries D1 access (the nightly
+# transcode job uses it for exactly these calls), while a developer's local
+# `wrangler login` OAuth token generally does not include the d1 scope and fails
+# with "not authorized to access this service [code: 7403]".
+#
+# Manual dispatch only, one file per run, so applying a migration is always
+# something a person chose to do and can point at afterwards.
+
+on:
+  workflow_dispatch:
+    inputs:
+      file:
+        description: 'Migration filename in migrations/ (e.g. 029_recheck_video_transcode.sql)'
+        required: true
+      confirm:
+        description: 'Type the database name to confirm: photos-db'
+        required: true
+
+jobs:
+  migrate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Validate input
+        run: |
+          set -euo pipefail
+          FILE="${{ github.event.inputs.file }}"
+
+          # Reject anything that tries to leave migrations/ — the input ends up in
+          # a shell command, so a path like ../../etc/passwd or an absolute path
+          # must not be accepted just because a file happens to exist there.
+          case "$FILE" in
+            */*|..*|"") echo "::error::Pass a bare filename inside migrations/, not a path."; exit 1 ;;
+            *.sql) ;;
+            *) echo "::error::Migration files end in .sql"; exit 1 ;;
+          esac
+
+          if [ ! -f "migrations/$FILE" ]; then
+            echo "::error::migrations/$FILE does not exist"
+            exit 1
+          fi
+
+          if [ "${{ github.event.inputs.confirm }}" != "photos-db" ]; then
+            echo "::error::Confirmation did not match the database name."
+            exit 1
+          fi
+
+          echo "About to apply migrations/$FILE:"
+          echo "-----------------------------------------"
+          cat "migrations/$FILE"
+          echo "-----------------------------------------"
+
+      - name: Install wrangler
+        run: npm install -g wrangler
+
+      - name: Apply migration
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: wrangler d1 execute photos-db --remote --file="migrations/${{ github.event.inputs.file }}"
