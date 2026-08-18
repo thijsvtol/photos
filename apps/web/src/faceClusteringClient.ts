@@ -40,18 +40,27 @@ function isValidEmbeddingLength(embedding: number[]): boolean {
 }
 
 /** Threshold used by automatic clustering (assigning a face to an existing person with zero
- *  human review), now expressed as a COSINE similarity (range -1..1, though in practice ArcFace
- *  embeddings of different real faces rarely score below ~0) instead of the old Euclidean-
- *  based Human formula's 0..1 scale — these numbers are NOT directly comparable across the
- *  model swap. 0.35 is a conservative starting point based on common ArcFace/InsightFace
- *  verification-threshold guidance for cosine similarity on L2-normalized embeddings (typical
- *  literature/LFW-calibrated thresholds for ResNet100-class ArcFace models cluster in the
- *  0.25-0.4 range) — THIS HAS NOT BEEN EMPIRICALLY VALIDATED against this app's own photos
- *  (no labeled ground truth available) and may need real-world tuning after deploy, same as
- *  every previous threshold change in this feature's history. If real matches are still
- *  missed, the "Find Merge Suggestions" human-reviewed tool (using the separate, more lenient
- *  DEFAULT_MERGE_SUGGESTION_THRESHOLD below) remains the safe way to catch them. */
-export const SAME_PERSON_THRESHOLD = 0.35;
+ *  human review), expressed as a COSINE similarity (range -1..1, though in practice ArcFace
+ *  embeddings of different real faces rarely score below ~0).
+ *
+ *  TUNED FROM REAL DATA (2026-08): the "Recognition diagnostics" tool (see
+ *  computeRecognitionDiagnostics() below) measured this app's own library — 4,794 same-person
+ *  and 19,454 different-person face pairs across 545 confirmed people:
+ *    - same person:      median 0.458, p10 0.252, p90 0.738
+ *    - different people: median 0.043, p10 -0.068, p90 0.189
+ *  The two populations are cleanly separated (~0.4 between medians). The tool's raw best-split
+ *  suggestion was 0.22 (Youden's J: 93% of true matches caught, 7% of different-person pairs
+ *  wrongly matched), but that metric weighs a wrong merge and a missed match equally — for
+ *  UNATTENDED clustering they aren't equal here: a wrong merge pollutes a cluster and snowballs
+ *  (this feature's whole history is fighting that), while a miss is recoverable via the human-
+ *  reviewed "Find Merge Suggestions" tool. So we deliberately DON'T go to 0.22.
+ *
+ *  0.30 is the chosen compromise: below the previous 0.35 to reach further into the genuine
+ *  same-person low tail (recovering real matches the old value missed), yet still comfortably
+ *  above the different-people p90 of 0.189, so false merges stay rare. Any face still missed at
+ *  0.30 remains catchable via DEFAULT_MERGE_SUGGESTION_THRESHOLD below. Re-run the diagnostics
+ *  after the library grows substantially to confirm this still holds. */
+export const SAME_PERSON_THRESHOLD = 0.30;
 
 /** Threshold used by merge SUGGESTIONS only — deliberately lower than SAME_PERSON_THRESHOLD,
  *  for the same asymmetric-risk reason as before (a false positive here just needs one click
@@ -185,15 +194,15 @@ const CENTROID_FREEZE_SIZE = 40;
 // different people's faces can drift into that same borderline range against a large,
 // somewhat-generalized centroid). Fix: the bar a face must clear to join a cluster RISES
 // gradually with that cluster's current size, so:
-//  - Small/new clusters keep the flat baseline SAME_PERSON_THRESHOLD (0.35, cosine) — no
+//  - Small/new clusters keep the flat baseline SAME_PERSON_THRESHOLD (0.30, cosine) — no
 //    behavior change for the common case of a person who has only accumulated a few photos.
 //  - Large, well-established clusters require an increasingly CONFIDENT match to keep growing,
 //    which lets a real recurring person's clearly-matching photos keep joining (their genuine
 //    similarity scores are typically well above the baseline threshold, not borderline) while
 //    filtering out the marginal, easily-wrong matches that caused the earlier snowball.
 // Growth is capped at MAX_THRESHOLD_BOOST so the bar never becomes unreasonably strict even for
-// a very large, legitimate cluster (200+ photos) — with the baseline 0.35 and a 0.15 max boost,
-// the effective ceiling is 0.50, which a genuinely well-matching face should still pass.
+// a very large, legitimate cluster (200+ photos) — with the baseline 0.30 and a 0.15 max boost,
+// the effective ceiling is 0.45, which a genuinely well-matching face should still pass.
 // Growth rate/start tightened (2026-08-04) after the adaptive threshold ALONE still proved
 // insufficient in production (a cluster still grew to absorb multiple different people even
 // with this in place) — the bar now starts rising sooner and climbs faster, reaching its

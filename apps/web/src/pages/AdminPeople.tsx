@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { Users, ScanFace, Loader2, Sparkles, Eye, EyeOff, GitMerge, X, Check, GraduationCap, Search, ArrowUpDown, BarChart3 } from 'lucide-react';
+import { Users, ScanFace, Loader2, Sparkles, Eye, EyeOff, GitMerge, X, Check, GraduationCap, Search, ArrowUpDown, BarChart3, ChevronDown, Wrench, AlertTriangle } from 'lucide-react';
 import Navbar from '../components/Navbar';
 import { getPeople, getFullClusterData, getAllFacesForDeepRebuild, applyClusteringResults, resetAllClusters, mergePeople, getLegacyFaceStats, resetLegacyFaces, learnFromManualTags, rescanFacelessTaggedPhotos } from '../api';
 import type { Person, LegacyFaceStats } from '../api';
@@ -25,6 +25,54 @@ const FALLBACK_MERGE_THRESHOLD = 0.2;
 // merging/dismissing an item removes it from mergeSuggestions, letting the next one in line
 // become visible.
 const MERGE_SUGGESTIONS_RENDER_LIMIT = 200;
+
+/** A small colored badge conveying an action's IMPACT at a glance, so the admin knows what a
+ *  Tools item will do before clicking it (rather than only discovering it from a hover tooltip). */
+type Impact = 'safe' | 'read-only' | 'heavy' | 'destructive';
+const IMPACT_STYLES: Record<Impact, string> = {
+  safe: 'bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-300',
+  'read-only': 'bg-blue-100 text-blue-700 dark:bg-blue-900/50 dark:text-blue-300',
+  heavy: 'bg-amber-100 text-amber-800 dark:bg-amber-900/50 dark:text-amber-300',
+  destructive: 'bg-red-100 text-red-700 dark:bg-red-900/50 dark:text-red-300',
+};
+const ImpactChip: React.FC<{ impact: Impact }> = ({ impact }) => (
+  <span className={`shrink-0 px-1.5 py-0.5 rounded text-[10px] font-medium uppercase tracking-wide ${IMPACT_STYLES[impact]}`}>
+    {impact === 'safe' ? 'safe' : impact === 'read-only' ? 'read-only' : impact === 'heavy' ? 'slow' : 'destroys data'}
+  </span>
+);
+
+/** One row inside the Tools dropdown: icon + label + one-line description + impact chip. */
+const ToolItem: React.FC<{
+  icon: React.ReactNode;
+  label: string;
+  description: string;
+  impact: Impact;
+  disabled?: boolean;
+  onClick: () => void;
+}> = ({ icon, label, description, impact, disabled, onClick }) => (
+  <button
+    onClick={onClick}
+    disabled={disabled}
+    className={`w-full text-left px-3 py-2.5 flex items-start gap-3 rounded-lg transition disabled:opacity-40 disabled:cursor-not-allowed ${
+      impact === 'destructive'
+        ? 'hover:bg-red-50 dark:hover:bg-red-950/40'
+        : 'hover:bg-gray-100 dark:hover:bg-gray-700/60'
+    }`}
+  >
+    <span className={`mt-0.5 shrink-0 ${impact === 'destructive' ? 'text-red-600 dark:text-red-400' : 'text-gray-500 dark:text-gray-400'}`}>
+      {icon}
+    </span>
+    <span className="flex-1 min-w-0">
+      <span className="flex items-center gap-2">
+        <span className={`text-sm font-medium ${impact === 'destructive' ? 'text-red-700 dark:text-red-400' : 'text-gray-900 dark:text-gray-100'}`}>
+          {label}
+        </span>
+        <ImpactChip impact={impact} />
+      </span>
+      <span className="block text-xs text-gray-500 dark:text-gray-400 mt-0.5">{description}</span>
+    </span>
+  </button>
+);
 
 const AdminPeople: React.FC = () => {
   // Holds EVERY cluster (including single-photo ones) so the UI can tell the
@@ -89,6 +137,10 @@ const AdminPeople: React.FC = () => {
   // finding a specific one by scrolling/scanning wasn't practical.
   const [nameFilter, setNameFilter] = useState('');
   const [sortBy, setSortBy] = useState<'photos' | 'name'>('photos');
+  // "Tools" dropdown holding the less-frequent / advanced / destructive maintenance actions, so
+  // the header only surfaces the everyday ones (Scan, Cluster Now, Unattached).
+  const [toolsOpen, setToolsOpen] = useState(false);
+  const toolsRef = useRef<HTMLDivElement>(null);
 
   const multiPhotoPeople = allPeople.filter((p) => p.photo_count >= 2);
   const singlesCount = allPeople.length - multiPhotoPeople.length;
@@ -103,6 +155,23 @@ const AdminPeople: React.FC = () => {
       .then(setLegacyStats)
       .catch((err) => console.error('Failed to check for legacy face data', err));
   }, []);
+
+  // Close the Tools dropdown on an outside click or Escape (same pattern as Navbar's menus).
+  useEffect(() => {
+    if (!toolsOpen) return;
+    const onPointerDown = (e: MouseEvent) => {
+      if (toolsRef.current && !toolsRef.current.contains(e.target as Node)) setToolsOpen(false);
+    };
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setToolsOpen(false);
+    };
+    document.addEventListener('mousedown', onPointerDown);
+    document.addEventListener('keydown', onKeyDown);
+    return () => {
+      document.removeEventListener('mousedown', onPointerDown);
+      document.removeEventListener('keydown', onKeyDown);
+    };
+  }, [toolsOpen]);
 
   const loadData = async () => {
     try {
@@ -407,6 +476,32 @@ const AdminPeople: React.FC = () => {
     setMergeSuggestions((prev) => prev.filter((s) => suggestionKey(s) !== suggestionKey(suggestion)));
   };
 
+  // Whichever long-running task (if any) is currently active — surfaced in ONE progress strip
+  // under the header instead of each button turning into its own spinner. `canStop` is only true
+  // for the library scan, whose loop honors cancelRef (see handleCancelScan).
+  const busy: { label: string; detail: string; canStop: boolean } | null = scanning
+    ? {
+        label: rescanningFaceless ? 'Re-scanning tagged photos' : 'Scanning library for faces',
+        detail: scanProgress
+          ? `${scanProgress.processed} scanned${scanProgress.remaining != null ? ` · ${scanProgress.remaining} left` : ''}`
+          : 'starting…',
+        canStop: true,
+      }
+    : rescanningFaceless
+      ? { label: 'Re-scanning tagged photos', detail: 'preparing…', canStop: false }
+      : clustering
+        ? { label: 'Grouping faces into people', detail: clusterProgress ? `${clusterProgress.processed}/${clusterProgress.total}` : 'loading…', canStop: false }
+        : deepRebuilding
+          ? { label: 'Rebuilding all groups', detail: deepRebuildProgress ? `${deepRebuildProgress.processed}/${deepRebuildProgress.total}` : 'starting…', canStop: false }
+          : findingMerges
+            ? { label: 'Scanning for merge suggestions', detail: mergeScanProgress ? `${mergeScanProgress.comparisons}/${mergeScanProgress.total}` : 'loading…', canStop: false }
+            : runningDiagnostics
+              ? { label: 'Analyzing recognition accuracy', detail: diagnosticsLoaded != null ? `${diagnosticsLoaded} faces` : 'loading…', canStop: false }
+              : learningFromTags
+                ? { label: 'Learning from tags', detail: '', canStop: false }
+                : null;
+  const anyBusy = busy !== null;
+
   return (
     <div className="min-h-screen bg-gray-50 dark:bg-gray-900">
       <Navbar />
@@ -415,153 +510,129 @@ const AdminPeople: React.FC = () => {
           ← Back to Admin
         </Link>
         <div className="flex justify-between items-start flex-wrap gap-3 mb-2">
-          <h1 className="text-4xl font-bold text-gray-900 dark:text-white flex items-center gap-3">
-            <Users className="w-8 h-8" /> People
-          </h1>
-          {scanning ? (
+          <div>
+            <h1 className="text-4xl font-bold text-gray-900 dark:text-white flex items-center gap-3">
+              <Users className="w-8 h-8" /> People
+            </h1>
+            <p className="text-gray-600 dark:text-gray-400 mt-1 text-sm max-w-2xl">
+              New uploads are detected and grouped automatically. Use <strong>Scan Library</strong> +{' '}
+              <strong>Cluster Now</strong> to process older photos; open <strong>Tools</strong> for
+              cleanup and advanced options.
+            </p>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2">
             <button
-              onClick={handleCancelScan}
-              className="px-4 py-2 bg-gray-300 text-gray-700 rounded-lg hover:bg-gray-400 transition flex items-center gap-2"
+              onClick={handleScanLibrary}
+              disabled={anyBusy}
+              className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+              title="Detect faces in photos uploaded before this feature existed (runs in your browser; new uploads are processed automatically)"
             >
-              <Loader2 className="w-4 h-4 animate-spin" />
-              {scanProgress ? `Scanned ${scanProgress.processed} (${scanProgress.remaining} left) — Stop` : 'Starting scan…'}
+              <ScanFace className="w-4 h-4" /> Scan Library for Faces
             </button>
-          ) : (
-            <div className="flex flex-wrap gap-2">
+            <button
+              onClick={handleClusterNow}
+              disabled={anyBusy}
+              title="Group newly-detected faces into named people (only looks at not-yet-clustered faces)"
+              className="px-4 py-2 bg-gray-200 dark:bg-gray-700 text-gray-800 dark:text-gray-200 rounded-lg hover:bg-gray-300 dark:hover:bg-gray-600 transition flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              <Sparkles className="w-4 h-4" /> Cluster Now
+            </button>
+            <Link
+              to="/admin/people/unattached"
+              title="Browse photos with nobody identified yet and bulk-assign them to a person"
+              className="px-4 py-2 bg-gray-200 dark:bg-gray-700 text-gray-800 dark:text-gray-200 rounded-lg hover:bg-gray-300 dark:hover:bg-gray-600 transition flex items-center gap-2"
+            >
+              <Users className="w-4 h-4" /> Unattached Photos
+            </Link>
+
+            {/* Tools: the rarer / advanced / destructive actions, each with a description +
+                impact chip so the effect is clear before clicking (was previously ~6 more bare
+                buttons crammed into this same row with only hover tooltips). */}
+            <div className="relative" ref={toolsRef}>
               <button
-                onClick={handleScanLibrary}
-                className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition flex items-center gap-2"
-                title="Detect faces in photos uploaded before this feature existed (runs in your browser; new uploads are processed automatically)"
-              >
-                <ScanFace className="w-4 h-4" /> Scan Library for Faces
-              </button>
-              {clustering ? (
-                <button
-                  disabled
-                  className="px-4 py-2 bg-gray-300 text-gray-700 rounded-lg flex items-center gap-2 cursor-wait"
-                >
-                  <Loader2 className="w-4 h-4 animate-spin" />
-                  {clusterProgress ? `Grouping… ${clusterProgress.processed}/${clusterProgress.total}` : 'Loading…'}
-                </button>
-              ) : (
-                <button
-                  onClick={handleClusterNow}
-                  title="Group newly-detected faces into named people (only looks at not-yet-clustered faces)"
-                  className="px-4 py-2 bg-gray-200 dark:bg-gray-700 text-gray-800 dark:text-gray-200 rounded-lg hover:bg-gray-300 dark:hover:bg-gray-600 transition flex items-center gap-2"
-                >
-                  <Sparkles className="w-4 h-4" /> Cluster Now
-                </button>
-              )}
-              {deepRebuilding ? (
-                <button
-                  disabled
-                  className="px-4 py-2 bg-gray-300 text-gray-700 rounded-lg flex items-center gap-2 cursor-wait"
-                >
-                  <Loader2 className="w-4 h-4 animate-spin" />
-                  {deepRebuildProgress ? `Rebuilding… ${deepRebuildProgress.processed}/${deepRebuildProgress.total}` : 'Starting…'}
-                </button>
-              ) : (
-                <button
-                  onClick={handleDeepRebuild}
-                  title="Discards ALL current groupings and rebuilds everyone from scratch with a stronger, drift-free matching algorithm"
-                  className="px-4 py-2 bg-gray-200 dark:bg-gray-700 text-gray-800 dark:text-gray-200 rounded-lg hover:bg-gray-300 dark:hover:bg-gray-600 transition flex items-center gap-2"
-                >
-                  <Sparkles className="w-4 h-4" /> Rebuild All (Deep)
-                </button>
-              )}
-              {singlesCount > 0 && (
-                <button
-                  onClick={() => setShowSingles((v) => !v)}
-                  title="Groups with only one photo so far are hidden by default — they usually just haven't been matched to more photos of that person yet"
-                  className="px-4 py-2 bg-gray-200 dark:bg-gray-700 text-gray-800 dark:text-gray-200 rounded-lg hover:bg-gray-300 dark:hover:bg-gray-600 transition flex items-center gap-2"
-                >
-                  {showSingles ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-                  {showSingles ? 'Hide' : 'Show'} {singlesCount} single-photo group{singlesCount === 1 ? '' : 's'}
-                </button>
-              )}
-              {findingMerges ? (
-                <button
-                  disabled
-                  className="px-4 py-2 bg-gray-300 text-gray-700 rounded-lg flex items-center gap-2 cursor-wait"
-                >
-                  <Loader2 className="w-4 h-4 animate-spin" />
-                  {mergeScanProgress ? `Scanning… ${mergeScanProgress.comparisons}/${mergeScanProgress.total}` : 'Loading…'}
-                </button>
-              ) : (
-                <button
-                  onClick={handleFindMergeSuggestions}
-                  title="Scan every pair of groups for likely-same-person matches that clustering never got the chance to merge automatically"
-                  className="px-4 py-2 bg-gray-200 dark:bg-gray-700 text-gray-800 dark:text-gray-200 rounded-lg hover:bg-gray-300 dark:hover:bg-gray-600 transition flex items-center gap-2"
-                >
-                  <GitMerge className="w-4 h-4" /> Find Merge Suggestions
-                </button>
-              )}
-              {runningDiagnostics ? (
-                <button
-                  disabled
-                  className="px-4 py-2 bg-gray-300 text-gray-700 rounded-lg flex items-center gap-2 cursor-wait"
-                >
-                  <Loader2 className="w-4 h-4 animate-spin" />
-                  {diagnosticsLoaded != null ? `Analyzing… ${diagnosticsLoaded} faces` : 'Loading…'}
-                </button>
-              ) : (
-                <button
-                  onClick={handleRunDiagnostics}
-                  title="Read-only: measure how well the current matching threshold separates same-person vs different-person faces on YOUR photos, using your named/confirmed people as ground truth. Changes nothing."
-                  className="px-4 py-2 bg-gray-200 dark:bg-gray-700 text-gray-800 dark:text-gray-200 rounded-lg hover:bg-gray-300 dark:hover:bg-gray-600 transition flex items-center gap-2"
-                >
-                  <BarChart3 className="w-4 h-4" /> Recognition diagnostics
-                </button>
-              )}
-              {learningFromTags ? (
-                <button
-                  disabled
-                  className="px-4 py-2 bg-gray-300 text-gray-700 rounded-lg flex items-center gap-2 cursor-wait"
-                >
-                  <Loader2 className="w-4 h-4 animate-spin" /> Learning…
-                </button>
-              ) : (
-                <button
-                  onClick={handleLearnFromTags}
-                  title="Teach the model from photos you've manually tagged — assigns any now-unambiguous detected face to the person that photo was tagged with, so future scans recognize them better"
-                  className="px-4 py-2 bg-gray-200 dark:bg-gray-700 text-gray-800 dark:text-gray-200 rounded-lg hover:bg-gray-300 dark:hover:bg-gray-600 transition flex items-center gap-2"
-                >
-                  <GraduationCap className="w-4 h-4" /> Learn from Tags
-                </button>
-              )}
-              {rescanningFaceless ? (
-                <button
-                  disabled
-                  className="px-4 py-2 bg-gray-300 text-gray-700 rounded-lg flex items-center gap-2 cursor-wait"
-                >
-                  <Loader2 className="w-4 h-4 animate-spin" />
-                  {scanning && scanProgress ? `Re-scanning… ${scanProgress.processed}` : 'Re-scanning…'}
-                </button>
-              ) : (
-                <button
-                  onClick={handleRescanFacelessTaggedPhotos}
-                  disabled={scanning}
-                  title="Re-check manually-tagged photos that were scanned but found no face — a past backfill bug scanned a downscaled preview instead of the full original, which could genuinely miss small/distant faces"
-                  className="px-4 py-2 bg-gray-200 dark:bg-gray-700 text-gray-800 dark:text-gray-200 rounded-lg hover:bg-gray-300 dark:hover:bg-gray-600 transition flex items-center gap-2 disabled:opacity-50"
-                >
-                  <ScanFace className="w-4 h-4" /> Re-scan Tagged Photos
-                </button>
-              )}
-              <Link
-                to="/admin/people/unattached"
-                title="Browse photos with nobody identified yet and bulk-assign them to a person"
+                onClick={() => setToolsOpen((v) => !v)}
+                aria-expanded={toolsOpen}
+                aria-haspopup="menu"
                 className="px-4 py-2 bg-gray-200 dark:bg-gray-700 text-gray-800 dark:text-gray-200 rounded-lg hover:bg-gray-300 dark:hover:bg-gray-600 transition flex items-center gap-2"
               >
-                <Users className="w-4 h-4" /> Unattached Photos
-              </Link>
+                <Wrench className="w-4 h-4" /> Tools
+                <ChevronDown className={`w-4 h-4 transition-transform ${toolsOpen ? 'rotate-180' : ''}`} />
+              </button>
+              {toolsOpen && (
+                <div
+                  role="menu"
+                  className="absolute right-0 top-full mt-2 w-80 max-w-[calc(100vw-2rem)] bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl shadow-xl z-30 p-2"
+                >
+                  <p className="px-3 pt-1 pb-1 text-[11px] font-semibold uppercase tracking-wide text-gray-400 dark:text-gray-500">Review</p>
+                  <ToolItem
+                    icon={<GitMerge className="w-4 h-4" />}
+                    label="Find Merge Suggestions"
+                    description="Scan every pair of groups for likely same-person matches to merge."
+                    impact="safe"
+                    disabled={anyBusy}
+                    onClick={() => { setToolsOpen(false); handleFindMergeSuggestions(); }}
+                  />
+                  <p className="px-3 pt-2 pb-1 text-[11px] font-semibold uppercase tracking-wide text-gray-400 dark:text-gray-500">Improve matching</p>
+                  <ToolItem
+                    icon={<GraduationCap className="w-4 h-4" />}
+                    label="Learn from Tags"
+                    description="Use photos you've manually tagged to teach the model who's who."
+                    impact="safe"
+                    disabled={anyBusy}
+                    onClick={() => { setToolsOpen(false); handleLearnFromTags(); }}
+                  />
+                  <ToolItem
+                    icon={<ScanFace className="w-4 h-4" />}
+                    label="Re-scan Tagged Photos"
+                    description="Re-check tagged photos that were scanned but found no face."
+                    impact="heavy"
+                    disabled={anyBusy}
+                    onClick={() => { setToolsOpen(false); handleRescanFacelessTaggedPhotos(); }}
+                  />
+                  <ToolItem
+                    icon={<BarChart3 className="w-4 h-4" />}
+                    label="Recognition diagnostics"
+                    description="Measure how well matching separates people on your library. Changes nothing."
+                    impact="read-only"
+                    disabled={anyBusy}
+                    onClick={() => { setToolsOpen(false); handleRunDiagnostics(); }}
+                  />
+                  <div className="my-2 border-t border-gray-200 dark:border-gray-700" />
+                  <p className="px-3 pb-1 text-[11px] font-semibold uppercase tracking-wide text-red-500 dark:text-red-400 flex items-center gap-1">
+                    <AlertTriangle className="w-3 h-3" /> Danger zone
+                  </p>
+                  <ToolItem
+                    icon={<Sparkles className="w-4 h-4" />}
+                    label="Rebuild All (Deep)"
+                    description="Discard ALL current groups and rebuild from scratch — named people lose their names. Asks to confirm first."
+                    impact="destructive"
+                    disabled={anyBusy}
+                    onClick={() => { setToolsOpen(false); handleDeepRebuild(); }}
+                  />
+                </div>
+              )}
             </div>
-          )}
+          </div>
         </div>
-        <p className="text-gray-600 dark:text-gray-400 mb-4 text-sm">
-          New uploads are detected automatically. Hover any button above for what it does —
-          in short: scan old photos, group detected faces into people, and find duplicate
-          groups to merge.
-        </p>
+
+        {/* One progress strip for whichever long task is running, instead of each button
+            turning into its own spinner (so progress stays visible even with Tools closed). */}
+        {busy && (
+          <div className="mb-4 flex items-center gap-3 bg-blue-50 dark:bg-blue-950/40 border border-blue-200 dark:border-blue-800 text-blue-800 dark:text-blue-300 px-4 py-2.5 rounded-lg text-sm">
+            <Loader2 className="w-4 h-4 animate-spin shrink-0" />
+            <span className="font-medium">{busy.label}</span>
+            {busy.detail && <span className="text-blue-600 dark:text-blue-400">· {busy.detail}</span>}
+            {busy.canStop && (
+              <button
+                onClick={handleCancelScan}
+                className="ml-auto px-3 py-1 text-xs bg-white dark:bg-gray-800 border border-blue-300 dark:border-blue-700 rounded-lg hover:bg-blue-100 dark:hover:bg-blue-900/40 transition"
+              >
+                Stop
+              </button>
+            )}
+          </div>
+        )}
 
         <div className="flex flex-wrap items-center gap-2 mb-8">
           <div className="relative flex-1 min-w-[200px] max-w-xs">
@@ -580,6 +651,16 @@ const AdminPeople: React.FC = () => {
           >
             <ArrowUpDown className="w-4 h-4" /> Sort: {sortBy === 'photos' ? 'Most photos' : 'Name (A-Z)'}
           </button>
+          {singlesCount > 0 && (
+            <button
+              onClick={() => setShowSingles((v) => !v)}
+              title="Groups with only one photo so far are hidden by default — they usually just haven't been matched to more photos of that person yet"
+              className="px-3 py-2 text-sm bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-700 text-gray-700 dark:text-gray-300 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 transition flex items-center gap-1.5"
+            >
+              {showSingles ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+              {showSingles ? 'Hide' : 'Show'} {singlesCount} single-photo group{singlesCount === 1 ? '' : 's'}
+            </button>
+          )}
         </div>
 
         {rescanResult && (

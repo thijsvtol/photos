@@ -225,7 +225,7 @@ describe('runClientSideClustering', () => {
     // move the centroid by 1/36th of the difference. Under the capped formula, it should move
     // by a fixed ~1/30 weight instead. Candidate face at [10, 3, 0, ...] has cosine similarity
     // 100/(10*sqrt(109)) ≈ 0.958 to the cluster centroid — comfortably above SAME_PERSON_
-    // THRESHOLD (0.35), so it matches.
+    // THRESHOLD (0.30), so it matches.
     const existingClusters: ClusterDataCluster[] = [
       { id: 1, centroidEmbedding: pad512(10, 0, 0), faceCount: 35 },
     ];
@@ -255,12 +255,12 @@ describe('runClientSideClustering', () => {
   });
 
   it('a small/new cluster still matches at the flat baseline threshold (no behavior change for the common case)', async () => {
-    // similarity 0.45 is comfortably above the flat baseline SAME_PERSON_THRESHOLD (0.35), so a
+    // similarity 0.40 is comfortably above the flat baseline SAME_PERSON_THRESHOLD (0.30), so a
     // small cluster (below THRESHOLD_GROWTH_START=12) should accept it.
     const existingClusters: ClusterDataCluster[] = [
       { id: 1, centroidEmbedding: unitVec(0), faceCount: 10 },
     ];
-    const faces: ClusterDataFace[] = [{ id: 999, photoId: 'photo-x', embedding: vecWithSimilarity(0.45) }];
+    const faces: ClusterDataFace[] = [{ id: 999, photoId: 'photo-x', embedding: vecWithSimilarity(0.40) }];
 
     const results = await runClientSideClustering(faces, existingClusters);
 
@@ -269,14 +269,14 @@ describe('runClientSideClustering', () => {
   });
 
   it('a large, well-established cluster requires a MORE CONFIDENT match, rejecting the same borderline similarity a small cluster would accept (fix for the 2467-face runaway-merge incident, which a flat hard cap alone did not solve)', async () => {
-    // Same 0.45 similarity as above, but this time against an already-large (150-member)
-    // cluster — at that size the adaptive threshold has risen to its ceiling (baseline 0.35 +
-    // MAX_THRESHOLD_BOOST 0.15 = 0.5), so 0.45 must now be REJECTED, starting a new cluster
+    // Same 0.40 similarity as above, but this time against an already-large (150-member)
+    // cluster — at that size the adaptive threshold has risen to its ceiling (baseline 0.30 +
+    // MAX_THRESHOLD_BOOST 0.15 = 0.45), so 0.40 must now be REJECTED, starting a new cluster
     // instead of further diluting the large one.
     const existingClusters: ClusterDataCluster[] = [
       { id: 1, centroidEmbedding: unitVec(0), faceCount: 150 },
     ];
-    const faces: ClusterDataFace[] = [{ id: 999, photoId: 'photo-x', embedding: vecWithSimilarity(0.45) }];
+    const faces: ClusterDataFace[] = [{ id: 999, photoId: 'photo-x', embedding: vecWithSimilarity(0.40) }];
 
     const results = await runClientSideClustering(faces, existingClusters);
 
@@ -286,7 +286,7 @@ describe('runClientSideClustering', () => {
 
   it('lets a genuinely large, legitimate person (200+ photos) keep growing when the match is confidently ABOVE the raised bar — the whole point of replacing the old flat 60-face hard cap', async () => {
     // A clearly-matching (similarity 0.9) face should still join even a very large cluster,
-    // since it comfortably clears the raised (but capped at 0.5) threshold — unlike the old
+    // since it comfortably clears the raised (but capped at 0.45) threshold — unlike the old
     // flat MAX_AUTO_CLUSTER_SIZE=60 cap, which would have rejected this unconditionally purely
     // based on size, incorrectly splitting a real recurring person into multiple groups.
     const existingClusters: ClusterDataCluster[] = [
