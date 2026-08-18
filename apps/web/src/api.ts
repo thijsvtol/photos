@@ -519,6 +519,54 @@ export const getUnattachedPhotos = async (
   return response.data;
 };
 
+/** The named person a redundant unnamed cluster most likely actually is, inferred from the named
+ *  people already tagged/identified on that cluster's photos — see
+ *  getUnnamedPeopleWithSuggestions() in apps/worker/src/faceClustering.ts. */
+export interface UnnamedPersonSuggestion {
+  personId: number;
+  name: string;
+  sharedPhotos: number;
+  totalPhotos: number;
+  centroidSimilarity: number;
+}
+
+/** An unnamed person cluster (name IS NULL) plus, where inferrable, its suggested real identity.
+ *  Shares the cover/count fields of `Person` so the same avatar tile renders both. */
+export interface UnnamedPerson {
+  id: number;
+  face_count: number;
+  photo_count: number;
+  cover_photo_id?: string | null;
+  cover_file_type?: string | null;
+  cover_cache_version?: number | null;
+  cover_event_slug?: string | null;
+  suggestion: UnnamedPersonSuggestion | null;
+  /** True when `suggestion` is safe to merge in bulk (the "Merge all confident matches" action). */
+  confident: boolean;
+}
+
+/** Every unnamed person cluster with cover metadata + a suggested identity where the cluster's
+ *  photos are already tagged with a named person. Powers the Unattached page's "Unnamed people"
+ *  cleanup section. */
+export const getUnnamedPeople = async (): Promise<UnnamedPerson[]> => {
+  const response = await api.get<{ people: UnnamedPerson[] }>('/admin/people/unnamed', {
+    headers: getAdminHeaders(),
+  });
+  return response.data.people;
+};
+
+/** Bulk-merges every high-confidence unnamed cluster into its suggested named person. Capped
+ *  server-side per call; returns how many merged and how many confident matches still remain, so
+ *  the caller can loop until `remaining` is 0. */
+export const mergeUnnamedConfident = async (): Promise<{ merged: number; remaining: number }> => {
+  const response = await api.post<{ success: boolean; merged: number; remaining: number }>(
+    '/admin/people/merge-unnamed-confident',
+    {},
+    { headers: getAdminHeaders() }
+  );
+  return { merged: response.data.merged, remaining: response.data.remaining };
+};
+
 export interface ClusterDataFace {
   id: number;
   photoId: string;

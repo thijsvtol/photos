@@ -5,6 +5,7 @@ import Navbar from '../components/Navbar';
 import { getPeople, getFullClusterData, getAllFacesForDeepRebuild, applyClusteringResults, resetAllClusters, mergePeople, getLegacyFaceStats, resetLegacyFaces, learnFromManualTags, rescanFacelessTaggedPhotos } from '../api';
 import type { Person, LegacyFaceStats } from '../api';
 import MediaThumb from '../components/MediaThumb';
+import PersonAvatar from '../components/PersonAvatar';
 import { runBackfillScan } from '../faceBackfill';
 import type { BackfillProgress } from '../faceBackfill';
 import { runClientSideClustering, runDeepRebuildClustering, findClientSideMergeSuggestions, chunkClusteringResultsForApply, computeRecognitionDiagnostics, DEFAULT_MERGE_SUGGESTION_THRESHOLD } from '../faceClusteringClient';
@@ -855,29 +856,7 @@ const AdminPeople: React.FC = () => {
         ) : (
           <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-4">
             {people.map((person) => (
-              <Link
-                key={person.id}
-                to={`/admin/people/${person.id}`}
-                className="text-center group"
-              >
-                <div className="aspect-square rounded-full overflow-hidden bg-gray-200 dark:bg-gray-700 mx-auto w-24 h-24 sm:w-28 sm:h-28 shadow group-hover:shadow-lg transition-shadow">
-                  {person.cover_event_slug && person.cover_photo_id && person.cover_file_type ? (
-                    <MediaThumb
-                      slug={person.cover_event_slug}
-                      photoId={person.cover_photo_id}
-                      fileType={person.cover_file_type}
-                      cacheVersion={person.cover_cache_version}
-                      alt={person.name || 'Unnamed person'}
-                    />
-                  ) : (
-                    <Users className="w-10 h-10 text-gray-400 m-auto mt-8" />
-                  )}
-                </div>
-                <p className="mt-2 text-sm font-medium text-gray-900 dark:text-white truncate">
-                  {person.name || 'Unnamed'}
-                </p>
-                <p className="text-xs text-gray-500 dark:text-gray-400">{person.photo_count} photo{person.photo_count === 1 ? '' : 's'}</p>
-              </Link>
+              <PersonAvatar key={person.id} person={person} />
             ))}
           </div>
         )}

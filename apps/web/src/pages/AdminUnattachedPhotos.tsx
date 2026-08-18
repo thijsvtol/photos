@@ -1,10 +1,11 @@
 import React, { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { Users, Check, X, UserPlus } from 'lucide-react';
+import { Users, Check, X, UserPlus, GitMerge, Loader2 } from 'lucide-react';
 import Navbar from '../components/Navbar';
-import { getUnattachedPhotos, getPeople, assignPhotosToPerson, bulkTagPeopleOnPhotos } from '../api';
-import type { UnattachedPhoto, Person } from '../api';
+import { getUnattachedPhotos, getPeople, assignPhotosToPerson, bulkTagPeopleOnPhotos, getUnnamedPeople, mergePeople, mergeUnnamedConfident } from '../api';
+import type { UnattachedPhoto, Person, UnnamedPerson } from '../api';
 import MediaThumb from '../components/MediaThumb';
+import PersonAvatar from '../components/PersonAvatar';
 
 /**
  * Admin "Unattached photos" view (/admin/people/unattached) — lists every photo with NO person
@@ -23,6 +24,14 @@ import MediaThumb from '../components/MediaThumb';
  * AdminPersonDetail's per-photo "Move to…" button uses the same assign+tag pair (plus a
  * removePersonFromPhoto to detach the source person), since a person's photo list can include
  * manual-tag-only photos with no detected face too.
+ *
+ * This page ALSO surfaces every UNNAMED person cluster (top section). Manual tagging only writes
+ * photo_person_tags and never assigns the detected face, so clustering keeps spinning those
+ * already-identified faces into redundant unnamed clusters (see getUnnamedPeopleWithSuggestions()
+ * in apps/worker/src/faceClustering.ts). Each unnamed person shows a suggested identity — the
+ * named person its photos are already tagged with — plus a one-click "Merge into X"; a
+ * "Merge all confident matches" button bulk-merges the unambiguous ones. Nothing merges
+ * automatically.
  */
 const AdminUnattachedPhotos: React.FC = () => {
   const [photos, setPhotos] = useState<UnattachedPhoto[]>([]);
@@ -46,8 +55,16 @@ const AdminUnattachedPhotos: React.FC = () => {
   const [assignError, setAssignError] = useState<string | null>(null);
   const [assignResult, setAssignResult] = useState<string | null>(null);
 
+  // Unnamed-people cleanup section (top of page).
+  const [unnamed, setUnnamed] = useState<UnnamedPerson[] | null>(null);
+  const [unnamedError, setUnnamedError] = useState<string | null>(null);
+  const [mergingId, setMergingId] = useState<number | null>(null);
+  const [mergingAll, setMergingAll] = useState(false);
+  const [cleanupResult, setCleanupResult] = useState<string | null>(null);
+
   useEffect(() => {
     loadFirstPage();
+    loadUnnamed();
   }, []);
 
   const loadFirstPage = async () => {
@@ -77,6 +94,65 @@ const AdminUnattachedPhotos: React.FC = () => {
       console.error(err);
     } finally {
       setLoadingMore(false);
+    }
+  };
+
+  const loadUnnamed = async () => {
+    try {
+      setUnnamedError(null);
+      setUnnamed(await getUnnamedPeople());
+    } catch (err) {
+      setUnnamedError('Failed to load unnamed people');
+      console.error(err);
+    }
+  };
+
+  /** One-click: merge a single unnamed cluster into its suggested named person. */
+  const handleMergeOne = async (cluster: UnnamedPerson) => {
+    if (!cluster.suggestion) return;
+    try {
+      setMergingId(cluster.id);
+      setUnnamedError(null);
+      setCleanupResult(null);
+      await mergePeople(cluster.suggestion.personId, [cluster.id]);
+      setUnnamed((prev) => (prev ? prev.filter((u) => u.id !== cluster.id) : prev));
+      setCleanupResult(`Merged an unnamed person into ${cluster.suggestion.name}.`);
+      // Photo/person counts changed elsewhere — refresh the unattached photo list too.
+      loadFirstPage();
+    } catch (err) {
+      setUnnamedError(`Failed to merge into ${cluster.suggestion.name}`);
+      console.error(err);
+    } finally {
+      setMergingId(null);
+    }
+  };
+
+  /** Bulk: merge every confident unnamed cluster into its tagged identity. The endpoint caps
+   *  merges per call and reports how many confident matches remain, so loop until none are left
+   *  (or a call merges nothing, guarding against an unexpected stall). */
+  const handleMergeAllConfident = async () => {
+    try {
+      setMergingAll(true);
+      setUnnamedError(null);
+      setCleanupResult(null);
+      let total = 0;
+      for (;;) {
+        const { merged, remaining } = await mergeUnnamedConfident();
+        total += merged;
+        if (merged === 0 || remaining === 0) break;
+      }
+      setCleanupResult(
+        total === 0
+          ? 'No confident matches to merge.'
+          : `Merged ${total} unnamed ${total === 1 ? 'person' : 'people'} into their tagged identity.`
+      );
+      await loadUnnamed();
+      loadFirstPage();
+    } catch (err) {
+      setUnnamedError('Failed to merge confident matches');
+      console.error(err);
+    } finally {
+      setMergingAll(false);
     }
   };
 
@@ -221,6 +297,87 @@ const AdminUnattachedPhotos: React.FC = () => {
             {assignResult}
           </div>
         )}
+
+        {/* Unnamed people cleanup — clusters the face grouping made but nobody named. Most are
+            already tagged to a named person on their photos, so we suggest that identity and let
+            the admin merge (one-click, or all confident matches at once). */}
+        {unnamed && unnamed.length > 0 && (() => {
+          const confidentCount = unnamed.filter((u) => u.confident).length;
+          return (
+            <div className="mb-10">
+              <div className="mb-4 flex items-center justify-between flex-wrap gap-3">
+                <div>
+                  <h2 className="text-xl font-bold text-gray-900 dark:text-white">
+                    Unnamed people ({unnamed.length})
+                  </h2>
+                  <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
+                    People the face grouping found but nobody has named. Many are already the same
+                    person as someone tagged on their photos — merge those in, or open one to name
+                    it.
+                  </p>
+                </div>
+                {confidentCount > 0 && (
+                  <button
+                    onClick={handleMergeAllConfident}
+                    disabled={mergingAll || mergingId !== null}
+                    className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    {mergingAll ? <Loader2 className="w-4 h-4 animate-spin" /> : <GitMerge className="w-4 h-4" />}
+                    Merge all {confidentCount} confident match{confidentCount === 1 ? '' : 'es'}
+                  </button>
+                )}
+              </div>
+
+              {unnamedError && (
+                <div className="bg-red-50 dark:bg-red-900/30 border border-red-200 dark:border-red-800 text-red-700 dark:text-red-300 px-4 py-3 rounded mb-4">
+                  {unnamedError}
+                </div>
+              )}
+              {cleanupResult && (
+                <div className="bg-green-50 dark:bg-green-900/30 border border-green-200 dark:border-green-800 text-green-700 dark:text-green-300 px-4 py-3 rounded mb-4">
+                  {cleanupResult}
+                </div>
+              )}
+
+              <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-4">
+                {unnamed.map((cluster) => (
+                  <div key={cluster.id} className="flex flex-col">
+                    <PersonAvatar person={cluster} />
+                    {cluster.suggestion ? (
+                      <div className="mt-1 text-center">
+                        <p className="text-xs text-gray-500 dark:text-gray-400">
+                          Likely <span className="font-medium text-gray-700 dark:text-gray-300">{cluster.suggestion.name}</span>
+                          {' · '}{cluster.suggestion.sharedPhotos}/{cluster.suggestion.totalPhotos} photos
+                          {cluster.confident && (
+                            <span className="ml-1 inline-block px-1.5 py-0.5 text-[10px] font-medium rounded bg-green-100 dark:bg-green-900/40 text-green-700 dark:text-green-300">
+                              confident
+                            </span>
+                          )}
+                        </p>
+                        <button
+                          onClick={() => handleMergeOne(cluster)}
+                          disabled={mergingId === cluster.id || mergingAll}
+                          className="mt-1 w-full px-2 py-1 text-xs bg-gray-200 dark:bg-gray-700 text-gray-800 dark:text-gray-200 rounded hover:bg-gray-300 dark:hover:bg-gray-600 transition flex items-center justify-center gap-1 disabled:opacity-50 disabled:cursor-not-allowed"
+                        >
+                          {mergingId === cluster.id ? (
+                            <Loader2 className="w-3 h-3 animate-spin" />
+                          ) : (
+                            <GitMerge className="w-3 h-3" />
+                          )}
+                          Merge into {cluster.suggestion.name}
+                        </button>
+                      </div>
+                    ) : (
+                      <p className="mt-1 text-center text-xs text-gray-400 dark:text-gray-500">
+                        No suggestion — open to name
+                      </p>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </div>
+          );
+        })()}
 
         {loading ? (
           <div className="text-center py-12">

@@ -2,7 +2,7 @@ import { Hono } from 'hono';
 import type { Env, User } from '../../types';
 import { requireAdmin } from '../../auth';
 import { logActivity } from '../../activityLog';
-import { getClusterData, applyClusteringResults, countUnclusteredFaces, getLegacyFaceStats, resetLegacyFaces, mergeClusters, assignPhotosToPerson, resetAllClusters, resetSingleCluster, learnFromManualTags, getUnattachedPhotos, resetFacesForFacelessTaggedPhotos } from '../../faceClustering';
+import { getClusterData, applyClusteringResults, countUnclusteredFaces, getLegacyFaceStats, resetLegacyFaces, mergeClusters, assignPhotosToPerson, resetAllClusters, resetSingleCluster, learnFromManualTags, getUnattachedPhotos, resetFacesForFacelessTaggedPhotos, getUnnamedPeopleWithSuggestions, mergeConfidentUnnamedIntoTagged } from '../../faceClustering';
 import type { ClusterResult } from '../../faceClustering';
 
 type Variables = {
@@ -160,6 +160,51 @@ app.get('/unattached-photos', async (c) => {
   } catch (error) {
     console.error('Error fetching unattached photos:', error);
     return c.json({ error: 'Failed to fetch unattached photos' }, 500);
+  }
+});
+
+/**
+ * GET /people/unnamed
+ * Every unnamed cluster with cover metadata, its real photo count, and — where inferrable — a
+ * suggested named identity (the named person its photos are already tagged with) plus a
+ * `confident` flag. See getUnnamedPeopleWithSuggestions()'s doc comment in faceClustering.ts.
+ * Powers the "Unnamed people" section of the Unattached admin page, where an admin reviews and
+ * merges the redundant unnamed clusters that manual tagging keeps producing.
+ *
+ * MUST stay registered before GET /:personId, or "unnamed" would be captured as a person id.
+ */
+app.get('/unnamed', async (c) => {
+  try {
+    const people = await getUnnamedPeopleWithSuggestions(c.env);
+    return c.json({ people });
+  } catch (error) {
+    console.error('Error fetching unnamed people:', error);
+    return c.json({ error: 'Failed to fetch unnamed people' }, 500);
+  }
+});
+
+/**
+ * POST /people/merge-unnamed-confident
+ * Bulk-merges every high-confidence unnamed cluster into its suggested named person (see
+ * mergeConfidentUnnamedIntoTagged()). Capped per call; returns `{ merged, remaining }` so the
+ * client loops until `remaining` is 0. Safe to re-run.
+ */
+app.post('/merge-unnamed-confident', async (c) => {
+  try {
+    const result = await mergeConfidentUnnamedIntoTagged(c.env);
+    if (result.merged > 0) {
+      await logActivity(c.env, {
+        actorEmail: c.get('user')?.email || 'unknown',
+        action: 'person_merge',
+        targetType: 'person',
+        targetId: 'unnamed-cleanup',
+        metadata: { mergedCount: result.merged, remaining: result.remaining, reason: 'merge_unnamed_confident' },
+      });
+    }
+    return c.json({ success: true, ...result });
+  } catch (error) {
+    console.error('Error merging confident unnamed people:', error);
+    return c.json({ error: 'Failed to merge unnamed people' }, 500);
   }
 });
 
