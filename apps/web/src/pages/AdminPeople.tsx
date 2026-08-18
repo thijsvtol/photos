@@ -1,13 +1,14 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { Users, ScanFace, Loader2, Sparkles, Eye, EyeOff, GitMerge, X, Check, GraduationCap, Search, ArrowUpDown } from 'lucide-react';
+import { Users, ScanFace, Loader2, Sparkles, Eye, EyeOff, GitMerge, X, Check, GraduationCap, Search, ArrowUpDown, BarChart3 } from 'lucide-react';
 import Navbar from '../components/Navbar';
-import { getPeople, getPreviewUrl, getFullClusterData, getAllFacesForDeepRebuild, applyClusteringResults, resetAllClusters, mergePeople, getLegacyFaceStats, resetLegacyFaces, learnFromManualTags, rescanFacelessTaggedPhotos } from '../api';
+import { getPeople, getFullClusterData, getAllFacesForDeepRebuild, applyClusteringResults, resetAllClusters, mergePeople, getLegacyFaceStats, resetLegacyFaces, learnFromManualTags, rescanFacelessTaggedPhotos } from '../api';
 import type { Person, LegacyFaceStats } from '../api';
+import MediaThumb from '../components/MediaThumb';
 import { runBackfillScan } from '../faceBackfill';
 import type { BackfillProgress } from '../faceBackfill';
-import { runClientSideClustering, runDeepRebuildClustering, findClientSideMergeSuggestions, chunkClusteringResultsForApply, DEFAULT_MERGE_SUGGESTION_THRESHOLD } from '../faceClusteringClient';
-import type { MergeSuggestion } from '../faceClusteringClient';
+import { runClientSideClustering, runDeepRebuildClustering, findClientSideMergeSuggestions, chunkClusteringResultsForApply, computeRecognitionDiagnostics, DEFAULT_MERGE_SUGGESTION_THRESHOLD } from '../faceClusteringClient';
+import type { MergeSuggestion, RecognitionDiagnostics } from '../faceClusteringClient';
 
 // A second, much more lenient similarity threshold tried automatically only if the default
 // (DEFAULT_MERGE_SUGGESTION_THRESHOLD, 0.45 as of 2026-08-04) scan finds literally nothing —
@@ -77,6 +78,13 @@ const AdminPeople: React.FC = () => {
   // (full-resolution-original, not a downscaled preview) backfill logic.
   const [rescanningFaceless, setRescanningFaceless] = useState(false);
   const [rescanResult, setRescanResult] = useState<{ photosReset: number } | null>(null);
+  // "Recognition diagnostics" — a READ-ONLY tool that measures, on this library's own confirmed
+  // clusters, how well cosine similarity separates same-person vs different-person faces, and
+  // what threshold best splits them (see computeRecognitionDiagnostics() in
+  // faceClusteringClient.ts). Never writes anything; used to validate/tune SAME_PERSON_THRESHOLD.
+  const [diagnostics, setDiagnostics] = useState<RecognitionDiagnostics | null>(null);
+  const [runningDiagnostics, setRunningDiagnostics] = useState(false);
+  const [diagnosticsLoaded, setDiagnosticsLoaded] = useState<number | null>(null);
   // Name search + sort — the list has no pagination, so for a library with many named people
   // finding a specific one by scrolling/scanning wasn't practical.
   const [nameFilter, setNameFilter] = useState('');
@@ -297,6 +305,30 @@ const AdminPeople: React.FC = () => {
   };
 
   /**
+   * "Recognition diagnostics" — READ-ONLY. Fetches every face (with its current person
+   * assignment) via the same paginated getAllFacesForDeepRebuild() the deep rebuild uses, then
+   * computes intra- vs inter-person similarity distributions and a suggested threshold entirely
+   * in the browser (see computeRecognitionDiagnostics()). Nothing is written; this only tells the
+   * admin whether the current SAME_PERSON_THRESHOLD is well-tuned for THEIR photos.
+   */
+  const handleRunDiagnostics = async () => {
+    setRunningDiagnostics(true);
+    setDiagnostics(null);
+    setDiagnosticsLoaded(null);
+    try {
+      const faces = await getAllFacesForDeepRebuild((facesLoaded) => {
+        setDiagnosticsLoaded(facesLoaded);
+      });
+      setDiagnostics(computeRecognitionDiagnostics(faces));
+    } catch (err) {
+      setError('Recognition diagnostics failed');
+      console.error(err);
+    } finally {
+      setRunningDiagnostics(false);
+    }
+  };
+
+  /**
    * Runs the ENTIRE O(clusterCount²) merge-suggestion scan client-side in one shot — see
    * faceClusteringClient.ts's findClientSideMergeSuggestions(). The scan itself needs no
    * cursor/pagination (a browser can examine even hundreds of thousands of pairs in well under
@@ -464,6 +496,23 @@ const AdminPeople: React.FC = () => {
                   <GitMerge className="w-4 h-4" /> Find Merge Suggestions
                 </button>
               )}
+              {runningDiagnostics ? (
+                <button
+                  disabled
+                  className="px-4 py-2 bg-gray-300 text-gray-700 rounded-lg flex items-center gap-2 cursor-wait"
+                >
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                  {diagnosticsLoaded != null ? `Analyzing… ${diagnosticsLoaded} faces` : 'Loading…'}
+                </button>
+              ) : (
+                <button
+                  onClick={handleRunDiagnostics}
+                  title="Read-only: measure how well the current matching threshold separates same-person vs different-person faces on YOUR photos, using your named/confirmed people as ground truth. Changes nothing."
+                  className="px-4 py-2 bg-gray-200 dark:bg-gray-700 text-gray-800 dark:text-gray-200 rounded-lg hover:bg-gray-300 dark:hover:bg-gray-600 transition flex items-center gap-2"
+                >
+                  <BarChart3 className="w-4 h-4" /> Recognition diagnostics
+                </button>
+              )}
               {learningFromTags ? (
                 <button
                   disabled
@@ -480,7 +529,7 @@ const AdminPeople: React.FC = () => {
                   <GraduationCap className="w-4 h-4" /> Learn from Tags
                 </button>
               )}
-              {(rescanningFaceless || scanning) && rescanningFaceless ? (
+              {rescanningFaceless ? (
                 <button
                   disabled
                   className="px-4 py-2 bg-gray-300 text-gray-700 rounded-lg flex items-center gap-2 cursor-wait"
@@ -657,11 +706,12 @@ const AdminPeople: React.FC = () => {
                         <div key={person.id} className="flex items-center gap-2">
                           <div className="w-12 h-12 rounded-full overflow-hidden bg-gray-200 dark:bg-gray-700 shrink-0">
                             {person.cover_event_slug && person.cover_photo_id && person.cover_file_type ? (
-                              <img
-                                src={getPreviewUrl(person.cover_event_slug, person.cover_photo_id, person.cover_file_type, person.cover_cache_version || undefined)}
+                              <MediaThumb
+                                slug={person.cover_event_slug}
+                                photoId={person.cover_photo_id}
+                                fileType={person.cover_file_type}
+                                cacheVersion={person.cover_cache_version}
                                 alt={person.name || 'Unnamed person'}
-                                className="w-full h-full object-cover"
-                                loading="lazy"
                               />
                             ) : (
                               <Users className="w-6 h-6 text-gray-400 m-auto mt-3" />
@@ -731,11 +781,12 @@ const AdminPeople: React.FC = () => {
               >
                 <div className="aspect-square rounded-full overflow-hidden bg-gray-200 dark:bg-gray-700 mx-auto w-24 h-24 sm:w-28 sm:h-28 shadow group-hover:shadow-lg transition-shadow">
                   {person.cover_event_slug && person.cover_photo_id && person.cover_file_type ? (
-                    <img
-                      src={getPreviewUrl(person.cover_event_slug, person.cover_photo_id, person.cover_file_type, person.cover_cache_version || undefined)}
+                    <MediaThumb
+                      slug={person.cover_event_slug}
+                      photoId={person.cover_photo_id}
+                      fileType={person.cover_file_type}
+                      cacheVersion={person.cover_cache_version}
                       alt={person.name || 'Unnamed person'}
-                      className="w-full h-full object-cover"
-                      loading="lazy"
                     />
                   ) : (
                     <Users className="w-10 h-10 text-gray-400 m-auto mt-8" />
@@ -747,6 +798,98 @@ const AdminPeople: React.FC = () => {
                 <p className="text-xs text-gray-500 dark:text-gray-400">{person.photo_count} photo{person.photo_count === 1 ? '' : 's'}</p>
               </Link>
             ))}
+          </div>
+        )}
+
+        {diagnostics && (
+          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
+            <div className="bg-white dark:bg-gray-800 rounded-lg shadow-xl max-w-lg w-full max-h-[90vh] overflow-y-auto">
+              <div className="p-6">
+                <div className="flex items-center justify-between mb-4">
+                  <h2 className="text-xl font-bold text-gray-900 dark:text-white flex items-center gap-2">
+                    <BarChart3 className="w-5 h-5" /> Recognition diagnostics
+                  </h2>
+                  <button
+                    onClick={() => setDiagnostics(null)}
+                    className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-200"
+                  >
+                    <X className="w-5 h-5" />
+                  </button>
+                </div>
+
+                {diagnostics.insufficientData ? (
+                  <p className="text-sm text-gray-600 dark:text-gray-400">
+                    Not enough labeled data yet — this needs at least two people who each have two
+                    or more faces assigned to them (found {diagnostics.labeledPeople} such
+                    {diagnostics.labeledPeople === 1 ? ' person' : ' people'},{' '}
+                    {diagnostics.labeledFaces} labeled face{diagnostics.labeledFaces === 1 ? '' : 's'}).
+                    Cluster and name a few more people, then run this again.
+                  </p>
+                ) : (
+                  <>
+                    <p className="text-sm text-gray-600 dark:text-gray-400 mb-4">
+                      Measured on {diagnostics.labeledFaces} faces across {diagnostics.labeledPeople}{' '}
+                      confirmed {diagnostics.labeledPeople === 1 ? 'person' : 'people'} (read-only —
+                      nothing was changed). Same-person pairs should score HIGH; different-person
+                      pairs should score LOW. The further apart these two rows are, the more reliably
+                      faces can be matched.
+                    </p>
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-sm mb-4">
+                        <thead>
+                          <tr className="text-left text-gray-500 dark:text-gray-400 border-b border-gray-200 dark:border-gray-700">
+                            <th className="py-1 pr-2 font-medium"> </th>
+                            <th className="py-1 px-2 font-medium">median</th>
+                            <th className="py-1 px-2 font-medium">p10</th>
+                            <th className="py-1 px-2 font-medium">p90</th>
+                            <th className="py-1 px-2 font-medium">n</th>
+                          </tr>
+                        </thead>
+                        <tbody className="text-gray-900 dark:text-gray-100">
+                          <tr className="border-b border-gray-100 dark:border-gray-700/50">
+                            <td className="py-1 pr-2 font-medium text-green-600 dark:text-green-400">Same person</td>
+                            <td className="py-1 px-2">{diagnostics.intra.median.toFixed(3)}</td>
+                            <td className="py-1 px-2">{diagnostics.intra.p10.toFixed(3)}</td>
+                            <td className="py-1 px-2">{diagnostics.intra.p90.toFixed(3)}</td>
+                            <td className="py-1 px-2">{diagnostics.intra.count}</td>
+                          </tr>
+                          <tr>
+                            <td className="py-1 pr-2 font-medium text-red-600 dark:text-red-400">Different people</td>
+                            <td className="py-1 px-2">{diagnostics.inter.median.toFixed(3)}</td>
+                            <td className="py-1 px-2">{diagnostics.inter.p10.toFixed(3)}</td>
+                            <td className="py-1 px-2">{diagnostics.inter.p90.toFixed(3)}</td>
+                            <td className="py-1 px-2">{diagnostics.inter.count}</td>
+                          </tr>
+                        </tbody>
+                      </table>
+                    </div>
+                    <div className="p-3 rounded-lg bg-gray-50 dark:bg-gray-700/40 text-sm text-gray-800 dark:text-gray-200">
+                      <p>
+                        Suggested threshold:{' '}
+                        <strong>{diagnostics.suggestedThreshold.toFixed(2)}</strong>{' '}
+                        (separates the two groups best: catches{' '}
+                        {Math.round(diagnostics.truePositiveRate * 100)}% of true matches while
+                        wrongly matching {Math.round(diagnostics.falsePositiveRate * 100)}% of
+                        different-person pairs).
+                      </p>
+                      <p className="mt-1">
+                        Currently in use: <strong>{diagnostics.currentThreshold.toFixed(2)}</strong>.
+                        {Math.abs(diagnostics.suggestedThreshold - diagnostics.currentThreshold) >= 0.05
+                          ? ' These differ meaningfully — consider updating SAME_PERSON_THRESHOLD in faceClusteringClient.ts.'
+                          : ' The current value looks well-tuned for this library.'}
+                      </p>
+                    </div>
+                  </>
+                )}
+
+                <button
+                  onClick={() => setDiagnostics(null)}
+                  className="w-full mt-4 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition"
+                >
+                  Close
+                </button>
+              </div>
+            </div>
           </div>
         )}
       </div>

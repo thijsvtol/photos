@@ -185,15 +185,15 @@ const CENTROID_FREEZE_SIZE = 40;
 // different people's faces can drift into that same borderline range against a large,
 // somewhat-generalized centroid). Fix: the bar a face must clear to join a cluster RISES
 // gradually with that cluster's current size, so:
-//  - Small/new clusters keep the original, already-tuned SAME_PERSON_THRESHOLD (0.5) — no
+//  - Small/new clusters keep the flat baseline SAME_PERSON_THRESHOLD (0.35, cosine) — no
 //    behavior change for the common case of a person who has only accumulated a few photos.
 //  - Large, well-established clusters require an increasingly CONFIDENT match to keep growing,
 //    which lets a real recurring person's clearly-matching photos keep joining (their genuine
 //    similarity scores are typically well above the baseline threshold, not borderline) while
 //    filtering out the marginal, easily-wrong matches that caused the earlier snowball.
 // Growth is capped at MAX_THRESHOLD_BOOST so the bar never becomes unreasonably strict even for
-// a very large, legitimate cluster (200+ photos) — a genuinely well-matching face should still
-// pass a 0.60 bar even at that scale.
+// a very large, legitimate cluster (200+ photos) — with the baseline 0.35 and a 0.15 max boost,
+// the effective ceiling is 0.50, which a genuinely well-matching face should still pass.
 // Growth rate/start tightened (2026-08-04) after the adaptive threshold ALONE still proved
 // insufficient in production (a cluster still grew to absorb multiple different people even
 // with this in place) — the bar now starts rising sooner and climbs faster, reaching its
@@ -229,9 +229,14 @@ export async function runClientSideClustering(
   if (validFaces.length !== faces.length) {
     console.error(`runClientSideClustering: skipping ${faces.length - validFaces.length} face(s) with a malformed embedding length`);
   }
-  const validClusters = clusters.filter((c) => isValidEmbeddingLength(c.centroidEmbedding));
+  // Skip clusters with a malformed centroid AND clusters that currently have no members
+  // (faceCount <= 0). A member-less cluster only exists after a per-person "Reset Clustering"
+  // (see resetSingleCluster() in the worker), which intentionally keeps the person row but leaves
+  // its centroid stale; matching new faces against that stale centroid would silently re-absorb
+  // exactly the faces the admin just reset away, defeating the reset.
+  const validClusters = clusters.filter((c) => isValidEmbeddingLength(c.centroidEmbedding) && c.faceCount > 0);
   if (validClusters.length !== clusters.length) {
-    console.error(`runClientSideClustering: ignoring ${clusters.length - validClusters.length} existing cluster(s) with a malformed centroid length`);
+    console.error(`runClientSideClustering: ignoring ${clusters.length - validClusters.length} existing cluster(s) with a malformed centroid length or no members`);
   }
 
   // In-memory working copy — updated as we go, same as the old worker implementation.
@@ -351,7 +356,7 @@ export async function runClientSideClustering(
 // with another person" action can always fix later with human review).
 //
 // Cost: O(faces × clusters × REP_SIZE × embeddingDim) in the worst case, all in the browser
-// (no per-task CPU-time limit, unlike the Worker) — REP_SIZE is deliberately small (8) since
+// (no per-task CPU-time limit, unlike the Worker) — REP_SIZE is deliberately small (12) since
 // representativeness saturates quickly for a fixed real embedding distribution, and the exact
 // same `yieldPeriodically()` UX helper used elsewhere keeps the tab responsive during a large
 // pass (this is NOT a CPU-safety mechanism here, just avoids the tab looking frozen).
@@ -584,9 +589,12 @@ export async function findClientSideMergeSuggestions(
 ): Promise<MergeSuggestion[]> {
   // Same malformed-embedding-length guard as runClientSideClustering() above — see
   // EXPECTED_EMBEDDING_LENGTH's doc comment.
-  const validClusters = clusters.filter((c) => isValidEmbeddingLength(c.centroidEmbedding));
+  // Same guards as runClientSideClustering(): drop malformed centroids AND member-less clusters
+  // (faceCount <= 0, i.e. a person that was reset but kept) so a stale centroid can't produce
+  // bogus merge suggestions.
+  const validClusters = clusters.filter((c) => isValidEmbeddingLength(c.centroidEmbedding) && c.faceCount > 0);
   if (validClusters.length !== clusters.length) {
-    console.error(`findClientSideMergeSuggestions: ignoring ${clusters.length - validClusters.length} cluster(s) with a malformed centroid length`);
+    console.error(`findClientSideMergeSuggestions: ignoring ${clusters.length - validClusters.length} cluster(s) with a malformed centroid length or no members`);
   }
 
   const centroids = validClusters.map((c) => new Float32Array(c.centroidEmbedding));
@@ -612,4 +620,160 @@ export async function findClientSideMergeSuggestions(
   suggestions.sort((a, b) => b.similarity - a.similarity);
 
   return suggestions;
+}
+
+// ============================================================================================
+// RECOGNITION DIAGNOSTICS (read-only threshold-validation harness)
+// ============================================================================================
+//
+// SAME_PERSON_THRESHOLD above is flagged in-code as "NOT empirically validated" — there's no
+// labeled ground truth to tune it against at development time. But once an admin has NAMED/
+// confirmed some people, those confirmed clusters ARE ground truth: two faces assigned to the
+// same person should be a "same person" pair, two faces in different people should not. This
+// tool measures, on the admin's OWN library, how well cosine similarity separates those two
+// populations and what threshold best splits them — so any future change to SAME_PERSON_THRESHOLD
+// (or to the embedding preprocessing in faceEmbeddingOnnx.ts) is a measured decision, not a
+// guess. It ONLY reads and computes; it never writes anything.
+
+/** Summary of one similarity distribution (intra-person or inter-person). */
+export interface SimilarityStats {
+  count: number;
+  mean: number;
+  median: number;
+  p10: number;
+  p90: number;
+  min: number;
+  max: number;
+}
+
+export interface RecognitionDiagnostics {
+  /** True when there wasn't enough labeled data to say anything meaningful. */
+  insufficientData: boolean;
+  /** How many named/confirmed people (with >= 2 faces) contributed intra-person pairs. */
+  labeledPeople: number;
+  /** Total faces assigned to a person and used as ground truth. */
+  labeledFaces: number;
+  /** Similarity between two faces of the SAME person — should be HIGH. */
+  intra: SimilarityStats;
+  /** Similarity between two faces of DIFFERENT people — should be LOW. */
+  inter: SimilarityStats;
+  /** Threshold that best separates the two distributions (max true-positive-minus-false-positive
+   *  rate, i.e. Youden's J), plus the rates achieved there. */
+  suggestedThreshold: number;
+  truePositiveRate: number;
+  falsePositiveRate: number;
+  /** The threshold currently in use, for side-by-side comparison. */
+  currentThreshold: number;
+}
+
+// Bound the pair sampling so this stays fast even on a large library (this is pure O(pairs) math
+// in the browser, but a person in 500 photos alone is 124,750 intra pairs — no need to compute
+// them all to characterize a distribution).
+const MAX_DIAGNOSTIC_PAIRS = 20000;
+
+function summarize(values: number[]): SimilarityStats {
+  if (values.length === 0) {
+    return { count: 0, mean: 0, median: 0, p10: 0, p90: 0, min: 0, max: 0 };
+  }
+  const sorted = values.slice().sort((a, b) => a - b);
+  const at = (q: number) => sorted[Math.min(sorted.length - 1, Math.max(0, Math.floor(q * (sorted.length - 1))))];
+  const mean = sorted.reduce((s, v) => s + v, 0) / sorted.length;
+  return {
+    count: sorted.length,
+    mean: Math.round(mean * 10000) / 10000,
+    median: at(0.5),
+    p10: at(0.1),
+    p90: at(0.9),
+    min: sorted[0],
+    max: sorted[sorted.length - 1],
+  };
+}
+
+/**
+ * Computes intra- vs inter-person cosine-similarity distributions from labeled faces (faces with
+ * a non-null personId) and a suggested separating threshold. Pure/read-only.
+ *
+ * `rand` is injectable so tests can pass a deterministic generator; it defaults to `Math.random`.
+ */
+export function computeRecognitionDiagnostics(
+  faces: ClusterDataFace[],
+  rand: () => number = Math.random
+): RecognitionDiagnostics {
+  const currentThreshold = SAME_PERSON_THRESHOLD;
+
+  // Group valid-embedding faces by their assigned person (ground truth).
+  const byPerson = new Map<number, Float32Array[]>();
+  for (const f of faces) {
+    if (f.personId == null) continue;
+    if (!isValidEmbeddingLength(f.embedding)) continue;
+    if (!byPerson.has(f.personId)) byPerson.set(f.personId, []);
+    byPerson.get(f.personId)!.push(new Float32Array(f.embedding));
+  }
+
+  const people = Array.from(byPerson.entries()).filter(([, embs]) => embs.length >= 2);
+  const labeledFaces = Array.from(byPerson.values()).reduce((s, e) => s + e.length, 0);
+
+  // Need at least two multi-face people to have both a within-person and a between-person signal.
+  if (people.length < 2) {
+    const empty = summarize([]);
+    return {
+      insufficientData: true,
+      labeledPeople: people.length,
+      labeledFaces,
+      intra: empty,
+      inter: empty,
+      suggestedThreshold: currentThreshold,
+      truePositiveRate: 0,
+      falsePositiveRate: 0,
+      currentThreshold,
+    };
+  }
+
+  // Intra-person pairs, sampled per person proportional to how many pairs each contributes, so a
+  // few huge clusters don't crowd out everyone else's signal.
+  const intra: number[] = [];
+  for (const [, embs] of people) {
+    const maxPairs = (embs.length * (embs.length - 1)) / 2;
+    const target = Math.min(maxPairs, Math.ceil(MAX_DIAGNOSTIC_PAIRS / people.length));
+    for (let k = 0; k < target; k++) {
+      let i = Math.floor(rand() * embs.length);
+      let j = Math.floor(rand() * embs.length);
+      if (i === j) j = (j + 1) % embs.length;
+      intra.push(humanSimilarity(embs[i], embs[j]));
+    }
+  }
+
+  // Inter-person pairs: random faces from two different people.
+  const flat: Float32Array[] = [];
+  const owner: number[] = [];
+  people.forEach(([, embs], idx) => embs.forEach((e) => { flat.push(e); owner.push(idx); }));
+  const inter: number[] = [];
+  for (let k = 0; k < MAX_DIAGNOSTIC_PAIRS; k++) {
+    const a = Math.floor(rand() * flat.length);
+    let b = Math.floor(rand() * flat.length);
+    if (owner[a] === owner[b]) { b = (b + 1) % flat.length; }
+    if (owner[a] === owner[b]) continue; // still same person (tiny dataset) — skip
+    inter.push(humanSimilarity(flat[a], flat[b]));
+  }
+
+  // Sweep candidate thresholds and pick the one with the best separation (Youden's J = TPR-FPR).
+  let best = { t: currentThreshold, j: -Infinity, tpr: 0, fpr: 0 };
+  for (let t = -0.2; t <= 0.95; t += 0.01) {
+    const tpr = intra.filter((s) => s >= t).length / (intra.length || 1);
+    const fpr = inter.filter((s) => s >= t).length / (inter.length || 1);
+    const j = tpr - fpr;
+    if (j > best.j) best = { t: Math.round(t * 100) / 100, j, tpr, fpr };
+  }
+
+  return {
+    insufficientData: false,
+    labeledPeople: people.length,
+    labeledFaces,
+    intra: summarize(intra),
+    inter: summarize(inter),
+    suggestedThreshold: best.t,
+    truePositiveRate: Math.round(best.tpr * 1000) / 1000,
+    falsePositiveRate: Math.round(best.fpr * 1000) / 1000,
+    currentThreshold,
+  };
 }

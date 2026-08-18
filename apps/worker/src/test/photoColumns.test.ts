@@ -49,11 +49,11 @@ describe('GALLERY_PHOTO_COLUMNS', () => {
     }
   });
 
-  it('omits blur_placeholder — it was 81% of a full-event response', () => {
-    // 5.31MB of an 8.08MB body for 4102 photos, ~1470 bytes per row. A 16x16
-    // JPEG cannot be made meaningfully smaller (fixed JPEG tables + base64), so
-    // the column comes out of the big listing entirely.
-    expect(columns).not.toContain('p.blur_placeholder');
+  it('includes blur_placeholder so gallery tiles blur up', () => {
+    // Re-added by product decision (accepting the slower open on large events —
+    // it was 81% of a 4102-photo response at ~1470 bytes/row). If that cost needs
+    // revisiting, swap to a compact placeholder (thumbhash), don't drop the blur.
+    expect(columns).toContain('p.blur_placeholder');
   });
 
   it('still offers a blur-bearing variant for short lists', () => {

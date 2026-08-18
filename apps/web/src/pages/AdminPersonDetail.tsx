@@ -2,8 +2,9 @@ import React, { useEffect, useRef, useState } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
 import { Users, Pencil, Trash2, Check, X, UserPlus, GitMerge, MoveRight, UserMinus } from 'lucide-react';
 import Navbar from '../components/Navbar';
-import { getPerson, updatePerson, deletePerson, resetPersonCluster, getPreviewUrl, searchUsers, getPeople, mergePeople, assignPhotosToPerson, removePersonFromPhoto } from '../api';
+import { getPerson, updatePerson, deletePerson, resetPersonCluster, searchUsers, getPeople, mergePeople, assignPhotosToPerson, bulkTagPeopleOnPhotos, removePersonFromPhoto } from '../api';
 import type { Person, PersonPhoto } from '../api';
+import MediaThumb from '../components/MediaThumb';
 
 const AdminPersonDetail: React.FC = () => {
   const { personId } = useParams<{ personId: string }>();
@@ -86,7 +87,17 @@ const AdminPersonDetail: React.FC = () => {
     if (!person) return;
     try {
       await updatePerson(person.id, { coverPhotoId: photoId });
-      setPerson({ ...person, cover_photo_id: photoId });
+      // Carry the chosen photo's media type/cache version into local state too — the People grid
+      // avatar (AdminPeople) keys its video-vs-image render off cover_file_type, so setting a
+      // VIDEO as cover would otherwise leave a stale image-only cover and render a broken tile
+      // there until a full reload.
+      const chosen = photos.find((p) => p.id === photoId);
+      setPerson({
+        ...person,
+        cover_photo_id: photoId,
+        cover_file_type: chosen?.file_type ?? person.cover_file_type,
+        cover_cache_version: chosen?.cache_version ?? person.cover_cache_version,
+      });
     } catch (err) {
       setError('Failed to set cover photo');
       console.error(err);
@@ -222,10 +233,21 @@ const AdminPersonDetail: React.FC = () => {
   };
 
   const handleMovePhotoTo = async (targetPersonId: number, photoId: string) => {
+    if (!person) return;
     try {
       setMoving(true);
       setMoveError(null);
+      // A "move" has to both ATTACH the target and DETACH the current person, and the photos
+      // shown here can be attached to this person by EITHER a detected face OR a manual tag (see
+      // getPerson's UNION query in apps/worker/src/routes/admin/people.ts). So:
+      //  - assignPhotosToPerson reassigns any DETECTED face to the target,
+      //  - bulkTagPeopleOnPhotos records a manual tag so a face-LESS (tag-only) photo still moves
+      //    (assignPhotosToPerson alone is a silent no-op when there's no face), and
+      //  - removePersonFromPhoto strips the current person's leftover face assignment AND manual
+      //    tag, so the photo genuinely leaves this person instead of ending up on both.
       await assignPhotosToPerson(targetPersonId, [photoId]);
+      await bulkTagPeopleOnPhotos([photoId], [targetPersonId]);
+      await removePersonFromPhoto(photoId, person.id);
       // This photo no longer belongs to the CURRENT person, so drop it from the list locally
       // rather than waiting for a full reload.
       setPhotos((prev) => prev.filter((p) => p.id !== photoId));
@@ -470,11 +492,13 @@ const AdminPersonDetail: React.FC = () => {
               <div key={photo.id} className="relative bg-white dark:bg-gray-800 rounded-lg shadow overflow-hidden group">
                 <Link to={`/p/${photo.event_slug}/${photo.id}`}>
                   <div className="aspect-square">
-                    <img
-                      src={getPreviewUrl(photo.event_slug, photo.id, photo.file_type, photo.cache_version)}
+                    <MediaThumb
+                      slug={photo.event_slug}
+                      photoId={photo.id}
+                      fileType={photo.file_type}
+                      cacheVersion={photo.cache_version}
+                      blurPlaceholder={photo.blur_placeholder}
                       alt={photo.original_filename}
-                      className="w-full h-full object-cover"
-                      loading="lazy"
                     />
                   </div>
                 </Link>

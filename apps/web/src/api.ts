@@ -516,6 +516,10 @@ export interface ClusterDataFace {
   id: number;
   photoId: string;
   embedding: number[];
+  /** Person this face is currently assigned to, or null if still unclustered. Populated when
+   *  fetching ALL faces (see getAllFacesForDeepRebuild); used as ground-truth labels by the
+   *  read-only "Recognition diagnostics" tool. */
+  personId?: number | null;
 }
 
 export interface ClusterDataCluster {

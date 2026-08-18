@@ -154,15 +154,26 @@ export function startFaceDetectionQueue(): void {
       if (!item.file) continue;
 
       processedIds.add(item.id);
-      if (processedIds.size > MAX_TRACKED_IDS) {
-        // Drop the oldest half to keep this bounded across a long session.
-        const toDrop = Array.from(processedIds).slice(0, MAX_TRACKED_IDS / 2);
-        toDrop.forEach((id) => processedIds.delete(id));
-      }
 
       // Queued, not awaited: uploads must never wait on face detection, but the
       // detections themselves run one at a time (see enqueueDetection).
       enqueueDetection(() => processItem(item));
+    }
+
+    // Keep processedIds bounded WITHOUT ever forgetting an id that's still present-and-completed
+    // in the queue: uploadManager.notify() re-delivers the whole snapshot every time, so evicting
+    // a still-live completed id (the old "drop the oldest half" logic did) meant the very next
+    // notify() re-enqueued detection for it — re-decoding the image and re-POSTing saveFaces,
+    // the exact wasteful reprocessing this set exists to prevent. An id that has DROPPED OUT of
+    // the snapshot can never be re-delivered, so it's safe to forget; that alone keeps the set
+    // naturally bounded by the live queue size. The cap is just a backstop (ids are cheap
+    // strings; real memory pressure comes from concurrent detections, which enqueueDetection
+    // already serializes).
+    if (processedIds.size > MAX_TRACKED_IDS) {
+      const currentIds = new Set(items.map((i) => i.id));
+      for (const id of processedIds) {
+        if (!currentIds.has(id)) processedIds.delete(id);
+      }
     }
   });
 }

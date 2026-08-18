@@ -98,6 +98,10 @@ export interface ClusterDataFace {
   id: number;
   photoId: string;
   embedding: number[];
+  /** The person this face is currently assigned to (null = still unclustered). Only meaningful
+   *  when the caller requested ALL faces (`unclusteredOnly=false`); it's how the read-only
+   *  "Recognition diagnostics" tool uses confirmed clusters as ground-truth labels. */
+  personId: number | null;
 }
 
 export interface ClusterDataCluster {
@@ -118,7 +122,7 @@ export interface ClusterData {
 }
 
 // Converting a BLOB embedding into a plain number[] (Array.from(new Float32Array(...))) is
-// REAL synchronous CPU work — 1024 floats per row — and so is JSON-encoding the resulting
+// REAL synchronous CPU work — 512 floats per row — and so is JSON-encoding the resulting
 // payload; both scale with however many cluster/face ROWS are fetched in one call, even though
 // the SQL query itself is cheap I/O. A large library (thousands of clusters and/or unclustered
 // faces) can make a single "fetch everything" call alone exceed the Workers Free plan's 10ms
@@ -173,16 +177,17 @@ export async function getClusterData(
   const { results: faceRows } = await env.DB
     .prepare(
       unclusteredOnly
-        ? `SELECT id, photo_id, embedding FROM photo_faces WHERE person_id IS NULL AND id > ? ORDER BY id ASC LIMIT ?`
-        : `SELECT id, photo_id, embedding FROM photo_faces WHERE id > ? ORDER BY id ASC LIMIT ?`
+        ? `SELECT id, photo_id, person_id, embedding FROM photo_faces WHERE person_id IS NULL AND id > ? ORDER BY id ASC LIMIT ?`
+        : `SELECT id, photo_id, person_id, embedding FROM photo_faces WHERE id > ? ORDER BY id ASC LIMIT ?`
     )
     .bind(afterFaceId, PAGE_SIZE)
-    .all<{ id: number; photo_id: string; embedding: ArrayBuffer }>();
+    .all<{ id: number; photo_id: string; person_id: number | null; embedding: ArrayBuffer }>();
 
   const faceRowsArr = faceRows || [];
   const faces: ClusterDataFace[] = faceRowsArr.map((f) => ({
     id: f.id,
     photoId: f.photo_id,
+    personId: f.person_id,
     embedding: Array.from(blobToFloat32Array(f.embedding)),
   }));
   const nextFaceCursor = faceRowsArr.length === PAGE_SIZE ? faceRowsArr[faceRowsArr.length - 1].id : null;
@@ -294,8 +299,16 @@ export async function resetSingleCluster(env: Env, personId: number): Promise<{ 
     .prepare('UPDATE photo_faces SET person_id = NULL WHERE person_id = ?')
     .bind(personId)
     .run();
+  // Only zero out face_count — do NOT null the centroid. `centroid_embedding` is `BLOB NOT NULL`
+  // (migration 023), so `SET centroid_embedding = NULL` throws SQLITE_CONSTRAINT and made this
+  // whole endpoint 500. The stale centroid is now simply IGNORED everywhere it would matter: the
+  // client clustering/merge-suggestion scans skip any cluster with `faceCount <= 0` (see
+  // faceClusteringClient.ts), and the first face re-assigned to this person overwrites the
+  // centroid outright (incorporateEmbedding() uses weight 1 when count is 0). Keeping the row
+  // intact preserves the person's identity (name, linked account, cover photo, manual tags),
+  // which is the entire point of a per-person reset vs. a full delete.
   await env.DB
-    .prepare('UPDATE person_clusters SET centroid_embedding = NULL, face_count = 0 WHERE id = ?')
+    .prepare("UPDATE person_clusters SET face_count = 0, updated_at = datetime('now') WHERE id = ?")
     .bind(personId)
     .run();
   return {
@@ -583,7 +596,7 @@ function chunk<T>(items: T[], size: number): T[][] {
  * vector math. See ClusterResult above for the shape the client sends.
  *
  * Defense-in-depth: HARD-REJECTS (skips, never writes) any result whose `centroidEmbedding`
- * isn't exactly `EXPECTED_EMBEDDING_LENGTH` (1024) — see this file's top-of-file doc comment
+ * isn't exactly `EXPECTED_EMBEDDING_LENGTH` (512) — see this file's top-of-file doc comment
  * for the exact production incident this guards against (a read-side bug once silently fed
  * 4x-too-long, garbage "embeddings" all the way through clustering and into the database).
  * Even with that read-side bug now fixed, this guard ensures no future, still-unknown bug can
@@ -642,24 +655,28 @@ export async function countUnclusteredFaces(env: Env): Promise<number> {
 }
 
 // Every embedding is a Float32Array BLOB, so its expected byte length is dims * 4 bytes/float.
-// See faceValidation.ts's EXPECTED_EMBEDDING_LENGTH doc comment for the full history: this app
-// switched face-embedding models in 2026-08 (face-api.js's 128-dim FaceRecognitionNet ->
-// @vladmandic/human's 1024-dim FaceRes descriptor). Rows/clusters created before that switch
-// (`faces_processed_at` was already set, so the backfill scan never revisits them) are stuck
-// with 128-dim (512-byte) embeddings/centroids forever — comparing a 512-byte BLOB against a
-// 4096-byte one in humanDistance()/humanSimilarity() (which loops `Math.min(a.length,
-// b.length)`) silently truncates to the first 128 of the 1024 dimensions, comparing two
-// completely incompatible embedding spaces. In practice this makes every genuine "same person"
-// match against a pre-switch cluster score as if the faces were near-total strangers, which is
-// exactly why merge suggestions/clustering can find literally 0 matches for people who
-// obviously DO recur in the library: their older photos are still tagged with the old,
-// incomparable embedding.
+// The CURRENT model is the ArcFace ONNX recognition model: 512 dims -> 2048 bytes (see
+// faceValidation.ts's EXPECTED_EMBEDDING_LENGTH doc comment for the full history). This app
+// switched face-embedding models TWICE: face-api.js's 128-dim FaceRecognitionNet (512 bytes) ->
+// @vladmandic/human's 1024-dim FaceRes descriptor (4096 bytes) -> the current 512-dim ArcFace
+// (2048 bytes). Rows/clusters created under EITHER older model (`faces_processed_at` was already
+// set, so the backfill scan never revisits them) are stuck with a differently-sized
+// embedding/centroid forever — and comparing two different-length BLOBs is meaningless (they're
+// separate models with separately-trained dimensions), which is why humanDistance()/
+// humanSimilarity() refuse to compare mismatched lengths at all. In practice a genuine "same
+// person" match against a pre-switch cluster scores as near-total strangers, which is exactly
+// why merge suggestions/clustering can find literally 0 matches for people who obviously DO
+// recur in the library: their older photos are still tagged with an incomparable embedding.
+// "Legacy" below therefore means any row whose byte length is NOT the current 2048 — covering
+// BOTH earlier formats.
 const EXPECTED_EMBEDDING_BYTES = EXPECTED_EMBEDDING_LENGTH * 4;
 
-/** Number of photo_faces rows and person_clusters rows still using the legacy pre-2026-08
- *  face-api.js embedding format (see EXPECTED_EMBEDDING_BYTES doc comment above) — surfaced to
- *  the admin so they know why "same person" matches might be silently missing, and so they can
- *  trigger resetLegacyFaces() to fix it. `corruptedClusters` counts a SEPARATE, worse problem:
+/** Number of photo_faces rows and person_clusters rows still using a legacy embedding format —
+ *  i.e. any row whose byte length isn't the current 512-dim ArcFace 2048 bytes, covering both
+ *  the older face-api.js (128-dim) and @vladmandic/human (1024-dim) formats (see
+ *  EXPECTED_EMBEDDING_BYTES doc comment above) — surfaced to the admin so they know why "same
+ *  person" matches might be silently missing, and so they can trigger resetLegacyFaces() to fix
+ *  it. `corruptedClusters` counts a SEPARATE, worse problem:
  *  clusters whose centroid is already the CORRECT byte length but contains `NaN` values — see
  *  findCorruptedClusterIds()'s doc comment below for exactly how this happens. */
 export interface LegacyFaceStats {

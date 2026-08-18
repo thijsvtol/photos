@@ -4,7 +4,7 @@ import type { Env, User } from '../../types';
 import { extractUser, hasEventCapabilityByEventId, isUserAdmin } from '../../auth';
 import { permanentlyDeletePhotos } from '../../photoDeletion';
 import { logActivity } from '../../activityLog';
-import { isValidFaceInput } from '../../faceValidation';
+import { isValidFaceInput, EXPECTED_EMBEDDING_LENGTH } from '../../faceValidation';
 import { setManualPhotoPersonTags, getPhotoPeople, addManualPhotoPersonTags, removePersonFromPhoto, syncPeopleAcrossDuplicates } from '../../faceClustering';
 import { MAX_SQL_IN_CHUNK, chunkArray } from '../../utils';
 
@@ -85,6 +85,12 @@ async function requireEventCapabilityById(
  * POST /photos/:photoId/faces below. Admin-only, since it scans across
  * every event (unlike the per-event upload-time faces endpoint in
  * routes/admin/uploads.ts).
+ *
+ * Videos are excluded (face detection isn't supported for them — see faceBackfill.ts). RAW
+ * photos ARE included: the browser scan fetches each photo's JPEG PREVIEW (getPreviewUrl maps a
+ * `raw/*` file_type to its `.jpg` preview), which is a perfectly detectable image. RAW was
+ * previously excluded here, which left manually-tagged RAW photos stuck as a permanently
+ * non-zero "remaining" count that a scan could never drain.
  */
 app.get('/faces-pending', async (c) => {
   try {
@@ -99,7 +105,6 @@ app.get('/faces-pending', async (c) => {
           AND p.upload_complete = 1
           AND p.deleted_at IS NULL
           AND p.file_type != 'video/mp4'
-          AND p.file_type NOT LIKE 'raw/%'
         ORDER BY p.uploaded_at ASC
         LIMIT ?
       `)
@@ -110,7 +115,7 @@ app.get('/faces-pending', async (c) => {
       .prepare(`
         SELECT COUNT(*) as count FROM photos
         WHERE faces_processed_at IS NULL AND upload_complete = 1 AND deleted_at IS NULL
-          AND file_type != 'video/mp4' AND file_type NOT LIKE 'raw/%'
+          AND file_type != 'video/mp4'
       `)
       .first<{ count: number }>();
 
@@ -148,7 +153,7 @@ app.post('/:photoId/faces', async (c) => {
       return c.json({ error: 'Cannot report more than 50 faces per photo' }, 400);
     }
     if (!faces.every(isValidFaceInput)) {
-      return c.json({ error: 'Each face requires a 128-number embedding and a numeric bbox' }, 400);
+      return c.json({ error: `Each face requires a ${EXPECTED_EMBEDDING_LENGTH}-number embedding and a numeric bbox` }, 400);
     }
 
     await c.env.DB.prepare('DELETE FROM photo_faces WHERE photo_id = ?').bind(photoId).run();

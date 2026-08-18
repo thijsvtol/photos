@@ -5,7 +5,7 @@ import { logCollaborationAction } from '../collaborators';
 import { logActivity } from '../../activityLog';
 import { checkFeature } from '../../features';
 import { isVideoFileType, getStorageExtension } from '../../fileTypeUtils';
-import { isValidFaceInput } from '../../faceValidation';
+import { isValidFaceInput, EXPECTED_EMBEDDING_LENGTH } from '../../faceValidation';
 import { MAX_SQL_IN_CHUNK, chunkArray } from '../../utils';
 
 type Variables = {
@@ -522,13 +522,13 @@ app.post('/:photoId/faces', requireUploadPermission, async (c) => {
     if (faces.length > 50) {
       return c.json({ error: 'Cannot report more than 50 faces per photo' }, 400);
     }
-    // @vladmandic/human's FaceRes description model always produces a
-    // 1024-dim descriptor. Validate shape/bounds before trusting client-supplied data — this is a
-    // defense-in-depth check (the caller already has upload permission for
-    // this event) against a buggy client sending malformed/oversized
-    // payloads that would otherwise bloat the DB or corrupt clustering.
+    // Face embeddings are computed client-side by a purpose-built ArcFace ONNX model that always
+    // produces exactly EXPECTED_EMBEDDING_LENGTH (512) numbers — see faceValidation.ts. Validate
+    // shape/bounds before trusting client-supplied data — this is a defense-in-depth check (the
+    // caller already has upload permission for this event) against a buggy client sending
+    // malformed/oversized payloads that would otherwise bloat the DB or corrupt clustering.
     if (!faces.every(isValidFaceInput)) {
-      return c.json({ error: 'Each face requires a 128-number embedding and a numeric bbox' }, 400);
+      return c.json({ error: `Each face requires a ${EXPECTED_EMBEDDING_LENGTH}-number embedding and a numeric bbox` }, 400);
     }
 
     // Replace any previous detections for this photo (e.g. a re-run after an edit).

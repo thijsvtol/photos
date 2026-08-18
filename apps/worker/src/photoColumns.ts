@@ -34,26 +34,27 @@ const BASE_PHOTO_COLUMNS = [
 ];
 
 /**
- * For the full-event gallery listing: everything above, WITHOUT
- * `blur_placeholder`.
+ * For the full-event gallery listing: everything above, PLUS `blur_placeholder`
+ * so gallery tiles blur up from a placeholder instead of fading in from an empty
+ * background.
  *
- * That one column was 81% of the response — 5.31MB of an 8.08MB body for a
- * 4102-photo event, averaging 1470 bytes per row. It is a 16x16 JPEG, so the
- * size is not the dimensions: a baseline JPEG's fixed header/quantization/Huffman
- * tables cost ~700 bytes no matter how few pixels follow, and base64 adds a
- * further third.
+ * Cost, eyes open: `blur_placeholder` is a 16x16 JPEG and dominates the response
+ * — it was 81% of an 8.08MB body (5.31MB, ~1470 bytes/row) for a 4102-photo
+ * event. A baseline JPEG's fixed header/quantization/Huffman tables cost ~700
+ * bytes no matter how few pixels follow, and base64 adds a further third, so the
+ * column cannot be made meaningfully smaller in this format. The wire cost is
+ * modest (Cloudflare compresses the body to ~630KB); the real cost is that the
+ * WebView must decompress and JSON.parse the whole thing, then hold 4102 objects
+ * each carrying a ~1.5KB string, before the grid renders — so big events open
+ * slower with this column than without it.
  *
- * The wire cost was never the problem — Cloudflare compresses the body to ~630KB.
- * The cost is what the WebView does next: decompress and JSON.parse 8MB, then
- * hold 4102 objects each carrying a ~1.5KB string. That is what made opening a
- * big event slow.
- *
- * The trade is real and deliberate: gallery tiles no longer blur up from a
- * placeholder, they fade in from an empty background. Photo detail still gets one
- * (different endpoint, one row), and so do the small featured/most-favorited
- * lists below, where a handful of rows costs nothing.
+ * This was deliberately dropped once for that reason, then re-added by product
+ * decision: the blur-up is wanted on the gallery grid and the slower open on
+ * large events is accepted. If that trade needs revisiting, the fix is a more
+ * compact placeholder (e.g. thumbhash, ~25 bytes/row) rather than dropping the
+ * blur again.
  */
-export const GALLERY_PHOTO_COLUMNS = BASE_PHOTO_COLUMNS.join(', ');
+export const GALLERY_PHOTO_COLUMNS = [...BASE_PHOTO_COLUMNS, 'p.blur_placeholder'].join(', ');
 
 /** For SHORT lists (featured, most-favorited — LIMIT ~20), where the blur-up is
  *  worth its bytes because there are so few rows. */

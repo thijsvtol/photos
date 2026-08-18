@@ -75,11 +75,11 @@ app.post('/apply-clustering', async (c) => {
 /**
  * GET /people/legacy-face-stats
  *
- * Counts how many photo_faces/person_clusters rows still use the legacy pre-2026-08
- * face-api.js embedding format (128-dim) instead of the current @vladmandic/human format
- * (1024-dim) — see getLegacyFaceStats()'s doc comment in faceClustering.ts for why this
- * silently breaks clustering/merge-suggestion matches for anyone whose photos predate the
- * model switch. Surfaced on the People admin page as a one-time "fix outdated face data"
+ * Counts how many photo_faces/person_clusters rows still use a legacy embedding format (an
+ * older face-api.js 128-dim or @vladmandic/human 1024-dim vector) instead of the current
+ * ArcFace 512-dim format — see getLegacyFaceStats()'s doc comment in faceClustering.ts for why
+ * this silently breaks clustering/merge-suggestion matches for anyone whose photos predate the
+ * current model. Surfaced on the People admin page as a one-time "fix outdated face data"
  * prompt when either count is nonzero.
  */
 app.get('/legacy-face-stats', async (c) => {

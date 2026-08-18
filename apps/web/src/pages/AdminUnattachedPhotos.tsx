@@ -2,8 +2,9 @@ import React, { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { Users, Check, X, UserPlus } from 'lucide-react';
 import Navbar from '../components/Navbar';
-import { getUnattachedPhotos, getPeople, assignPhotosToPerson, bulkTagPeopleOnPhotos, getPreviewUrl } from '../api';
+import { getUnattachedPhotos, getPeople, assignPhotosToPerson, bulkTagPeopleOnPhotos } from '../api';
 import type { UnattachedPhoto, Person } from '../api';
+import MediaThumb from '../components/MediaThumb';
 
 /**
  * Admin "Unattached photos" view (/admin/people/unattached) — lists every photo with NO person
@@ -18,9 +19,10 @@ import type { UnattachedPhoto, Person } from '../api';
  * common case here since this list exists precisely because these photos were never clustered).
  * Using assignPhotosToPerson alone silently did nothing for a face-less photo (0 faces to move,
  * hence the confusing "Assigned 0 photos" toast even though a photo genuinely had nobody
- * attached before) — the manual tag is what actually attaches the person in that case, same as
- * AdminPersonDetail's per-photo "Move to…" button only ever needing assignPhotosToPerson because
- * every photo shown there already has at least one detected face by definition.
+ * attached before) — the manual tag is what actually attaches the person in that case.
+ * AdminPersonDetail's per-photo "Move to…" button uses the same assign+tag pair (plus a
+ * removePersonFromPhoto to detach the source person), since a person's photo list can include
+ * manual-tag-only photos with no detected face too.
  */
 const AdminUnattachedPhotos: React.FC = () => {
   const [photos, setPhotos] = useState<UnattachedPhoto[]>([]);
@@ -274,11 +276,13 @@ const AdminUnattachedPhotos: React.FC = () => {
                     onClick={() => toggleSelected(photo.id)}
                   >
                     <div className="aspect-square">
-                      <img
-                        src={getPreviewUrl(photo.event_slug, photo.id, photo.file_type, photo.cache_version)}
+                      <MediaThumb
+                        slug={photo.event_slug}
+                        photoId={photo.id}
+                        fileType={photo.file_type}
+                        cacheVersion={photo.cache_version}
+                        blurPlaceholder={photo.blur_placeholder}
                         alt={photo.original_filename}
-                        className="w-full h-full object-cover"
-                        loading="lazy"
                       />
                     </div>
                     <div
