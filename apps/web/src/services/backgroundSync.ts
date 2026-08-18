@@ -19,6 +19,12 @@ const PARALLEL_CHUNKS = 4; // Upload up to 4 chunks simultaneously
 const MAX_RETRIES = 5; // Maximum retry attempts (increased from 3)
 const RETRY_DELAY_MS = 2000; // Initial retry delay: 2 seconds
 const MAX_CHUNK_RETRIES = 3; // Retry individual chunks up to 3 times
+// Progress notification updates are coalesced to at most one per this interval,
+// mirroring the native folder-sync engine (SyncNotifier.UPDATE_THROTTLE_MS).
+// Without it this path fired a notification per uploaded file AND per uploaded
+// 4-chunk batch — thousands across a large batch — which floods the phone's
+// notification stream and any paired wearable/bridge that mirrors updates.
+const PROGRESS_NOTIFY_THROTTLE_MS = 1000;
 
 /** Thrown to unwind out of an in-flight upload when the user taps "Cancel
  *  uploads" on the progress notification. Handled distinctly from a real
@@ -55,6 +61,26 @@ class BackgroundSyncService {
    * other's progress writes and starting two multipart uploads for one photo.
    */
   private isProcessing = false;
+
+  /** Timestamp of the last progress-notification update, for throttling. */
+  private lastProgressNotifyAt = 0;
+
+  /**
+   * Post/update the ongoing progress notification, coalesced to at most one
+   * update per PROGRESS_NOTIFY_THROTTLE_MS. Pass `force` for updates that must
+   * always show (the first one, and the terminal summary) so throttling never
+   * swallows a state the user needs to see. No-op on web (the plugin is a stub
+   * there anyway) — kept unconditional so callers stay simple.
+   */
+  private async showProgress(
+    options: Parameters<typeof ProgressNotification.show>[0],
+    force = false
+  ): Promise<void> {
+    const now = Date.now();
+    if (!force && now - this.lastProgressNotifyAt < PROGRESS_NOTIFY_THROTTLE_MS) return;
+    this.lastProgressNotifyAt = now;
+    await ProgressNotification.show(options);
+  }
 
   /**
    * Calculate exponential backoff delay in milliseconds
@@ -270,44 +296,52 @@ class BackgroundSyncService {
 
     this.isProcessing = true;
 
-    console.log(`Processing ${pendingUploads.length} pending uploads in background`);
+    // Everything below runs inside a single try/finally so `isProcessing` is
+    // ALWAYS reset — even if a notification call throws. It previously wasn't:
+    // the initial ProgressNotification.show() ran before the try block, so a
+    // rejection there left `isProcessing` stuck true and every later
+    // syncNow()/resume silently early-returned forever, until the app process
+    // was restarted. That was the primary "uploads just stop and never resume"
+    // bug.
+    try {
+      console.log(`Processing ${pendingUploads.length} pending uploads in background`);
 
-    const notificationId = Math.floor(Math.random() * 2147483647);
-    
-    // Track which event we're uploading to (use first upload's event)
-    const eventSlug = pendingUploads.length > 0 ? pendingUploads[0].eventSlug : null;
+      const notificationId = Math.floor(Math.random() * 2147483647);
 
-    // Start a foreground service (native only) so the OS treats these
-    // uploads as important, user-visible work and doesn't throttle network
-    // access or suspend the app when it's backgrounded/screen locked —
-    // without this, in-flight chunk uploads get aborted with generic
-    // network errors as soon as the phone is locked mid-upload.
-    if (isNative) {
-      try {
-        await ProgressNotification.startForeground({
+      // Track which event we're uploading to (use first upload's event)
+      const eventSlug = pendingUploads.length > 0 ? pendingUploads[0].eventSlug : null;
+
+      // Start a foreground service (native only) so the OS treats these
+      // uploads as important, user-visible work and doesn't throttle network
+      // access or suspend the app when it's backgrounded/screen locked —
+      // without this, in-flight chunk uploads get aborted with generic
+      // network errors as soon as the phone is locked mid-upload.
+      if (isNative) {
+        try {
+          await ProgressNotification.startForeground({
+            id: notificationId,
+            title: 'Uploading Photos',
+            body: `0 of ${pendingUploads.length} completed`,
+          });
+        } catch (err) {
+          console.warn('[BackgroundSync] Failed to start upload foreground service:', err);
+        }
+
+        // Show initial progress notification (same id as the foreground
+        // service notification, so this simply updates it in place). Forced so
+        // the first update is never throttled away.
+        await this.showProgress({
           id: notificationId,
           title: 'Uploading Photos',
           body: `0 of ${pendingUploads.length} completed`,
-        });
-      } catch (err) {
-        console.warn('[BackgroundSync] Failed to start upload foreground service:', err);
+          progress: 0,
+          maxProgress: pendingUploads.length,
+          indeterminate: false,
+          ongoing: true,
+          eventSlug: eventSlug || undefined,
+        }, true);
       }
 
-      // Show initial progress notification (same id as the foreground
-      // service notification, so this simply updates it in place).
-      await ProgressNotification.show({
-        id: notificationId,
-        title: 'Uploading Photos',
-        body: `0 of ${pendingUploads.length} completed`,
-        progress: 0,
-        maxProgress: pendingUploads.length,
-        indeterminate: false,
-        ongoing: true,
-        eventSlug: eventSlug || undefined,
-      });
-    }
-
-    try {
       await this.uploadBatch(pendingUploads, notificationId, eventSlug, isNative);
     } finally {
       this.isProcessing = false;
@@ -373,9 +407,10 @@ class BackgroundSyncService {
           continue;
         }
 
-        // Update progress notification (native only)
+        // Update progress notification (native only), throttled so a large
+        // batch doesn't post one notification per file.
         if (isNative) {
-          await ProgressNotification.show({
+          await this.showProgress({
             id: notificationId,
             title: 'Uploading Photos',
             body: `${idx} of ${pendingUploads.length} completed`,
@@ -505,9 +540,11 @@ class BackgroundSyncService {
               const progress = Math.round((completedChunks / totalChunks) * originalProgressMax);
               await this.updateQueueItemAndSync(upload.id, { progress, parts: [...parts] });
 
-              // Update notification with chunk progress (native only)
+              // Update notification with chunk progress (native only),
+              // throttled so a big file doesn't post one notification per
+              // uploaded 4-chunk batch.
               if (isNative) {
-                await ProgressNotification.show({
+                await this.showProgress({
                   id: notificationId,
                   title: 'Uploading Photos',
                   body: `${idx} of ${pendingUploads.length} completed`,
@@ -636,65 +673,56 @@ class BackgroundSyncService {
       }
     }
 
-    // Show completion notification (native only)
+    // Show a single end-of-run summary (native only).
+    //
+    // Routed through ProgressNotification.show({ ongoing: false }) rather than
+    // Capacitor's LocalNotifications.schedule(): the native plugin sets
+    // setLocalOnly(true), so the summary stays on the phone and never buzzes a
+    // paired watch. LocalNotifications does NOT set localOnly, so it was the
+    // one upload notification still bridged to the wrist. Reusing the progress
+    // notification id transitions the ongoing progress notification into this
+    // dismissible summary in place (ongoing:false → autoCancel + alert-once),
+    // so there's exactly one notification, and tap-to-view is preserved via
+    // eventSlug (same MainActivity intent contract as the progress taps).
     if (isNative) {
-      // First cancel the progress notification
-      await ProgressNotification.cancel({ id: notificationId });
+      let title: string | null = null;
+      let body = '';
 
       if (cancelled) {
         // The user stopped this deliberately — confirm it and say what happens
         // to the rest, rather than reporting it as a failure.
         const remaining = pendingUploads.length - successCount;
-        await LocalNotifications.schedule({
-          notifications: [{
-            title: 'Uploads stopped',
-            body: successCount > 0
-              ? `${successCount} uploaded. ${remaining} still waiting — they'll resume next time you upload.`
-              : 'No photos were uploaded. They\'ll resume next time you upload.',
-            id: notificationId,
-            ongoing: false,
-          }],
-        });
+        title = 'Uploads stopped';
+        body = successCount > 0
+          ? `${successCount} uploaded. ${remaining} still waiting — they'll resume next time you upload.`
+          : 'No photos were uploaded. They\'ll resume next time you upload.';
       } else if (successCount > 0 && failCount === 0) {
-        // All succeeded
-        await LocalNotifications.schedule({
-          notifications: [{
-            title: '✓ Upload Complete',
-            body: `Successfully uploaded ${successCount} photo${successCount > 1 ? 's' : ''}. Tap to view.`,
-            id: notificationId,
-            ongoing: false,
-            actionTypeId: 'VIEW_EVENT',
-            extra: {
-              eventSlug: eventSlug,
-              action: 'view_event'
-            }
-          }],
-        });
+        title = '✓ Upload Complete';
+        body = `Successfully uploaded ${successCount} photo${successCount > 1 ? 's' : ''}. Tap to view.`;
       } else if (successCount > 0 && failCount > 0) {
-        // Partial success
-        await LocalNotifications.schedule({
-          notifications: [{
-            title: 'Upload Completed',
-            body: `${successCount} uploaded, ${failCount} failed. Tap to view.`,
-            id: notificationId,
-            ongoing: false,
-            actionTypeId: 'VIEW_EVENT',
-            extra: {
-              eventSlug: eventSlug,
-              action: 'view_event'
-            }
-          }],
-        });
+        title = 'Upload Completed';
+        body = `${successCount} uploaded, ${failCount} failed. Tap to view.`;
       } else if (failCount > 0) {
-        // All failed
-        await LocalNotifications.schedule({
-          notifications: [{
-            title: '✗ Upload Failed',
-            body: `Failed to upload ${failCount} photo${failCount > 1 ? 's' : ''}. Check your connection and try again.`,
-            id: notificationId,
-            ongoing: false,
-          }],
-        });
+        title = '✗ Upload Failed';
+        body = `Failed to upload ${failCount} photo${failCount > 1 ? 's' : ''}. Check your connection and try again.`;
+      }
+
+      if (title !== null) {
+        // Forced so the terminal state is never swallowed by throttling.
+        await this.showProgress({
+          id: notificationId,
+          title,
+          body,
+          progress: pendingUploads.length,
+          maxProgress: pendingUploads.length,
+          indeterminate: false,
+          ongoing: false,
+          eventSlug: eventSlug || undefined,
+        }, true);
+      } else {
+        // Nothing worth reporting (e.g. every item was skipped) — just clear
+        // the ongoing progress notification.
+        await ProgressNotification.cancel({ id: notificationId });
       }
     }
   }

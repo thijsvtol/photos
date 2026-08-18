@@ -46,6 +46,13 @@ const extractEventSlugFromApiPath = (requestUrl?: string): string | null => {
 // bounded time.
 const CHUNK_UPLOAD_TIMEOUT_MS = 120_000;
 const UPLOAD_COMPLETE_TIMEOUT_MS = 60_000;
+// The shared `api` instance has no default timeout (a global one would break
+// legitimately long-running endpoints like zip generation and cluster-data
+// paging), so the small upload-session calls need their own. Without one, a
+// stalled connection at /start hangs the whole upload loop indefinitely
+// instead of failing and letting the retry logic recover. These are tiny
+// metadata calls, so a short timeout is plenty.
+const START_UPLOAD_TIMEOUT_MS = 30_000;
 
 const api = axios.create({
   baseURL: import.meta.env.VITE_API_URL || '/api',
@@ -274,7 +281,7 @@ export const startUpload = async (
       latitude, longitude, blurPlaceholder,
       isPreview, fileType, fileHash
     },
-    { headers: getAdminHeaders() }
+    { headers: getAdminHeaders(), timeout: START_UPLOAD_TIMEOUT_MS }
   );
   return response.data;
 };
@@ -333,7 +340,7 @@ export const cancelUpload = async (
   await api.post(
     `/admin/events/${slug}/uploads/${photoId}/cancel`,
     options,
-    { headers: getAdminHeaders() }
+    { headers: getAdminHeaders(), timeout: START_UPLOAD_TIMEOUT_MS }
   );
 };
 

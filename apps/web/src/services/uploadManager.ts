@@ -407,6 +407,7 @@ class UploadManager {
   private async resumeAll() {
     try {
       const pending = await getPendingUploads();
+      const isNative = Capacitor.isNativePlatform();
       for (const item of pending) {
         // Skip items that are currently being processed to avoid overwriting live progress
         if (this.processing.has(item.id)) continue;
@@ -414,7 +415,7 @@ class UploadManager {
         // Items stuck as 'uploading' in IndexedDB were interrupted (app was
         // killed/reloaded mid-upload). Reset their status to 'pending' so
         // they get picked up again, but keep uploadId/parts/progress intact —
-        // processUpload() will resume the existing R2 multipart upload from
+        // the upload path will resume the existing R2 multipart upload from
         // the last successfully uploaded chunk instead of restarting the
         // whole file from 0%.
         if (item.status === 'uploading') {
@@ -423,6 +424,15 @@ class UploadManager {
         }
 
         this.items.set(item.id, item);
+
+        // On native, DON'T drive uploads through this manager's foreground
+        // path (processUpload) — it runs without UploadForegroundService, so a
+        // screen-lock mid-resume aborts in-flight chunks with generic network
+        // errors. Just populate the in-memory map here (so the UI shows the
+        // items) and let backgroundSyncService run the actual uploads under the
+        // foreground service after the loop — the same path addFiles() uses.
+        if (isNative) continue;
+
         if (item.status === 'pending') {
           this.enqueueUpload(item);
         } else if (item.status === 'failed' && this.shouldAutoRetry(item)) {
@@ -430,6 +440,20 @@ class UploadManager {
         }
       }
       this.notify();
+
+      if (isNative && pending.length > 0) {
+        // Dynamic import avoids the import cycle (backgroundSync imports this
+        // module at the top level), same as addFiles().
+        const { backgroundSyncService } = await import('./backgroundSync');
+        await backgroundSyncService.syncNow();
+        // Reconcile in-memory state with the statuses the background pipeline
+        // wrote to IndexedDB.
+        const latest = await getQueueItems();
+        for (const it of latest) {
+          if (this.items.has(it.id)) this.items.set(it.id, it);
+        }
+        this.notify();
+      }
     } catch (err) {
       console.error('[UploadManager] resumeAll failed:', err);
     }
