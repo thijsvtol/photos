@@ -38,7 +38,7 @@ jobs:
     # Give a large mirror room to finish; the default 6h ceiling still applies.
     timeout-minutes: 350
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       - name: Install rclone
         run: sudo -v ; curl -fsSL https://rclone.org/install.sh | sudo bash
