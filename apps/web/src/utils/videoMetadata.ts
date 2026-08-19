@@ -102,3 +102,64 @@ export function isVideoFile(fileType: string | undefined | null, fileName: strin
 export function normalizeVideoFileType(fileType: string, fileName: string | undefined | null): string {
   return isVideoFile(fileType, fileName) ? 'video/mp4' : fileType;
 }
+
+/**
+ * Captures a still-image poster (cover frame) from a video File as a JPEG Blob, for upload as the
+ * video's gallery thumbnail. Same seek-to-first-frame approach the blur_placeholder capture uses
+ * (see uploadManager.extractVideoMetadata) but drawn at capped full size instead of 16x16.
+ *
+ * Best-effort: returns null (never throws) if the browser/WebView can't decode the video to a
+ * canvas — the nightly ffmpeg job generates the poster server-side in that case. `maxLongSide`
+ * caps the longest edge so the poster stays small (a gallery tile needs no more than ~1280px).
+ */
+export async function captureVideoPoster(file: File, maxLongSide = 1280): Promise<Blob | null> {
+  const url = URL.createObjectURL(file);
+  try {
+    const video = document.createElement('video');
+    video.muted = true;
+    video.preload = 'metadata';
+    video.src = url;
+
+    await new Promise<void>((resolve, reject) => {
+      video.onloadedmetadata = () => resolve();
+      video.onerror = () => reject(new Error('Failed to load video metadata'));
+    });
+
+    // Seek a hair past 0 to force a paintable first frame, racing a timeout because `seeked`
+    // doesn't fire reliably for every codec/browser at a seek this close to 0.
+    await new Promise<void>((resolve) => {
+      let settled = false;
+      const finish = () => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(safety);
+        resolve();
+      };
+      const safety = setTimeout(finish, 4000);
+      video.onseeked = finish;
+      video.onloadeddata = finish;
+      video.oncanplay = finish;
+      video.currentTime = Math.min(0.1, (video.duration || 1) / 2);
+    });
+
+    const vw = video.videoWidth;
+    const vh = video.videoHeight;
+    if (!vw || !vh) return null;
+
+    const scale = Math.min(1, maxLongSide / Math.max(vw, vh));
+    const canvas = document.createElement('canvas');
+    canvas.width = Math.max(1, Math.round(vw * scale));
+    canvas.height = Math.max(1, Math.round(vh * scale));
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return null;
+    ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+
+    return await new Promise<Blob | null>((resolve) => {
+      canvas.toBlob((blob) => resolve(blob), 'image/jpeg', 0.8);
+    });
+  } catch {
+    return null;
+  } finally {
+    URL.revokeObjectURL(url);
+  }
+}

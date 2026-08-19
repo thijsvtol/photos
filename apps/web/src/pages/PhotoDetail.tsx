@@ -295,21 +295,27 @@ const PhotoDetail: React.FC = () => {
     if (!photoId || allPhotos.length === 0) return;
 
     const index = photosToUse.findIndex(p => p.id === photoId);
-    if (index < 0 || index === currentIndex) return;
+    if (index < 0) return;
 
-    setCurrentIndex(index);
-    const photoInList = photosToUse[index];
-    if (!photoInList) return;
+    // Sync the displayed index/photo from the URL only when they're actually out of sync —
+    // i.e. browser back/forward, where this effect is the driver. Swipe/next/prev already
+    // update `currentIndex` and `photo` synchronously (with the correct preload state) before
+    // changing the URL, so re-applying here would needlessly reset `imageLoaded`.
+    if (index !== currentIndex) {
+      const photoInList = photosToUse[index];
+      if (!photoInList) return;
+      setCurrentIndex(index);
+      setPhoto(photoInList);
+      setImageLoaded(false); // Reset for new image
+    }
 
     // The gallery list never includes `.people` (see Photo.people's doc comment in types.ts),
     // so navigating between photos (swipe/next/prev) would otherwise show "No one tagged yet"
     // for every photo except the very first one loaded. Fetch the single-photo detail in the
-    // background to pick up its real people list once ready, guarded by `cancelled` so a fast
-    // swipe-through doesn't attach a stale response to whatever photo is showing by the time it
-    // resolves.
-    setPhoto(photoInList);
-    setImageLoaded(false); // Reset for new image
-
+    // background to pick up its real people list once ready, regardless of whether the index
+    // was already synced by a swipe — otherwise the fetch would be skipped on exactly the
+    // swipe path. Guarded by `cancelled` so a fast swipe-through doesn't attach a stale
+    // response to whatever photo is showing by the time it resolves.
     let cancelled = false;
     getPhoto(slug!, photoId).then((fullPhoto) => {
       if (cancelled) return;

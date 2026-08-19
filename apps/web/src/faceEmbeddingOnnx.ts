@@ -38,7 +38,11 @@
  *
  * onnxruntime-web's WASM runtime files are loaded from a CDN (jsdelivr) rather than
  * self-hosted, since they're separate from the (already R2-hosted) model file and this avoids
- * needing to manage/copy them as build assets.
+ * needing to manage/copy them as build assets. The CDN URL is PINNED to the exact installed
+ * package version (read at runtime from `ort.env.versions`) — an unpinned
+ * `.../onnxruntime-web/dist/` URL silently serves whatever "latest" jsdelivr resolves to, which
+ * can drift out of lockstep with the installed JS API and break inference for a core path with
+ * no code change on our side.
  */
 
 let sessionPromise: Promise<import('onnxruntime-web').InferenceSession> | null = null;
@@ -52,7 +56,13 @@ async function loadSession(): Promise<import('onnxruntime-web').InferenceSession
         import('onnxruntime-web'),
         import('./api'),
       ]);
-      ort.env.wasm.wasmPaths = 'https://cdn.jsdelivr.net/npm/onnxruntime-web/dist/';
+      // Pin to the installed version so the CDN runtime can never drift from the JS API we
+      // loaded (see this file's doc comment). `web` is the precise package version; `common` is
+      // the always-present fallback; the unversioned path is a last resort if neither is exposed.
+      const ortVersion = ort.env.versions?.web || ort.env.versions?.common;
+      ort.env.wasm.wasmPaths = ortVersion
+        ? `https://cdn.jsdelivr.net/npm/onnxruntime-web@${ortVersion}/dist/`
+        : 'https://cdn.jsdelivr.net/npm/onnxruntime-web/dist/';
 
       const modelBuffer = await getEmbeddingModelBuffer();
       return ort.InferenceSession.create(modelBuffer, { executionProviders: ['wasm'] });
@@ -61,11 +71,19 @@ async function loadSession(): Promise<import('onnxruntime-web').InferenceSession
   return sessionPromise;
 }
 
-/** Extracts raw RGB pixel values (0..255) from a 112x112 canvas in NCHW ([1,3,112,112])
- *  layout, matching the reference preprocessing's `np.transpose(nimg, (2,0,1))` — NO
- *  normalization/scaling is applied, since the reference model was trained on raw 0..255
- *  pixel values passed straight through. */
-function canvasToNCHW(canvas: HTMLCanvasElement): Float32Array {
+/** Channel order of the CHW planes. The current model was validated with 'rgb' (see this file's
+ *  doc comment / the reference notebook); 'bgr' exists ONLY so the recognition-diagnostics harness
+ *  and tests can measure whether the alternative (which some ArcFace/InsightFace pipelines expect)
+ *  would separate identities better on this app's real photos — production always uses the
+ *  default 'rgb'. */
+export type ChannelOrder = 'rgb' | 'bgr';
+
+/** Extracts raw pixel values (0..255) from a 112x112 canvas in NCHW ([1,3,112,112]) layout,
+ *  matching the reference preprocessing's `np.transpose(nimg, (2,0,1))` — NO normalization/
+ *  scaling is applied, since the reference model was trained on raw 0..255 pixel values passed
+ *  straight through. Channel order defaults to 'rgb' (the validated production behavior);
+ *  see ChannelOrder for why 'bgr' is selectable. Exported for the diagnostics/parity tests. */
+export function canvasToNCHW(canvas: HTMLCanvasElement, channelOrder: ChannelOrder = 'rgb'): Float32Array {
   const ctx = canvas.getContext('2d');
   if (!ctx) throw new Error('canvasToNCHW: 2D canvas context unavailable');
   const { width, height } = canvas;
@@ -73,11 +91,14 @@ function canvasToNCHW(canvas: HTMLCanvasElement): Float32Array {
 
   const chw = new Float32Array(3 * width * height);
   const plane = width * height;
+  // First/third planes swap for BGR; the middle (green) plane is unchanged either way.
+  const firstOffset = channelOrder === 'bgr' ? 2 : 0;
+  const thirdOffset = channelOrder === 'bgr' ? 0 : 2;
   for (let i = 0; i < plane; i++) {
     const rgbaOffset = i * 4;
-    chw[i] = data[rgbaOffset]; // R plane
-    chw[plane + i] = data[rgbaOffset + 1]; // G plane
-    chw[2 * plane + i] = data[rgbaOffset + 2]; // B plane
+    chw[i] = data[rgbaOffset + firstOffset];
+    chw[plane + i] = data[rgbaOffset + 1];
+    chw[2 * plane + i] = data[rgbaOffset + thirdOffset];
   }
   return chw;
 }

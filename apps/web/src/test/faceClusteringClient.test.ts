@@ -8,6 +8,7 @@ import {
   runDeepRebuildClustering,
   findClientSideMergeSuggestions,
   chunkClusteringResultsForApply,
+  computeRecognitionDiagnostics,
 } from '../faceClusteringClient';
 import type { ClusterDataFace, ClusterDataCluster, ClusterResult } from '../api';
 
@@ -224,7 +225,7 @@ describe('runClientSideClustering', () => {
     // move the centroid by 1/36th of the difference. Under the capped formula, it should move
     // by a fixed ~1/30 weight instead. Candidate face at [10, 3, 0, ...] has cosine similarity
     // 100/(10*sqrt(109)) ≈ 0.958 to the cluster centroid — comfortably above SAME_PERSON_
-    // THRESHOLD (0.35), so it matches.
+    // THRESHOLD (0.30), so it matches.
     const existingClusters: ClusterDataCluster[] = [
       { id: 1, centroidEmbedding: pad512(10, 0, 0), faceCount: 35 },
     ];
@@ -254,12 +255,12 @@ describe('runClientSideClustering', () => {
   });
 
   it('a small/new cluster still matches at the flat baseline threshold (no behavior change for the common case)', async () => {
-    // similarity 0.45 is comfortably above the flat baseline SAME_PERSON_THRESHOLD (0.35), so a
+    // similarity 0.40 is comfortably above the flat baseline SAME_PERSON_THRESHOLD (0.30), so a
     // small cluster (below THRESHOLD_GROWTH_START=12) should accept it.
     const existingClusters: ClusterDataCluster[] = [
       { id: 1, centroidEmbedding: unitVec(0), faceCount: 10 },
     ];
-    const faces: ClusterDataFace[] = [{ id: 999, photoId: 'photo-x', embedding: vecWithSimilarity(0.45) }];
+    const faces: ClusterDataFace[] = [{ id: 999, photoId: 'photo-x', embedding: vecWithSimilarity(0.40) }];
 
     const results = await runClientSideClustering(faces, existingClusters);
 
@@ -268,14 +269,14 @@ describe('runClientSideClustering', () => {
   });
 
   it('a large, well-established cluster requires a MORE CONFIDENT match, rejecting the same borderline similarity a small cluster would accept (fix for the 2467-face runaway-merge incident, which a flat hard cap alone did not solve)', async () => {
-    // Same 0.45 similarity as above, but this time against an already-large (150-member)
-    // cluster — at that size the adaptive threshold has risen to its ceiling (baseline 0.35 +
-    // MAX_THRESHOLD_BOOST 0.15 = 0.5), so 0.45 must now be REJECTED, starting a new cluster
+    // Same 0.40 similarity as above, but this time against an already-large (150-member)
+    // cluster — at that size the adaptive threshold has risen to its ceiling (baseline 0.30 +
+    // MAX_THRESHOLD_BOOST 0.15 = 0.45), so 0.40 must now be REJECTED, starting a new cluster
     // instead of further diluting the large one.
     const existingClusters: ClusterDataCluster[] = [
       { id: 1, centroidEmbedding: unitVec(0), faceCount: 150 },
     ];
-    const faces: ClusterDataFace[] = [{ id: 999, photoId: 'photo-x', embedding: vecWithSimilarity(0.45) }];
+    const faces: ClusterDataFace[] = [{ id: 999, photoId: 'photo-x', embedding: vecWithSimilarity(0.40) }];
 
     const results = await runClientSideClustering(faces, existingClusters);
 
@@ -285,7 +286,7 @@ describe('runClientSideClustering', () => {
 
   it('lets a genuinely large, legitimate person (200+ photos) keep growing when the match is confidently ABOVE the raised bar — the whole point of replacing the old flat 60-face hard cap', async () => {
     // A clearly-matching (similarity 0.9) face should still join even a very large cluster,
-    // since it comfortably clears the raised (but capped at 0.5) threshold — unlike the old
+    // since it comfortably clears the raised (but capped at 0.45) threshold — unlike the old
     // flat MAX_AUTO_CLUSTER_SIZE=60 cap, which would have rejected this unconditionally purely
     // based on size, incorrectly splitting a real recurring person into multiple groups.
     const existingClusters: ClusterDataCluster[] = [
@@ -526,5 +527,87 @@ describe('runDeepRebuildClustering', () => {
     expect(bigCluster).toBeDefined();
     expect(newCluster).toBeDefined();
     expect(newCluster?.addedFaceIds).toEqual([1000]);
+  });
+});
+
+describe('runClientSideClustering: member-less (reset) clusters are ignored', () => {
+  it('does NOT match a new face to an existing cluster whose faceCount is 0 (a reset-but-kept person)', async () => {
+    // A person that was reset keeps a stale centroid but faceCount 0. A new face identical to
+    // that stale centroid must NOT be re-absorbed into it (that would silently undo the reset);
+    // it should start a brand-new cluster instead.
+    const faces: ClusterDataFace[] = [
+      { id: 1, photoId: 'p1', embedding: unitVec(0) },
+    ];
+    const clusters: ClusterDataCluster[] = [
+      { id: 99, centroidEmbedding: unitVec(0), faceCount: 0 }, // reset person, stale centroid
+    ];
+
+    const results = await runClientSideClustering(faces, clusters);
+
+    // The reset cluster (99) is never touched; a new cluster is created for the face.
+    expect(results.find((r) => r.clusterId === 99)).toBeUndefined();
+    const created = results.find((r) => r.clusterId === null);
+    expect(created).toBeDefined();
+    expect(created?.addedFaceIds).toEqual([1]);
+  });
+});
+
+describe('computeRecognitionDiagnostics', () => {
+  // Deterministic PRNG so pair sampling is reproducible in tests.
+  function seededRand(seed: number): () => number {
+    let s = seed >>> 0;
+    return () => {
+      s = (s * 1664525 + 1013904223) >>> 0;
+      return s / 0x100000000;
+    };
+  }
+
+  it('reports insufficientData when there are fewer than two multi-face people', () => {
+    const faces: ClusterDataFace[] = [
+      { id: 1, photoId: 'a', embedding: unitVec(0), personId: 1 },
+      { id: 2, photoId: 'b', embedding: unitVec(0), personId: 1 },
+      { id: 3, photoId: 'c', embedding: unitVec(1), personId: null }, // unlabeled
+    ];
+    const d = computeRecognitionDiagnostics(faces, seededRand(1));
+    expect(d.insufficientData).toBe(true);
+    expect(d.labeledPeople).toBe(1);
+  });
+
+  it('separates well-clustered people: intra similarity high, inter low, sane suggested threshold', () => {
+    // Two tight, well-separated people: person A near angle 0, person B near angle pi/2
+    // (orthogonal → ~0 similarity between them, ~1 within each).
+    const faces: ClusterDataFace[] = [
+      { id: 1, photoId: 'a1', embedding: unitVec(0.00), personId: 1 },
+      { id: 2, photoId: 'a2', embedding: unitVec(0.02), personId: 1 },
+      { id: 3, photoId: 'a3', embedding: unitVec(0.04), personId: 1 },
+      { id: 4, photoId: 'b1', embedding: unitVec(Math.PI / 2), personId: 2 },
+      { id: 5, photoId: 'b2', embedding: unitVec(Math.PI / 2 + 0.02), personId: 2 },
+      { id: 6, photoId: 'b3', embedding: unitVec(Math.PI / 2 + 0.04), personId: 2 },
+    ];
+    const d = computeRecognitionDiagnostics(faces, seededRand(42));
+    expect(d.insufficientData).toBe(false);
+    expect(d.labeledPeople).toBe(2);
+    expect(d.labeledFaces).toBe(6);
+    // Same-person pairs are near-identical; different-person pairs are near-orthogonal.
+    expect(d.intra.median).toBeGreaterThan(0.9);
+    expect(d.inter.median).toBeLessThan(0.2);
+    // A threshold between the two populations should be suggested, and it should split them well.
+    expect(d.suggestedThreshold).toBeGreaterThan(d.inter.median);
+    expect(d.suggestedThreshold).toBeLessThanOrEqual(d.intra.median);
+    expect(d.truePositiveRate).toBeGreaterThan(0.9);
+    expect(d.falsePositiveRate).toBeLessThan(0.1);
+  });
+
+  it('ignores malformed-length embeddings when computing diagnostics', () => {
+    const faces: ClusterDataFace[] = [
+      { id: 1, photoId: 'a1', embedding: [1, 0], personId: 1 }, // malformed (2 numbers)
+      { id: 2, photoId: 'a2', embedding: [1, 0], personId: 1 }, // malformed
+      { id: 3, photoId: 'b1', embedding: unitVec(0), personId: 2 },
+      { id: 4, photoId: 'b2', embedding: unitVec(0.01), personId: 2 },
+    ];
+    // Only person 2 survives the length filter → fewer than two multi-face people.
+    const d = computeRecognitionDiagnostics(faces, seededRand(7));
+    expect(d.insufficientData).toBe(true);
+    expect(d.labeledPeople).toBe(1);
   });
 });

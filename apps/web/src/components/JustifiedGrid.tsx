@@ -5,7 +5,7 @@ import { Link } from 'react-router-dom';
 import { Heart, Star, Check } from 'lucide-react';
 import ProgressiveImage from './ProgressiveImage';
 import ProgressiveVideo from './ProgressiveVideo';
-import { getPreviewUrl } from '../api';
+import { getPreviewUrl, getVideoPosterUrl } from '../api';
 import type { Photo } from '../types';
 
 interface JustifiedGridProps {
@@ -116,6 +116,7 @@ const JustifiedGridInner: React.FC<JustifiedGridProps> = ({
               <ProgressiveVideo
                 src={props.src}
                 poster={photo.blur_placeholder}
+                posterUrl={getVideoPosterUrl(slug, photo.id, photo.cache_version)}
                 className="w-full h-full object-cover"
               />
             );

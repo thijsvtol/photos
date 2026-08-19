@@ -1,10 +1,11 @@
 /**
  * Client-side face detection using @vladmandic/human (MediaPipe BlazeFace
- * detector + FaceMesh + FaceRes description/embedding model). Runs entirely
- * in the browser/WebView — Workers AI has no face-embedding model, so this
- * follows the same pattern as this app's existing client-side EXIF/
- * blur-placeholder/RAW-decode processing rather than a server-side/AI-binding
- * approach.
+ * detector + FaceMesh landmarks only — Human's own FaceRes descriptor is
+ * disabled; the recognition embedding comes from a separate ArcFace ONNX
+ * model, see below). Runs entirely in the browser/WebView — Workers AI has
+ * no face-embedding model, so this follows the same pattern as this app's
+ * existing client-side EXIF/blur-placeholder/RAW-decode processing rather
+ * than a server-side/AI-binding approach.
  *
  * Switched from face-api.js to @vladmandic/human (2026-08) because this
  * app's photos are heavily action/sports (ice skating, cycling) with
@@ -36,12 +37,13 @@
  * upload or run the People backfill scan ever download it).
  *
  * Models are loaded lazily (only once, on first use) from /models — see
- * apps/web/public/models/ (blazeface, facemesh, faceres — copied from
- * node_modules/@vladmandic/human/models at install time), ~8.9MB total,
- * fetched once and cached by the browser. Body/hand/object/gesture/
- * segmentation detection are explicitly disabled since this app only needs
- * faces — Human ships many more capabilities than we use, and disabling the
- * unused modules means their (much larger) models are never downloaded.
+ * apps/web/public/models/ (only blazeface + facemesh — copied from
+ * node_modules/@vladmandic/human/models at install time), fetched once and
+ * cached by the browser. Human's FaceRes descriptor model (faceres) is NOT
+ * shipped: `description` is disabled below, so it's never requested — see the
+ * embedding note above. Body/hand/object/gesture/segmentation detection are
+ * likewise disabled since this app only needs face detection, so their
+ * (much larger) models are never downloaded.
  */
 
 import { alignFace } from './faceAlignment';
@@ -125,16 +127,36 @@ type DetectInput = HTMLImageElement | HTMLCanvasElement;
 async function detectAndEmbedFaces(human: HumanInstance, input: DetectInput): Promise<DetectedFace[]> {
   const result = await human.detect(input);
   const faces: DetectedFace[] = [];
+  let embeddableFaces = 0; // detected faces that had mesh landmarks and so were embedding candidates
+  let embedFailures = 0;
+  let lastEmbedError: unknown = null;
   for (const face of result.face) {
     if (!face.mesh || face.mesh.length === 0) continue; // alignment needs mesh landmarks
+    embeddableFaces++;
     const [x, y, width, height] = face.box;
     try {
       const aligned = alignFace(input, face.mesh as Array<[number, number, number]>);
       const embedding = await computeFaceEmbedding(aligned);
       faces.push({ embedding, bbox: { x, y, width, height } });
     } catch (err) {
+      embedFailures++;
+      lastEmbedError = err;
       console.warn('[faceDetection] Failed to align/embed a detected face:', err);
     }
+  }
+  // Distinguish a SYSTEMATIC embedding failure from a genuinely faceless photo. If the detector
+  // found faces but EVERY one failed to embed, the embedding model itself is almost certainly
+  // broken (e.g. the model asset 404/401s — the exact class of bug that once made "Scan Library
+  // for Faces" silently mark thousands of photos processed with zero faces; see
+  // faceEmbeddingOnnx.ts's doc comment). Returning [] here is indistinguishable from "no people
+  // in this shot", so escalate to a loud, distinct error instead of leaving only per-face warns.
+  if (embeddableFaces > 0 && embedFailures === embeddableFaces) {
+    console.error(
+      `[faceDetection] Embedding model failed for ALL ${embeddableFaces} detected face(s) in this image — ` +
+        `this usually means the ArcFace model asset can't be fetched/decoded, not that the photo has no faces. ` +
+        `Last error:`,
+      lastEmbedError
+    );
   }
   return faces;
 }

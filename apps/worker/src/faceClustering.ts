@@ -93,11 +93,36 @@ export function blobToFloat32Array(blob: ArrayBuffer | ArrayBufferView | number[
   return new Float32Array(blob);
 }
 
+/**
+ * Cosine similarity of two equal-length embedding vectors, in [-1, 1] (1 = identical
+ * direction). Used to sanity-check a tag-based identity suggestion against the actual face
+ * geometry before treating it as "confident" — see getUnnamedPeopleWithSuggestions(). Returns
+ * 0 for a length mismatch or a zero-magnitude vector rather than throwing/NaN, so a
+ * malformed/legacy-dimension centroid simply fails the confidence gate instead of blowing up.
+ */
+function cosineSimilarity(a: Float32Array, b: Float32Array): number {
+  if (a.length !== b.length) return 0;
+  let dot = 0;
+  let magA = 0;
+  let magB = 0;
+  for (let i = 0; i < a.length; i++) {
+    dot += a[i] * b[i];
+    magA += a[i] * a[i];
+    magB += b[i] * b[i];
+  }
+  if (magA === 0 || magB === 0) return 0;
+  return dot / (Math.sqrt(magA) * Math.sqrt(magB));
+}
+
 /** Raw data needed to run one full clustering pass — see faceClusteringClient.ts. */
 export interface ClusterDataFace {
   id: number;
   photoId: string;
   embedding: number[];
+  /** The person this face is currently assigned to (null = still unclustered). Only meaningful
+   *  when the caller requested ALL faces (`unclusteredOnly=false`); it's how the read-only
+   *  "Recognition diagnostics" tool uses confirmed clusters as ground-truth labels. */
+  personId: number | null;
 }
 
 export interface ClusterDataCluster {
@@ -118,7 +143,7 @@ export interface ClusterData {
 }
 
 // Converting a BLOB embedding into a plain number[] (Array.from(new Float32Array(...))) is
-// REAL synchronous CPU work — 1024 floats per row — and so is JSON-encoding the resulting
+// REAL synchronous CPU work — 512 floats per row — and so is JSON-encoding the resulting
 // payload; both scale with however many cluster/face ROWS are fetched in one call, even though
 // the SQL query itself is cheap I/O. A large library (thousands of clusters and/or unclustered
 // faces) can make a single "fetch everything" call alone exceed the Workers Free plan's 10ms
@@ -173,16 +198,17 @@ export async function getClusterData(
   const { results: faceRows } = await env.DB
     .prepare(
       unclusteredOnly
-        ? `SELECT id, photo_id, embedding FROM photo_faces WHERE person_id IS NULL AND id > ? ORDER BY id ASC LIMIT ?`
-        : `SELECT id, photo_id, embedding FROM photo_faces WHERE id > ? ORDER BY id ASC LIMIT ?`
+        ? `SELECT id, photo_id, person_id, embedding FROM photo_faces WHERE person_id IS NULL AND id > ? ORDER BY id ASC LIMIT ?`
+        : `SELECT id, photo_id, person_id, embedding FROM photo_faces WHERE id > ? ORDER BY id ASC LIMIT ?`
     )
     .bind(afterFaceId, PAGE_SIZE)
-    .all<{ id: number; photo_id: string; embedding: ArrayBuffer }>();
+    .all<{ id: number; photo_id: string; person_id: number | null; embedding: ArrayBuffer }>();
 
   const faceRowsArr = faceRows || [];
   const faces: ClusterDataFace[] = faceRowsArr.map((f) => ({
     id: f.id,
     photoId: f.photo_id,
+    personId: f.person_id,
     embedding: Array.from(blobToFloat32Array(f.embedding)),
   }));
   const nextFaceCursor = faceRowsArr.length === PAGE_SIZE ? faceRowsArr[faceRowsArr.length - 1].id : null;
@@ -294,8 +320,16 @@ export async function resetSingleCluster(env: Env, personId: number): Promise<{ 
     .prepare('UPDATE photo_faces SET person_id = NULL WHERE person_id = ?')
     .bind(personId)
     .run();
+  // Only zero out face_count — do NOT null the centroid. `centroid_embedding` is `BLOB NOT NULL`
+  // (migration 023), so `SET centroid_embedding = NULL` throws SQLITE_CONSTRAINT and made this
+  // whole endpoint 500. The stale centroid is now simply IGNORED everywhere it would matter: the
+  // client clustering/merge-suggestion scans skip any cluster with `faceCount <= 0` (see
+  // faceClusteringClient.ts), and the first face re-assigned to this person overwrites the
+  // centroid outright (incorporateEmbedding() uses weight 1 when count is 0). Keeping the row
+  // intact preserves the person's identity (name, linked account, cover photo, manual tags),
+  // which is the entire point of a per-person reset vs. a full delete.
   await env.DB
-    .prepare('UPDATE person_clusters SET centroid_embedding = NULL, face_count = 0 WHERE id = ?')
+    .prepare("UPDATE person_clusters SET face_count = 0, updated_at = datetime('now') WHERE id = ?")
     .bind(personId)
     .run();
   return {
@@ -583,7 +617,7 @@ function chunk<T>(items: T[], size: number): T[][] {
  * vector math. See ClusterResult above for the shape the client sends.
  *
  * Defense-in-depth: HARD-REJECTS (skips, never writes) any result whose `centroidEmbedding`
- * isn't exactly `EXPECTED_EMBEDDING_LENGTH` (1024) — see this file's top-of-file doc comment
+ * isn't exactly `EXPECTED_EMBEDDING_LENGTH` (512) — see this file's top-of-file doc comment
  * for the exact production incident this guards against (a read-side bug once silently fed
  * 4x-too-long, garbage "embeddings" all the way through clustering and into the database).
  * Even with that read-side bug now fixed, this guard ensures no future, still-unknown bug can
@@ -642,24 +676,28 @@ export async function countUnclusteredFaces(env: Env): Promise<number> {
 }
 
 // Every embedding is a Float32Array BLOB, so its expected byte length is dims * 4 bytes/float.
-// See faceValidation.ts's EXPECTED_EMBEDDING_LENGTH doc comment for the full history: this app
-// switched face-embedding models in 2026-08 (face-api.js's 128-dim FaceRecognitionNet ->
-// @vladmandic/human's 1024-dim FaceRes descriptor). Rows/clusters created before that switch
-// (`faces_processed_at` was already set, so the backfill scan never revisits them) are stuck
-// with 128-dim (512-byte) embeddings/centroids forever — comparing a 512-byte BLOB against a
-// 4096-byte one in humanDistance()/humanSimilarity() (which loops `Math.min(a.length,
-// b.length)`) silently truncates to the first 128 of the 1024 dimensions, comparing two
-// completely incompatible embedding spaces. In practice this makes every genuine "same person"
-// match against a pre-switch cluster score as if the faces were near-total strangers, which is
-// exactly why merge suggestions/clustering can find literally 0 matches for people who
-// obviously DO recur in the library: their older photos are still tagged with the old,
-// incomparable embedding.
+// The CURRENT model is the ArcFace ONNX recognition model: 512 dims -> 2048 bytes (see
+// faceValidation.ts's EXPECTED_EMBEDDING_LENGTH doc comment for the full history). This app
+// switched face-embedding models TWICE: face-api.js's 128-dim FaceRecognitionNet (512 bytes) ->
+// @vladmandic/human's 1024-dim FaceRes descriptor (4096 bytes) -> the current 512-dim ArcFace
+// (2048 bytes). Rows/clusters created under EITHER older model (`faces_processed_at` was already
+// set, so the backfill scan never revisits them) are stuck with a differently-sized
+// embedding/centroid forever — and comparing two different-length BLOBs is meaningless (they're
+// separate models with separately-trained dimensions), which is why humanDistance()/
+// humanSimilarity() refuse to compare mismatched lengths at all. In practice a genuine "same
+// person" match against a pre-switch cluster scores as near-total strangers, which is exactly
+// why merge suggestions/clustering can find literally 0 matches for people who obviously DO
+// recur in the library: their older photos are still tagged with an incomparable embedding.
+// "Legacy" below therefore means any row whose byte length is NOT the current 2048 — covering
+// BOTH earlier formats.
 const EXPECTED_EMBEDDING_BYTES = EXPECTED_EMBEDDING_LENGTH * 4;
 
-/** Number of photo_faces rows and person_clusters rows still using the legacy pre-2026-08
- *  face-api.js embedding format (see EXPECTED_EMBEDDING_BYTES doc comment above) — surfaced to
- *  the admin so they know why "same person" matches might be silently missing, and so they can
- *  trigger resetLegacyFaces() to fix it. `corruptedClusters` counts a SEPARATE, worse problem:
+/** Number of photo_faces rows and person_clusters rows still using a legacy embedding format —
+ *  i.e. any row whose byte length isn't the current 512-dim ArcFace 2048 bytes, covering both
+ *  the older face-api.js (128-dim) and @vladmandic/human (1024-dim) formats (see
+ *  EXPECTED_EMBEDDING_BYTES doc comment above) — surfaced to the admin so they know why "same
+ *  person" matches might be silently missing, and so they can trigger resetLegacyFaces() to fix
+ *  it. `corruptedClusters` counts a SEPARATE, worse problem:
  *  clusters whose centroid is already the CORRECT byte length but contains `NaN` values — see
  *  findCorruptedClusterIds()'s doc comment below for exactly how this happens. */
 export interface LegacyFaceStats {
@@ -1190,5 +1228,232 @@ export async function resetFacesForFacelessTaggedPhotos(env: Env): Promise<{ pho
   }
 
   return { photosReset: photoIds.length };
+}
+
+// ── Unnamed-person cleanup ────────────────────────────────────────────────────────────────────
+//
+// Manual "Tag people" actions (event-gallery bulk tag, PhotoDetail editor) only ever write
+// photo_person_tags — they never assign the detected FACE on the photo. So the face stays in
+// photo_faces and the clustering pass groups it into a brand-new UNNAMED cluster, even though the
+// person in that photo is already known (named) via the manual tag. Over a large library this
+// produces hundreds of redundant unnamed clusters. learnFromManualTags() can't fix them: it only
+// looks at faces with person_id IS NULL, but these faces are already assigned to the unnamed
+// cluster. The correct reconciliation is a cluster-level merge of each redundant unnamed cluster
+// into the named person its photos are already tagged with — which mergeClusters() does cleanly
+// (folds centroids, reassigns faces, moves tags, keeps the named target's name).
+
+/** Gates for treating a tag-based identity suggestion as "confident" (auto-mergeable in bulk).
+ *  Deliberately conservative and kept as named constants so they're easy to tune. */
+const UNNAMED_MERGE_MIN_COVERAGE = 0.8;        // top candidate appears on >= 80% of the cluster's photos
+const UNNAMED_MERGE_MIN_DOMINANCE = 2;         // ...and on >= 2x as many photos as the runner-up candidate
+const UNNAMED_MERGE_MIN_CENTROID_COSINE = 0.6; // ...and is geometrically plausible as the same face
+/** Cap merges per merge-unnamed-confident call so one request stays well under Workers' subrequest
+ *  budget (each mergeClusters() issues several D1 statements). The caller loops until none remain. */
+const UNNAMED_MERGE_BATCH_LIMIT = 50;
+
+/** The named person a redundant unnamed cluster most likely actually is, inferred from the
+ *  named people already tagged/identified on that cluster's photos. */
+export interface UnnamedPersonSuggestion {
+  personId: number;
+  name: string;
+  /** How many of the cluster's (face) photos this named person also appears on. */
+  sharedPhotos: number;
+  /** Total distinct (face) photos in the cluster — the coverage denominator. */
+  totalPhotos: number;
+  /** Cosine similarity between the unnamed cluster's centroid and this person's centroid. */
+  centroidSimilarity: number;
+}
+
+export interface UnnamedPerson {
+  id: number;
+  face_count: number;
+  /** Distinct photos (auto faces ∪ manual tags), matching GET /people's photo_count semantics. */
+  photo_count: number;
+  cover_photo_id: string | null;
+  cover_file_type: string | null;
+  cover_cache_version: number | null;
+  cover_event_slug: string | null;
+  suggestion: UnnamedPersonSuggestion | null;
+  /** True when `suggestion` clears every UNNAMED_MERGE_* gate, i.e. safe to merge in bulk. */
+  confident: boolean;
+}
+
+/**
+ * Pure decision core of getUnnamedPeopleWithSuggestions(): given the named people co-occurring on
+ * an unnamed cluster's photos (with shared-photo counts), the cluster's total photo count, its
+ * centroid, and the named clusters' names+centroids, returns the suggested identity and whether
+ * it's `confident` (bulk-mergeable). Extracted and exported so the three confidence gates can be
+ * unit-tested without a database (the surrounding SQL can't be, given the test suite's hand-rolled
+ * D1 mocks). The suggestion is the top candidate by shared photos; `confident` additionally
+ * requires high coverage, clear dominance over the runner-up, and centroid similarity.
+ */
+export function computeUnnamedSuggestion(
+  candidates: { named_id: number; shared: number }[],
+  totalPhotos: number,
+  unnamedCentroid: Float32Array,
+  namedById: Map<number, { name: string; centroid: Float32Array }>
+): { suggestion: UnnamedPersonSuggestion | null; confident: boolean } {
+  const sorted = candidates.slice().sort((a, b) => b.shared - a.shared);
+  const top = sorted[0];
+  const runnerUp = sorted[1];
+  if (!top || !namedById.has(top.named_id) || totalPhotos <= 0) {
+    return { suggestion: null, confident: false };
+  }
+  const named = namedById.get(top.named_id)!;
+  const centroidSimilarity = cosineSimilarity(unnamedCentroid, named.centroid);
+  const suggestion: UnnamedPersonSuggestion = {
+    personId: top.named_id,
+    name: named.name,
+    sharedPhotos: top.shared,
+    totalPhotos,
+    centroidSimilarity,
+  };
+  const coverageOk = top.shared / totalPhotos >= UNNAMED_MERGE_MIN_COVERAGE;
+  const dominanceOk = !runnerUp || top.shared >= UNNAMED_MERGE_MIN_DOMINANCE * runnerUp.shared;
+  const similarityOk = centroidSimilarity >= UNNAMED_MERGE_MIN_CENTROID_COSINE;
+  return { suggestion, confident: coverageOk && dominanceOk && similarityOk };
+}
+
+/**
+ * Every unnamed cluster (name IS NULL, face_count >= 1) with cover metadata, its real distinct
+ * photo count, and — where inferrable — a suggested named identity plus a `confident` flag.
+ *
+ * The suggestion is the named person appearing on the MOST of the cluster's face-photos (via a
+ * manual tag or an assigned face). It is shown for one-click review whenever any named candidate
+ * exists; `confident` (which gates the bulk "merge all" action) additionally requires high
+ * coverage, clear dominance over the runner-up, AND centroid similarity — the last guards the
+ * nasty case where an unnamed cluster's photos are tagged with a DIFFERENT named person who just
+ * happens to also be in frame (a group shot), which coverage/dominance alone can't distinguish.
+ */
+export async function getUnnamedPeopleWithSuggestions(env: Env): Promise<UnnamedPerson[]> {
+  const { results: unnamedRows } = await env.DB
+    .prepare(`
+      SELECT pc.id, pc.face_count, pc.centroid_embedding, pc.cover_photo_id,
+             p.file_type as cover_file_type, p.cache_version as cover_cache_version,
+             e.slug as cover_event_slug
+      FROM person_clusters pc
+      LEFT JOIN photos p ON pc.cover_photo_id = p.id
+      LEFT JOIN events e ON p.event_id = e.id
+      WHERE pc.name IS NULL AND pc.face_count >= 1
+    `)
+    .all<{
+      id: number; face_count: number; centroid_embedding: ArrayBuffer; cover_photo_id: string | null;
+      cover_file_type: string | null; cover_cache_version: number | null; cover_event_slug: string | null;
+    }>();
+
+  const unnamed = unnamedRows || [];
+  if (unnamed.length === 0) return [];
+
+  // Distinct photo counts. `photo_count` (union) is for display and matches GET /people; the
+  // face-only total is the coverage denominator (candidates are counted over face-photos).
+  const { results: photoCountRows } = await env.DB
+    .prepare(`
+      SELECT cluster_id, COUNT(*) AS photo_count FROM (
+        SELECT DISTINCT person_id AS cluster_id, photo_id FROM (
+          SELECT person_id, photo_id FROM photo_faces WHERE person_id IN (SELECT id FROM person_clusters WHERE name IS NULL)
+          UNION
+          SELECT person_id, photo_id FROM photo_person_tags WHERE person_id IN (SELECT id FROM person_clusters WHERE name IS NULL)
+        )
+      ) GROUP BY cluster_id
+    `)
+    .all<{ cluster_id: number; photo_count: number }>();
+  const photoCountByCluster = new Map<number, number>();
+  for (const r of photoCountRows || []) photoCountByCluster.set(r.cluster_id, r.photo_count);
+
+  const { results: faceTotalRows } = await env.DB
+    .prepare(`
+      SELECT person_id AS cluster_id, COUNT(DISTINCT photo_id) AS total
+      FROM photo_faces
+      WHERE person_id IN (SELECT id FROM person_clusters WHERE name IS NULL)
+      GROUP BY person_id
+    `)
+    .all<{ cluster_id: number; total: number }>();
+  const faceTotalByCluster = new Map<number, number>();
+  for (const r of faceTotalRows || []) faceTotalByCluster.set(r.cluster_id, r.total);
+
+  // Named people co-occurring on each unnamed cluster's face-photos, with shared-photo counts.
+  const { results: candidateRows } = await env.DB
+    .prepare(`
+      SELECT u.cluster_id, cand.person_id AS named_id, COUNT(DISTINCT u.photo_id) AS shared
+      FROM (
+        SELECT person_id AS cluster_id, photo_id
+        FROM photo_faces
+        WHERE person_id IN (SELECT id FROM person_clusters WHERE name IS NULL)
+      ) u
+      JOIN (
+        SELECT photo_id, person_id FROM photo_person_tags
+        UNION
+        SELECT photo_id, person_id FROM photo_faces WHERE person_id IS NOT NULL
+      ) cand ON cand.photo_id = u.photo_id AND cand.person_id != u.cluster_id
+      JOIN person_clusters pc ON pc.id = cand.person_id AND pc.name IS NOT NULL
+      GROUP BY u.cluster_id, cand.person_id
+    `)
+    .all<{ cluster_id: number; named_id: number; shared: number }>();
+
+  const candidatesByCluster = new Map<number, { named_id: number; shared: number }[]>();
+  for (const r of candidateRows || []) {
+    if (!candidatesByCluster.has(r.cluster_id)) candidatesByCluster.set(r.cluster_id, []);
+    candidatesByCluster.get(r.cluster_id)!.push({ named_id: r.named_id, shared: r.shared });
+  }
+
+  // Named clusters' names + centroids (for the display name and the cosine guard).
+  const { results: namedRows } = await env.DB
+    .prepare('SELECT id, name, centroid_embedding FROM person_clusters WHERE name IS NOT NULL')
+    .all<{ id: number; name: string; centroid_embedding: ArrayBuffer }>();
+  const namedById = new Map<number, { name: string; centroid: Float32Array }>();
+  for (const r of namedRows || []) {
+    namedById.set(r.id, { name: r.name, centroid: blobToFloat32Array(r.centroid_embedding) });
+  }
+
+  const result: UnnamedPerson[] = unnamed.map((cluster) => {
+    const candidates = candidatesByCluster.get(cluster.id) || [];
+    const totalPhotos = faceTotalByCluster.get(cluster.id) ?? 0;
+    const { suggestion, confident } = computeUnnamedSuggestion(
+      candidates,
+      totalPhotos,
+      blobToFloat32Array(cluster.centroid_embedding),
+      namedById
+    );
+
+    return {
+      id: cluster.id,
+      face_count: cluster.face_count,
+      photo_count: photoCountByCluster.get(cluster.id) ?? 0,
+      cover_photo_id: cluster.cover_photo_id,
+      cover_file_type: cluster.cover_file_type,
+      cover_cache_version: cluster.cover_cache_version,
+      cover_event_slug: cluster.cover_event_slug,
+      suggestion,
+      confident,
+    };
+  });
+
+  // Confident (mergeable) first, then largest clusters — the most impactful to review — first.
+  result.sort((a, b) => {
+    if (a.confident !== b.confident) return a.confident ? -1 : 1;
+    return b.photo_count - a.photo_count;
+  });
+
+  return result;
+}
+
+/**
+ * Bulk cleanup: merges every `confident` unnamed cluster into its suggested named person,
+ * capped at UNNAMED_MERGE_BATCH_LIMIT per call so one request stays within the Workers subrequest
+ * budget. Returns how many merged and how many confident matches still remain, so the caller can
+ * loop until `remaining` is 0. Idempotent and safe to re-run (it's the ongoing reconciliation for
+ * unnamed clusters that manual tagging keeps producing).
+ */
+export async function mergeConfidentUnnamedIntoTagged(env: Env): Promise<{ merged: number; remaining: number }> {
+  const unnamed = await getUnnamedPeopleWithSuggestions(env);
+  const confident = unnamed.filter((u) => u.confident && u.suggestion);
+
+  const toMerge = confident.slice(0, UNNAMED_MERGE_BATCH_LIMIT);
+  for (const cluster of toMerge) {
+    // target = the named person (suggestion), source = this unnamed cluster.
+    await mergeClusters(env, cluster.suggestion!.personId, [cluster.id]);
+  }
+
+  return { merged: toMerge.length, remaining: confident.length - toMerge.length };
 }
 

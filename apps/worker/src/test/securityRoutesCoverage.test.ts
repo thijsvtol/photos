@@ -396,6 +396,38 @@ describe('Security Route Coverage', () => {
 
     const originalError = await mediaRoutes.request('http://localhost/media/public-event/original/photo-image.jpg', {}, env);
     expect(originalError.status).toBe(500);
+
+    const posterError = await mediaRoutes.request('http://localhost/media/public-event/poster/photo-image.jpg', {}, env);
+    expect(posterError.status).toBe(500);
+  });
+
+  it('covers video poster endpoint success/copy/missing/not-found/auth', async () => {
+    const db = new MockD1Database(events, photos, { 3: ['collab@example.com'] });
+
+    // Poster present → 200 image/jpeg.
+    const ok = await mediaRoutes.request('http://localhost/media/public-event/poster/photo-image.jpg', {}, createEnv(db));
+    expect(ok.status).toBe(200);
+    expect(ok.headers.get('Content-Type')).toBe('image/jpeg');
+
+    // Copy resolves to the SOURCE event's poster key.
+    const copy = await mediaRoutes.request('http://localhost/media/public-event/poster/photo-copy.jpg', {}, createEnv(db));
+    expect(copy.status).toBe(200);
+
+    // Poster object absent → 404 (client falls back to the blur placeholder).
+    const missing = createEnv(db, new Set(['poster/public-event/photo-image.jpg']));
+    const missingRes = await mediaRoutes.request('http://localhost/media/public-event/poster/photo-image.jpg', {}, missing);
+    expect(missingRes.status).toBe(404);
+
+    // Unknown photo / unknown event → 404.
+    const noPhoto = await mediaRoutes.request('http://localhost/media/public-event/poster/missing.jpg', {}, createEnv(db));
+    expect(noPhoto.status).toBe(404);
+    const noEvent = await mediaRoutes.request('http://localhost/media/unknown/poster/photo-image.jpg', {}, createEnv(db));
+    expect(noEvent.status).toBe(404);
+
+    // Access denied on a protected event.
+    allowEventAuth = false;
+    const denied = await mediaRoutes.request('http://localhost/media/password-event/poster/photo-image.jpg', {}, createEnv(db));
+    expect(denied.status).toBe(401);
   });
 
   it('covers zip auth denial and collaborator denial branches', async () => {

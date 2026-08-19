@@ -38,6 +38,8 @@ export async function permanentlyDeletePhotos(env: Env, photos: DeletablePhotoRe
           env.PHOTOS_BUCKET.delete(`preview/${photo.slug}/${photo.id}.jpg`),
           env.PHOTOS_BUCKET.delete(`preview/${photo.slug}/${photo.id}.mp4`),
           env.PHOTOS_BUCKET.delete(`ig/${photo.slug}/${photo.id}.jpg`),
+          // Video poster (cover frame) — see media.ts's /poster route and migration 030.
+          env.PHOTOS_BUCKET.delete(`poster/${photo.slug}/${photo.id}.jpg`),
         ]);
       })
     );

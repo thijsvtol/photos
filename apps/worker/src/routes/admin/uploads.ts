@@ -5,7 +5,7 @@ import { logCollaborationAction } from '../collaborators';
 import { logActivity } from '../../activityLog';
 import { checkFeature } from '../../features';
 import { isVideoFileType, getStorageExtension } from '../../fileTypeUtils';
-import { isValidFaceInput } from '../../faceValidation';
+import { isValidFaceInput, EXPECTED_EMBEDDING_LENGTH } from '../../faceValidation';
 import { MAX_SQL_IN_CHUNK, chunkArray } from '../../utils';
 
 type Variables = {
@@ -273,6 +273,60 @@ app.put('/:photoId/parts/:partNumber', requireUploadPermission, async (c) => {
   }
 });
 
+/**
+ * PUT /events/:slug/uploads/:photoId/poster
+ *
+ * Stores a client-captured still-image poster (cover frame) for a VIDEO at
+ * poster/<slug>/<id>.jpg, so gallery/timeline grids can render a fast <img> instead of loading
+ * the MP4 just to paint a frame. The nightly ffmpeg job also generates these for the existing
+ * library; this endpoint is what gives a freshly-uploaded video a poster immediately, without
+ * waiting for that run. A poster is small, so a single R2 put (not a multipart upload) is used.
+ * Best-effort from the client's perspective — a failure here never blocks the video upload.
+ */
+app.put('/:photoId/poster', requireUploadPermission, async (c) => {
+  const slug = c.req.param('slug')!;
+  const photoId = c.req.param('photoId');
+
+  try {
+    // Only accept a poster for a real video row in this event (guards against writing orphan
+    // R2 objects for a bad/mismatched id).
+    const photo = await c.env.DB
+      .prepare(`
+        SELECT p.file_type FROM photos p
+        JOIN events e ON p.event_id = e.id
+        WHERE p.id = ? AND e.slug = ?
+      `)
+      .bind(photoId, slug)
+      .first<{ file_type: string }>();
+    if (!photo) {
+      return c.json({ error: 'Photo not found' }, 404);
+    }
+    if (!isVideoFileType(photo.file_type)) {
+      return c.json({ error: 'Posters are only stored for videos' }, 400);
+    }
+
+    const body = await c.req.arrayBuffer();
+    if (body.byteLength === 0) {
+      return c.json({ error: 'Empty poster body' }, 400);
+    }
+
+    await c.env.PHOTOS_BUCKET.put(`poster/${slug}/${photoId}.jpg`, body, {
+      httpMetadata: { contentType: 'image/jpeg' },
+    });
+
+    // Mark generated and bump cache_version so any already-loaded gallery re-requests the URL.
+    await c.env.DB
+      .prepare("UPDATE photos SET video_poster_status = 'done', cache_version = cache_version + 1 WHERE id = ?")
+      .bind(photoId)
+      .run();
+
+    return c.json({ success: true });
+  } catch (error) {
+    console.error('Error storing video poster:', error);
+    return c.json({ error: 'Failed to store poster' }, 500);
+  }
+});
+
 type CancelUploadBody = { uploadId?: string; previewUploadId?: string; fileType?: string };
 
 /**
@@ -522,13 +576,13 @@ app.post('/:photoId/faces', requireUploadPermission, async (c) => {
     if (faces.length > 50) {
       return c.json({ error: 'Cannot report more than 50 faces per photo' }, 400);
     }
-    // @vladmandic/human's FaceRes description model always produces a
-    // 1024-dim descriptor. Validate shape/bounds before trusting client-supplied data — this is a
-    // defense-in-depth check (the caller already has upload permission for
-    // this event) against a buggy client sending malformed/oversized
-    // payloads that would otherwise bloat the DB or corrupt clustering.
+    // Face embeddings are computed client-side by a purpose-built ArcFace ONNX model that always
+    // produces exactly EXPECTED_EMBEDDING_LENGTH (512) numbers — see faceValidation.ts. Validate
+    // shape/bounds before trusting client-supplied data — this is a defense-in-depth check (the
+    // caller already has upload permission for this event) against a buggy client sending
+    // malformed/oversized payloads that would otherwise bloat the DB or corrupt clustering.
     if (!faces.every(isValidFaceInput)) {
-      return c.json({ error: 'Each face requires a 128-number embedding and a numeric bbox' }, 400);
+      return c.json({ error: `Each face requires a ${EXPECTED_EMBEDDING_LENGTH}-number embedding and a numeric bbox` }, 400);
     }
 
     // Replace any previous detections for this photo (e.g. a re-run after an edit).

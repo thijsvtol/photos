@@ -3,7 +3,7 @@ import { Link } from 'react-router-dom';
 import { Heart, Star, Check } from 'lucide-react';
 import ProgressiveImage from './ProgressiveImage';
 import ProgressiveVideo from './ProgressiveVideo';
-import { getPreviewUrl, downloadOriginal, downloadSmall } from '../api';
+import { getPreviewUrl, getVideoPosterUrl, downloadOriginal, downloadSmall } from '../api';
 import type { Photo } from '../types';
 
 interface PhotoCardProps {
@@ -132,6 +132,7 @@ const PhotoCard: React.FC<PhotoCardProps> = ({
             <ProgressiveVideo
               src={getPreviewUrl(slug, photo.id, photo.file_type, photo.cache_version)}
               poster={photo.blur_placeholder}
+              posterUrl={getVideoPosterUrl(slug, photo.id, photo.cache_version)}
               className="w-full h-full object-cover object-center transition-transform duration-300 group-hover:scale-[1.02]"
             />
           ) : (
@@ -223,6 +224,7 @@ const PhotoCard: React.FC<PhotoCardProps> = ({
           <ProgressiveVideo
             src={getPreviewUrl(slug, photo.id, photo.file_type)}
             poster={photo.blur_placeholder}
+            posterUrl={getVideoPosterUrl(slug, photo.id, photo.cache_version)}
             className="w-full h-full object-cover object-center"
           />
         ) : (

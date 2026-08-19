@@ -9,11 +9,11 @@ import { ulid } from 'ulid';
 import { Capacitor } from '@capacitor/core';
 import ExifReader from 'exifreader';
 import axios from 'axios';
-import { startUpload, uploadPart, completeUpload, cancelUpload as cancelUploadApi } from '../api';
+import { startUpload, uploadPart, completeUpload, cancelUpload as cancelUploadApi, uploadVideoPoster } from '../api';
 import { addToQueue, updateQueueItem, getQueueItem, getQueueItems, getPendingUploads, removeFromQueue, clearCompletedUploads } from '../uploadQueue';
 import { createPreview, computeFileHash } from '../imageUtils';
 import { isRawFile, isRawFileType, getRawFileType, createRawPreview, createRawPlaceholder } from '../rawImageUtils';
-import { extractMp4CreationTime, isVideoFile, normalizeVideoFileType } from '../utils/videoMetadata';
+import { extractMp4CreationTime, isVideoFile, normalizeVideoFileType, captureVideoPoster } from '../utils/videoMetadata';
 import type { UploadQueueItem } from '../types';
 
 /** A file the user tried to upload that isn't a supported image/video/RAW type. */
@@ -407,6 +407,7 @@ class UploadManager {
   private async resumeAll() {
     try {
       const pending = await getPendingUploads();
+      const isNative = Capacitor.isNativePlatform();
       for (const item of pending) {
         // Skip items that are currently being processed to avoid overwriting live progress
         if (this.processing.has(item.id)) continue;
@@ -414,7 +415,7 @@ class UploadManager {
         // Items stuck as 'uploading' in IndexedDB were interrupted (app was
         // killed/reloaded mid-upload). Reset their status to 'pending' so
         // they get picked up again, but keep uploadId/parts/progress intact —
-        // processUpload() will resume the existing R2 multipart upload from
+        // the upload path will resume the existing R2 multipart upload from
         // the last successfully uploaded chunk instead of restarting the
         // whole file from 0%.
         if (item.status === 'uploading') {
@@ -423,6 +424,15 @@ class UploadManager {
         }
 
         this.items.set(item.id, item);
+
+        // On native, DON'T drive uploads through this manager's foreground
+        // path (processUpload) — it runs without UploadForegroundService, so a
+        // screen-lock mid-resume aborts in-flight chunks with generic network
+        // errors. Just populate the in-memory map here (so the UI shows the
+        // items) and let backgroundSyncService run the actual uploads under the
+        // foreground service after the loop — the same path addFiles() uses.
+        if (isNative) continue;
+
         if (item.status === 'pending') {
           this.enqueueUpload(item);
         } else if (item.status === 'failed' && this.shouldAutoRetry(item)) {
@@ -430,6 +440,20 @@ class UploadManager {
         }
       }
       this.notify();
+
+      if (isNative && pending.length > 0) {
+        // Dynamic import avoids the import cycle (backgroundSync imports this
+        // module at the top level), same as addFiles().
+        const { backgroundSyncService } = await import('./backgroundSync');
+        await backgroundSyncService.syncNow();
+        // Reconcile in-memory state with the statuses the background pipeline
+        // wrote to IndexedDB.
+        const latest = await getQueueItems();
+        for (const it of latest) {
+          if (this.items.has(it.id)) this.items.set(it.id, it);
+        }
+        this.notify();
+      }
     } catch (err) {
       console.error('[UploadManager] resumeAll failed:', err);
     }
@@ -696,6 +720,10 @@ class UploadManager {
       if (isVideo) {
         this.updateItem(item.id, { status: 'completed', progress: 100 });
         await updateQueueItem(item.id, { status: 'completed', progress: 100 });
+        // Best-effort: capture and upload a poster (cover) image so the video has a fast
+        // gallery thumbnail immediately, instead of waiting for the nightly ffmpeg job. Never
+        // fatal — the nightly job is the reliable fallback if capture/upload fails here.
+        void this.uploadVideoPosterBestEffort(item.eventSlug, photoId, item.file);
       } else {
         if (!originalAlreadyUploaded) {
           this.updateItem(item.id, { progress: 85 });
@@ -756,6 +784,18 @@ class UploadManager {
     if (existing) {
       this.items.set(id, { ...existing, ...updates });
       this.notify();
+    }
+  }
+
+  /** Capture a poster (cover) frame from a just-uploaded video and store it, so the gallery has a
+   *  fast image thumbnail without waiting for the nightly job. Fully best-effort: swallows every
+   *  error (canvas/codec failures, network) since the nightly ffmpeg job regenerates it anyway. */
+  private async uploadVideoPosterBestEffort(eventSlug: string, photoId: string, file: File) {
+    try {
+      const poster = await captureVideoPoster(file);
+      if (poster) await uploadVideoPoster(eventSlug, photoId, poster);
+    } catch (err) {
+      console.warn('[UploadManager] Video poster capture/upload failed (nightly job will retry):', err);
     }
   }
 

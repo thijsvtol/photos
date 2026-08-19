@@ -2,7 +2,7 @@ import { Hono } from 'hono';
 import type { Env, User } from '../../types';
 import { requireAdmin } from '../../auth';
 import { logActivity } from '../../activityLog';
-import { getClusterData, applyClusteringResults, countUnclusteredFaces, getLegacyFaceStats, resetLegacyFaces, mergeClusters, assignPhotosToPerson, resetAllClusters, resetSingleCluster, learnFromManualTags, getUnattachedPhotos, resetFacesForFacelessTaggedPhotos } from '../../faceClustering';
+import { getClusterData, applyClusteringResults, countUnclusteredFaces, getLegacyFaceStats, resetLegacyFaces, mergeClusters, assignPhotosToPerson, resetAllClusters, resetSingleCluster, learnFromManualTags, getUnattachedPhotos, resetFacesForFacelessTaggedPhotos, getUnnamedPeopleWithSuggestions, mergeConfidentUnnamedIntoTagged } from '../../faceClustering';
 import type { ClusterResult } from '../../faceClustering';
 
 type Variables = {
@@ -75,11 +75,11 @@ app.post('/apply-clustering', async (c) => {
 /**
  * GET /people/legacy-face-stats
  *
- * Counts how many photo_faces/person_clusters rows still use the legacy pre-2026-08
- * face-api.js embedding format (128-dim) instead of the current @vladmandic/human format
- * (1024-dim) — see getLegacyFaceStats()'s doc comment in faceClustering.ts for why this
- * silently breaks clustering/merge-suggestion matches for anyone whose photos predate the
- * model switch. Surfaced on the People admin page as a one-time "fix outdated face data"
+ * Counts how many photo_faces/person_clusters rows still use a legacy embedding format (an
+ * older face-api.js 128-dim or @vladmandic/human 1024-dim vector) instead of the current
+ * ArcFace 512-dim format — see getLegacyFaceStats()'s doc comment in faceClustering.ts for why
+ * this silently breaks clustering/merge-suggestion matches for anyone whose photos predate the
+ * current model. Surfaced on the People admin page as a one-time "fix outdated face data"
  * prompt when either count is nonzero.
  */
 app.get('/legacy-face-stats', async (c) => {
@@ -160,6 +160,51 @@ app.get('/unattached-photos', async (c) => {
   } catch (error) {
     console.error('Error fetching unattached photos:', error);
     return c.json({ error: 'Failed to fetch unattached photos' }, 500);
+  }
+});
+
+/**
+ * GET /people/unnamed
+ * Every unnamed cluster with cover metadata, its real photo count, and — where inferrable — a
+ * suggested named identity (the named person its photos are already tagged with) plus a
+ * `confident` flag. See getUnnamedPeopleWithSuggestions()'s doc comment in faceClustering.ts.
+ * Powers the "Unnamed people" section of the Unattached admin page, where an admin reviews and
+ * merges the redundant unnamed clusters that manual tagging keeps producing.
+ *
+ * MUST stay registered before GET /:personId, or "unnamed" would be captured as a person id.
+ */
+app.get('/unnamed', async (c) => {
+  try {
+    const people = await getUnnamedPeopleWithSuggestions(c.env);
+    return c.json({ people });
+  } catch (error) {
+    console.error('Error fetching unnamed people:', error);
+    return c.json({ error: 'Failed to fetch unnamed people' }, 500);
+  }
+});
+
+/**
+ * POST /people/merge-unnamed-confident
+ * Bulk-merges every high-confidence unnamed cluster into its suggested named person (see
+ * mergeConfidentUnnamedIntoTagged()). Capped per call; returns `{ merged, remaining }` so the
+ * client loops until `remaining` is 0. Safe to re-run.
+ */
+app.post('/merge-unnamed-confident', async (c) => {
+  try {
+    const result = await mergeConfidentUnnamedIntoTagged(c.env);
+    if (result.merged > 0) {
+      await logActivity(c.env, {
+        actorEmail: c.get('user')?.email || 'unknown',
+        action: 'person_merge',
+        targetType: 'person',
+        targetId: 'unnamed-cleanup',
+        metadata: { mergedCount: result.merged, remaining: result.remaining, reason: 'merge_unnamed_confident' },
+      });
+    }
+    return c.json({ success: true, ...result });
+  } catch (error) {
+    console.error('Error merging confident unnamed people:', error);
+    return c.json({ error: 'Failed to merge unnamed people' }, 500);
   }
 });
 

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { getClusterData, applyClusteringResults, countUnclusteredFaces, getLegacyFaceStats, resetLegacyFaces, blobToFloat32Array, mergeClusters, assignPhotosToPerson, resetAllClusters, learnFromManualTags, resetFacesForFacelessTaggedPhotos } from '../faceClustering';
+import { getClusterData, applyClusteringResults, countUnclusteredFaces, getLegacyFaceStats, resetLegacyFaces, blobToFloat32Array, mergeClusters, assignPhotosToPerson, resetAllClusters, resetSingleCluster, learnFromManualTags, resetFacesForFacelessTaggedPhotos } from '../faceClustering';
 import type { Env } from '../types';
 
 /**
@@ -136,16 +136,16 @@ class FakeFaceClusteringDb {
             .sort((a, b) => a.id - b.id)
             .filter((f) => f.person_id === null && f.id > afterId)
             .slice(0, limit)
-            .map((f) => ({ id: f.id, photo_id: f.photo_id, embedding: f.embedding }));
+            .map((f) => ({ id: f.id, photo_id: f.photo_id, person_id: f.person_id, embedding: f.embedding }));
           return { results: results as T[] };
         }
-        if (query.includes('FROM photo_faces') && query.includes('WHERE id > ?') && !query.includes('person_id')) {
+        if (query.includes('FROM photo_faces') && query.includes('WHERE id > ?') && !query.includes('person_id IS NULL')) {
           const [afterId, limit] = boundArgs as [number, number];
           const results = [...db.faces]
             .sort((a, b) => a.id - b.id)
             .filter((f) => f.id > afterId)
             .slice(0, limit)
-            .map((f) => ({ id: f.id, photo_id: f.photo_id, embedding: f.embedding }));
+            .map((f) => ({ id: f.id, photo_id: f.photo_id, person_id: f.person_id, embedding: f.embedding }));
           return { results: results as T[] };
         }
         if (query.includes('FROM photo_faces') && query.includes('WHERE person_id IS NULL')) {
@@ -297,6 +297,20 @@ class FakeFaceClusteringDb {
           db.clusters = [];
           return { success: true, meta: { changes: changed } };
         }
+        // resetSingleCluster: unassign one person's faces, keeping the person row.
+        if (query.includes('UPDATE photo_faces SET person_id = NULL WHERE person_id = ?')) {
+          const [personId] = boundArgs as [number];
+          const changed = db.faces.filter((f) => f.person_id === personId).length;
+          for (const face of db.faces) if (face.person_id === personId) face.person_id = null;
+          return { success: true, meta: { changes: changed } };
+        }
+        // resetSingleCluster: zero out face_count WITHOUT nulling the (NOT NULL) centroid.
+        if (query.includes('UPDATE person_clusters SET face_count = 0')) {
+          const [id] = boundArgs as [number];
+          const cluster = db.clusters.find((c) => c.id === id);
+          if (cluster) cluster.face_count = 0;
+          return { success: true };
+        }
         return { success: true };
       },
     };
@@ -397,7 +411,7 @@ describe('getClusterData', () => {
     const data = await getClusterData(makeEnv(db), true);
 
     expect(data.clusters).toEqual([{ id: 1, centroidEmbedding: [1, 2, 3], faceCount: 2 }]);
-    expect(data.faces).toEqual([{ id: 10, photoId: 'photo-a', embedding: [4, 5, 6] }]);
+    expect(data.faces).toEqual([{ id: 10, photoId: 'photo-a', personId: null, embedding: [4, 5, 6] }]);
   });
 
   it('skips fetching faces entirely when includeFaces is false', async () => {
@@ -427,7 +441,7 @@ describe('getClusterData', () => {
 
     const data = await getClusterData(makeEnv(db), true);
 
-    expect(data.faces).toEqual([{ id: 10, photoId: 'photo-a', embedding: [1.5, -2.25, 3.0] }]);
+    expect(data.faces).toEqual([{ id: 10, photoId: 'photo-a', personId: null, embedding: [1.5, -2.25, 3.0] }]);
   });
 
   it('paginates clusters/faces via afterClusterId/afterFaceId, returning null cursors once fully consumed', async () => {
@@ -494,6 +508,45 @@ describe('resetAllClusters', () => {
       embeddingOf(2, 2, 2),
       embeddingOf(3, 3, 3),
     ]);
+  });
+});
+
+describe('resetSingleCluster', () => {
+  it('unassigns the person\'s faces and zeroes face_count, but KEEPS the person row and never nulls the NOT NULL centroid', async () => {
+    const db = new FakeFaceClusteringDb();
+    db.clusters = [
+      { id: 1, centroid_embedding: embeddingOf(1, 1, 1), face_count: 2 },
+      { id: 2, centroid_embedding: embeddingOf(2, 2, 2), face_count: 1 },
+    ];
+    db.faces = [
+      { id: 10, photo_id: 'photo-a', embedding: embeddingOf(1, 1, 1), person_id: 1 },
+      { id: 11, photo_id: 'photo-b', embedding: embeddingOf(1, 1, 1), person_id: 1 },
+      { id: 12, photo_id: 'photo-c', embedding: embeddingOf(2, 2, 2), person_id: 2 },
+    ];
+
+    // Capture every statement to prove the buggy `centroid_embedding = NULL` UPDATE (which would
+    // hit SQLITE_CONSTRAINT on the NOT NULL column and 500 the whole endpoint) is never issued.
+    const queries: string[] = [];
+    const originalPrepare = db.prepare.bind(db);
+    db.prepare = (q: string) => {
+      queries.push(q);
+      return originalPrepare(q);
+    };
+
+    const result = await resetSingleCluster(makeEnv(db), 1);
+
+    expect(result).toEqual({ facesUnassigned: 2 });
+    // Person 1's faces are unassigned; person 2 untouched.
+    expect(db.faces.find((f) => f.id === 10)!.person_id).toBeNull();
+    expect(db.faces.find((f) => f.id === 11)!.person_id).toBeNull();
+    expect(db.faces.find((f) => f.id === 12)!.person_id).toBe(2);
+    // The person row still exists (identity preserved) with face_count reset to 0 and its
+    // centroid left intact (stale but ignored by clustering while face_count is 0).
+    const person1 = db.clusters.find((c) => c.id === 1);
+    expect(person1).toBeDefined();
+    expect(person1!.face_count).toBe(0);
+    expect(person1!.centroid_embedding).toEqual(embeddingOf(1, 1, 1));
+    expect(queries.some((q) => q.includes('centroid_embedding = NULL'))).toBe(false);
   });
 });
 
