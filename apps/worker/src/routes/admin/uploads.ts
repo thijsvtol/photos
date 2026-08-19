@@ -273,6 +273,60 @@ app.put('/:photoId/parts/:partNumber', requireUploadPermission, async (c) => {
   }
 });
 
+/**
+ * PUT /events/:slug/uploads/:photoId/poster
+ *
+ * Stores a client-captured still-image poster (cover frame) for a VIDEO at
+ * poster/<slug>/<id>.jpg, so gallery/timeline grids can render a fast <img> instead of loading
+ * the MP4 just to paint a frame. The nightly ffmpeg job also generates these for the existing
+ * library; this endpoint is what gives a freshly-uploaded video a poster immediately, without
+ * waiting for that run. A poster is small, so a single R2 put (not a multipart upload) is used.
+ * Best-effort from the client's perspective — a failure here never blocks the video upload.
+ */
+app.put('/:photoId/poster', requireUploadPermission, async (c) => {
+  const slug = c.req.param('slug')!;
+  const photoId = c.req.param('photoId');
+
+  try {
+    // Only accept a poster for a real video row in this event (guards against writing orphan
+    // R2 objects for a bad/mismatched id).
+    const photo = await c.env.DB
+      .prepare(`
+        SELECT p.file_type FROM photos p
+        JOIN events e ON p.event_id = e.id
+        WHERE p.id = ? AND e.slug = ?
+      `)
+      .bind(photoId, slug)
+      .first<{ file_type: string }>();
+    if (!photo) {
+      return c.json({ error: 'Photo not found' }, 404);
+    }
+    if (!isVideoFileType(photo.file_type)) {
+      return c.json({ error: 'Posters are only stored for videos' }, 400);
+    }
+
+    const body = await c.req.arrayBuffer();
+    if (body.byteLength === 0) {
+      return c.json({ error: 'Empty poster body' }, 400);
+    }
+
+    await c.env.PHOTOS_BUCKET.put(`poster/${slug}/${photoId}.jpg`, body, {
+      httpMetadata: { contentType: 'image/jpeg' },
+    });
+
+    // Mark generated and bump cache_version so any already-loaded gallery re-requests the URL.
+    await c.env.DB
+      .prepare("UPDATE photos SET video_poster_status = 'done', cache_version = cache_version + 1 WHERE id = ?")
+      .bind(photoId)
+      .run();
+
+    return c.json({ success: true });
+  } catch (error) {
+    console.error('Error storing video poster:', error);
+    return c.json({ error: 'Failed to store poster' }, 500);
+  }
+});
+
 type CancelUploadBody = { uploadId?: string; previewUploadId?: string; fileType?: string };
 
 /**

@@ -5,11 +5,11 @@ import { LocalNotifications } from '@capacitor/local-notifications';
 import { Network } from '@capacitor/network';
 import { ulid } from 'ulid';
 import { getPendingUploads, updateQueueItem } from '../uploadQueue';
-import { startUpload, uploadPart, completeUpload, cancelUpload as cancelUploadApi } from '../api';
+import { startUpload, uploadPart, completeUpload, cancelUpload as cancelUploadApi, uploadVideoPoster } from '../api';
 import FolderSync from './folderSyncPlugin';
 import { uploadManager } from './uploadManager';
 import { createPreview, computeFileHash } from '../imageUtils';
-import { normalizeVideoFileType } from '../utils/videoMetadata';
+import { normalizeVideoFileType, captureVideoPoster } from '../utils/videoMetadata';
 import ProgressNotification from '../plugins/ProgressNotification';
 import type { UploadQueueItem } from '../types';
 
@@ -595,6 +595,14 @@ class BackgroundSyncService {
             progress: 100,
             photoId: photoId
           });
+          // Best-effort: capture + store a poster (cover) image so the video gets a fast gallery
+          // thumbnail immediately instead of waiting for the nightly ffmpeg job. Never fatal.
+          try {
+            const poster = await captureVideoPoster(upload.file);
+            if (poster) await uploadVideoPoster(upload.eventSlug, photoId, poster);
+          } catch (err) {
+            console.warn('[BackgroundSync] Video poster capture/upload failed (nightly job will retry):', err);
+          }
         } else {
           if (!originalAlreadyUploaded) {
             await this.updateQueueItemAndSync(upload.id, { progress: 85 });

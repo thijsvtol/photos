@@ -1,7 +1,7 @@
 import React from 'react';
 import ProgressiveImage from './ProgressiveImage';
 import ProgressiveVideo from './ProgressiveVideo';
-import { getPreviewUrl } from '../api';
+import { getPreviewUrl, getVideoPosterUrl } from '../api';
 
 interface MediaThumbProps {
   /** Event slug the media belongs to (used to build the preview URL). */
@@ -36,7 +36,14 @@ const MediaThumb: React.FC<MediaThumbProps> = ({
 }) => {
   const src = getPreviewUrl(slug, photoId, fileType ?? undefined, cacheVersion ?? undefined);
   if (fileType === 'video/mp4') {
-    return <ProgressiveVideo src={src} poster={blurPlaceholder ?? undefined} className={className} />;
+    return (
+      <ProgressiveVideo
+        src={src}
+        poster={blurPlaceholder ?? undefined}
+        posterUrl={getVideoPosterUrl(slug, photoId, cacheVersion ?? undefined)}
+        className={className}
+      />
+    );
   }
   return (
     <ProgressiveImage

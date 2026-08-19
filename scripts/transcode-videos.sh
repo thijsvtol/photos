@@ -37,25 +37,34 @@ BATCH_SIZE="${1:-15}"
 # for a gallery tile or full-screen phone playback; the untouched original stays
 # available for download.
 MAX_PREVIEW_HEIGHT=1080
+# Longest side of the poster (cover) JPEG. A gallery tile is small and full-screen
+# on a phone is ~1080p, so 1280 is ample while keeping the poster tiny (~100-300KB)
+# vs the multi-MB video it replaces in the grid.
+MAX_POSTER_SIDE=1280
 DB_NAME="photos-db"
 R2_BUCKET="photos-storage"
 
 WORKDIR=$(mktemp -d)
 trap 'rm -rf "$WORKDIR"' EXIT
 
-echo "Fetching up to $BATCH_SIZE video(s) pending compatibility check..."
+echo "Fetching up to $BATCH_SIZE video(s) needing a compatibility check or a poster..."
 
-QUERY="SELECT p.id AS id, e.slug AS event_slug, p.source_event_slug AS source_event_slug, p.source_photo_id AS source_photo_id FROM photos p JOIN events e ON p.event_id = e.id WHERE p.file_type = 'video/mp4' AND p.video_transcode_status IS NULL LIMIT $BATCH_SIZE"
+# A video is selected when it still needs EITHER step: a codec/resolution compatibility check
+# (video_transcode_status IS NULL) OR a poster/cover image (video_poster_status IS NULL). Both
+# reuse the single R2 download below. video_poster_status is a separate column (migration 030) so
+# the entire EXISTING library — whose transcode_status is already set — is re-selected for a poster
+# without disturbing its transcode state.
+QUERY="SELECT p.id AS id, e.slug AS event_slug, p.source_event_slug AS source_event_slug, p.source_photo_id AS source_photo_id, p.video_transcode_status AS video_transcode_status, p.video_poster_status AS video_poster_status FROM photos p JOIN events e ON p.event_id = e.id WHERE p.file_type = 'video/mp4' AND (p.video_transcode_status IS NULL OR p.video_poster_status IS NULL) LIMIT $BATCH_SIZE"
 
 RESULT_JSON=$(wrangler d1 execute "$DB_NAME" --remote --json --command "$QUERY")
 COUNT=$(echo "$RESULT_JSON" | jq '.[0].results | length')
 
 if [ "$COUNT" -eq 0 ]; then
-  echo "No videos pending a compatibility check."
+  echo "No videos pending a compatibility check or a poster."
   exit 0
 fi
 
-echo "Found $COUNT video(s) to check."
+echo "Found $COUNT video(s) to process."
 
 mark_status() {
   local id="$1"
@@ -70,15 +79,29 @@ mark_status() {
   fi
 }
 
+# Poster generation is tracked in its own column (migration 030), independent of the
+# transcode-compatibility state, and always bumps cache_version so an already-loaded gallery
+# re-requests the now-available poster URL.
+mark_poster_status() {
+  local id="$1"
+  local status="$2"
+  wrangler d1 execute "$DB_NAME" --remote --command \
+    "UPDATE photos SET video_poster_status = '$status', cache_version = cache_version + 1 WHERE id = '$id'" >/dev/null
+}
+
 echo "$RESULT_JSON" | jq -c '.[0].results[]' | while IFS= read -r row; do
   ID=$(echo "$row" | jq -r '.id')
   EVENT_SLUG=$(echo "$row" | jq -r '.event_slug')
   SOURCE_EVENT_SLUG=$(echo "$row" | jq -r '.source_event_slug // empty')
   SOURCE_PHOTO_ID=$(echo "$row" | jq -r '.source_photo_id // empty')
+  TRANSCODE_STATUS=$(echo "$row" | jq -r '.video_transcode_status // empty')
+  POSTER_STATUS=$(echo "$row" | jq -r '.video_poster_status // empty')
 
   R2_SLUG="${SOURCE_EVENT_SLUG:-$EVENT_SLUG}"
   R2_PHOTO_ID="${SOURCE_PHOTO_ID:-$ID}"
   SOURCE_KEY="original/$R2_SLUG/$R2_PHOTO_ID.mp4"
+  # Poster (cover) JPEG for gallery/timeline tiles — see media.ts's /poster route + migration 030.
+  POSTER_KEY="poster/$R2_SLUG/$R2_PHOTO_ID.jpg"
   # The playable derivative goes to its OWN key. media.ts already looks for
   # preview/<slug>/<id>.mp4 before falling back to original/, so writing here is
   # all that is needed for the gallery and photo detail to pick it up.
@@ -95,7 +118,41 @@ echo "$RESULT_JSON" | jq -c '.[0].results[]' | while IFS= read -r row; do
 
   if ! wrangler r2 object get "$R2_BUCKET/$SOURCE_KEY" --file "$INPUT_FILE" --remote >/dev/null 2>&1; then
     echo "  Could not download from R2 — marking failed."
-    mark_status "$ID" "failed" "false"
+    # Mark only the step(s) that were actually pending, so a poster-only pass can't
+    # clobber an already-resolved transcode status (and vice versa).
+    [ -z "$TRANSCODE_STATUS" ] && mark_status "$ID" "failed" "false"
+    [ -z "$POSTER_STATUS" ] && mark_poster_status "$ID" "failed"
+    continue
+  fi
+
+  # --- Poster (cover image) step ---
+  # Runs first and independently of the codec/resolution logic: a poster is just one
+  # decoded frame and is wanted for EVERY video, including already-compatible ones.
+  if [ -z "$POSTER_STATUS" ]; then
+    POSTER_FILE="$WORKDIR/$ID-poster.jpg"
+    # -ss before -i = fast seek to ~first frame; force_original_aspect_ratio=decrease caps the
+    # longest side to MAX_POSTER_SIDE without ever upscaling; -q:v 3 is a small, sharp JPEG.
+    if ffmpeg -nostdin -y -loglevel error -ss 0.1 -i "$INPUT_FILE" -frames:v 1 \
+        -vf "scale='min($MAX_POSTER_SIDE,iw)':'min($MAX_POSTER_SIDE,ih)':force_original_aspect_ratio=decrease" \
+        -q:v 3 "$POSTER_FILE" && [ -s "$POSTER_FILE" ]; then
+      if wrangler r2 object put "$R2_BUCKET/$POSTER_KEY" --file "$POSTER_FILE" --content-type "image/jpeg" --remote >/dev/null; then
+        mark_poster_status "$ID" "done"
+        echo "  Poster written — $POSTER_KEY."
+      else
+        echo "  Poster upload to R2 failed."
+        mark_poster_status "$ID" "failed"
+      fi
+    else
+      echo "  Poster extraction failed."
+      mark_poster_status "$ID" "failed"
+    fi
+    rm -f "$POSTER_FILE"
+  fi
+
+  # --- Codec/resolution compatibility step ---
+  # Skip entirely when this video's transcode status is already resolved (poster-only pass).
+  if [ -n "$TRANSCODE_STATUS" ]; then
+    rm -f "$INPUT_FILE"
     continue
   fi
 

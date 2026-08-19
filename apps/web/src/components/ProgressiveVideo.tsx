@@ -9,7 +9,16 @@ const AUTO_RETRY_BASE_DELAY_MS = 800;
 
 interface ProgressiveVideoProps {
   src: string;
+  /** Tiny (16x16) blur_placeholder data-URI — the progressive placeholder behind the poster. */
   poster?: string | null;
+  /**
+   * URL of the real still-image poster (cover frame) JPEG for this video. When provided, the tile
+   * renders that IMAGE at rest and only mounts the <video> (at the multi-MB MP4) on hover — so
+   * scrolling a gallery of videos never fetches video bytes. When omitted (video not yet
+   * backfilled, or a non-grid caller), falls back to the legacy behavior: mount the <video> near
+   * the viewport to paint a frame, using the blur as its poster attribute.
+   */
+  posterUrl?: string | null;
   className?: string;
   style?: React.CSSProperties;
 }
@@ -17,10 +26,19 @@ interface ProgressiveVideoProps {
 const ProgressiveVideo: React.FC<ProgressiveVideoProps> = ({
   src,
   poster,
+  posterUrl,
   className = '',
   style,
 }) => {
+  /** The poster image failed to load (e.g. a video not yet backfilled — the /poster route 404s).
+   *  We then fall back to the legacy near-viewport <video> mount for this tile, so a missing
+   *  poster degrades to today's behavior rather than a broken image. */
+  const [posterFailed, setPosterFailed] = useState(false);
+  // Only take the poster-image path while we actually have a working poster.
+  const usePosterImage = !!posterUrl && !posterFailed;
   const [isNearViewport, setIsNearViewport] = useState(false);
+  /** Desktop hover over the tile — the mount trigger on the poster-image path. */
+  const [hovering, setHovering] = useState(false);
   const [isPlaying, setIsPlaying] = useState(false);
   const [supportsHover, setSupportsHover] = useState(true);
   const [metadataLoaded, setMetadataLoaded] = useState(false);
@@ -34,11 +52,17 @@ const ProgressiveVideo: React.FC<ProgressiveVideoProps> = ({
    *  event that provokes isn't mistaken for a failed load — see handleVideoError. */
   const isUnloadingRef = useRef(false);
 
+  // On the poster-image path the <video> mounts only while hovering; on the legacy fallback it
+  // mounts whenever the tile is near the viewport.
+  const shouldMountVideo = usePosterImage ? hovering : isNearViewport;
+
   useEffect(() => {
     setIsNearViewport(false);
+    setHovering(false);
     setIsPlaying(false);
     setMetadataLoaded(false);
     setVideoError(false);
+    setPosterFailed(false);
     retryCountRef.current = 0;
     if (retryTimeoutRef.current) {
       clearTimeout(retryTimeoutRef.current);
@@ -89,18 +113,10 @@ const ProgressiveVideo: React.FC<ProgressiveVideoProps> = ({
   }, []);
 
   /**
-   * Mount the <video> when the tile comes near the viewport, and UNMOUNT it again
-   * once it is far away.
-   *
-   * This used to be one-way: the observer set isNearViewport(true) and then
-   * disconnected, so every tile the user ever scrolled past kept a live <video>
-   * with `preload="metadata"` for the lifetime of the page. In this library that
-   * is brutal — the gallery serves the ORIGINAL file for video tiles (videos get
-   * no separate preview), and the synced videos average ~70MB, with 147 between
-   * 50-200MB and 22 over 200MB (avg 550MB). Scrolling through a few hundred of
-   * them left a few hundred concurrent metadata fetches against very large files,
-   * which is what exhausted connections (videos stuck not loading) and stalled
-   * scrolling for seconds at a time.
+   * Legacy fallback ONLY (no poster image available): mount the <video> when the tile comes near
+   * the viewport, and UNMOUNT it again once it is far away. On the poster-image path this is
+   * skipped entirely — the poster <img> is the at-rest thumbnail and the <video> mounts on hover
+   * — which is what keeps scrolling from fetching any video bytes.
    *
    * Two observers rather than one, because a single rootMargin can only express
    * one threshold and load/unload must not share an edge — that would thrash on
@@ -109,6 +125,7 @@ const ProgressiveVideo: React.FC<ProgressiveVideoProps> = ({
    * re-fetches.
    */
   useEffect(() => {
+    if (usePosterImage) return; // poster path mounts on hover, not on scroll proximity
     const el = containerRef.current;
     if (!el) return;
 
@@ -158,7 +175,7 @@ const ProgressiveVideo: React.FC<ProgressiveVideoProps> = ({
       loadObserver.disconnect();
       unloadObserver.disconnect();
     };
-  }, [src]);
+  }, [src, usePosterImage]);
 
   // Abort video preload on unmount to free browser connections
   useEffect(() => {
@@ -173,37 +190,69 @@ const ProgressiveVideo: React.FC<ProgressiveVideoProps> = ({
     };
   }, []);
 
+  const handleTileMouseEnter = () => {
+    if (usePosterImage && supportsHover) setHovering(true);
+  };
+  const handleTileMouseLeave = () => {
+    if (usePosterImage && supportsHover) {
+      setHovering(false);
+      setIsPlaying(false);
+      setMetadataLoaded(false);
+    }
+  };
+
   return (
-    <div ref={containerRef} className="relative overflow-hidden w-full h-full">
-      {!isNearViewport && poster && (
-        <img
-          src={poster}
-          alt=""
-          className={`${className} blur-xl`}
-          style={style}
-        />
+    <div
+      ref={containerRef}
+      className="relative overflow-hidden w-full h-full"
+      onMouseEnter={handleTileMouseEnter}
+      onMouseLeave={handleTileMouseLeave}
+    >
+      {/* At-rest thumbnail */}
+      {usePosterImage ? (
+        // Real poster image over the tiny blur. Kept mounted under the <video> so hover-in/out
+        // never refetches or flickers. Native lazy-loading keeps a long grid from fetching every
+        // poster at once. onError (e.g. a 404 for a not-yet-backfilled video) flips this tile to
+        // the legacy near-viewport <video> path instead of showing a broken image.
+        <>
+          {poster && (
+            <img src={poster} alt="" aria-hidden className={`${className} absolute inset-0 blur-xl`} style={style} />
+          )}
+          <img
+            src={posterUrl!}
+            alt=""
+            loading="lazy"
+            className={`${className} relative`}
+            style={style}
+            onError={() => setPosterFailed(true)}
+          />
+        </>
+      ) : (
+        !isNearViewport && poster && (
+          <img src={poster} alt="" className={`${className} blur-xl`} style={style} />
+        )
       )}
-      {isNearViewport && (
+
+      {shouldMountVideo && (
         <>
           <video
             ref={videoRef}
             src={src}
-            className={className}
+            className={usePosterImage ? `${className} absolute inset-0` : className}
             style={style}
             muted
             playsInline
             preload="metadata"
+            // On the poster path the <video> only appears on hover, so autoplay = the preview the
+            // hover implies. On the fallback path it stays paused (showing a frame) until hovered.
+            autoPlay={usePosterImage}
             poster={poster || undefined}
-            // Force the first frame to decode/paint. `preload="metadata"` alone
-            // doesn't guarantee a painted frame on every browser/WebView —
-            // seeking a hair past 0 makes it appear. Previously this only ran
-            // on native (Android WebView), but plain desktop/mobile web
-            // browsers can show the same blank-tile behavior whenever there's
-            // no `poster` (e.g. blur_placeholder failed to capture at upload
-            // time), so this now always runs as a fallback when no poster is
-            // available, regardless of platform.
+            // Force the first frame to decode/paint on the FALLBACK path. `preload="metadata"`
+            // alone doesn't guarantee a painted frame on every browser/WebView; seeking a hair
+            // past 0 makes it appear. Not needed on the poster path (the poster image is already
+            // showing and the video autoplays).
             onLoadedMetadata={(e) => {
-              if ((isNative || !poster) && e.currentTarget.currentTime === 0) {
+              if (!usePosterImage && (isNative || !poster) && e.currentTarget.currentTime === 0) {
                 try {
                   e.currentTarget.currentTime = 0.1;
                 } catch {
@@ -212,14 +261,15 @@ const ProgressiveVideo: React.FC<ProgressiveVideoProps> = ({
               }
             }}
             onLoadedData={() => setMetadataLoaded(true)}
+            onPlaying={() => setIsPlaying(true)}
             onMouseEnter={(e) => {
-              if (supportsHover) {
+              if (!usePosterImage && supportsHover) {
                 e.currentTarget.play();
                 setIsPlaying(true);
               }
             }}
             onMouseLeave={(e) => {
-              if (supportsHover) {
+              if (!usePosterImage && supportsHover) {
                 e.currentTarget.pause();
                 e.currentTarget.currentTime = 0;
                 setIsPlaying(false);
@@ -228,8 +278,9 @@ const ProgressiveVideo: React.FC<ProgressiveVideoProps> = ({
             onEnded={() => setIsPlaying(false)}
             onError={handleVideoError}
           />
-          {/* Show poster overlay until the first video frame is visible */}
-          {!metadataLoaded && !isPlaying && !videoError && poster && (
+          {/* Fallback path only: hold the blur poster over the <video> until its first frame
+              paints. On the poster path the real poster image underneath already fills this role. */}
+          {!usePosterImage && !metadataLoaded && !isPlaying && !videoError && poster && (
             <img
               src={poster}
               alt=""
@@ -250,15 +301,16 @@ const ProgressiveVideo: React.FC<ProgressiveVideoProps> = ({
               </button>
             </div>
           )}
-          {/* Play icon overlay — always visible on touch/native devices, hidden on hover devices until hovered */}
-          {!isPlaying && !videoError && (
-            <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-              <div className="bg-black/50 backdrop-blur-sm rounded-full p-2.5 shadow-lg">
-                <Play className="w-5 h-5 text-white fill-white" />
-              </div>
-            </div>
-          )}
         </>
+      )}
+
+      {/* Play icon overlay — always visible on touch/native devices, hidden on hover devices once playing */}
+      {!isPlaying && !videoError && (
+        <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+          <div className="bg-black/50 backdrop-blur-sm rounded-full p-2.5 shadow-lg">
+            <Play className="w-5 h-5 text-white fill-white" />
+          </div>
+        </div>
       )}
     </div>
   );

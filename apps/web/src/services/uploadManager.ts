@@ -9,11 +9,11 @@ import { ulid } from 'ulid';
 import { Capacitor } from '@capacitor/core';
 import ExifReader from 'exifreader';
 import axios from 'axios';
-import { startUpload, uploadPart, completeUpload, cancelUpload as cancelUploadApi } from '../api';
+import { startUpload, uploadPart, completeUpload, cancelUpload as cancelUploadApi, uploadVideoPoster } from '../api';
 import { addToQueue, updateQueueItem, getQueueItem, getQueueItems, getPendingUploads, removeFromQueue, clearCompletedUploads } from '../uploadQueue';
 import { createPreview, computeFileHash } from '../imageUtils';
 import { isRawFile, isRawFileType, getRawFileType, createRawPreview, createRawPlaceholder } from '../rawImageUtils';
-import { extractMp4CreationTime, isVideoFile, normalizeVideoFileType } from '../utils/videoMetadata';
+import { extractMp4CreationTime, isVideoFile, normalizeVideoFileType, captureVideoPoster } from '../utils/videoMetadata';
 import type { UploadQueueItem } from '../types';
 
 /** A file the user tried to upload that isn't a supported image/video/RAW type. */
@@ -720,6 +720,10 @@ class UploadManager {
       if (isVideo) {
         this.updateItem(item.id, { status: 'completed', progress: 100 });
         await updateQueueItem(item.id, { status: 'completed', progress: 100 });
+        // Best-effort: capture and upload a poster (cover) image so the video has a fast
+        // gallery thumbnail immediately, instead of waiting for the nightly ffmpeg job. Never
+        // fatal — the nightly job is the reliable fallback if capture/upload fails here.
+        void this.uploadVideoPosterBestEffort(item.eventSlug, photoId, item.file);
       } else {
         if (!originalAlreadyUploaded) {
           this.updateItem(item.id, { progress: 85 });
@@ -780,6 +784,18 @@ class UploadManager {
     if (existing) {
       this.items.set(id, { ...existing, ...updates });
       this.notify();
+    }
+  }
+
+  /** Capture a poster (cover) frame from a just-uploaded video and store it, so the gallery has a
+   *  fast image thumbnail without waiting for the nightly job. Fully best-effort: swallows every
+   *  error (canvas/codec failures, network) since the nightly ffmpeg job regenerates it anyway. */
+  private async uploadVideoPosterBestEffort(eventSlug: string, photoId: string, file: File) {
+    try {
+      const poster = await captureVideoPoster(file);
+      if (poster) await uploadVideoPoster(eventSlug, photoId, poster);
+    } catch (err) {
+      console.warn('[UploadManager] Video poster capture/upload failed (nightly job will retry):', err);
     }
   }
 
