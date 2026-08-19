@@ -1,0 +1,64 @@
+name: Nightly Backup to B2
+
+# Off-site backup of everything to Backblaze B2 — see scripts/backup-to-b2.sh
+# and docs/backup.md for the full rationale.
+#
+#   * Blobs: rclone sync of the R2 photo/video bucket -> B2 (deletions archived,
+#     never hard-deleted).
+#   * Database: a full `wrangler d1 export` SQL dump, gzipped and uploaded to B2
+#     as a dated blob.
+#
+# This is the second, independent copy in a 3-2-1 strategy: a different provider
+# and account from Cloudflare, so it survives an account/billing problem or a
+# bad mass-delete that a second Cloudflare bucket would not.
+
+on:
+  schedule:
+    # 05:17 UTC nightly. Deliberately after the 03:00 UTC transcode job
+    # (video-transcode.yml), which rewrites videos in R2 in place and can run
+    # for a while — we want to back up the transcoded result, not race it. The
+    # :17 avoids the top-of-hour scheduling stampede on GitHub's runners.
+    - cron: '17 5 * * *'
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: 'What to back up: all | blobs | db'
+        required: false
+        default: 'all'
+
+# Never let two backups (e.g. a manual run overlapping the nightly one) mutate
+# the same B2 prefix at once.
+concurrency:
+  group: backup-b2
+  cancel-in-progress: false
+
+jobs:
+  backup:
+    runs-on: ubuntu-latest
+    # Give a large mirror room to finish; the default 6h ceiling still applies.
+    timeout-minutes: 350
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install rclone
+        run: sudo -v ; curl -fsSL https://rclone.org/install.sh | sudo bash
+
+      - name: Install wrangler
+        run: npm install -g wrangler
+
+      - name: Run backup
+        env:
+          # Reused from the other workflows (D1 export + R2 endpoint host).
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          # R2 S3 API token (Object Read is enough for a backup source).
+          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          # Backblaze B2 application key + target bucket.
+          B2_KEY_ID: ${{ secrets.B2_KEY_ID }}
+          B2_APPLICATION_KEY: ${{ secrets.B2_APPLICATION_KEY }}
+          B2_BUCKET: ${{ secrets.B2_BUCKET }}
+          # BACKUP_STAMP is left unset so the script stamps DB dumps with the UTC
+          # date (photos-db-YYYY-MM-DD.sql.gz) for human-readable restores. Two
+          # runs on the same day overwrite; B2 versioning keeps the earlier one.
+        run: ./scripts/backup-to-b2.sh "${{ github.event.inputs.mode || 'all' }}"

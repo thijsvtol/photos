@@ -75,6 +75,31 @@ npm run db:setup
 
 ---
 
+### ☁️ backup-to-b2.sh
+
+Off-site nightly backup to Backblaze B2.
+
+```bash
+npm run backup            # blobs + database
+npm run backup -- db      # database only
+npm run backup -- blobs   # blobs only
+```
+
+**What it does:**
+- Mirrors the R2 photo/video bucket to B2 (deleted/changed files are archived, never hard-deleted)
+- Exports the D1 database (`wrangler d1 export`), gzips it, and uploads it as a dated blob
+- Prunes archived versions and old DB dumps to `RETENTION_DAYS` (default 90)
+
+**When to use:**
+- Runs automatically via [.github/workflows/backup-b2.yml](../.github/workflows/backup-b2.yml) (nightly 05:17 UTC)
+- Run manually for an ad-hoc backup or to test configuration
+
+**Requirements:**
+- [rclone](https://rclone.org/install/) and Wrangler CLI on `PATH`
+- Env vars for Cloudflare, R2 S3, and B2 credentials — see [docs/backup.md](../docs/backup.md)
+
+---
+
 ### 🚀 deploy-helper.sh
 
 Interactive deployment helper for production.

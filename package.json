@@ -8,6 +8,7 @@
     "setup:wizard": "node scripts/setup-wizard.js",
     "validate": "node scripts/validate-config.js",
     "db:setup": "bash scripts/db-setup.sh",
+    "backup": "bash scripts/backup-to-b2.sh",
     "deploy:helper": "bash scripts/deploy-helper.sh",
     "dev": "concurrently \"npm --prefix apps/worker run dev\" \"npm --prefix apps/web run dev\"",
     "install:all": "npm --prefix apps/worker install && npm --prefix apps/web install",
