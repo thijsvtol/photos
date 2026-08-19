@@ -30,8 +30,14 @@ independent things:
    Changed or deleted files are moved to `B2:<bucket>/photos/_archive/<date>/`
    instead of being hard-deleted, so a bad delete in R2 can never destroy the
    only backup of a file.
-2. **Database** — `wrangler d1 export` produces a full logical SQL dump (schema
-   + data), gzipped and uploaded to `B2:<bucket>/photos/db-backups/photos-db-<date>.sql.gz`.
+2. **Database** — a logical SQL dump (schema + data), gzipped and uploaded to
+   `B2:<bucket>/photos/db-backups/photos-db-<date>.sql.gz`. `wrangler d1 export`
+   [cannot export a database containing an fts5 virtual table](https://github.com/cloudflare/workers-sdk/issues/6305)
+   (your `photos_fts` search index), so the script enumerates the real tables and
+   exports them one at a time (`--table` accepts only one table per call), then
+   concatenates them. The fts5 index is **not** backed up — it is fully derived
+   from `photos` and rebuilt on restore (see below). BLOB columns (face/AI
+   embeddings) are preserved as SQL hex literals.
 
 The three prefixes (`blobs/`, `_archive/`, `db-backups/`) are siblings under
 `photos/` (the `B2_PREFIX`), so the mirror never re-syncs its own archive or
@@ -111,6 +117,18 @@ Database (restore into a *fresh/empty* DB and verify before repointing prod):
 rclone copyto B2:<bucket>/photos/db-backups/photos-db-2026-08-19.sql.gz ./dump.sql.gz
 gunzip dump.sql.gz
 wrangler d1 execute photos-db --remote --file=dump.sql
+```
+
+Then **rebuild the full-text search index**, which is intentionally not in the
+dump (it is derived from `photos`). Re-run the `photos_fts` block — the
+`CREATE VIRTUAL TABLE photos_fts`, the three `photos_fts_*` triggers, and the
+backfill `INSERT` — from
+[migrations/023_photos_organization_and_ai.sql](../migrations/023_photos_organization_and_ai.sql)
+(lines 54–82) against the restored database:
+
+```bash
+wrangler d1 execute photos-db --remote --command "CREATE VIRTUAL TABLE IF NOT EXISTS photos_fts USING fts5(original_filename, ai_caption, ai_tags, city, content='photos', content_rowid='rowid');"
+# ...then the three CREATE TRIGGER statements and the backfill INSERT from that migration.
 ```
 
 Blobs (current mirror lives under `photos/blobs/`; recover a specific

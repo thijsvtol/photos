@@ -43,6 +43,9 @@ jobs:
       - name: Install rclone
         run: sudo -v ; curl -fsSL https://rclone.org/install.sh | sudo bash
 
+      - name: Install jq
+        run: sudo apt-get update && sudo apt-get install -y jq
+
       - name: Install wrangler
         run: npm install -g wrangler
 

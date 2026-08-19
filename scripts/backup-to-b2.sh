@@ -17,10 +17,12 @@
 #      bad delete in R2 never destroys the only backup of a file. (blobs/,
 #      _archive/ and db-backups/ are siblings so the mirror never re-syncs its
 #      own archive or dumps.)
-#   2. Database: `wrangler d1 export` produces a full logical SQL dump (schema +
-#      data). We gzip it and upload it as a dated blob under B2/<prefix>/db-backups/.
-#      Restoring the R2 blobs without this metadata would give you anonymous
-#      files, so the dump is the more important half.
+#   2. Database: `wrangler d1 export` of the real tables produces a logical SQL
+#      dump (schema + data). We gzip it and upload it as a dated blob under
+#      B2/<prefix>/db-backups/. Restoring the R2 blobs without this metadata
+#      would give you anonymous files, so the dump is the more important half.
+#      The fts5 search index (photos_fts) is skipped and rebuilt on restore —
+#      wrangler cannot export a DB containing fts5 tables (see backup_db).
 #
 # _archive/ is pruned to ARCHIVE_RETENTION_DAYS (short — it is the main cost
 # driver), db-backups/ to DB_RETENTION_DAYS (long — the dumps are tiny).
@@ -125,6 +127,8 @@ backup_db() {
   require CLOUDFLARE_ACCOUNT_ID CLOUDFLARE_API_TOKEN B2_KEY_ID B2_APPLICATION_KEY
   command -v wrangler >/dev/null 2>&1 || command -v npx >/dev/null 2>&1 || {
     echo "::error::Need wrangler (npm i -g wrangler) or npx to export D1" >&2; exit 1; }
+  command -v jq >/dev/null 2>&1 || {
+    echo "::error::jq is required to enumerate D1 tables (apt-get install jq / brew install jq)" >&2; exit 1; }
   export RCLONE_CONFIG_B2_ACCOUNT="$B2_KEY_ID"
   export RCLONE_CONFIG_B2_KEY="$B2_APPLICATION_KEY"
 
@@ -137,8 +141,51 @@ backup_db() {
   dump="${workdir}/${D1_DATABASE}-${STAMP}.sql"
   gz="${dump}.gz"
 
-  echo ">> Exporting D1 database '${D1_DATABASE}' (remote)"
-  $wr d1 export "$D1_DATABASE" --remote --output "$dump"
+  # `wrangler d1 export` refuses to export a whole database that contains an
+  # fts5 virtual table (photos_fts) — an open wrangler limitation. Exporting a
+  # single table with --table does get past it, but --table takes exactly ONE
+  # table (a comma-separated list is read as one literal name and silently
+  # yields an EMPTY dump), so we enumerate the real tables and export them one
+  # at a time, concatenating the results. We skip:
+  #   - the fts5 virtual table (sql = CREATE VIRTUAL TABLE ...)
+  #   - its shadow tables (auto-generated, single-quoted names: CREATE TABLE '...')
+  #   - SQLite/D1 internals (sqlite_*, _cf_*)
+  # The fts5 index is fully derived from `photos`, so it is rebuilt on restore
+  # (see docs/backup.md), not backed up. BLOB columns (face/AI embeddings) are
+  # preserved because wrangler writes them as SQL, not JSON.
+  local list_sql tables_json t tables=()
+  list_sql="SELECT name FROM sqlite_master WHERE type='table' \
+AND sql LIKE 'CREATE TABLE %' AND sql NOT LIKE 'CREATE TABLE ''%' \
+AND name NOT LIKE 'sqlite_%' AND name NOT LIKE '_cf_%' ORDER BY name"
+
+  echo ">> Enumerating exportable tables in '${D1_DATABASE}'"
+  if ! tables_json="$($wr d1 execute "$D1_DATABASE" --remote --json --command "$list_sql" 2>/dev/null)"; then
+    echo "::error::Failed to list D1 tables" >&2; exit 1
+  fi
+  while IFS= read -r t; do
+    [ -n "$t" ] && tables+=("$t")
+  done < <(printf '%s' "$tables_json" | jq -r '.[0].results[].name')
+
+  if [ "${#tables[@]}" -eq 0 ]; then
+    echo "::error::No exportable tables found — refusing to write an empty backup" >&2
+    exit 1
+  fi
+  echo "   ${#tables[@]} tables: ${tables[*]}"
+
+  echo ">> Exporting D1 tables from '${D1_DATABASE}' (remote), one at a time"
+  : > "$dump"
+  for t in "${tables[@]}"; do
+    echo "   - ${t}"
+    $wr d1 export "$D1_DATABASE" --remote --table "$t" --output "${workdir}/part.sql"
+    # A per-table export is at minimum the PRAGMA header + a CREATE TABLE. If a
+    # table ever comes back with only the header, --table silently matched
+    # nothing — fail loudly rather than ship a gap.
+    if ! grep -q 'CREATE TABLE' "${workdir}/part.sql"; then
+      echo "::error::Export of table '${t}' produced no schema — aborting" >&2
+      exit 1
+    fi
+    cat "${workdir}/part.sql" >> "$dump"
+  done
 
   # Guard against a silently-empty export becoming a "successful" backup.
   if [ ! -s "$dump" ]; then
