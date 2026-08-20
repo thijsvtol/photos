@@ -43,7 +43,7 @@ function createFakeEnv(photos: FakePhoto[]) {
             const hasCursor = query.includes('AND p.id > ?');
             const cursor = hasCursor ? (boundArgs[0] as string) : null;
             const results = photos
-              .filter((p) => !p.file_hash && p.file_type !== 'video/mp4')
+              .filter((p) => !p.file_hash)
               .filter((p) => !cursor || p.id > cursor)
               .sort((a, b) => a.id.localeCompare(b.id))
               .map((p) => ({ id: p.id, file_type: p.file_type, cache_version: 1, event_slug: p.event_slug }));
@@ -74,7 +74,7 @@ function createFakeEnv(photos: FakePhoto[]) {
 }
 
 describe('GET /admin/photos/missing-file-hash', () => {
-  it('returns only images/RAW without a file_hash, paginated', async () => {
+  it('returns every media type (photos, RAW AND videos) without a file_hash, paginated', async () => {
     const photos: FakePhoto[] = [
       { id: 'a', file_hash: null, file_type: 'image/jpeg', event_slug: 'evil8' },
       { id: 'b', file_hash: 'already-set', file_type: 'image/jpeg', event_slug: 'evil8' },
@@ -86,7 +86,9 @@ describe('GET /admin/photos/missing-file-hash', () => {
     const res = await photosRouter.fetch(new Request('http://test/missing-file-hash?limit=50'), env);
     const body = await res.json() as { photos: { id: string }[]; nextCursor: string | null };
 
-    expect(body.photos.map((p) => p.id)).toEqual(['a', 'd']);
+    // Video 'c' is now INCLUDED (duplicate videos can be backfilled/detected); only 'b' (already
+    // hashed) is skipped.
+    expect(body.photos.map((p) => p.id)).toEqual(['a', 'c', 'd']);
     expect(body.nextCursor).toBeNull();
   });
 });

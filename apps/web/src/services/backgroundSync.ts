@@ -447,8 +447,10 @@ class BackgroundSyncService {
         // native background-sync path got file_hash = NULL, silently
         // breaking duplicate detection for the whole library). Cached on the
         // queue item so a retry never re-hashes the same file.
+        // Hash photos AND videos — computeFileHash streams large files, so video no longer risks
+        // the OOM that once justified skipping it (a NULL hash breaks duplicate detection).
         let fileHash = upload.fileHash;
-        if (!isVideo && !fileHash) {
+        if (!fileHash) {
           fileHash = await computeFileHash(upload.file);
           if (fileHash) {
             await this.updateQueueItemAndSync(upload.id, { fileHash });

@@ -18,8 +18,8 @@ import CastButton from '../components/CastButton';
 import AlbumPicker from '../components/AlbumPicker';
 import EventLocationPicker from '../components/EventLocationPicker';
 import { useUpload } from '../hooks/useUpload';
-import { getEvent, getPhotos, loginToEvent, getPreviewUrl, getCastPreviewUrl, requestZip, downloadZip, setPhotoFeatured, getUserFavoriteIds, toggleFavorite as toggleFavoriteAPI, bulkDeletePhotos, bulkCopyPhotos, bulkUpdatePhotoLocation, bulkTagPeopleOnPhotos, getCollaborators, getNamedPeople } from '../api';
-import type { NamedPerson } from '../api';
+import { getEvent, getPhotos, loginToEvent, getPreviewUrl, getCastPreviewUrl, requestZip, downloadZip, setPhotoFeatured, getUserFavoriteIds, toggleFavorite as toggleFavoriteAPI, bulkDeletePhotos, bulkCopyPhotos, bulkUpdatePhotoLocation, bulkTagPeopleOnPhotos, getCollaborators, getNamedPeople, getPublicNamedPeople } from '../api';
+import type { NamedPerson, PublicNamedPerson } from '../api';
 import type { Event, Photo, Collaborator } from '../types';
 import { getCachedEventPhotos, cacheEventPhotos } from '../services/eventPhotoCache';
 import { CollaboratorAvatars } from '../components/CollaboratorAvatars';
@@ -46,13 +46,15 @@ const EventGallery: React.FC = () => {
   const [sortBy, setSortBy] = useState('date_desc');
   const [searchQuery, setSearchQuery] = useState('');
   const [mediaTypeFilter, setMediaTypeFilter] = useState<'all' | 'photos' | 'videos'>('all');
-  // People filter (admin-only, see Timeline.tsx's people filter for why full names are gated to
-  // admins there but public on the combined Timeline/Search page) —
-  // requires ALL selected people to be in a photo (see the worker route's doc comment for why
-  // AND, not OR, is the right default for multi-select). Reuses the same `namedPeople` list
-  // fetched (lazily, below) for the "Tag people" bulk action. The filter UI itself now lives
-  // inside GallerySortFilter (see its namedPeople/selectedPersonIds/onTogglePerson props)
-  // rather than its own separate picker state here.
+  // People filter — available to EVERY viewer (not just admins), same as the Timeline/Search
+  // people filter. Requires ALL selected people to be in a photo (AND semantics — see the worker
+  // route's doc comment for why that's the right default for multi-select; the public
+  // GET /events/:slug/photos endpoint already supports the `people` param). Admins filter using
+  // the full admin people list (`namedPeople`, also used by the "Tag people" bulk action);
+  // non-admins use the public first-name-only list (`filterPeople`, from GET /api/people/named,
+  // which is privacy-restricted server-side to people appearing in accessible events). The filter
+  // UI (searchable picker) lives inside GallerySortFilter (see its
+  // namedPeople/selectedPersonIds/onTogglePerson props).
   const [peopleFilterIds, setPeopleFilterIds] = useState<Set<number>>(new Set());
   const [userFavorites, setUserFavorites] = useState<Set<string>>(new Set());
   const [deleting, setDeleting] = useState(false);
@@ -62,6 +64,8 @@ const EventGallery: React.FC = () => {
   const [showPeopleTagPicker, setShowPeopleTagPicker] = useState(false);
   const [namedPeople, setNamedPeople] = useState<NamedPerson[]>([]);
   const [namedPeopleLoading, setNamedPeopleLoading] = useState(false);
+  // Public (first-name-only) people list used to power the people filter for NON-admin viewers.
+  const [filterPeople, setFilterPeople] = useState<PublicNamedPerson[]>([]);
   const [peopleTagSelection, setPeopleTagSelection] = useState<Set<number>>(new Set());
   const [peopleTagSearchQuery, setPeopleTagSearchQuery] = useState('');
   const [taggingPeople, setTaggingPeople] = useState(false);
@@ -386,6 +390,17 @@ const EventGallery: React.FC = () => {
     if (!isAdmin) return;
     getNamedPeople().then(setNamedPeople).catch((err) => console.error('Failed to load people list', err));
   }, [isAdmin]);
+
+  // Non-admin viewers get the same people filter, powered by the public (first-name-only,
+  // access-restricted) named-people list — same source the Timeline/Search people filter uses.
+  useEffect(() => {
+    if (isAdmin) return; // admins already have the full list loaded above
+    getPublicNamedPeople().then(setFilterPeople).catch((err) => console.error('Failed to load people list', err));
+  }, [isAdmin]);
+
+  // Which list backs the gallery's people filter: admins use the full admin list (full names, for
+  // disambiguating same-first-name people); everyone else uses the public first-name list.
+  const galleryFilterPeople = isAdmin ? namedPeople : filterPeople;
 
   const toggleFavorite = async (photoId: string, isFavorited: boolean) => {
     // Require authentication for favorites
@@ -1580,9 +1595,9 @@ const EventGallery: React.FC = () => {
           </div>
         </div>
 
-        {/* Sort & Filter Options - Mobile optimized (people filter for admins is folded into
-            this same bar — see GallerySortFilter's namedPeople/selectedPersonIds/onTogglePerson
-            props — instead of its own separate chips row above the gallery). */}
+        {/* Sort & Filter Options - Mobile optimized (the people filter — available to every
+            viewer — is folded into this same bar via GallerySortFilter's
+            namedPeople/selectedPersonIds/onTogglePerson props, instead of its own separate row). */}
         <GallerySortFilter
           sortBy={sortBy}
           onSortChange={setSortBy}
@@ -1617,9 +1632,9 @@ const EventGallery: React.FC = () => {
           isGlobalAdmin={isAdmin}
           density={density}
           onDensityChange={changeDensity}
-          namedPeople={isAdmin ? namedPeople : undefined}
-          selectedPersonIds={isAdmin ? peopleFilterIds : undefined}
-          onTogglePerson={isAdmin ? handleToggleGalleryPersonFilter : undefined}
+          namedPeople={galleryFilterPeople}
+          selectedPersonIds={peopleFilterIds}
+          onTogglePerson={handleToggleGalleryPersonFilter}
         />
 
         {/* Duplicate photos banner */}

@@ -210,7 +210,8 @@ app.get('/missing-file-hash', async (c) => {
         WHERE p.deleted_at IS NULL
           AND p.upload_complete = 1
           AND p.file_hash IS NULL
-          AND p.file_type NOT IN ('video/mp4')
+          -- Videos ARE included now: computeFileHash() streams large files, so duplicate videos
+          -- can be backfilled/detected like photos (was previously excluded to avoid OOM).
           -- Never hash a COPY (bulk-copy rows point at another photo's R2 file
           -- via source_photo_id and are created without a file_hash on purpose).
           -- The media route serves a copy the SOURCE file, so hashing one just

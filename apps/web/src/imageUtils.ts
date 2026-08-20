@@ -15,15 +15,58 @@ export interface ResizeOptions {
   quality: number;
 }
 
-const MAX_HASHABLE_SIZE = 100 * 1024 * 1024; // 100MB
+// Files at or below this size are hashed in one shot with WebCrypto (fast, no WASM load). Larger
+// files (typically videos) are hashed by STREAMING instead — see computeFileHash() for why.
+const ONE_SHOT_MAX_SIZE = 100 * 1024 * 1024; // 100MB
+
+function bytesToHex(bytes: Uint8Array): string {
+  return Array.from(bytes)
+    .map((b) => b.toString(16).padStart(2, '0'))
+    .join('');
+}
 
 /**
- * SHA-256 hash (hex) of a file's full contents, used for client-side
- * duplicate-photo detection (see GET /admin/photos/duplicates and
- * syncPeopleAcrossDuplicates() in apps/worker/src/faceClustering.ts, both of
- * which group photos by this value). Capped at MAX_HASHABLE_SIZE and
- * best-effort — returns undefined (never throws) if hashing fails or the
- * file is too large to hash without risking excessive memory use.
+ * Streaming SHA-256 (hex) — feeds the file to an incremental hasher chunk-by-chunk so the whole
+ * file is NEVER held in memory at once. Used for large files (videos), where a single
+ * `file.arrayBuffer()` of hundreds of MB has crashed the Android WebView's renderer. WebCrypto has
+ * no incremental digest, so this uses hash-wasm's `createSHA256()` — the result is a standard
+ * SHA-256, byte-for-byte identical to WebCrypto's, so image and video hashes share one space and
+ * stay comparable for duplicate detection. Exported for unit tests (so the streaming path can be
+ * exercised without allocating a 100MB blob).
+ */
+export async function sha256Stream(file: Blob): Promise<string> {
+  const { createSHA256 } = await import('hash-wasm');
+  const hasher = await createSHA256();
+  hasher.init();
+  // Prefer the Streams API (true constant-memory); fall back to fixed-size slices where Blob.stream
+  // isn't available (older WebViews / some test environments).
+  const streamable = file as Blob & { stream?: () => ReadableStream<Uint8Array> };
+  if (typeof streamable.stream === 'function') {
+    const reader = streamable.stream().getReader();
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      if (value) hasher.update(value);
+    }
+  } else {
+    const CHUNK = 8 * 1024 * 1024; // 8MB slices
+    for (let offset = 0; offset < file.size; offset += CHUNK) {
+      const slice = file.slice(offset, Math.min(offset + CHUNK, file.size));
+      hasher.update(new Uint8Array(await slice.arrayBuffer()));
+    }
+  }
+  return hasher.digest('hex');
+}
+
+/**
+ * SHA-256 hash (hex) of a file's full contents, used for client-side duplicate detection (see
+ * GET /admin/photos/duplicates and syncPeopleAcrossDuplicates() in
+ * apps/worker/src/faceClustering.ts, both of which group photos/videos by this value). Best-effort:
+ * returns undefined (never throws) if hashing fails, so it can never block or fail an upload.
+ *
+ * Small files use a one-shot WebCrypto digest; large files (videos) stream through an incremental
+ * hasher so memory stays bounded regardless of size (see sha256Stream). Both produce the same
+ * SHA-256, so nothing that was hashed before regresses.
  *
  * Shared between uploadManager.ts's foreground upload path, backgroundSync.ts's native
  * background-upload path (the latter used to skip this entirely, which meant essentially every
@@ -33,13 +76,13 @@ const MAX_HASHABLE_SIZE = 100 * 1024 * 1024; // 100MB
  * this accepts either).
  */
 export async function computeFileHash(file: Blob): Promise<string | undefined> {
-  if (file.size > MAX_HASHABLE_SIZE) return undefined;
   try {
-    const buffer = await file.arrayBuffer();
-    const digest = await crypto.subtle.digest('SHA-256', buffer);
-    return Array.from(new Uint8Array(digest))
-      .map((b) => b.toString(16).padStart(2, '0'))
-      .join('');
+    if (file.size <= ONE_SHOT_MAX_SIZE && typeof crypto !== 'undefined' && crypto.subtle) {
+      const buffer = await file.arrayBuffer();
+      const digest = await crypto.subtle.digest('SHA-256', buffer);
+      return bytesToHex(new Uint8Array(digest));
+    }
+    return await sha256Stream(file);
   } catch (err) {
     console.warn('[computeFileHash] Failed to compute file hash:', err);
     return undefined;

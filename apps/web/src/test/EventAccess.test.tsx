@@ -24,6 +24,8 @@ vi.mock('../api', () => ({
   getCollaborators: vi.fn(),
   getInviteLinks: vi.fn(),
   createInviteLink: vi.fn(),
+  getNamedPeople: vi.fn(() => Promise.resolve([])),
+  getPublicNamedPeople: vi.fn(() => Promise.resolve([])),
 }));
 
 vi.mock('../contexts/AuthContext', () => ({

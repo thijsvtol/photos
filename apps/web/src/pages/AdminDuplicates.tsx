@@ -208,7 +208,7 @@ const AdminDuplicates: React.FC = () => {
             <button
               onClick={handleBackfillHashes}
               disabled={backfilling}
-              title="Photos uploaded via the Android app never got a content hash computed until this was fixed, so duplicate detection couldn't find them — this downloads and hashes every affected photo once, retroactively"
+              title="Computes a content hash for every photo AND video that's missing one, so duplicate detection can find them — downloads each affected original once to hash it (videos can be large, so this may transfer a lot of data), retroactively"
               className="px-4 py-2 bg-gray-200 dark:bg-gray-700 text-gray-800 dark:text-gray-200 rounded-lg hover:bg-gray-300 dark:hover:bg-gray-600 transition flex items-center gap-2 disabled:opacity-50"
             >
               {backfilling ? <Loader2 className="w-4 h-4 animate-spin" /> : <Hash className="w-4 h-4" />}

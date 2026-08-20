@@ -592,11 +592,12 @@ class UploadManager {
         await updateQueueItem(item.id, exifData);
       }
 
-      // Compute a content hash for duplicate detection (images/RAW only —
-      // skipped for video to avoid reading large files fully into memory).
-      // Cached on the item so a retry never re-hashes the same file.
+      // Compute a content hash for duplicate detection — for photos AND videos. computeFileHash
+      // streams large files (videos) instead of buffering them, so this no longer risks the
+      // out-of-memory crash that once justified skipping video. Cached on the item so a retry
+      // never re-hashes the same file.
       let fileHash = item.fileHash;
-      if (!isVideo && !fileHash) {
+      if (!fileHash) {
         fileHash = await computeFileHash(item.file);
         if (fileHash) {
           this.updateItem(item.id, { fileHash });
