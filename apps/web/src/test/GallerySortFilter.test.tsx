@@ -38,3 +38,29 @@ describe('media type filter', () => {
     expect(onChange).toHaveBeenCalledWith('videos');
   });
 });
+
+describe('selectionBarOnly mode (Timeline)', () => {
+  it('hides the sort/filter card but still shows the selection action bar when photos are selected', () => {
+    render(
+      <GallerySortFilter
+        {...baseProps}
+        selectionBarOnly
+        selectedCount={3}
+        onMediaTypeFilterChange={vi.fn()}
+        mediaTypeFilter="all"
+        onClearSelection={vi.fn()}
+      />
+    );
+    // Sort/filter card is skipped...
+    expect(screen.queryByLabelText('Sort by')).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('Show photos only')).not.toBeInTheDocument();
+    // ...but the selection action bar renders (Download is always available).
+    expect(screen.getByText('3 photos')).toBeInTheDocument();
+    expect(screen.getByTitle('Download as ZIP')).toBeInTheDocument();
+  });
+
+  it('still renders the sort/filter card normally when selectionBarOnly is not set', () => {
+    render(<GallerySortFilter {...baseProps} />);
+    expect(screen.getByLabelText('Sort by')).toBeInTheDocument();
+  });
+});

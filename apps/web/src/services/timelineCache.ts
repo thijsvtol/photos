@@ -65,6 +65,14 @@ export async function cacheTimelinePhotos(photos: Photo[]): Promise<void> {
   await db.photos.bulkPut(photos);
 }
 
+/** Removes photos from the cache by id — used after a bulk delete on the Timeline so a
+ *  just-deleted photo doesn't linger in IndexedDB and reappear on the next open (the normal
+ *  load path only upserts the newest page and never otherwise learns about deletions). */
+export async function removeTimelineCachePhotos(ids: string[]): Promise<void> {
+  if (ids.length === 0) return;
+  await db.photos.bulkDelete(ids);
+}
+
 /** Clears the entire timeline cache (e.g. on logout, to avoid leaking another
  *  user's private photos into a shared device's cache). */
 export async function clearTimelineCache(): Promise<void> {

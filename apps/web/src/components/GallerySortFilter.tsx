@@ -46,6 +46,10 @@ interface GallerySortFilterProps {
   namedPeople?: SimplePerson[];
   selectedPersonIds?: Set<number>;
   onTogglePerson?: (personId: number) => void;
+  /** Render ONLY the fixed selection action bar (shown when selectedCount > 0), skipping the
+   *  sort/filter/search card below it. Used by the Timeline page, which has its own separate
+   *  search/sort/people bar but wants the exact same bulk-action toolbar as EventGallery. */
+  selectionBarOnly?: boolean;
 }
 
 /**
@@ -78,6 +82,7 @@ export function GallerySortFilter({
   namedPeople,
   selectedPersonIds,
   onTogglePerson,
+  selectionBarOnly = false,
 }: GallerySortFilterProps) {
   const isAndroid = Capacitor.getPlatform() === 'android';
   // On mobile, the media-type filter + grid-density controls are tucked into a
@@ -242,7 +247,8 @@ export function GallerySortFilter({
         </div>
       )}
 
-      {/* Sort controls - always visible */}
+      {/* Sort controls - always visible (skipped in selection-bar-only mode, e.g. Timeline) */}
+      {!selectionBarOnly && (
       <div data-gallery-controls="true" className="bg-white dark:bg-gray-800 rounded-lg shadow p-3 sm:p-4 mb-3 sm:mb-4">
         {/* Row 1: Sort + Search + mobile Filters toggle — always visible */}
         <div className="flex items-center gap-3">
@@ -464,6 +470,7 @@ export function GallerySortFilter({
           </div>
         )}
       </div>
+      )}
     </>
   );
 }

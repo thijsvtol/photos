@@ -1,6 +1,6 @@
 import React, { useEffect, useState, useRef, useMemo } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { Clock, Download, X, Search, Users, Check } from 'lucide-react';
+import { Clock, X, Search, Users, Check } from 'lucide-react';
 import Navbar from '../components/Navbar';
 import Footer from '../components/Footer';
 import { TimelineSkeleton } from '../components/Skeletons';
@@ -8,11 +8,15 @@ import SEO from '../components/SEO';
 import JustifiedGrid from '../components/JustifiedGrid';
 import VerticalDateScrubber from '../components/VerticalDateScrubber';
 import MemoriesCarousel from '../components/MemoriesCarousel';
+import { GallerySortFilter } from '../components/GallerySortFilter';
+import AlbumPicker from '../components/AlbumPicker';
+import EventLocationPicker from '../components/EventLocationPicker';
+import { useConfirm } from '../components/ConfirmDialog';
 import { useGridDensity } from '../hooks/useGridDensity';
 import { usePhotoSelection } from '../hooks/usePhotoSelection';
-import { getTimeline, getUserFavoriteIds, toggleFavorite as toggleFavoriteAPI, requestZip, downloadZip, getMyPhotos, searchPhotos, getPublicNamedPeople } from '../api';
-import type { SearchResultPhoto, PublicNamedPerson } from '../api';
-import { getCachedTimelinePhotos, cacheTimelinePhotos } from '../services/timelineCache';
+import { getTimeline, getUserFavoriteIds, toggleFavorite as toggleFavoriteAPI, requestZip, downloadZip, getMyPhotos, searchPhotos, getPublicNamedPeople, setPhotoFeatured, bulkDeletePhotos, bulkCopyPhotos, bulkUpdatePhotoLocation, bulkTagPeopleOnPhotos, getNamedPeople } from '../api';
+import type { SearchResultPhoto, PublicNamedPerson, NamedPerson } from '../api';
+import { getCachedTimelinePhotos, cacheTimelinePhotos, removeTimelineCachePhotos } from '../services/timelineCache';
 import type { Photo } from '../types';
 import { config } from '../config';
 import { useAuth } from '../contexts/AuthContext';
@@ -96,8 +100,15 @@ function LazyDateGroup({ photoCount, children }: { photoCount: number; children:
 }
 
 const Timeline: React.FC = () => {
-  const { isAuthenticated } = useAuth();
+  const { isAuthenticated, user } = useAuth();
+  // Timeline is cross-event and viewable by anyone, and (unlike EventGallery) it has no per-event
+  // collaborator-role data — so bulk actions split into three tiers by the GLOBAL admin flag only:
+  //  - logged out:        select + download (per-event ZIP)
+  //  - logged in (user):  + favorite
+  //  - admin:             + copy, feature, tag people, set location, delete
+  const isAdmin = user?.isAdmin === true;
   const toast = useToast();
+  const { confirm, ConfirmDialog } = useConfirm();
   const [searchParams, setSearchParams] = useSearchParams();
   const [photos, setPhotos] = useState<Photo[]>([]);
   const [loading, setLoading] = useState(true);
@@ -143,7 +154,20 @@ const Timeline: React.FC = () => {
     selectedPhotos,
     togglePhotoSelection: togglePhotoSelectionBase,
     clearSelection,
+    setSelectedPhotos,
   } = usePhotoSelection(photos);
+
+  // Bulk-action modal + in-flight state (mirrors EventGallery's selection toolbar).
+  const [showCopyPicker, setShowCopyPicker] = useState(false);
+  const [showLocationPicker, setShowLocationPicker] = useState(false);
+  const [showPeopleTagPicker, setShowPeopleTagPicker] = useState(false);
+  const [peopleTagSelection, setPeopleTagSelection] = useState<Set<number>>(new Set());
+  const [peopleTagSearchQuery, setPeopleTagSearchQuery] = useState('');
+  const [namedPeopleForTag, setNamedPeopleForTag] = useState<NamedPerson[]>([]);
+  const [namedPeopleForTagLoading, setNamedPeopleForTagLoading] = useState(false);
+  const [taggingPeople, setTaggingPeople] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const [copying, setCopying] = useState(false);
 
   const togglePhotoSelection = async (photoId: string) => {
     await haptics.selectionChanged();
@@ -187,6 +211,161 @@ const Timeline: React.FC = () => {
       clearSelection();
     } catch {
       toast.showError('Download failed');
+    }
+  };
+
+  // Selects every photo currently visible — the search results when a search is active, otherwise
+  // the whole (filtered) timeline. `filteredPhotos`/`filteredSearchResults` are declared lower in
+  // this component but only read at click time, so the reference is safe.
+  const handleSelectAllVisible = async () => {
+    const ids = (hasActiveSearch ? (filteredSearchResults || []) : filteredPhotos).map((p) => p.id);
+    if (ids.length === 0) return;
+    setSelectedPhotos(new Set(ids));
+    await haptics.light();
+  };
+
+  // Favorite/unfavorite the whole selection (logged-in users). If all selected are already
+  // favorited, this unfavorites them; otherwise it favorites the lot — matching EventGallery.
+  const toggleFavoriteForSelected = async () => {
+    if (!isAuthenticated || selectedPhotos.size === 0) return;
+    const ids = Array.from(selectedPhotos);
+    const allAlreadyFavorited = ids.every((id) => userFavorites.has(id));
+    try {
+      await Promise.all(ids.map((id) => toggleFavoriteAPI(id, allAlreadyFavorited)));
+      setUserFavorites((prev) => {
+        const next = new Set(prev);
+        ids.forEach((id) => (allAlreadyFavorited ? next.delete(id) : next.add(id)));
+        return next;
+      });
+      await haptics.light();
+      toast.showSuccess(allAlreadyFavorited ? 'Removed selected from favorites' : 'Added selected to favorites');
+    } catch {
+      toast.showError('Failed to update favorites');
+    }
+  };
+
+  // Admin: toggle featured on the selection. If any selected photo isn't featured, feature all;
+  // otherwise unfeature all (visible only on the full-timeline `photos` list).
+  const toggleFeaturedForSelected = async () => {
+    if (!isAdmin || selectedPhotos.size === 0) return;
+    const ids = Array.from(selectedPhotos);
+    const shouldEnable = photos.filter((p) => selectedPhotos.has(p.id)).some((p) => !p.is_featured);
+    try {
+      await Promise.all(ids.map((id) => setPhotoFeatured(id, shouldEnable)));
+      setPhotos((prev) => prev.map((p) => (selectedPhotos.has(p.id) ? { ...p, is_featured: shouldEnable } : p)));
+      await haptics.light();
+      toast.showSuccess(shouldEnable ? 'Marked selected as featured' : 'Removed featured from selected');
+    } catch {
+      toast.showError('Failed to update featured status');
+    }
+  };
+
+  // Admin: soft-delete the selection (moves to Trash, restorable for 30 days). Removes them from
+  // the in-memory lists AND the IndexedDB cache so they don't reappear on the next open.
+  const handleBulkDelete = async () => {
+    if (!isAdmin || selectedPhotos.size === 0) return;
+    const ids = Array.from(selectedPhotos);
+    const confirmed = await confirm(
+      'Delete Photos',
+      `Delete ${ids.length} selected photo(s)? They move to Trash (restorable for 30 days).`,
+      { variant: 'danger' }
+    );
+    if (!confirmed) return;
+    try {
+      setDeleting(true);
+      const result = await bulkDeletePhotos(ids);
+      const deleted = new Set(ids);
+      setPhotos((prev) => prev.filter((p) => !deleted.has(p.id)));
+      setSearchResults((prev) => (prev ? prev.filter((p) => !deleted.has(p.id)) : prev));
+      await removeTimelineCachePhotos(ids);
+      clearSelection();
+      await haptics.success();
+      toast.showSuccess(`Deleted ${result.deletedCount} photo(s)`);
+    } catch {
+      await haptics.error();
+      toast.showError('Failed to delete photos');
+    } finally {
+      setDeleting(false);
+    }
+  };
+
+  // Admin: set GPS location on the selection (spans events — the API is id-based).
+  const handleBulkSetLocation = async (latitude: number, longitude: number) => {
+    if (!isAdmin || selectedPhotos.size === 0) return;
+    const ids = Array.from(selectedPhotos);
+    try {
+      const result = await bulkUpdatePhotoLocation(ids, latitude, longitude);
+      setPhotos((prev) => prev.map((p) => (selectedPhotos.has(p.id) ? { ...p, latitude, longitude } : p)));
+      setShowLocationPicker(false);
+      clearSelection();
+      await haptics.success();
+      toast.showSuccess(`Updated location for ${result.updatedCount} photo(s)`);
+    } catch {
+      await haptics.error();
+      toast.showError('Failed to update location');
+    }
+  };
+
+  // Admin: open the people-tag picker and load the (admin) named-people list.
+  const handleOpenPeopleTagPicker = async () => {
+    if (selectedPhotos.size === 0) return;
+    setPeopleTagSelection(new Set());
+    setPeopleTagSearchQuery('');
+    setShowPeopleTagPicker(true);
+    setNamedPeopleForTagLoading(true);
+    try {
+      setNamedPeopleForTag(await getNamedPeople());
+    } catch {
+      toast.showError('Failed to load people list');
+    } finally {
+      setNamedPeopleForTagLoading(false);
+    }
+  };
+
+  const handleToggleTagPersonSelection = (personId: number) => {
+    setPeopleTagSelection((prev) => {
+      const next = new Set(prev);
+      if (next.has(personId)) next.delete(personId);
+      else next.add(personId);
+      return next;
+    });
+  };
+
+  // Admin: additively tag the selected people onto every selected photo (never removes tags).
+  const handleBulkTagPeople = async () => {
+    if (peopleTagSelection.size === 0 || selectedPhotos.size === 0) return;
+    const ids = Array.from(selectedPhotos);
+    setTaggingPeople(true);
+    try {
+      const result = await bulkTagPeopleOnPhotos(ids, Array.from(peopleTagSelection));
+      setShowPeopleTagPicker(false);
+      clearSelection();
+      await haptics.success();
+      toast.showSuccess(`Tagged people on ${result.taggedPhotoCount} photo(s)`);
+    } catch {
+      await haptics.error();
+      toast.showError('Failed to tag people');
+    } finally {
+      setTaggingPeople(false);
+    }
+  };
+
+  // Admin: copy the selection into another event ("album"). Source ids span events; the target is
+  // chosen in AlbumPicker.
+  const handleBulkCopy = async (targetEventSlug: string) => {
+    if (selectedPhotos.size === 0) return;
+    const ids = Array.from(selectedPhotos);
+    try {
+      setCopying(true);
+      const result = await bulkCopyPhotos(ids, targetEventSlug);
+      clearSelection();
+      await haptics.success();
+      toast.showSuccess(`Copied ${result.copiedCount} photo(s)`);
+    } catch {
+      await haptics.error();
+      toast.showError('Failed to copy photos');
+    } finally {
+      setCopying(false);
     }
   };
 
@@ -273,6 +452,16 @@ const Timeline: React.FC = () => {
     mq.addEventListener('change', handler);
     return () => mq.removeEventListener('change', handler);
   }, []);
+
+  // Escape clears the current selection (matches EventGallery's selection UX).
+  useEffect(() => {
+    if (selectedPhotos.size === 0) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') clearSelection();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [selectedPhotos.size, clearSelection]);
 
   // Initial load — render whatever is already cached in IndexedDB immediately
   // (instant, no network wait — this is what makes reopening the Timeline on
@@ -592,6 +781,32 @@ const Timeline: React.FC = () => {
           )}
         </div>
 
+        {/* Bulk-selection action bar — same component/looks as EventGallery, rendered once
+            (it's position:fixed) so it works in both timeline and search modes. Actions are
+            tiered: download for everyone, favorite for logged-in, the rest admin-only. */}
+        <GallerySortFilter
+          selectionBarOnly
+          sortBy="date_desc"
+          onSortChange={() => {}}
+          searchQuery={searchQuery}
+          onSearchChange={setSearchQuery}
+          selectedCount={selectedPhotos.size}
+          onClearSelection={clearSelection}
+          onSelectAllVisible={handleSelectAllVisible}
+          onDownloadSelected={handleDownloadSelected}
+          onToggleFavoriteSelected={isAuthenticated ? toggleFavoriteForSelected : undefined}
+          onToggleFeaturedSelected={isAdmin ? toggleFeaturedForSelected : undefined}
+          showFeaturedAction={isAdmin}
+          onCopySelected={isAdmin ? () => setShowCopyPicker(true) : undefined}
+          onDeleteSelected={isAdmin ? handleBulkDelete : undefined}
+          onSetLocationSelected={isAdmin ? () => setShowLocationPicker(true) : undefined}
+          onTagPeopleSelected={isAdmin ? handleOpenPeopleTagPicker : undefined}
+          isAdmin={isAdmin}
+          isGlobalAdmin={isAdmin}
+          isDeleting={deleting}
+          isCopying={copying}
+        />
+
         {hasActiveSearch ? (
           <>
             {searchError && (
@@ -647,8 +862,8 @@ const Timeline: React.FC = () => {
                         slug={eventSlug}
                         targetRowHeight={targetRowHeight}
                         spacing={4}
-                        selectedPhotos={new Set()}
-                        forceControlsVisible={false}
+                        selectedPhotos={selectedPhotos}
+                        forceControlsVisible={selectedPhotos.size > 0}
                         userFavorites={userFavorites}
                         supportsHover={supportsHover}
                         linkState={{
@@ -656,6 +871,7 @@ const Timeline: React.FC = () => {
                           searchResultIds: eventPhotos.map((p) => p.id),
                           searchUrl: `${window.location.pathname}${window.location.search}`,
                         }}
+                        onToggleSelection={togglePhotoSelection}
                         onToggleFavorite={isAuthenticated ? toggleFavorite : undefined}
                       />
                     </div>
@@ -678,20 +894,6 @@ const Timeline: React.FC = () => {
           </div>
         ) : (
           <div className="space-y-7" ref={densityContainerRef}>
-            {/* Selection toolbar */}
-            {selectedPhotos.size > 0 && (
-              <div className="sticky top-20 z-30 bg-blue-600 text-white rounded-xl px-4 py-2.5 flex items-center justify-between shadow-lg">
-                <span className="font-medium text-sm">{selectedPhotos.size} selected</span>
-                <div className="flex items-center gap-2">
-                  <button onClick={handleDownloadSelected} className="px-3 py-1.5 bg-white/20 rounded-lg text-sm hover:bg-white/30 transition flex items-center gap-1.5">
-                    <Download className="w-4 h-4" /> Download
-                  </button>
-                  <button onClick={clearSelection} className="p-1.5 rounded-lg hover:bg-white/20 transition">
-                    <X className="w-4 h-4" />
-                  </button>
-                </div>
-              </div>
-            )}
             {dates.map((date) => {
               const datePhotos = groups.get(date) || [];
               const formattedDate = formatDate(date);
@@ -780,6 +982,113 @@ const Timeline: React.FC = () => {
           </>
         )}
       </div>
+
+      {ConfirmDialog}
+
+      {isAdmin && (
+        <AlbumPicker
+          isOpen={showCopyPicker}
+          onClose={() => setShowCopyPicker(false)}
+          onSelectAlbum={(targetSlug) => {
+            void handleBulkCopy(targetSlug);
+          }}
+          title="Copy to Album"
+          description="Choose an album to copy the selected photos to"
+        />
+      )}
+
+      {isAdmin && (
+        <EventLocationPicker
+          isOpen={showLocationPicker}
+          onClose={() => setShowLocationPicker(false)}
+          onSetLocation={(lat, lng) => {
+            void handleBulkSetLocation(lat, lng);
+          }}
+        />
+      )}
+
+      {showPeopleTagPicker && (
+        <div
+          className="fixed inset-0 bg-black/75 flex items-center justify-center z-[100] p-4"
+          onClick={() => !taggingPeople && setShowPeopleTagPicker(false)}
+        >
+          <div
+            className="bg-gray-800 rounded-lg p-6 max-w-md w-full max-h-[80vh] flex flex-col"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex justify-between items-center mb-4 shrink-0">
+              <h2 className="text-xl font-bold text-white flex items-center gap-2">
+                <Users className="w-5 h-5" /> Tag people on {selectedPhotos.size} photo{selectedPhotos.size === 1 ? '' : 's'}
+              </h2>
+              <button
+                onClick={() => setShowPeopleTagPicker(false)}
+                disabled={taggingPeople}
+                className="text-gray-400 hover:text-white disabled:opacity-50"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <p className="text-xs text-gray-400 mb-3 shrink-0">
+              Adds the selected people to every chosen photo — existing tags on these photos are kept.
+            </p>
+
+            <input
+              type="text"
+              value={peopleTagSearchQuery}
+              onChange={(e) => setPeopleTagSearchQuery(e.target.value)}
+              placeholder="Search people..."
+              className="mb-3 w-full px-3 py-2 bg-gray-700 text-white rounded-lg text-sm placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500 shrink-0"
+            />
+
+            <div className="flex-1 overflow-y-auto space-y-1 -mx-1 px-1">
+              {namedPeopleForTagLoading ? (
+                <p className="text-gray-400 text-sm py-4 text-center">Loading people...</p>
+              ) : namedPeopleForTag.length === 0 ? (
+                <p className="text-gray-400 text-sm py-4 text-center">
+                  No named people yet — name someone in Admin → People first.
+                </p>
+              ) : (
+                namedPeopleForTag
+                  .filter((p) => p.name.toLowerCase().includes(peopleTagSearchQuery.trim().toLowerCase()))
+                  .map((p) => {
+                    const selected = peopleTagSelection.has(p.id);
+                    return (
+                      <button
+                        key={p.id}
+                        onClick={() => handleToggleTagPersonSelection(p.id)}
+                        className={`w-full flex items-center justify-between gap-2 px-3 py-2 rounded-lg text-sm text-left transition ${
+                          selected ? 'bg-blue-600 text-white' : 'bg-gray-700/60 text-gray-200 hover:bg-gray-700'
+                        }`}
+                      >
+                        <span>{p.name}</span>
+                        {selected && <Check className="w-4 h-4 shrink-0" />}
+                      </button>
+                    );
+                  })
+              )}
+            </div>
+
+            <div className="flex gap-2.5 mt-4 shrink-0">
+              <button
+                onClick={() => setShowPeopleTagPicker(false)}
+                disabled={taggingPeople}
+                className="flex-1 py-2.5 bg-gray-700 text-white rounded-lg text-sm font-medium hover:bg-gray-600 transition disabled:opacity-50"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleBulkTagPeople}
+                disabled={taggingPeople || peopleTagSelection.size === 0}
+                className="flex-1 py-2.5 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 transition disabled:opacity-50"
+              >
+                {taggingPeople ? 'Tagging...' : 'Tag People'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       <Footer />
     </div>
   );
