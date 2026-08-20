@@ -8,6 +8,10 @@ export interface Env {
   // type (always present at runtime via wrangler.toml's [ai] binding) so
   // existing test Env mocks don't all need updating.
   AI?: Ai;
+  /** Optional: max photos the AI enrichment cron processes per hourly tick
+   *  (see aiEnrichment.ts). Defaults to 50; clamped to 200. Raise to clear a
+   *  backlog faster — the job self-throttles to the free neuron allocation. */
+  AI_ENRICHMENT_BATCH_SIZE?: string;
   EVENT_COOKIE_SECRET: string;
   ADMIN_SHARED_SECRET?: string;
   ADMIN_EMAILS?: string; // Comma-separated list of admin emails
