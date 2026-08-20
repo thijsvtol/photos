@@ -32,9 +32,17 @@ function createFakeEnv(photos: FakePhoto[]) {
   const activityInserts: unknown[][] = [];
   const deletedR2Keys: string[] = [];
   const deletedDbIds: string[] = [];
+  const tombstoneUpserts: string[] = [];
+  const tombstoneDeletes: string[] = [];
+  const tombstonePurges: string[] = [];
   let deletedAtUpdateCount = 0;
 
   const db = {
+    async batch(stmts: { run: () => Promise<unknown> }[]) {
+      // recordSoftDeleteTombstones() drives its per-photo upserts through batch().
+      for (const s of stmts) await s.run();
+      return stmts.map(() => ({ success: true }));
+    },
     prepare(query: string) {
       let boundArgs: unknown[] = [];
       const stmt = {
@@ -43,10 +51,10 @@ function createFakeEnv(photos: FakePhoto[]) {
           return stmt;
         },
         async first<T>() {
-          if (query.includes('SELECT id, event_id, deleted_at FROM photos WHERE id = ?')) {
+          if (query.includes('SELECT id, event_id, deleted_at, uploaded_by FROM photos WHERE id = ?')) {
             const [id] = boundArgs as [string];
             const photo = photos.find((p) => p.id === id);
-            return (photo ? { id: photo.id, event_id: photo.event_id, deleted_at: photo.deleted_at } : null) as T | null;
+            return (photo ? { id: photo.id, event_id: photo.event_id, deleted_at: photo.deleted_at, uploaded_by: 'owner@example.com' } : null) as T | null;
           }
           if (query.includes('SELECT id, event_id FROM photos WHERE id = ?')) {
             const [id] = boundArgs as [string];
@@ -77,6 +85,15 @@ function createFakeEnv(photos: FakePhoto[]) {
           if (query.includes('DELETE FROM photos WHERE id IN')) {
             deletedDbIds.push(...(boundArgs as string[]));
           }
+          if (query.includes('INSERT INTO photo_tombstones')) {
+            tombstoneUpserts.push(boundArgs[0] as string);
+          }
+          if (query.includes('DELETE FROM photo_tombstones')) {
+            tombstoneDeletes.push(boundArgs[0] as string);
+          }
+          if (query.includes('UPDATE photo_tombstones SET purged_at')) {
+            tombstonePurges.push(...(boundArgs as string[]));
+          }
           if (query.includes('INSERT INTO activity_log')) {
             activityInserts.push(boundArgs);
           }
@@ -93,7 +110,7 @@ function createFakeEnv(photos: FakePhoto[]) {
     },
   };
 
-  return { db, bucket, activityInserts, deletedR2Keys, deletedDbIds, getDeletedAtUpdateCount: () => deletedAtUpdateCount };
+  return { db, bucket, activityInserts, deletedR2Keys, deletedDbIds, tombstoneUpserts, tombstoneDeletes, tombstonePurges, getDeletedAtUpdateCount: () => deletedAtUpdateCount };
 }
 
 function makeEnv(fake: ReturnType<typeof createFakeEnv>) {
@@ -117,6 +134,8 @@ describe('DELETE /photos/:photoId (soft delete / move to Trash)', () => {
     expect(photos[0].deleted_at).not.toBeNull();
     expect(fake.deletedR2Keys).toHaveLength(0);
     expect(fake.getDeletedAtUpdateCount()).toBe(1);
+    // A soft delete records a deletion tombstone (unpurged) for later sync-device reconciliation.
+    expect(fake.tombstoneUpserts).toContain('p1');
   });
 
   it('logs a photo_trash activity entry only the first time', async () => {
@@ -160,6 +179,8 @@ describe('PUT /photos/:photoId/restore', () => {
 
     expect(res.status).toBe(200);
     expect(photos[0].deleted_at).toBeNull();
+    // Restoring must drop the tombstone so the photo can never become "purged/eligible".
+    expect(fake.tombstoneDeletes).toContain('p1');
   });
 });
 
@@ -173,6 +194,8 @@ describe('DELETE /photos/:photoId/permanent', () => {
     expect(res.status).toBe(200);
     expect(fake.deletedR2Keys.length).toBeGreaterThan(0);
     expect(fake.deletedDbIds).toContain('p1');
+    // Permanent deletion stamps the tombstone as purged (the moment the feed exposes it).
+    expect(fake.tombstonePurges).toContain('p1');
   });
 
   it('does not delete R2 objects for a copied photo (source_photo_id set)', async () => {

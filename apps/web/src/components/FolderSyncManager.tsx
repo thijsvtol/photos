@@ -47,6 +47,9 @@ export default function FolderSyncManager({ eventSlug }: Props) {
   const [isNative, setIsNative] = useState(false);
   const [status, setStatus] = useState<FolderSyncStatus | null>(null);
   const [showQuarantined, setShowQuarantined] = useState(false);
+  // Opt-in "delete local file when deleted online" — a JS-side flag (see folderSync.ts), not part
+  // of the native settings blob, so it's tracked separately from `status`.
+  const [deleteLocalEnabled, setDeleteLocalEnabled] = useState(false);
   const pollRef = useRef<number | null>(null);
 
   const loadFolderSyncs = useCallback(() => {
@@ -69,6 +72,7 @@ export default function FolderSyncManager({ eventSlug }: Props) {
 
     loadFolderSyncs();
     void refreshStatus();
+    setDeleteLocalEnabled(folderSyncService.getDeleteLocalEnabled());
 
     // The engine runs in a background job, not in this WebView, so poll rather
     // than expecting it to push updates into React.
@@ -149,6 +153,16 @@ export default function FolderSyncManager({ eventSlug }: Props) {
     setStatus(prev => (prev ? { ...prev, ...patch } : prev));
     await folderSyncService.updateSettings(patch);
     await refreshStatus();
+  };
+
+  const handleToggleDeleteLocal = async (enabled: boolean) => {
+    setDeleteLocalEnabled(enabled); // optimistic
+    try {
+      await folderSyncService.setDeleteLocalEnabled(enabled);
+    } catch (err) {
+      console.warn('[FolderSyncManager] Failed to update delete-local setting:', err);
+      setDeleteLocalEnabled(folderSyncService.getDeleteLocalEnabled());
+    }
   };
 
   const handleRetryQuarantined = async (id: number) => {
@@ -355,6 +369,12 @@ export default function FolderSyncManager({ eventSlug }: Props) {
             hint="Waits until the phone has charge to spare."
             checked={status.batteryNotLow}
             onChange={(v) => updateSetting({ batteryNotLow: v })}
+          />
+          <Toggle
+            label="Delete local files when deleted online"
+            hint="When you permanently delete a synced photo online (after the 30-day trash), also remove its original from this folder. Only affects photos you deleted yourself."
+            checked={deleteLocalEnabled}
+            onChange={(v) => void handleToggleDeleteLocal(v)}
           />
 
           <label className="block">

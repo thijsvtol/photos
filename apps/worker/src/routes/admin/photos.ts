@@ -3,6 +3,7 @@ import { ulid } from 'ulid';
 import type { Env, User } from '../../types';
 import { extractUser, hasEventCapabilityByEventId, isUserAdmin } from '../../auth';
 import { permanentlyDeletePhotos } from '../../photoDeletion';
+import { recordSoftDeleteTombstones, removeTombstone } from '../../tombstones';
 import { logActivity } from '../../activityLog';
 import { isValidFaceInput, EXPECTED_EMBEDDING_LENGTH } from '../../faceValidation';
 import { setManualPhotoPersonTags, getPhotoPeople, addManualPhotoPersonTags, removePersonFromPhoto, syncPeopleAcrossDuplicates } from '../../faceClustering';
@@ -672,9 +673,9 @@ app.delete('/:photoId', async (c) => {
 
   try {
     const photo = await c.env.DB
-      .prepare('SELECT id, event_id, deleted_at FROM photos WHERE id = ?')
+      .prepare('SELECT id, event_id, deleted_at, uploaded_by FROM photos WHERE id = ?')
       .bind(photoId)
-      .first<{ id: string; event_id: number; deleted_at: string | null }>();
+      .first<{ id: string; event_id: number; deleted_at: string | null; uploaded_by: string | null }>();
 
     if (!photo) {
       return c.json({ error: 'Photo not found' }, 404);
@@ -698,6 +699,16 @@ app.delete('/:photoId', async (c) => {
       );
 
       const user = c.get('user');
+
+      // Record a deletion tombstone so an opt-in Android sync device can later remove the local
+      // original once this is permanently purged (see tombstones.ts). Best-effort — never let a
+      // tombstone write failure surface as a failed delete.
+      try {
+        await recordSoftDeleteTombstones(c.env, [{ id: photoId, uploadedBy: photo.uploaded_by }], user?.email || 'unknown');
+      } catch (err) {
+        console.error('Failed to record deletion tombstone (non-fatal):', err);
+      }
+
       await logActivity(c.env, {
         eventId: photo.event_id,
         actorEmail: user?.email || 'unknown',
@@ -743,6 +754,14 @@ app.put('/:photoId/restore', async (c) => {
       .prepare('UPDATE photos SET deleted_at = NULL WHERE id = ?')
       .bind(photoId)
       .run();
+
+    // Drop any deletion tombstone so a restored photo can never become "purged/eligible" and
+    // trigger a local-file deletion on a sync device (see tombstones.ts / docs).
+    try {
+      await removeTombstone(c.env, photoId);
+    } catch (err) {
+      console.error('Failed to remove deletion tombstone on restore (non-fatal):', err);
+    }
 
     await logActivity(c.env, {
       eventId: photo.event_id,
@@ -955,14 +974,14 @@ app.post('/bulk-delete', async (c) => {
       const chunkPlaceholders = chunk.map(() => '?').join(', ');
       return c.env.DB
         .prepare(`
-          SELECT p.id, p.event_id
+          SELECT p.id, p.event_id, p.uploaded_by
           FROM photos p
           WHERE p.id IN (${chunkPlaceholders}) AND p.deleted_at IS NULL
         `)
         .bind(...chunk);
     });
 
-    const photoRowBatches = await c.env.DB.batch<{ id: string; event_id: number }>(photoSelectStatements);
+    const photoRowBatches = await c.env.DB.batch<{ id: string; event_id: number; uploaded_by: string | null }>(photoSelectStatements);
 
     const existingPhotos = photoRowBatches.flatMap((batch) => batch.results || []);
     const existingPhotoIds = new Set(existingPhotos.map((p) => p.id));
@@ -999,6 +1018,18 @@ app.post('/bulk-delete', async (c) => {
         () => c.env.DB.batch(updateStatements),
         `DB bulk soft-delete ${existingPhotos.length} photos`
       );
+
+      // Deletion tombstones for the whole selection (see tombstones.ts) — best-effort so a
+      // tombstone write failure never turns a successful bulk delete into an error.
+      try {
+        await recordSoftDeleteTombstones(
+          c.env,
+          existingPhotos.map((p) => ({ id: p.id, uploadedBy: p.uploaded_by })),
+          user.email
+        );
+      } catch (err) {
+        console.error('Failed to record bulk deletion tombstones (non-fatal):', err);
+      }
 
       deletedCount = existingPhotos.length;
 

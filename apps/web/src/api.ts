@@ -941,6 +941,23 @@ export const getMyPhotos = async (): Promise<MyPhotosResponse> => {
   return response.data;
 };
 
+export interface DeletionsPage {
+  deletions: { photoId: string; purgedAt: string }[];
+  nextCursor: string | null;
+}
+
+/** Deletions feed for the Android folder-sync "delete local when deleted online" reconcile
+ *  (see folderSync.ts). Returns photos the current account permanently deleted online (purge-
+ *  gated + `deleted_by = me`). Pass `head: true` to fetch just the current head cursor (no rows)
+ *  — used at opt-in time so enabling never retroactively deletes files purged before opt-in. */
+export const getDeletions = async (cursor?: string | null, head = false): Promise<DeletionsPage> => {
+  const params: Record<string, string> = {};
+  if (cursor) params.cursor = cursor;
+  if (head) params.head = '1';
+  const response = await api.get<DeletionsPage>('/me/deletions', { params });
+  return response.data;
+};
+
 
 
 // Helper functions

@@ -2,6 +2,7 @@ import { Capacitor } from '@capacitor/core';
 import { config as appConfig } from '../config';
 import FolderSync, { type FolderSyncStatus, type FolderSyncSettings } from './folderSyncPlugin';
 import { purgeFolderSyncQueueItems } from '../uploadQueue';
+import { getDeletions } from '../api';
 
 // Enable debug logging (set to false in production builds)
 const DEBUG = import.meta.env.DEV;
@@ -47,6 +48,12 @@ const MIGRATION_KEY = 'folderSyncNativeMigrated';
 class FolderSyncService {
   private syncConfigs: Map<string, FolderSyncConfig> = new Map();
   private readonly STORAGE_KEY = 'folderSyncConfigs';
+  // Opt-in "delete the local file when I permanently delete the photo online" (off by default).
+  // Kept in localStorage rather than the native settings blob because the reconcile is entirely
+  // JS-driven (it needs the authenticated web API + the WASM-free deletions feed), so only this
+  // layer reads it. See docs/local-delete-sync-design.md.
+  private readonly DELETE_LOCAL_ENABLED_KEY = 'folderSyncDeleteLocalEnabled';
+  private readonly DELETIONS_CURSOR_KEY = 'folderSyncDeletionsCursor';
 
   async initialize() {
     if (!Capacitor.isNativePlatform()) {
@@ -59,6 +66,8 @@ class FolderSyncService {
     // Push the current mapping (and API base URL) down to the native engine so
     // a background run has everything it needs without the app being open.
     await this.pushConfigToNative();
+    // Best-effort: remove local originals for photos permanently deleted online since last time.
+    void this.reconcileDeletions();
   }
 
   /**
@@ -202,6 +211,58 @@ class FolderSyncService {
       throw new Error('Folder sync only available on mobile');
     }
     await FolderSync.syncNow({ userInitiated });
+    void this.reconcileDeletions();
+  }
+
+  /** Whether the opt-in "delete local when deleted online" reconcile is on for this device. */
+  getDeleteLocalEnabled(): boolean {
+    return localStorage.getItem(this.DELETE_LOCAL_ENABLED_KEY) === '1';
+  }
+
+  /**
+   * Turns the reconcile on/off. Enabling SEEDS the cursor at the server's current head, so it only
+   * ever acts on photos purged AFTER opt-in — it never retroactively deletes local originals for
+   * things the user purged online in the past.
+   */
+  async setDeleteLocalEnabled(enabled: boolean): Promise<void> {
+    if (enabled) {
+      try {
+        const { nextCursor } = await getDeletions(null, true);
+        localStorage.setItem(this.DELETIONS_CURSOR_KEY, nextCursor || '');
+      } catch (err) {
+        // If we can't reach the head, start empty — worst case is a one-time reconcile of the
+        // (small) purge backlog, still gated to this account's own deletes.
+        debug('Failed to seed deletions cursor on enable', err);
+        localStorage.setItem(this.DELETIONS_CURSOR_KEY, '');
+      }
+      localStorage.setItem(this.DELETE_LOCAL_ENABLED_KEY, '1');
+    } else {
+      localStorage.setItem(this.DELETE_LOCAL_ENABLED_KEY, '0');
+    }
+  }
+
+  /**
+   * Server→local reconcile: pull this account's purge-gated deletions feed and remove the matching
+   * local originals via the native SAF delete. Opt-in + native only, and best-effort — any failure
+   * just leaves the work for the next run (the persisted cursor only advances past pages that were
+   * actually handed to the native layer). Runs while the app is open (initialize + syncNow); a
+   * background-worker equivalent is a documented follow-up.
+   */
+  async reconcileDeletions(): Promise<void> {
+    if (!Capacitor.isNativePlatform() || !this.getDeleteLocalEnabled()) return;
+    try {
+      let cursor = localStorage.getItem(this.DELETIONS_CURSOR_KEY) || null;
+      // Bounded so a runaway feed can never loop forever; each iteration strictly advances cursor.
+      for (let i = 0; i < 100; i++) {
+        const { deletions, nextCursor } = await getDeletions(cursor);
+        if (deletions.length === 0 || !nextCursor) break;
+        await FolderSync.deleteLocalFiles({ photoIds: deletions.map((d) => d.photoId) });
+        cursor = nextCursor;
+        localStorage.setItem(this.DELETIONS_CURSOR_KEY, cursor);
+      }
+    } catch (err) {
+      debug('Deletion reconcile failed (will retry next run)', err);
+    }
   }
 
   /** Live engine status: settings, queue counts and quarantined files. */

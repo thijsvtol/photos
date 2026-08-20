@@ -90,6 +90,17 @@ export interface FolderSyncPlugin {
 
   takePendingFaceJobs(): Promise<{ jobs: FaceJob[] }>;
   clearFaceJob(options: { photoId: string }): Promise<void>;
+
+  /**
+   * Deletes the LOCAL original files for the given server photo ids (opt-in "delete local when
+   * deleted online" reconcile — see folderSync.ts reconcileDeletions + docs). Each id is mapped
+   * to its local file via the sync ledger; ids this device never uploaded resolve to nothing.
+   * Best-effort per id (`deleted:false` on any failure, never throws).
+   */
+  deleteLocalFiles(options: { photoIds: string[] }): Promise<{
+    results: { photoId: string; deleted: boolean }[];
+    deletedCount: number;
+  }>;
 }
 
 /**
@@ -130,6 +141,7 @@ const FolderSync = registerPlugin<FolderSyncPlugin>('FolderSync', {
     async resetLedger() { return { removed: 0 }; },
     async takePendingFaceJobs() { return { jobs: [] }; },
     async clearFaceJob() { /* folder sync is mobile-only */ },
+    async deleteLocalFiles() { return { results: [], deletedCount: 0 }; },
   }),
 });
 

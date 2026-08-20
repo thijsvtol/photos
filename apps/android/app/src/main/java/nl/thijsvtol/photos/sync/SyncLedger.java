@@ -37,7 +37,7 @@ import java.util.Locale;
 public class SyncLedger extends SQLiteOpenHelper {
 
     private static final String DB_NAME = "sync_ledger.db";
-    private static final int DB_VERSION = 2;
+    private static final int DB_VERSION = 3;
     public static final String TABLE = "synced_files";
 
     // ── state values ──
@@ -53,6 +53,13 @@ public class SyncLedger extends SQLiteOpenHelper {
     public static final String STATE_DUPLICATE = "duplicate";
     /** Gave up after {@link #MAX_RETRIES} attempts. Quarantined, retryable by the user. */
     public static final String STATE_FAILED = "failed";
+    /**
+     * The local original was deleted from the folder because its photo was permanently deleted
+     * online (opt-in "delete local when deleted online" reconcile — see FolderSyncPlugin
+     * deleteLocalFiles + docs/local-delete-sync-design.md). Terminal; the row is kept only so the
+     * reconcile is idempotent and never re-attempts a delete on an already-removed file.
+     */
+    public static final String STATE_LOCALLY_DELETED = "locally_deleted";
 
     /**
      * Whole-file attempt limit, matching MAX_RETRIES in
@@ -103,6 +110,9 @@ public class SyncLedger extends SQLiteOpenHelper {
         db.execSQL("CREATE INDEX idx_hash ON " + TABLE + "(event_slug, file_hash)");
         db.execSQL("CREATE INDEX idx_state ON " + TABLE + "(state)");
         db.execSQL("CREATE INDEX idx_faces ON " + TABLE + "(faces_pending)");
+        // Look up a row by its server photo id — used to map a server deletion back to the local
+        // file that produced it (deleteLocalFiles / byPhotoId).
+        db.execSQL("CREATE INDEX idx_photo_id ON " + TABLE + "(photo_id)");
     }
 
     @Override
@@ -131,6 +141,11 @@ public class SyncLedger extends SQLiteOpenHelper {
                     + "              ELSE '" + STATE_HASHED + "' END"
                     + " WHERE state = '" + STATE_FAILED + "' AND error = 'Sync stopped'"
             );
+        }
+
+        if (oldVersion < 3) {
+            // Index for photo_id lookups added for the "delete local when deleted online" feature.
+            db.execSQL("CREATE INDEX IF NOT EXISTS idx_photo_id ON " + TABLE + "(photo_id)");
         }
     }
 
@@ -415,6 +430,31 @@ public class SyncLedger extends SQLiteOpenHelper {
     public Entry byId(long id) {
         List<Entry> rows = query("id = ?", new String[]{String.valueOf(id)}, null, 1);
         return rows.isEmpty() ? null : rows.get(0);
+    }
+
+    /**
+     * Looks up the ledger row for a given server photo id, so a server-side deletion can be mapped
+     * back to the exact local file that produced it (its {@code doc_uri}). Only ever finds rows
+     * THIS device uploaded — which is what keeps the "delete local when deleted online" feature
+     * scoped to this device's own originals. Returns null if unknown or already locally deleted.
+     */
+    public Entry byPhotoId(String photoId) {
+        if (photoId == null) return null;
+        List<Entry> rows = query("photo_id = ?", new String[]{photoId}, null, 1);
+        return rows.isEmpty() ? null : rows.get(0);
+    }
+
+    /**
+     * Marks a row's local original as removed (see {@link #STATE_LOCALLY_DELETED}). Keyed by
+     * photo id (like {@link #clearFaceJob}) so the reconcile never re-attempts a delete on a file
+     * it has already removed.
+     */
+    public void markLocallyDeleted(String photoId) {
+        if (photoId == null) return;
+        ContentValues v = new ContentValues();
+        v.put("state", STATE_LOCALLY_DELETED);
+        v.put("updated_at", System.currentTimeMillis());
+        getWritableDatabase().update(TABLE, v, "photo_id = ?", new String[]{photoId});
     }
 
     // ── face-detection handoff ──

@@ -1,11 +1,17 @@
 package nl.thijsvtol.photos.sync;
 
+import android.content.ContentResolver;
+import android.net.Uri;
+import android.provider.DocumentsContract;
+
 import com.getcapacitor.JSArray;
 import com.getcapacitor.JSObject;
 import com.getcapacitor.Plugin;
 import com.getcapacitor.PluginCall;
 import com.getcapacitor.PluginMethod;
 import com.getcapacitor.annotation.CapacitorPlugin;
+
+import org.json.JSONException;
 
 import java.util.List;
 
@@ -201,5 +207,70 @@ public class FolderSyncPlugin extends Plugin {
         }
         ledger().clearFaceJob(photoId);
         call.resolve();
+    }
+
+    /**
+     * Deletes the LOCAL original files for the given server photo ids — the native half of the
+     * opt-in "delete local when deleted online" reconcile (see apps/web/src/services/folderSync.ts
+     * and docs/local-delete-sync-design.md). The JS side has already fetched these ids from the
+     * server's purge-gated deletions feed (GET /api/me/deletions), so every id here is a photo the
+     * user permanently deleted online.
+     *
+     * Each id is mapped to the exact local file via the ledger's photo_id → doc_uri link (never
+     * filename/hash), and only ids THIS device uploaded resolve — structurally scoping deletion to
+     * this device's own originals. Deletion uses DocumentsContract.deleteDocument on the persisted
+     * OPEN_DOCUMENT_TREE write grant (the same grant SafDirectoryPlugin.writeFile relies on).
+     *
+     * Best-effort: an unknown id, an already-removed file, a stale doc id, or a revoked grant just
+     * yields {deleted:false} and never throws — a failed local delete only leaves an orphan the
+     * user can remove manually; it must never break the sync run.
+     */
+    @PluginMethod
+    public void deleteLocalFiles(PluginCall call) {
+        JSArray photoIdsArr = call.getArray("photoIds");
+        if (photoIdsArr == null) {
+            call.reject("photoIds is required");
+            return;
+        }
+        List<String> photoIds;
+        try {
+            photoIds = photoIdsArr.toList();
+        } catch (JSONException e) {
+            call.reject("photoIds must be an array of strings");
+            return;
+        }
+
+        ContentResolver resolver = getContext().getContentResolver();
+        SyncLedger ledger = ledger();
+
+        JSArray results = new JSArray();
+        int deletedCount = 0;
+        for (String photoId : photoIds) {
+            if (photoId == null) continue;
+            boolean deleted = false;
+            SyncLedger.Entry entry = ledger.byPhotoId(photoId);
+            if (entry != null && entry.docUri != null) {
+                try {
+                    deleted = DocumentsContract.deleteDocument(resolver, Uri.parse(entry.docUri));
+                } catch (Exception e) {
+                    // Stale doc id / revoked grant / already gone — best-effort, never fatal.
+                    deleted = false;
+                }
+                // Mark the row terminal either way: the file is gone (we deleted it, or it already
+                // was), so it must not linger as an "uploaded" row for a server-side-purged photo,
+                // and the reconcile must never re-attempt it.
+                ledger.markLocallyDeleted(photoId);
+                if (deleted) deletedCount++;
+            }
+            JSObject o = new JSObject();
+            o.put("photoId", photoId);
+            o.put("deleted", deleted);
+            results.put(o);
+        }
+
+        JSObject result = new JSObject();
+        result.put("results", results);
+        result.put("deletedCount", deletedCount);
+        call.resolve(result);
     }
 }

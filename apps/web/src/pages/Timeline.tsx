@@ -638,6 +638,23 @@ const Timeline: React.FC = () => {
     window.scrollTo({ top: y, behavior: 'smooth' });
   };
 
+  // Always-visible "select all" for the current view (all loaded timeline photos, or all search
+  // results) — the shared selection toolbar's own Select All only appears AFTER something is
+  // already selected, so this is the entry point for selecting everything from a clean state.
+  const renderSelectAll = (ids: string[]) => {
+    if (ids.length === 0) return null;
+    const allSelected = ids.every((id) => selectedPhotos.has(id));
+    return (
+      <button
+        type="button"
+        onClick={() => (allSelected ? clearSelection() : setSelectedPhotos(new Set(ids)))}
+        className="px-3 py-1.5 text-sm font-medium rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700 transition shrink-0"
+      >
+        {allSelected ? 'Deselect all' : `Select all ${ids.length}`}
+      </button>
+    );
+  };
+
   return (
     <div className="min-h-screen bg-gray-50 dark:bg-gray-900 flex flex-col">
       <SEO
@@ -844,11 +861,14 @@ const Timeline: React.FC = () => {
               </div>
             ) : filteredSearchResults && filteredSearchResults.length > 0 ? (
               <>
-                <p className="text-sm text-gray-500 dark:text-gray-400 mb-3">
-                  {filteredSearchResults.length} photo{filteredSearchResults.length === 1 ? '' : 's'} found
-                  {filterMode === 'me' && ' (filtered to just you)'}
-                  {searchHasMore && ' — showing the first batch only; refine your search to see more.'}
-                </p>
+                <div className="flex items-center justify-between gap-3 mb-3 flex-wrap">
+                  <p className="text-sm text-gray-500 dark:text-gray-400">
+                    {filteredSearchResults.length} photo{filteredSearchResults.length === 1 ? '' : 's'} found
+                    {filterMode === 'me' && ' (filtered to just you)'}
+                    {searchHasMore && ' — showing the first batch only; refine your search to see more.'}
+                  </p>
+                  {renderSelectAll(filteredSearchResults.map((p) => p.id))}
+                </div>
                 <div ref={densityContainerRef}>
                   {searchResultsByEvent.map(([eventSlug, eventPhotos]) => (
                     <div key={eventSlug} className="mb-6">
@@ -894,6 +914,12 @@ const Timeline: React.FC = () => {
           </div>
         ) : (
           <div className="space-y-7" ref={densityContainerRef}>
+            <div className="flex items-center gap-3">
+              {renderSelectAll(filteredPhotos.map((p) => p.id))}
+              {selectedPhotos.size > 0 && (
+                <span className="text-sm text-gray-500 dark:text-gray-400">{selectedPhotos.size} selected</span>
+              )}
+            </div>
             {dates.map((date) => {
               const datePhotos = groups.get(date) || [];
               const formattedDate = formatDate(date);

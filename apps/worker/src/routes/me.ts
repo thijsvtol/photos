@@ -2,6 +2,7 @@ import { Hono } from 'hono';
 import type { Env, User } from '../types';
 import { requireAuth } from '../auth';
 import { firstNameOf } from '../utils';
+import { getDeletionsForUser } from '../tombstones';
 
 type Variables = {
   user: User;
@@ -104,6 +105,39 @@ app.get('/api/me/face-embedding-model', requireAuth, async (c) => {
   } catch (error) {
     console.error('Error fetching embedding model:', error);
     return c.json({ error: 'Failed to fetch embedding model' }, 500);
+  }
+});
+
+/**
+ * GET /api/me/deletions
+ *
+ * Deletions feed for the Android folder-sync "delete local file when deleted online" feature
+ * (opt-in; see docs/local-delete-sync-design.md and tombstones.ts). Returns photos THIS account
+ * deleted that have since been PERMANENTLY purged from the server — the client maps each returned
+ * photo id back to the local file it uploaded (via its sync ledger) and deletes it.
+ *
+ * Purge-gated by design: only tombstones with a non-NULL purged_at are ever returned, so a
+ * soft-delete that gets restored within the 30-day trash window never appears here (the restore
+ * deletes the tombstone). Scoped to `deleted_by = this account` ("only my own deletes").
+ *
+ * Query params:
+ *  - `cursor`: opaque "<purgedAt>|<id>" resume token; omit to start from the beginning.
+ *  - `head=1`: return no rows, just the current head `nextCursor` — the client stores this the
+ *    moment the user opts in, so enabling the feature never retroactively deletes local files for
+ *    photos purged before opt-in.
+ *  - `limit`: page size (default 200, capped 500).
+ */
+app.get('/api/me/deletions', requireAuth, async (c) => {
+  try {
+    const user = c.get('user');
+    const cursor = c.req.query('cursor') || null;
+    const head = c.req.query('head') === '1';
+    const limit = Math.min(parseInt(c.req.query('limit') || '200', 10) || 200, 500);
+    const page = await getDeletionsForUser(c.env, user.email, cursor, limit, head);
+    return c.json(page);
+  } catch (error) {
+    console.error('Error fetching deletions feed:', error);
+    return c.json({ error: 'Failed to fetch deletions' }, 500);
   }
 });
 

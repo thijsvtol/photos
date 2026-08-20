@@ -1,7 +1,12 @@
 # Design: propagate an online delete to the local synced folder (Android)
 
-**Status:** proposal / not yet implemented. Captured from a feasibility investigation so the
-feature can be approved and built on its own. The Timeline multi-select work shipped separately.
+**Status:** IMPLEMENTED (purge-gated + own-deletes-only, opt-in). Chosen safety model: option (A)
+purge-gated and "only my own deletes". Key pieces: migration `031_photo_tombstones.sql`;
+`apps/worker/src/tombstones.ts` + wiring in `routes/admin/photos.ts` (delete/restore),
+`photoDeletion.ts` (purge) and `routes/me.ts` (`GET /api/me/deletions`); native
+`SyncLedger.byPhotoId`/`markLocallyDeleted` + `FolderSyncPlugin.deleteLocalFiles`; JS
+`folderSync.reconcileDeletions` + the opt-in toggle in `FolderSyncManager`. The rest of this
+document is the original design rationale.
 
 ## Goal
 

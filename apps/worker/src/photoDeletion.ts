@@ -1,4 +1,5 @@
 import type { Env } from './types';
+import { markTombstonesPurged } from './tombstones';
 
 /**
  * Shared "permanently delete" logic (R2 objects + DB row), used by both the
@@ -50,5 +51,14 @@ export async function permanentlyDeletePhotos(env: Env, photos: DeletablePhotoRe
     const chunk = ids.slice(i, i + DB_DELETE_CHUNK_SIZE);
     const placeholders = chunk.map(() => '?').join(', ');
     await env.DB.prepare(`DELETE FROM photos WHERE id IN (${placeholders})`).bind(...chunk).run();
+  }
+
+  // Stamp deletion tombstones as purged — this is the moment the photo is truly gone, and only
+  // now does the deletions feed expose it so an opt-in sync device can remove the local original
+  // (purge-gated; see tombstones.ts / docs/local-delete-sync-design.md). Best-effort.
+  try {
+    await markTombstonesPurged(env, ids);
+  } catch (err) {
+    console.error('Failed to mark deletion tombstones purged (non-fatal):', err);
   }
 }
