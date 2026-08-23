@@ -61,8 +61,7 @@ jobs:
           cat "migrations/$FILE"
           echo "-----------------------------------------"
 
-      - name: Install wrangler
-        run: npm install -g wrangler
+      - uses: ./.github/actions/setup-wrangler
 
       - name: Apply migration
         env:

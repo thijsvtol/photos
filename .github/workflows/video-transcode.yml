@@ -15,17 +15,27 @@ on:
         required: false
         default: '100'
 
+# Never let two transcode runs (e.g. a manual dispatch overlapping the nightly
+# one) rewrite the same R2 videos in place at once — the same race backup-b2
+# guards against on its side.
+concurrency:
+  group: video-transcode
+  cancel-in-progress: false
+
 jobs:
   transcode:
     runs-on: ubuntu-latest
+    # A bulk import can leave a big HEVC backlog; give it room but stay well
+    # under the 6h ceiling and clear before the 05:17 UTC backup wants a stable
+    # R2 (see backup-b2.yml).
+    timeout-minutes: 350
     steps:
       - uses: actions/checkout@v7
 
       - name: Install ffmpeg
         run: sudo apt-get update && sudo apt-get install -y ffmpeg jq
 
-      - name: Install wrangler
-        run: npm install -g wrangler
+      - uses: ./.github/actions/setup-wrangler
 
       - name: Run transcode job
         env:

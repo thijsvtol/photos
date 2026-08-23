@@ -11,6 +11,11 @@ name: Nightly Backup to B2
 # This is the second, independent copy in a 3-2-1 strategy: a different provider
 # and account from Cloudflare, so it survives an account/billing problem or a
 # bad mass-delete that a second Cloudflare bucket would not.
+#
+# The two halves are INDEPENDENT (either can fail without the other) and touch
+# different B2 prefixes (blobs/ vs db-backups/), so they run as two parallel
+# jobs: the tiny, fast D1 dump never has to wait behind the multi-hour blob
+# mirror. `mode` on manual dispatch still lets a human run just one half.
 
 on:
   schedule:
@@ -22,38 +27,63 @@ on:
   workflow_dispatch:
     inputs:
       mode:
-        description: 'What to back up: all | blobs | db'
+        description: 'What to back up'
         required: false
         default: 'all'
+        type: choice
+        options:
+          - all
+          - blobs
+          - db
 
-# Never let two backups (e.g. a manual run overlapping the nightly one) mutate
-# the same B2 prefix at once.
+# Never let two backup RUNS (e.g. a manual run overlapping the nightly one)
+# mutate the same B2 prefix at once. Scoped to the whole run, so the db and
+# blobs jobs of one run can still proceed in parallel.
 concurrency:
   group: backup-b2
   cancel-in-progress: false
 
 jobs:
-  backup:
+  # --- Database dump: fast, needs wrangler + jq, independent of transcode. -----
+  db:
+    if: ${{ github.event_name != 'workflow_dispatch' || contains(fromJSON('["all","db"]'), github.event.inputs.mode) }}
     runs-on: ubuntu-latest
-    # Give a large mirror room to finish; the default 6h ceiling still applies.
-    timeout-minutes: 350
+    timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v6
-
-      - name: Install rclone
-        run: sudo -v ; curl -fsSL https://rclone.org/install.sh | sudo bash
+      - uses: actions/checkout@v7
 
       - name: Install jq
         run: sudo apt-get update && sudo apt-get install -y jq
 
-      - name: Install wrangler
-        run: npm install -g wrangler
+      - uses: ./.github/actions/setup-wrangler
 
-      - name: Run backup
+      - name: Back up database
         env:
-          # Reused from the other workflows (D1 export + R2 endpoint host).
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          B2_KEY_ID: ${{ secrets.B2_KEY_ID }}
+          B2_APPLICATION_KEY: ${{ secrets.B2_APPLICATION_KEY }}
+          B2_BUCKET: ${{ secrets.B2_BUCKET }}
+          # BACKUP_STAMP left unset: the script stamps DB dumps with the UTC date
+          # (photos-db-YYYY-MM-DD.sql.gz) for human-readable restores. Two runs
+          # on the same day overwrite; B2 versioning keeps the earlier one.
+        run: ./scripts/backup-to-b2.sh db
+
+  # --- Blob mirror: the long one, only needs rclone. --------------------------
+  blobs:
+    if: ${{ github.event_name != 'workflow_dispatch' || contains(fromJSON('["all","blobs"]'), github.event.inputs.mode) }}
+    runs-on: ubuntu-latest
+    # Give a large mirror room to finish; the default 6h ceiling still applies.
+    timeout-minutes: 350
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install rclone
+        run: sudo -v ; curl -fsSL https://rclone.org/install.sh | sudo bash
+
+      - name: Back up blobs
+        env:
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           # R2 S3 API token (Object Read is enough for a backup source).
           R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
           R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
@@ -61,7 +91,4 @@ jobs:
           B2_KEY_ID: ${{ secrets.B2_KEY_ID }}
           B2_APPLICATION_KEY: ${{ secrets.B2_APPLICATION_KEY }}
           B2_BUCKET: ${{ secrets.B2_BUCKET }}
-          # BACKUP_STAMP is left unset so the script stamps DB dumps with the UTC
-          # date (photos-db-YYYY-MM-DD.sql.gz) for human-readable restores. Two
-          # runs on the same day overwrite; B2 versioning keeps the earlier one.
-        run: ./scripts/backup-to-b2.sh "${{ github.event.inputs.mode || 'all' }}"
+        run: ./scripts/backup-to-b2.sh blobs

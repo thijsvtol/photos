@@ -95,6 +95,13 @@ database_id = "45a56052-5385-463d-bc79-7ddc20307f53"
 binding = "PHOTOS_BUCKET"
 bucket_name = "photos-storage"
 
+# Workers AI binding. MUST be repeated here: named environments do NOT inherit
+# the top-level [ai] binding, so without this env.AI is undefined in production
+# and runAiEnrichment() silently early-returns every cron tick — leaving every
+# photo's ai_caption/embedding NULL (search-by-description finds nothing).
+[env.production.ai]
+binding = "AI"
+
 # Staging configuration
 [env.staging]
 name = "photos-worker-staging"
@@ -125,3 +132,7 @@ binding = "DB"
 [[env.staging.r2_buckets]]
 binding = "PHOTOS_BUCKET"
 bucket_name = "photos-storage-staging"
+
+# Workers AI binding — see the note under [env.production.ai].
+[env.staging.ai]
+binding = "AI"

@@ -1,0 +1,19 @@
+name: Setup wrangler
+description: >
+  Install a pinned wrangler CLI globally. Centralises the wrangler version so a
+  breaking wrangler release can't silently break the nightly backup/transcode or
+  a DB migration — bump it here once instead of in every workflow.
+
+inputs:
+  version:
+    description: 'wrangler version to install (keep in sync with apps/worker/package.json)'
+    required: false
+    # Matches the ^4.117.0 range the worker builds against (4.118.0 known-good).
+    default: '4.118.0'
+
+runs:
+  using: composite
+  steps:
+    - name: Install wrangler ${{ inputs.version }}
+      shell: bash
+      run: npm install -g "wrangler@${{ inputs.version }}"
