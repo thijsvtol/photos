@@ -784,6 +784,53 @@ app.get('/api/people/named', optionalAuth, async (c) => {
     const userIsAdmin = isAdmin(c);
     const userEmail = user?.email || '';
 
+    // Optional ?event=<slug>: scope the list to people who actually appear in that ONE event
+    // (the event gallery's people filter — otherwise you could filter by someone who isn't in
+    // the event and get zero results). Requires access to the event, mirroring the gallery/photo
+    // endpoints' visibility + password rules. On no access / unknown event we return an empty
+    // list rather than an error so the filter picker degrades quietly (and doesn't leak that the
+    // event exists).
+    const eventSlug = c.req.query('event');
+    if (eventSlug) {
+      if (!isValidSlug(eventSlug)) return c.json({ error: 'Invalid slug format' }, 400);
+      const event = await c.env.DB
+        .prepare('SELECT id, password_hash, visibility FROM events WHERE slug = ?')
+        .bind(eventSlug)
+        .first<{ id: number; password_hash: string | null; visibility: string }>();
+      if (!event) return c.json({ people: [] });
+
+      if (event.visibility === 'private' && !userIsAdmin) return c.json({ people: [] });
+      if (event.visibility === 'collaborators_only' && !userIsAdmin) {
+        const role = await getCollaboratorRoleByEventId(c.env.DB, event.id, userEmail);
+        if (!role) return c.json({ people: [] });
+      }
+      if (event.password_hash && !userIsAdmin) {
+        const ok = await hasEventSessionAccess(c.req.raw, eventSlug, c.env.EVENT_COOKIE_SECRET);
+        if (!ok) return c.json({ people: [] });
+      }
+
+      const scoped = await c.env.DB
+        .prepare(`
+          SELECT DISTINCT pc.id, pc.name
+          FROM person_clusters pc
+          WHERE pc.name IS NOT NULL
+            AND EXISTS (
+              SELECT 1
+              FROM (
+                SELECT photo_id FROM photo_faces WHERE person_id = pc.id
+                UNION
+                SELECT photo_id FROM photo_person_tags WHERE person_id = pc.id
+              ) pp
+              JOIN photos p ON p.id = pp.photo_id
+              WHERE p.deleted_at IS NULL AND p.event_id = ?
+            )
+          ORDER BY pc.name COLLATE NOCASE
+        `)
+        .bind(event.id)
+        .all<{ id: number; name: string }>();
+      return c.json({ people: scoped.results || [] });
+    }
+
     const people = await c.env.DB
       .prepare(`
         SELECT DISTINCT pc.id, pc.name

@@ -896,8 +896,12 @@ export interface PublicNamedPerson {
   id: number;
   name: string;
 }
-export const getPublicNamedPeople = async (): Promise<PublicNamedPerson[]> => {
-  const response = await api.get<{ people: PublicNamedPerson[] }>('/people/named');
+/** Pass `eventSlug` to scope the list to people who appear in that one event (used by the event
+ *  gallery's people filter); omit it for the global list (Timeline/Search filter). */
+export const getPublicNamedPeople = async (eventSlug?: string): Promise<PublicNamedPerson[]> => {
+  const response = await api.get<{ people: PublicNamedPerson[] }>('/people/named', {
+    params: eventSlug ? { event: eventSlug } : undefined,
+  });
   return response.data.people;
 };
 

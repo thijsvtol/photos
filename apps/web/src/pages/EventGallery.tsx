@@ -384,23 +384,24 @@ const EventGallery: React.FC = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sortBy, peopleFilterIds]);
 
-  // Eagerly load the named-people list for admins (used by both the gallery's people filter and
-  // the multi-select "Tag people" bulk action) so the filter picker opens instantly.
+  // Eagerly load the full admin named-people list for admins — this backs the multi-select
+  // "Tag people" bulk action (which can tag someone not yet in this event), NOT the filter.
   useEffect(() => {
     if (!isAdmin) return;
     getNamedPeople().then(setNamedPeople).catch((err) => console.error('Failed to load people list', err));
   }, [isAdmin]);
 
-  // Non-admin viewers get the same people filter, powered by the public (first-name-only,
-  // access-restricted) named-people list — same source the Timeline/Search people filter uses.
+  // People FILTER list — scoped via ?event=<slug> to people who actually appear in THIS event,
+  // so you can't pick someone who isn't in it and get zero results. Loaded for every viewer
+  // (admins included); access to the event is enforced server-side on the endpoint.
   useEffect(() => {
-    if (isAdmin) return; // admins already have the full list loaded above
-    getPublicNamedPeople().then(setFilterPeople).catch((err) => console.error('Failed to load people list', err));
-  }, [isAdmin]);
+    if (!slug) return;
+    getPublicNamedPeople(slug).then(setFilterPeople).catch((err) => console.error('Failed to load people list', err));
+  }, [slug]);
 
-  // Which list backs the gallery's people filter: admins use the full admin list (full names, for
-  // disambiguating same-first-name people); everyone else uses the public first-name list.
-  const galleryFilterPeople = isAdmin ? namedPeople : filterPeople;
+  // The gallery's people filter is event-scoped for everyone; the admin-only `namedPeople` list
+  // above backs the separate "Tag people" bulk action, not this filter.
+  const galleryFilterPeople = filterPeople;
 
   const toggleFavorite = async (photoId: string, isFavorited: boolean) => {
     // Require authentication for favorites

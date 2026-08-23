@@ -340,7 +340,11 @@ const PhotoDetail: React.FC = () => {
     const loadedUrls: string[] = [];
     const preloadCache = preloadRefs.current;
 
-    const preloadImage = (photoToPreload: Photo) => {
+    const preloadImage = (photoToPreload: Photo | undefined) => {
+      // Defensive: a tiny photosToUse (e.g. a search that matched a single photo
+      // in this event) can index past the ends when wrapping — never dereference
+      // undefined here.
+      if (!photoToPreload) return;
       const url = getPreviewUrl(slug!, photoToPreload.id, photoToPreload.file_type, photoToPreload.cache_version);
       
       // Skip if already preloaded or is a video
@@ -373,24 +377,16 @@ const PhotoDetail: React.FC = () => {
       };
     };
 
-    // Preload next 3 photos for smooth swiping
-    for (let i = 1; i <= 3; i++) {
-      const nextIdx = currentIndex + i;
-      if (nextIdx < photosToUse.length) {
-        preloadImage(photosToUse[nextIdx]);
-      } else if (nextIdx >= photosToUse.length && photosToUse.length > 0) {
-        preloadImage(photosToUse[nextIdx - photosToUse.length]);
-      }
-    }
-
-    // Preload previous 2 photos
-    for (let i = 1; i <= 2; i++) {
-      const prevIdx = currentIndex - i;
-      if (prevIdx >= 0) {
-        preloadImage(photosToUse[prevIdx]);
-      } else if (prevIdx < 0 && photosToUse.length > 1) {
-        preloadImage(photosToUse[photosToUse.length + prevIdx]);
-      }
+    // Preload nearby photos for smooth swiping, wrapping around both ends with a
+    // true circular index. The old `idx - length` / `length + idx` wrap lands out
+    // of bounds when there are fewer photos than the preload distance — e.g. a
+    // search that matched a single photo in this event (photosToUse.length === 1),
+    // which crashed with "Cannot read properties of undefined (reading 'id')".
+    // Nothing to preload when there's only 0 or 1 photo.
+    if (photosToUse.length > 1) {
+      const wrap = (i: number) => ((i % photosToUse.length) + photosToUse.length) % photosToUse.length;
+      for (let i = 1; i <= 3; i++) preloadImage(photosToUse[wrap(currentIndex + i)]);
+      for (let i = 1; i <= 2; i++) preloadImage(photosToUse[wrap(currentIndex - i)]);
     }
 
     // Cleanup function
