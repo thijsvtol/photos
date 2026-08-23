@@ -137,13 +137,13 @@ jobs:
           serviceAccountJsonPlainText: ${{ secrets.GOOGLE_PLAY_SERVICE_ACCOUNT_JSON }}
           packageName: nl.thijsvtol.photos
           releaseFiles: apps/android/app/build/outputs/bundle/release/app-release.aab
-          track: ${{ github.event.inputs.track }}
+          tracks: ${{ github.event.inputs.track }}
           status: 'draft' # Set to 'completed' after app is live.
-          # Google refuses to auto-send this edit for review via the API ("Changes cannot be
-          # sent for review automatically"), so commit the edit without requesting review and
-          # press "Send for review" in the Play Console UI. Also required whenever a change needs
-          # a manual declaration (e.g. the FOREGROUND_SERVICE_DATA_SYNC form) before review.
-          changesNotSentForReview: true
+          # NOTE: `changesNotSentForReview` is intentionally NOT set. Google's API now rejects it
+          # for this app ("Changes are sent for review automatically. The query parameter
+          # changesNotSentForReview must not be set.") — the review is sent automatically, so
+          # setting it fails the commit. `status: draft` already keeps the release from going live
+          # until it's manually promoted in the Play Console, which is the control we wanted.
           inAppUpdatePriority: 2
           whatsNewDirectory: apps/web/release-notes
       
