@@ -1599,7 +1599,7 @@ const PhotoDetail: React.FC = () => {
     '@type': 'ImageObject',
     contentUrl: getPreviewUrl(slug!, photo.id, photo.file_type, photo.cache_version),
     name: `Photo from ${event?.name}`,
-    caption: `Photo from ${event?.name} event${photo.city ? ` in ${photo.city}` : ''}`,
+    caption: photo.ai_caption?.trim() || `Photo from ${event?.name} event${photo.city ? ` in ${photo.city}` : ''}`,
     creator: {
       '@type': 'Person',
       name: config.brandName
@@ -1617,7 +1617,8 @@ const PhotoDetail: React.FC = () => {
   } : undefined;
 
   const photoDescription = photo
-    ? `Photo from ${event?.name}${photo.city ? ` in ${photo.city}` : ''}. ${photo.camera_model ? `Shot with ${photo.camera_model}${photo.lens_model ? ` and ${photo.lens_model}` : ''}.` : ''}`
+    ? (photo.ai_caption?.trim()
+        || `Photo from ${event?.name}${photo.city ? ` in ${photo.city}` : ''}. ${photo.camera_model ? `Shot with ${photo.camera_model}${photo.lens_model ? ` and ${photo.lens_model}` : ''}.` : ''}`)
     : '';
 
   return (
@@ -2214,6 +2215,16 @@ const PhotoDetail: React.FC = () => {
                   )}
                 </dl>
               </div>
+
+              {/* AI-generated description (Workers AI enrichment cron; empty until enriched). */}
+              {photo?.ai_caption?.trim() && (
+                <div>
+                  <h4 className="text-white font-medium mb-2 flex items-center gap-2">
+                    ✨ Description
+                  </h4>
+                  <p className="text-gray-200 text-sm leading-relaxed">{photo.ai_caption.trim()}</p>
+                </div>
+              )}
 
               {/* People tagged on this photo */}
               {((photo?.people && photo.people.length > 0) || canEditMedia) && (

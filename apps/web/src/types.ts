@@ -52,6 +52,10 @@ export interface Photo {
   archived_at?: string | null; // non-null = archived (hidden from Timeline, still in event gallery)
   event_slug_trash?: string; // present only on Trash listing rows
   event_name_trash?: string; // present only on Trash listing rows
+  /** AI-generated caption (Workers AI enrichment cron; also used as informal alt-text).
+   *  Only populated by the single photo-detail fetch (getPhoto()), which selects p.*;
+   *  the list/gallery endpoints strip it to keep payloads small (see photoColumns.ts). */
+  ai_caption?: string | null;
   /** Named people tagged on this photo (auto-detected + manual) — only populated by the single
    *  photo-detail fetch (getPhoto()), not by list/gallery endpoints. */
   people?: { id: number; name: string }[];
