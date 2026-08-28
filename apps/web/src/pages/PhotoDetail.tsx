@@ -23,6 +23,55 @@ import { Capacitor } from '@capacitor/core';
 import { Share } from '@capacitor/share';
 import { Filesystem, Directory } from '@capacitor/filesystem';
 
+/**
+ * Scrolls the background gallery page (still mounted behind the overlay the whole time — see
+ * App.tsx's background-location routing) so the given photo is back in view. Without this,
+ * after swiping far from the photo originally clicked, leaving the overlay left the background
+ * page scrolled to wherever it was when the overlay first OPENED, not wherever the user actually
+ * ended up. `[data-photo-id]` elements may not exist yet if that section hasn't been lazily
+ * rendered (Timeline's LazyDateGroup, EventGallery's windowed rendering) — nudging the scroll
+ * position forward repeatedly brings more of the page within each lazy section's
+ * IntersectionObserver rootMargin, causing it to mount for real. Bounded so this can never spin
+ * forever if the photo genuinely isn't present in the background page's current DOM (e.g. a
+ * different filter is active there).
+ */
+function scrollPhotoIntoView(photoId: string): void {
+  const MAX_ATTEMPTS = 120;
+  const STABLE_FRAMES_REQUIRED = 4;
+  let attempts = 0;
+  let stableFrames = 0;
+  let lastScrollHeight = -1;
+
+  const tryFind = () => {
+    const el = document.querySelector(`[data-photo-id="${CSS.escape(photoId)}"]`);
+    if (el) {
+      el.scrollIntoView({ block: 'center' });
+
+      // The justified grid (react-photo-album) keeps resettling row heights for a few frames
+      // after an element first appears — keep re-asserting the scroll position until the page
+      // height stops changing so the final position lands on the photo's settled spot.
+      const currentScrollHeight = document.documentElement.scrollHeight;
+      if (currentScrollHeight === lastScrollHeight) {
+        stableFrames++;
+      } else {
+        stableFrames = 0;
+        lastScrollHeight = currentScrollHeight;
+      }
+      if (stableFrames >= STABLE_FRAMES_REQUIRED || attempts >= MAX_ATTEMPTS) return;
+      attempts++;
+      requestAnimationFrame(tryFind);
+      return;
+    }
+
+    if (attempts >= MAX_ATTEMPTS) return;
+    attempts++;
+    window.scrollBy(0, window.innerHeight * 0.85);
+    requestAnimationFrame(tryFind);
+  };
+
+  requestAnimationFrame(tryFind);
+}
+
 const PhotoDetail: React.FC = () => {
   const { slug, photoId } = useParams<{ slug: string; photoId: string }>();
   const navigate = useNavigate();
@@ -229,6 +278,27 @@ const PhotoDetail: React.FC = () => {
     }
   }, [backgroundLocation, navigate, slug]);
 
+  // Kept up to date every render so the unmount effect below (whose own closure is fixed at
+  // mount time) can read the LATEST photo/backgroundLocation when it actually fires.
+  const photoRef = useRef<Photo | null>(null);
+  photoRef.current = photo;
+  const backgroundLocationRef = useRef(backgroundLocation);
+  backgroundLocationRef.current = backgroundLocation;
+
+  // Scrolls the background gallery page back to whatever photo was showing when this overlay
+  // instance unmounts — i.e. whenever the user leaves the photo detail view for ANY reason
+  // (Escape, the in-app back button, the Android hardware back button, browser back/forward),
+  // not just the ones that go through closeOverlay() directly. See scrollPhotoIntoView()'s doc
+  // comment for why this was needed: after swiping far from the originally-clicked photo,
+  // leaving used to land back wherever the background page was scrolled when the overlay first
+  // opened, not where the user actually ended up.
+  useEffect(() => {
+    return () => {
+      if (backgroundLocationRef.current && photoRef.current) {
+        scrollPhotoIntoView(photoRef.current.id);
+      }
+    };
+  }, []);
 
   const swipePreviewPhoto = (() => {
     if (swipeOffset === 0 || currentIndex < 0 || photosToUse.length < 2) {
@@ -282,9 +352,22 @@ const PhotoDetail: React.FC = () => {
   }, [slug, user?.email]);
 
   useEffect(() => {
-    if (slug && photoId) {
-      loadPhoto();
+    if (!slug || !photoId) return;
+
+    if (photo?.id === photoId) {
+      // Already showing this exact photo — navigateToNext/Previous already set `photo` (and
+      // the index/list bookkeeping) synchronously before this ran, and the separate
+      // photoId-sync effect below refreshes `.people`/`.ai_caption`. Only this EVENT's own
+      // metadata is potentially new (we may have just swiped across an event boundary), so
+      // refresh it quietly instead of running the full blocking load — that used to flash the
+      // whole loading spinner (making the viewer look like it briefly closed and reopened on
+      // every cross-event swipe) and needlessly re-derive `currentIndex` from scratch, which
+      // could race with further swiping and leave navigation stuck.
+      getEvent(slug).then(setEvent).catch(() => {});
+      return;
     }
+
+    loadPhoto();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [slug]);
 
@@ -307,20 +390,21 @@ const PhotoDetail: React.FC = () => {
       setImageLoaded(false); // Reset for new image
     }
 
-    // The gallery list never includes `.people` (see Photo.people's doc comment in types.ts),
-    // so navigating between photos (swipe/next/prev) would otherwise show "No one tagged yet"
-    // for every photo except the very first one loaded. Fetch the single-photo detail in the
-    // background to pick up its real people list once ready, regardless of whether the index
-    // was already synced by a swipe — otherwise the fetch would be skipped on exactly the
-    // swipe path. Guarded by `cancelled` so a fast swipe-through doesn't attach a stale
-    // response to whatever photo is showing by the time it resolves.
+    // The gallery list never includes `.people`/`.ai_caption` (see Photo.people's doc comment
+    // in types.ts — both are single-photo-detail-only fields), so navigating between photos
+    // (swipe/next/prev) would otherwise show "No one tagged yet" and no AI description for
+    // every photo except the very first one loaded. Fetch the single-photo detail in the
+    // background to pick up the real values once ready, regardless of whether the index was
+    // already synced by a swipe — otherwise the fetch would be skipped on exactly the swipe
+    // path. Guarded by `cancelled` so a fast swipe-through doesn't attach a stale response to
+    // whatever photo is showing by the time it resolves.
     let cancelled = false;
     getPhoto(slug!, photoId).then((fullPhoto) => {
       if (cancelled) return;
-      setPhoto((prev) => (prev && prev.id === photoId ? { ...prev, people: fullPhoto.people } : prev));
+      setPhoto((prev) => (prev && prev.id === photoId ? { ...prev, people: fullPhoto.people, ai_caption: fullPhoto.ai_caption } : prev));
     }).catch(() => {
       // Best-effort only — the photo itself is already showing from the list; a failed
-      // people fetch just means the People section stays empty until the next load.
+      // fetch just means the People/Description sections stay empty until the next load.
     });
 
     return () => {
