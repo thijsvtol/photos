@@ -60,8 +60,8 @@ describe('useAndroidBackButton', () => {
     expect(mockNavigate).toHaveBeenCalledWith('/events/my-event');
   });
 
-  it('falls back to favorites when there is no history and state.fromFavorites is set', () => {
-    renderAt('/p/my-event/photo123', { fromFavorites: true });
+  it('falls back to the background location when there is no history and state.backgroundLocation is set', () => {
+    renderAt('/p/my-event/photo123', { backgroundLocation: { pathname: '/favorites', search: '' } });
     backButtonHandler!({ canGoBack: false });
 
     expect(mockNavigate).toHaveBeenCalledWith('/favorites');

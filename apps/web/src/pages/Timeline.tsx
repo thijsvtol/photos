@@ -14,7 +14,7 @@ import EventLocationPicker from '../components/EventLocationPicker';
 import { useConfirm } from '../components/ConfirmDialog';
 import { useGridDensity } from '../hooks/useGridDensity';
 import { usePhotoSelection } from '../hooks/usePhotoSelection';
-import { useScrollRestoration } from '../hooks/useScrollRestoration';
+import { usePhotoNavigation } from '../contexts/PhotoNavigationContext';
 import { getTimeline, getUserFavoriteIds, toggleFavorite as toggleFavoriteAPI, requestZip, downloadZip, getMyPhotos, searchPhotos, getPublicNamedPeople, setPhotoFeatured, bulkDeletePhotos, bulkCopyPhotos, bulkUpdatePhotoLocation, bulkTagPeopleOnPhotos, bulkUntagPeopleOnPhotos, getNamedPeople } from '../api';
 import type { SearchResultPhoto, PublicNamedPerson, NamedPerson } from '../api';
 import { getCachedTimelinePhotos, cacheTimelinePhotos, removeTimelineCachePhotos } from '../services/timelineCache';
@@ -617,33 +617,12 @@ const Timeline: React.FC = () => {
 
   const { dates, groups } = useMemo(() => groupByDate(filteredPhotos), [filteredPhotos]);
 
-  // Photo ids per event across the ENTIRE (filtered) timeline, not just one date's slice — used
-  // so PhotoDetail's next/prev navigation (see its `fromTimeline`/`timelinePhotoIds` handling)
-  // can restrict itself to "every photo of this event that's actually in the timeline" instead
-  // of silently falling back to browsing that event's ENTIRE gallery (the previously-reported
-  // bug: `fromTimeline` only ever affected the Back button's destination, never what next/prev
-  // actually iterated over). A single event's photos in the timeline can span multiple dates
-  // (each rendered as a separate JustifiedGrid instance below), so this must be computed from
-  // the full `filteredPhotos` list, not from one date-grid's own `eventPhotos` slice.
-  const timelinePhotoIdsByEvent = useMemo(() => {
-    const map = new Map<string, string[]>();
-    for (const p of filteredPhotos) {
-      const s = p.event_slug || '';
-      const arr = map.get(s) || [];
-      arr.push(p.id);
-      map.set(s, arr);
-    }
-    return map;
-  }, [filteredPhotos]);
-
-  // Full cross-EVENT ordered list (id+slug pairs), exactly matching the on-screen render order
-  // (date-desc, then grouped by event within each date — see the render loop below) — lets
-  // PhotoDetail's next/prev navigation continue across event boundaries instead of stopping/
-  // looping at the edge of whichever event the opened photo happens to belong to (the reported
-  // "swiping through the timeline is interrupted per event" bug). Recomputed the same grouping
-  // the render below does rather than reusing `timelinePhotoIdsByEvent` (which discards date
-  // ordering between events).
-  const timelineLinkState = useMemo(() => {
+  // Full on-screen-ordered photo list (date-desc, then grouped by event within each date — see
+  // the render loop below) — registered into PhotoNavigationContext (below) so PhotoDetail,
+  // opened as an overlay on top of this page, can navigate next/prev through EXACTLY what's on
+  // screen, continuing across event boundaries instead of stopping/looping at the edge of
+  // whichever event the opened photo belongs to.
+  const timelineOrderedPhotos = useMemo(() => {
     const ordered: Photo[] = [];
     for (const date of dates) {
       const datePhotos = groups.get(date) || [];
@@ -658,15 +637,8 @@ const Timeline: React.FC = () => {
         ordered.push(...eventPhotos);
       }
     }
-    return {
-      fromTimeline: true,
-      timelinePhotos: ordered.map((p) => ({ id: p.id, slug: p.event_slug || '' })),
-    };
+    return ordered;
   }, [dates, groups]);
-
-  // Restores scroll position (anchored to the specific photo) when returning here from
-  // PhotoDetail — see useScrollRestoration()'s doc comment.
-  useScrollRestoration(!loading && photos.length > 0);
 
   // Search results are grouped by event (not date) — same approach the old standalone Search
   // page used, since JustifiedGrid needs one `slug` per instance to build preview URLs and
@@ -690,6 +662,23 @@ const Timeline: React.FC = () => {
     }
     return Array.from(groups.entries());
   }, [filteredSearchResults]);
+
+  // Registers whichever list is currently on screen (plain timeline or search/people-filter
+  // results) into PhotoNavigationContext, along with THIS page's own state setter for the
+  // underlying source array — see PhotoNavigationContext's doc comment for why PhotoDetail
+  // mutating through that setter (delete/feature-toggle) keeps this page in sync once its
+  // overlay closes, without a full re-fetch.
+  const { registerPhotoList } = usePhotoNavigation();
+  useEffect(() => {
+    if (hasActiveSearch) {
+      if (filteredSearchResults) {
+        registerPhotoList(filteredSearchResults, setSearchResults as unknown as React.Dispatch<React.SetStateAction<Photo[]>>);
+      }
+    } else {
+      registerPhotoList(timelineOrderedPhotos, setPhotos);
+    }
+  }, [hasActiveSearch, filteredSearchResults, timelineOrderedPhotos, registerPhotoList]);
+  useEffect(() => () => registerPhotoList([], null), [registerPhotoList]);
 
   const scrollToDate = (date: string) => {
     const el = dateRefs.current.get(date);
@@ -946,11 +935,6 @@ const Timeline: React.FC = () => {
                         forceControlsVisible={selectedPhotos.size > 0}
                         userFavorites={userFavorites}
                         supportsHover={supportsHover}
-                        linkState={{
-                          fromSearch: true,
-                          searchResultIds: eventPhotos.map((p) => p.id),
-                          searchUrl: `${window.location.pathname}${window.location.search}`,
-                        }}
                         onToggleSelection={togglePhotoSelection}
                         onToggleFavorite={isAuthenticated ? toggleFavorite : undefined}
                       />
@@ -1030,7 +1014,6 @@ const Timeline: React.FC = () => {
                           forceControlsVisible={selectedPhotos.size > 0}
                           userFavorites={userFavorites}
                           supportsHover={supportsHover}
-                          linkState={{ ...timelineLinkState, timelinePhotoIds: timelinePhotoIdsByEvent.get(eventSlug) || [] }}
                           onToggleSelection={togglePhotoSelection}
                           onToggleFavorite={isAuthenticated ? toggleFavorite : undefined}
                         />

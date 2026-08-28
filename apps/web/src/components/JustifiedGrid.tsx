@@ -1,7 +1,7 @@
 import React, { useMemo } from 'react';
 import { RowsPhotoAlbum } from 'react-photo-album';
 import 'react-photo-album/rows.css';
-import { Link } from 'react-router-dom';
+import { Link, useLocation } from 'react-router-dom';
 import { Heart, Star, Check } from 'lucide-react';
 import ProgressiveImage from './ProgressiveImage';
 import ProgressiveVideo from './ProgressiveVideo';
@@ -186,6 +186,9 @@ const PhotoOverlayInner: React.FC<PhotoOverlayProps> = ({
   const longPressTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
   const suppressNextClickRef = React.useRef(false);
   const [touchControlsVisible, setTouchControlsVisible] = React.useState(false);
+  // Attached to the Link's navigation state so PhotoDetail opens as an overlay on top of THIS
+  // page (see App.tsx's background-location routing) instead of replacing it.
+  const location = useLocation();
 
   // Reset touchControlsVisible when global selection mode changes
   React.useEffect(() => {
@@ -245,7 +248,7 @@ const PhotoOverlayInner: React.FC<PhotoOverlayProps> = ({
     >
       <Link
         to={`/p/${slug}/${photo.id}`}
-        state={{ ...linkState, ...(sortBy ? { sortBy } : undefined) }}
+        state={{ ...linkState, ...(sortBy ? { sortBy } : undefined), backgroundLocation: location }}
         className="block w-full h-full"
         onClick={(e) => {
           if (!supportsHover && suppressNextClickRef.current) {
@@ -264,13 +267,11 @@ const PhotoOverlayInner: React.FC<PhotoOverlayProps> = ({
           }
           // Reset individual card controls when navigating away
           setTouchControlsVisible(false);
-          // Store scroll position and photo ID for back navigation — slug-keyed for EventGallery's
-          // own restore logic, plus a pathname-keyed pair (see useScrollRestoration.ts) for
-          // cross-event pages like Timeline/Favorites that have no single event slug of their own.
+          // Store scroll position and photo ID for EventGallery's own restore-on-return logic
+          // (used for a fresh/cold mount only — under the overlay routing above, this page
+          // never actually unmounts while browsing photos, so there's nothing to restore).
           sessionStorage.setItem(`gallery_scroll_${slug}`, window.scrollY.toString());
           sessionStorage.setItem(`gallery_photo_${slug}`, photo.id);
-          sessionStorage.setItem(`${window.location.pathname}_scroll`, window.scrollY.toString());
-          sessionStorage.setItem(`${window.location.pathname}_photo`, photo.id);
         }}
         onTouchStart={startLongPress}
         onTouchEnd={clearLongPressTimer}

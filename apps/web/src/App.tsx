@@ -1,11 +1,13 @@
 import { Suspense, useEffect } from 'react';
 import { BrowserRouter, Routes, Route, Navigate, useNavigate, useLocation } from 'react-router-dom';
+import type { Location } from 'react-router-dom';
 import { HelmetProvider } from 'react-helmet-async';
 import { Capacitor } from '@capacitor/core';
 import { AuthProvider } from './contexts/AuthContext';
 import { ThemeProvider } from './contexts/ThemeContext';
 import { RefreshProvider } from './contexts/RefreshContext';
 import { UploadProvider } from './contexts/UploadContext';
+import { PhotoNavigationProvider } from './contexts/PhotoNavigationContext';
 import GlobalUploadIndicator from './components/GlobalUploadIndicator';
 import RequireProfileName from './components/RequireProfileName';
 import { OfflineBanner } from './components/OfflineBanner';
@@ -245,6 +247,65 @@ const PageViewTracker = () => {
   return null;
 };
 
+/**
+ * Renders the base routes, plus (when opened from within the app) PhotoDetail as an OVERLAY on
+ * top of whichever page it was opened from — the "background location" pattern (see
+ * JustifiedGrid.tsx's onClick, which attaches `state.backgroundLocation`). The base <Routes>
+ * keeps resolving to that SAME background location the whole time a photo (or a sequence of
+ * swiped-through photos) is open, so React never unmounts/remounts the underlying gallery page —
+ * its scroll position, loaded photos, and filters all survive automatically, and closing the
+ * overlay (back/Escape) reveals it exactly as it was, with no restore-on-return logic needed.
+ * A direct/cold load of a shared /p/:slug/:photoId link (no backgroundLocation) has nothing to
+ * overlay, so the base <Routes> renders it full-page, same as before.
+ */
+const AppRoutes = () => {
+  const location = useLocation();
+  const backgroundLocation = (location.state as { backgroundLocation?: Location } | null)?.backgroundLocation;
+
+  return (
+    <>
+      <Suspense fallback={<LoadingFallback />}>
+        <Routes location={backgroundLocation || location}>
+          <Route path="/" element={<Landing />} />
+          <Route path="/events" element={<EventList />} />
+          <Route path="/events/:slug" element={<EventGallery />} />
+          <Route path="/p/:slug/:photoId" element={<PhotoDetail />} />
+          <Route path="/favorites" element={<MyFavorites />} />
+          <Route path="/invite/:token" element={<InviteAccept />} />
+          <Route path="/logout" element={<Logout />} />
+          <Route path="/map" element={<MapView />} />
+          <Route path="/usage" element={<PhotoUsage />} />
+          <Route path="/privacy" element={<PrivacyPolicy />} />
+          <Route path="/share-upload" element={<ShareUpload />} />
+          <Route path="/timeline" element={<Timeline />} />
+          <Route path="/cast-receiver" element={<CastReceiver />} />
+          <Route path="/search" element={<SearchRedirect />} />
+          <Route path="/admin/people" element={<AdminPeople />} />
+          <Route path="/admin/people/unattached" element={<AdminUnattachedPhotos />} />
+          <Route path="/admin/people/:personId" element={<AdminPersonDetail />} />
+          <Route path="/admin" element={<AdminDashboard />} />
+          <Route path="/admin/tags" element={<AdminTagManager />} />
+          <Route path="/admin/trash" element={<AdminTrash />} />
+          <Route path="/admin/duplicates" element={<AdminDuplicates />} />
+          <Route path="/admin/activity" element={<AdminActivity />} />
+          <Route path="/admin/events/:slug/photos" element={<AdminPhotoManager />} />
+        </Routes>
+      </Suspense>
+      {/* A SEPARATE Suspense boundary from the base routes above — otherwise, while
+          PhotoDetail's lazy chunk is still loading, React would suspend the WHOLE fragment
+          (base routes included), hiding the already-rendered background page behind a
+          full-page spinner instead of just the overlay itself. */}
+      {backgroundLocation && (
+        <Suspense fallback={null}>
+          <Routes>
+            <Route path="/p/:slug/:photoId" element={<PhotoDetail />} />
+          </Routes>
+        </Suspense>
+      )}
+    </>
+  );
+};
+
 function App() {
   // Initialize analytics on app mount
   useEffect(() => {
@@ -271,39 +332,17 @@ function App() {
             <UploadProvider>
               <ToastProvider>
                 <BrowserRouter>
+                  <PhotoNavigationProvider>
                   <ShareIntentHandler />
                   <PageViewTracker />
                   <Suspense fallback={<LoadingFallback />}>
-                    <Routes>
-                      <Route path="/" element={<Landing />} />
-                      <Route path="/events" element={<EventList />} />
-                      <Route path="/events/:slug" element={<EventGallery />} />
-                      <Route path="/p/:slug/:photoId" element={<PhotoDetail />} />
-                      <Route path="/favorites" element={<MyFavorites />} />
-                      <Route path="/invite/:token" element={<InviteAccept />} />
-                      <Route path="/logout" element={<Logout />} />
-                      <Route path="/map" element={<MapView />} />
-                      <Route path="/usage" element={<PhotoUsage />} />
-                      <Route path="/privacy" element={<PrivacyPolicy />} />
-                      <Route path="/share-upload" element={<ShareUpload />} />
-                      <Route path="/timeline" element={<Timeline />} />
-                      <Route path="/cast-receiver" element={<CastReceiver />} />
-                      <Route path="/search" element={<SearchRedirect />} />
-                      <Route path="/admin/people" element={<AdminPeople />} />
-                      <Route path="/admin/people/unattached" element={<AdminUnattachedPhotos />} />
-                      <Route path="/admin/people/:personId" element={<AdminPersonDetail />} />
-                      <Route path="/admin" element={<AdminDashboard />} />
-                      <Route path="/admin/tags" element={<AdminTagManager />} />
-                      <Route path="/admin/trash" element={<AdminTrash />} />
-                      <Route path="/admin/duplicates" element={<AdminDuplicates />} />
-                      <Route path="/admin/activity" element={<AdminActivity />} />
-                      <Route path="/admin/events/:slug/photos" element={<AdminPhotoManager />} />
-                  </Routes>
+                    <AppRoutes />
                   </Suspense>
                   <AndroidAppPrompt />
                   <GlobalUploadIndicator />
                   <OfflineBanner />
                   <RequireProfileName />
+                  </PhotoNavigationProvider>
                 </BrowserRouter>
               </ToastProvider>
             </UploadProvider>

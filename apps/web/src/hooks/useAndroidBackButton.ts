@@ -19,26 +19,21 @@ export function useAndroidBackButton() {
     const handler = App.addListener('backButton', ({ canGoBack }) => {
       const path = location.pathname;
 
-      // Photo detail → back to gallery/timeline/favorites.
-      // Prefer a real history pop (navigate(-1)) over pushing a fresh route:
-      // PhotoDetail always arrives via a push from the gallery/timeline/
-      // favorites view (and uses `replace: true` when swiping between
-      // photos), so history[-1] is exactly that originating view. Popping
-      // it — instead of pushing a brand new `/events/:slug` entry — is what
-      // lets that view's scroll-restoration logic (which runs on mount)
-      // reliably kick in, and avoids growing the history stack with
-      // duplicate gallery entries on repeated back navigations.
+      // Photo detail → close the overlay, back to gallery/timeline/favorites.
+      // Prefer a real history pop (navigate(-1)) over pushing a fresh route: PhotoDetail always
+      // arrives via a push from the gallery/timeline/favorites view (and uses `replace: true`
+      // when swiping between photos), so history[-1] is exactly that originating view — which,
+      // under the background-location overlay routing (see App.tsx), never actually unmounted,
+      // so popping back to it is instant with no re-fetch/scroll-restore needed.
       if (path.startsWith('/p/')) {
         if (canGoBack) {
           navigate(-1);
           return;
         }
 
-        const state = location.state as Record<string, unknown> | null;
-        if (state?.fromFavorites) {
-          navigate('/favorites');
-        } else if (state?.fromTimeline) {
-          navigate('/timeline');
+        const state = location.state as { backgroundLocation?: { pathname: string; search: string } } | null;
+        if (state?.backgroundLocation) {
+          navigate(`${state.backgroundLocation.pathname}${state.backgroundLocation.search}`);
         } else {
           const parts = path.split('/');
           const slug = parts[2];

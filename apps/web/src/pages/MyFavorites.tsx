@@ -8,9 +8,10 @@ import JustifiedGrid from '../components/JustifiedGrid';
 import VerticalDateScrubber from '../components/VerticalDateScrubber';
 import SEO from '../components/SEO';
 import { useRefresh } from '../contexts/RefreshContext';
+import { usePhotoNavigation } from '../contexts/PhotoNavigationContext';
 import { useGridDensity } from '../hooks/useGridDensity';
-import { useScrollRestoration } from '../hooks/useScrollRestoration';
 import { getUserFavorites, removeFavorite as removeFavoriteAPI, toggleFavorite as toggleFavoriteAPI, requestZip, downloadZip, type FavoritePhoto } from '../api';
+import type { Photo } from '../types';
 import { useAuth } from '../contexts/AuthContext';
 import { config } from '../config';
 import { useToast } from '../components/Toast';
@@ -50,21 +51,11 @@ const MyFavorites: React.FC = () => {
   // (date-desc, then grouped by event within each date).
   const { dates, groups } = useMemo(() => groupByDate(photos), [photos]);
 
-  const scrollToDate = (date: string) => {
-    const el = dateRefs.current.get(date);
-    if (!el) return;
-    const y = el.getBoundingClientRect().top + window.scrollY - 120;
-    window.scrollTo({ top: y, behavior: 'smooth' });
-  };
-
-  // Restores scroll position (anchored to the specific photo) when returning here from
-  // PhotoDetail — see useScrollRestoration()'s doc comment.
-  useScrollRestoration(!loading && photos.length > 0);
-
-  // Navigation state passed to PhotoDetail so swiping next/prev stays within
-  // the full favorites list (across all events/dates) instead of falling back
-  // to the clicked photo's parent event.
-  const favoritesLinkState = useMemo(() => {
+  // Full on-screen-ordered photo list (date-desc, then grouped by event within each date) —
+  // registered into PhotoNavigationContext (below) so PhotoDetail, opened as an overlay on top
+  // of this page, can navigate next/prev through the full favorites list (across all events)
+  // instead of falling back to the clicked photo's parent event.
+  const favoritesOrderedPhotos = useMemo(() => {
     const ordered: FavoritePhoto[] = [];
     for (const date of dates) {
       const datePhotos = groups.get(date) || [];
@@ -78,11 +69,21 @@ const MyFavorites: React.FC = () => {
         ordered.push(...eventPhotos);
       }
     }
-    return {
-      fromFavorites: true,
-      favoritePhotos: ordered.map(p => ({ id: p.id, slug: p.event_slug })),
-    };
+    return ordered;
   }, [dates, groups]);
+
+  const { registerPhotoList } = usePhotoNavigation();
+  useEffect(() => {
+    registerPhotoList(favoritesOrderedPhotos, setPhotos as unknown as React.Dispatch<React.SetStateAction<Photo[]>>);
+  }, [favoritesOrderedPhotos, registerPhotoList]);
+  useEffect(() => () => registerPhotoList([], null), [registerPhotoList]);
+
+  const scrollToDate = (date: string) => {
+    const el = dateRefs.current.get(date);
+    if (!el) return;
+    const y = el.getBoundingClientRect().top + window.scrollY - 120;
+    window.scrollTo({ top: y, behavior: 'smooth' });
+  };
 
   // Detect hover support
   useEffect(() => {
@@ -356,7 +357,7 @@ const MyFavorites: React.FC = () => {
                         userFavorites={userFavorites}
                         supportsHover={supportsHover}
                         onToggleFavorite={toggleFavorite}
-                        linkState={favoritesLinkState}
+                        linkState={{ fromFavorites: true }}
                       />
                     </div>
                   ))}

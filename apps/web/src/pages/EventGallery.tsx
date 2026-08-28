@@ -24,6 +24,7 @@ import type { Event, Photo, Collaborator } from '../types';
 import { getCachedEventPhotos, cacheEventPhotos } from '../services/eventPhotoCache';
 import { CollaboratorAvatars } from '../components/CollaboratorAvatars';
 import { useAuth } from '../contexts/AuthContext';
+import { usePhotoNavigation } from '../contexts/PhotoNavigationContext';
 import { usePhotoSelection } from '../hooks/usePhotoSelection';
 import { config } from '../config';
 import { useToast } from '../components/Toast';
@@ -834,6 +835,21 @@ const EventGallery: React.FC = () => {
     : mediaTypeFilteredPhotos;
 
   const { groups: photosByDate, dates } = groupPhotosByDate(filteredPhotos);
+
+  // Lets PhotoDetail (rendered as an overlay on top of this page — see App.tsx's background-
+  // location routing) navigate next/prev through EXACTLY what's currently visible here
+  // (respecting mediaTypeFilter/searchQuery), and patch `photos` directly for a delete/feature-
+  // toggle made from inside the overlay, instead of re-fetching once it closes. `event_slug` is
+  // guaranteed here (this event's own photos don't always carry it themselves) since
+  // PhotoNavigationContext's list must always know which event each photo belongs to.
+  const { registerPhotoList } = usePhotoNavigation();
+  useEffect(() => {
+    registerPhotoList(
+      filteredPhotos.map((p) => ({ ...p, event_slug: p.event_slug || slug })),
+      setPhotos
+    );
+  }, [filteredPhotos, slug, registerPhotoList]);
+  useEffect(() => () => registerPhotoList([], null), [registerPhotoList]);
 
   const structuredData = {
     '@context': 'https://schema.org',

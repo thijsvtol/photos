@@ -5,6 +5,7 @@ import '@testing-library/jest-dom';
 import { MemoryRouter, Routes, Route } from 'react-router-dom';
 import EventGallery from '../pages/EventGallery';
 import PhotoDetail from '../pages/PhotoDetail';
+import { PhotoNavigationProvider } from '../contexts/PhotoNavigationContext';
 import * as api from '../api';
 
 vi.mock('../api', () => ({
@@ -148,11 +149,13 @@ describe('Event access UI', () => {
     vi.mocked(api.getEvent).mockRejectedValue(new Error('Access forbidden'));
 
     render(
-      <MemoryRouter initialEntries={['/events/test-event']}>
-        <Routes>
-          <Route path="/events/:slug" element={<EventGallery />} />
-        </Routes>
-      </MemoryRouter>
+      <PhotoNavigationProvider>
+        <MemoryRouter initialEntries={['/events/test-event']}>
+          <Routes>
+            <Route path="/events/:slug" element={<EventGallery />} />
+          </Routes>
+        </MemoryRouter>
+      </PhotoNavigationProvider>
     );
 
     await waitFor(() => {
@@ -164,11 +167,13 @@ describe('Event access UI', () => {
     vi.mocked(api.getEvent).mockRejectedValue(new Error('Access forbidden'));
 
     render(
-      <MemoryRouter initialEntries={['/p/test-event/photo-1']}>
-        <Routes>
-          <Route path="/p/:slug/:photoId" element={<PhotoDetail />} />
-        </Routes>
-      </MemoryRouter>
+      <PhotoNavigationProvider>
+        <MemoryRouter initialEntries={['/p/test-event/photo-1']}>
+          <Routes>
+            <Route path="/p/:slug/:photoId" element={<PhotoDetail />} />
+          </Routes>
+        </MemoryRouter>
+      </PhotoNavigationProvider>
     );
 
     await waitFor(() => {

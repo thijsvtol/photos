@@ -44,7 +44,7 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  # --- Database dump: fast, needs wrangler + jq, independent of transcode. -----
+  # --- Database dump: fast, needs wrangler + jq + rclone, independent of transcode. -----
   db:
     if: ${{ github.event_name != 'workflow_dispatch' || contains(fromJSON('["all","db"]'), github.event.inputs.mode) }}
     runs-on: ubuntu-latest
@@ -54,6 +54,9 @@ jobs:
 
       - name: Install jq
         run: sudo apt-get update && sudo apt-get install -y jq
+
+      - name: Install rclone
+        run: sudo -v ; curl -fsSL https://rclone.org/install.sh | sudo bash
 
       - uses: ./.github/actions/setup-wrangler
 

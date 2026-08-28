@@ -11,6 +11,7 @@ import type { NamedPerson } from '../api';
 import { createPreview } from '../imageUtils';
 import type { Event, Photo } from '../types';
 import { useAuth } from '../contexts/AuthContext';
+import { usePhotoNavigation } from '../contexts/PhotoNavigationContext';
 import { config } from '../config';
 import { useToast } from '../components/Toast';
 import { useConfirm } from '../components/ConfirmDialog';
@@ -197,46 +198,36 @@ const PhotoDetail: React.FC = () => {
     }
   }, [videoMuted, photoId]);
 
-  // Check if we came from favorites page, timeline, or search results — each can restrict
-  // next/prev navigation to a subset of the event's photos instead of the full gallery.
-  const fromFavorites = location.state?.fromFavorites;
-  const fromTimeline = location.state?.fromTimeline;
-  const fromSearch = location.state?.fromSearch;
-  const favoritePhotos = (location.state?.favoritePhotos || []) as Array<{ id: string; slug: string }>;
-  // Only this event's photo ids from the search results the user actually clicked from (see
-  // Timeline.tsx's per-event-group JustifiedGrid linkState — search is now built into the
-  // Timeline page rather than a separate page) — previously fromSearch was never read at all,
-  // so next/prev silently fell back to browsing the ENTIRE event instead of just the photos
-  // that matched the search (e.g. a specific person filter).
-  const searchResultIds = (location.state?.searchResultIds || []) as string[];
-  // Only this event's photo ids that actually appear in the Timeline (see Timeline.tsx's
-  // `timelinePhotoIdsByEvent` doc comment) — previously `fromTimeline` only ever affected the
-  // Back button's destination, never what next/prev actually iterated over, so swiping through
-  // photos opened from the Timeline silently browsed that event's ENTIRE gallery instead of
-  // just the (possibly filtered, e.g. "Just me") subset shown in the Timeline.
-  const timelinePhotoIds = (location.state?.timelinePhotoIds || []) as string[];
-  // Full cross-EVENT ordered list (id+slug pairs, matching what's actually on screen — see
-  // Timeline.tsx's `timelineLinkState` doc comment). Unlike `timelinePhotoIds` above (which only
-  // restricts next/prev to THIS event's photos), this is what lets swiping actually continue
-  // into the next/previous EVENT once you reach the edge of the current one, instead of
-  // wrapping back to the start of just this event (the reported "swiping stops per event" bug).
-  // Same cross-event navigation approach as `favoritePhotos` below.
-  const timelinePhotos = (location.state?.timelinePhotos || []) as Array<{ id: string; slug: string }>;
-  // Full /timeline?q=...&people=... URL to return to — needed since fromSearch alone isn't
-  // enough to reconstruct the exact search the user came from.
-  const searchUrl = (location.state?.searchUrl || '/timeline') as string;
+  // Present only when PhotoDetail was opened AS AN OVERLAY from a gallery page (Timeline/
+  // Favorites/EventGallery) — see App.tsx's background-location routing. Absent for a cold/
+  // direct load (e.g. a shared /p/:slug/:photoId link), in which case this renders full-page
+  // and closing it goes to this event's own gallery instead of "back" to a background page.
+  const backgroundLocation = location.state?.backgroundLocation as { pathname: string; search: string } | undefined;
+  // Purely cosmetic (the ♥ badge next to the counter below) — navigation itself no longer
+  // needs to know which page the overlay was opened from, see `photosToUse`'s doc comment.
+  const fromFavoritesBadge = Boolean(location.state?.fromFavorites);
   const sortBy = location.state?.sortBy || 'date_desc';
-  
-  // Filter photos based on whether we're viewing favorites, search results, or the timeline.
-  // When restricted, only show photos from this event that are in that subset.
-  const displayPhotos = fromFavorites && favoritePhotos.length > 0
-    ? allPhotos.filter(p => favoritePhotos.some((fav: { id: string; slug: string }) => fav.id === p.id && fav.slug === slug))
-    : fromSearch && searchResultIds.length > 0
-    ? allPhotos.filter(p => searchResultIds.includes(p.id))
-    : fromTimeline && timelinePhotoIds.length > 0
-    ? allPhotos.filter(p => timelinePhotoIds.includes(p.id))
-    : allPhotos;
-  const photosToUse = displayPhotos.length > 0 ? displayPhotos : allPhotos;
+
+  // The list to navigate through (next/prev) and show a "N / total" counter for. Prefers the
+  // LIVE list the background gallery page (EventGallery/Timeline/MyFavorites) already has on
+  // screen — via PhotoNavigationContext, kept up to date by that page itself — over a separate
+  // self-fetch, so: (1) swiping seamlessly continues across EVENT boundaries whenever that
+  // page's own list does (Timeline/Favorites already span events), (2) it respects whatever
+  // filter/search/sort that page currently has active, and (3) a mutation (delete/feature-
+  // toggle) made here can patch that SAME page's own state directly (see removeNavPhoto/
+  // updateNavPhoto below) instead of leaving it stale once the overlay closes. Falls back to
+  // this event's own full gallery (self-fetched into `allPhotos`, see loadPhoto()) when there's
+  // no live background list to read from — i.e. a cold/direct load of this exact URL.
+  const { photos: navPhotos, removePhoto: removeNavPhoto, updatePhoto: updateNavPhoto } = usePhotoNavigation();
+  const photosToUse = navPhotos.some((p) => p.id === photoId) ? navPhotos : allPhotos;
+
+  const closeOverlay = useCallback(() => {
+    if (backgroundLocation) {
+      navigate(-1);
+    } else {
+      navigate(`/events/${slug}`, { replace: true });
+    }
+  }, [backgroundLocation, navigate, slug]);
 
 
   const swipePreviewPhoto = (() => {
@@ -299,7 +290,7 @@ const PhotoDetail: React.FC = () => {
 
   // Update photo when photoId changes in URL (for browser back/forward)
   useEffect(() => {
-    if (!photoId || allPhotos.length === 0) return;
+    if (!photoId || photosToUse.length === 0) return;
 
     const index = photosToUse.findIndex(p => p.id === photoId);
     if (index < 0) return;
@@ -336,13 +327,13 @@ const PhotoDetail: React.FC = () => {
       cancelled = true;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [photoId, allPhotos, displayPhotos]);
+  }, [photoId, photosToUse]);
 
   // Preload adjacent images for smooth navigation
   useEffect(() => {
     // While editing, avoid background preview fetches to keep network activity deterministic.
     if (showEditor) return;
-    if (!photo || displayPhotos.length === 0) return;
+    if (!photo || photosToUse.length === 0) return;
 
     const loadedUrls: string[] = [];
     const preloadCache = preloadRefs.current;
@@ -408,7 +399,7 @@ const PhotoDetail: React.FC = () => {
       });
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [currentIndex, displayPhotos, allPhotos, photo, slug, preloadedImages, showEditor]);
+  }, [currentIndex, photosToUse, photo, slug, preloadedImages, showEditor]);
 
   // Check if current photo is favorited
   useEffect(() => {
@@ -485,7 +476,7 @@ const PhotoDetail: React.FC = () => {
         } else if (isSlideshow) {
           setIsSlideshow(false);
         } else {
-          navigate(fromFavorites ? '/favorites' : fromTimeline ? '/timeline' : fromSearch ? searchUrl : `/events/${slug}`);
+          closeOverlay();
         }
       }
       if (e.key === 'f' || e.key === 'F') toggleFullscreen();
@@ -495,7 +486,7 @@ const PhotoDetail: React.FC = () => {
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [slug, isFullscreen, fromFavorites, isSlideshow]);
+  }, [slug, isFullscreen, closeOverlay, isSlideshow]);
 
   // Continuously monitor zoom state
   useEffect(() => {
@@ -549,31 +540,19 @@ const PhotoDetail: React.FC = () => {
         const photoData = await getPhoto(slug!, photoId!);
         setPhoto(photoData);
         setAuthenticated(true);
-        
-        // Load all photos for navigation with the same sort order
-        const allPhotosData = await getPhotos(slug!, sortBy);
-        setAllPhotos(allPhotosData);
-        
-        // Find index in the appropriate list
-        const photosToUse = fromFavorites && favoritePhotos.length > 0
-          ? allPhotosData.filter(p => favoritePhotos.some((fav: { id: string; slug: string }) => fav.id === p.id && fav.slug === slug))
-          : fromSearch && searchResultIds.length > 0
-          ? allPhotosData.filter(p => searchResultIds.includes(p.id))
-          : fromTimeline && timelinePhotoIds.length > 0
-          ? allPhotosData.filter(p => timelinePhotoIds.includes(p.id))
-          : allPhotosData;
-        const index = photosToUse.findIndex(p => p.id === photoId);
-        setCurrentIndex(index);
-        
-        // Update photo with the version from allPhotos which includes all EXIF data.
-        // The gallery list endpoint never includes `.people` (only the single-photo detail
-        // fetch above does — see api.ts's Photo.people doc comment), so carry it over from
-        // photoData rather than letting this overwrite silently drop it (previously caused
-        // "No one tagged yet" to show for a photo that DOES have tagged people).
-        if (index >= 0 && photosToUse[index]) {
-          setPhoto({ ...photosToUse[index], people: photoData.people });
+
+        // Only self-fetch this event's full gallery as a navigation fallback when the live
+        // background list (see `photosToUse`'s doc comment above) doesn't already cover this
+        // photo — i.e. a cold/direct load with no overlay context to read from.
+        if (navPhotos.some((p) => p.id === photoId)) {
+          setAllPhotos([]);
+          setCurrentIndex(navPhotos.findIndex((p) => p.id === photoId));
+        } else {
+          const allPhotosData = await getPhotos(slug!, sortBy);
+          setAllPhotos(allPhotosData);
+          setCurrentIndex(allPhotosData.findIndex((p) => p.id === photoId));
         }
-        
+
         // Track photo view
         trackPhotoView(parseInt(photoId!), slug!);
       } catch {
@@ -607,184 +586,145 @@ const PhotoDetail: React.FC = () => {
   };
 
   const navigateToNext = useCallback(() => {
-    // Favorites and Timeline both navigate across a cross-event ordered list (id+slug pairs)
-    // instead of being confined to the current event's own photos — see `timelinePhotos`'s doc
-    // comment above for why this is required for Timeline (previously swiping stopped/looped at
-    // each event boundary instead of continuing into the next event).
-    const crossEventPhotos = fromFavorites ? favoritePhotos : fromTimeline ? timelinePhotos : null;
-    if (crossEventPhotos && crossEventPhotos.length > 0) {
-      const crossEventState = fromFavorites ? { fromFavorites: true, favoritePhotos } : { fromTimeline: true, timelinePhotos };
-      const currentCrossIndex = crossEventPhotos.findIndex((p) => p.id === photoId && p.slug === slug);
-      if (currentCrossIndex >= 0 && currentCrossIndex < crossEventPhotos.length - 1) {
-        const nextItem = crossEventPhotos[currentCrossIndex + 1];
-        navigate(`/p/${nextItem.slug}/${nextItem.id}`, { state: crossEventState });
-      } else if (currentCrossIndex === crossEventPhotos.length - 1) {
-        // Loop back to the first photo
-        const firstItem = crossEventPhotos[0];
-        navigate(`/p/${firstItem.slug}/${firstItem.id}`, { state: crossEventState });
+    if (currentIndex >= 0 && currentIndex < photosToUse.length - 1) {
+      const nextIndex = currentIndex + 1;
+      const nextPhoto = photosToUse[nextIndex];
+      const nextSlug = nextPhoto.event_slug || slug;
+
+      // Cancel any in-progress transition
+      if (transitionTimeoutRef.current) {
+        clearTimeout(transitionTimeoutRef.current);
+        transitionTimeoutRef.current = null;
       }
-    } else {
-      // Normal event gallery navigation
-      if (currentIndex >= 0 && currentIndex < photosToUse.length - 1) {
-        const nextIndex = currentIndex + 1;
-        const nextPhoto = photosToUse[nextIndex];
-        
-        // Cancel any in-progress transition
-        if (transitionTimeoutRef.current) {
-          clearTimeout(transitionTimeoutRef.current);
-          transitionTimeoutRef.current = null;
-        }
-        
-        // Keep current photo visible for cross-fade
-        setPreviousPhoto(photo);
-        
-        // Start transition with slide animation
-        setIsTransitioning(true);
-        setSlideDirection('left'); // Sliding left = next photo
-        
-        // Check if image is preloaded
-        const imageUrl = getPreviewUrl(slug!, nextPhoto.id, nextPhoto.file_type, nextPhoto.cache_version);
-        const isPreloaded = preloadedImages.has(imageUrl);
-        
-        setCurrentIndex(nextIndex);
-        setPhoto(nextPhoto);
-        setImageLoaded(isPreloaded); // If preloaded, mark as loaded immediately
-        
-        // Preserve the navigation-context state (fromTimeline/fromSearch/etc) across this
-        // in-place navigate — previously omitted here, which silently dropped `location.state`
-        // on every `replace: true` call. Since this component doesn't remount between photos
-        // (same route, different :photoId param), `photosToUse` re-derives itself from
-        // `location.state` on every render — so after the FIRST next/prev, the context was
-        // already gone and browsing silently fell back to the event's entire gallery instead of
-        // staying restricted to the Timeline/search subset the user actually came from. This was
-        // the reported "next photo goes to the whole album, not the Timeline" bug.
-        navigate(`/p/${slug}/${nextPhoto.id}`, { replace: true, state: location.state });
-        
-        // End transition and reset slide direction
-        transitionTimeoutRef.current = setTimeout(() => {
-          setPreviousPhoto(null); // Clear previous photo after transition
-          setIsTransitioning(false);
-          setSlideDirection(null);
-          transitionTimeoutRef.current = null;
-        }, 200);
-      } else if (currentIndex === photosToUse.length - 1 && photosToUse.length > 0) {
-        // Loop back to first photo
-        const firstPhoto = photosToUse[0];
-        const imageUrl = getPreviewUrl(slug!, firstPhoto.id, firstPhoto.file_type, firstPhoto.cache_version);
-        const isPreloaded = preloadedImages.has(imageUrl);
-        
-        if (transitionTimeoutRef.current) {
-          clearTimeout(transitionTimeoutRef.current);
-          transitionTimeoutRef.current = null;
-        }
-        
-        // Keep current photo visible for cross-fade
-        setPreviousPhoto(photo);
-        
-        setIsTransitioning(true);
-        setSlideDirection('left');
-        setCurrentIndex(0);
-        setPhoto(firstPhoto);
-        setImageLoaded(isPreloaded);
-        
-        // See the preceding navigate() call's comment for why `state: location.state` is required.
-        navigate(`/p/${slug}/${firstPhoto.id}`, { replace: true, state: location.state });
-        transitionTimeoutRef.current = setTimeout(() => {
-          setPreviousPhoto(null);
-          setIsTransitioning(false);
-          setSlideDirection(null);
-          transitionTimeoutRef.current = null;
-        }, 200);
+
+      // Keep current photo visible for cross-fade
+      setPreviousPhoto(photo);
+
+      // Start transition with slide animation
+      setIsTransitioning(true);
+      setSlideDirection('left'); // Sliding left = next photo
+
+      // Check if image is preloaded
+      const imageUrl = getPreviewUrl(nextSlug!, nextPhoto.id, nextPhoto.file_type, nextPhoto.cache_version);
+      const isPreloaded = preloadedImages.has(imageUrl);
+
+      setCurrentIndex(nextIndex);
+      setPhoto(nextPhoto);
+      setImageLoaded(isPreloaded); // If preloaded, mark as loaded immediately
+
+      // `replace: true` (never pushing a new history entry) means the browser's "back" always
+      // returns straight to the background page's own entry, no matter how many photos were
+      // swiped through — see App.tsx's overlay routing. `location.state` is carried forward
+      // unchanged so `backgroundLocation` (and the cosmetic favorites badge flag) survive too.
+      navigate(`/p/${nextSlug}/${nextPhoto.id}`, { replace: true, state: location.state });
+
+      // End transition and reset slide direction
+      transitionTimeoutRef.current = setTimeout(() => {
+        setPreviousPhoto(null); // Clear previous photo after transition
+        setIsTransitioning(false);
+        setSlideDirection(null);
+        transitionTimeoutRef.current = null;
+      }, 200);
+    } else if (currentIndex === photosToUse.length - 1 && photosToUse.length > 0) {
+      // Loop back to first photo
+      const firstPhoto = photosToUse[0];
+      const firstSlug = firstPhoto.event_slug || slug;
+      const imageUrl = getPreviewUrl(firstSlug!, firstPhoto.id, firstPhoto.file_type, firstPhoto.cache_version);
+      const isPreloaded = preloadedImages.has(imageUrl);
+
+      if (transitionTimeoutRef.current) {
+        clearTimeout(transitionTimeoutRef.current);
+        transitionTimeoutRef.current = null;
       }
+
+      // Keep current photo visible for cross-fade
+      setPreviousPhoto(photo);
+
+      setIsTransitioning(true);
+      setSlideDirection('left');
+      setCurrentIndex(0);
+      setPhoto(firstPhoto);
+      setImageLoaded(isPreloaded);
+
+      navigate(`/p/${firstSlug}/${firstPhoto.id}`, { replace: true, state: location.state });
+      transitionTimeoutRef.current = setTimeout(() => {
+        setPreviousPhoto(null);
+        setIsTransitioning(false);
+        setSlideDirection(null);
+        transitionTimeoutRef.current = null;
+      }, 200);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isTransitioning, fromFavorites, favoritePhotos, fromTimeline, timelinePhotos, photoId, slug, navigate, displayPhotos, allPhotos, currentIndex, preloadedImages, photo, location.state]);
+  }, [photosToUse, slug, navigate, currentIndex, preloadedImages, photo, location.state, isTransitioning]);
 
   const navigateToPrevious = useCallback(() => {
-    // Favorites and Timeline both navigate across a cross-event ordered list — see
-    // navigateToNext()'s matching comment above.
-    const crossEventPhotos = fromFavorites ? favoritePhotos : fromTimeline ? timelinePhotos : null;
-    if (crossEventPhotos && crossEventPhotos.length > 0) {
-      const crossEventState = fromFavorites ? { fromFavorites: true, favoritePhotos } : { fromTimeline: true, timelinePhotos };
-      const currentCrossIndex = crossEventPhotos.findIndex((p) => p.id === photoId && p.slug === slug);
-      if (currentCrossIndex > 0) {
-        const prevItem = crossEventPhotos[currentCrossIndex - 1];
-        navigate(`/p/${prevItem.slug}/${prevItem.id}`, { state: crossEventState });
-      } else if (currentCrossIndex === 0) {
-        // Loop back to the last photo
-        const lastItem = crossEventPhotos[crossEventPhotos.length - 1];
-        navigate(`/p/${lastItem.slug}/${lastItem.id}`, { state: crossEventState });
+    if (currentIndex > 0) {
+      const prevIndex = currentIndex - 1;
+      const prevPhoto = photosToUse[prevIndex];
+      const prevSlug = prevPhoto.event_slug || slug;
+
+      // Cancel any in-progress transition
+      if (transitionTimeoutRef.current) {
+        clearTimeout(transitionTimeoutRef.current);
+        transitionTimeoutRef.current = null;
       }
-    } else {
-      // Normal event gallery navigation
-      if (currentIndex > 0) {
-        const prevIndex = currentIndex - 1;
-        const prevPhoto = photosToUse[prevIndex];
-        
-        // Cancel any in-progress transition
-        if (transitionTimeoutRef.current) {
-          clearTimeout(transitionTimeoutRef.current);
-          transitionTimeoutRef.current = null;
-        }
-        
-        // Keep current photo visible for cross-fade
-        setPreviousPhoto(photo);
-        
-        // Start transition with slide animation
-        setIsTransitioning(true);
-        setSlideDirection('right'); // Sliding right = previous photo
-        
-        // Check if image is preloaded
-        const imageUrl = getPreviewUrl(slug!, prevPhoto.id, prevPhoto.file_type, prevPhoto.cache_version);
-        const isPreloaded = preloadedImages.has(imageUrl);
-        
-        setCurrentIndex(prevIndex);
-        setPhoto(prevPhoto);
-        setImageLoaded(isPreloaded); // If preloaded, mark as loaded immediately
-        
-        // See navigateToNext()'s matching comment for why `state: location.state` is required
-        // here — omitting it silently drops the fromTimeline/fromSearch/etc context after the
-        // FIRST navigation.
-        navigate(`/p/${slug}/${prevPhoto.id}`, { replace: true, state: location.state });
-        
-        // End transition and reset slide direction
-        transitionTimeoutRef.current = setTimeout(() => {
-          setPreviousPhoto(null); // Clear previous photo after transition
-          setIsTransitioning(false);
-          setSlideDirection(null);
-          transitionTimeoutRef.current = null;
-        }, 200);
-      } else if (currentIndex === 0 && photosToUse.length > 1) {
-        // Loop back to last photo
-        const lastPhoto = photosToUse[photosToUse.length - 1];
-        const imageUrl = getPreviewUrl(slug!, lastPhoto.id, lastPhoto.file_type, lastPhoto.cache_version);
-        const isPreloaded = preloadedImages.has(imageUrl);
-        
-        if (transitionTimeoutRef.current) {
-          clearTimeout(transitionTimeoutRef.current);
-          transitionTimeoutRef.current = null;
-        }
-        
-        // Keep current photo visible for cross-fade
-        setPreviousPhoto(photo);
-        
-        setIsTransitioning(true);
-        setSlideDirection('right');
-        setCurrentIndex(photosToUse.length - 1);
-        setPhoto(lastPhoto);
-        setImageLoaded(isPreloaded);
-        
-        navigate(`/p/${slug}/${lastPhoto.id}`, { replace: true, state: location.state });
-        transitionTimeoutRef.current = setTimeout(() => {
-          setPreviousPhoto(null);
-          setIsTransitioning(false);
-          setSlideDirection(null);
-          transitionTimeoutRef.current = null;
-        }, 200);
+
+      // Keep current photo visible for cross-fade
+      setPreviousPhoto(photo);
+
+      // Start transition with slide animation
+      setIsTransitioning(true);
+      setSlideDirection('right'); // Sliding right = previous photo
+
+      // Check if image is preloaded
+      const imageUrl = getPreviewUrl(prevSlug!, prevPhoto.id, prevPhoto.file_type, prevPhoto.cache_version);
+      const isPreloaded = preloadedImages.has(imageUrl);
+
+      setCurrentIndex(prevIndex);
+      setPhoto(prevPhoto);
+      setImageLoaded(isPreloaded); // If preloaded, mark as loaded immediately
+
+      // See navigateToNext()'s matching comment for why `replace: true, state: location.state`.
+      navigate(`/p/${prevSlug}/${prevPhoto.id}`, { replace: true, state: location.state });
+
+      // End transition and reset slide direction
+      transitionTimeoutRef.current = setTimeout(() => {
+        setPreviousPhoto(null); // Clear previous photo after transition
+        setIsTransitioning(false);
+        setSlideDirection(null);
+        transitionTimeoutRef.current = null;
+      }, 200);
+    } else if (currentIndex === 0 && photosToUse.length > 1) {
+      // Loop back to last photo
+      const lastPhoto = photosToUse[photosToUse.length - 1];
+      const lastSlug = lastPhoto.event_slug || slug;
+      const imageUrl = getPreviewUrl(lastSlug!, lastPhoto.id, lastPhoto.file_type, lastPhoto.cache_version);
+      const isPreloaded = preloadedImages.has(imageUrl);
+
+      if (transitionTimeoutRef.current) {
+        clearTimeout(transitionTimeoutRef.current);
+        transitionTimeoutRef.current = null;
       }
+
+      // Keep current photo visible for cross-fade
+      setPreviousPhoto(photo);
+
+      setIsTransitioning(true);
+      setSlideDirection('right');
+      setCurrentIndex(photosToUse.length - 1);
+      setPhoto(lastPhoto);
+      setImageLoaded(isPreloaded);
+
+      navigate(`/p/${lastSlug}/${lastPhoto.id}`, { replace: true, state: location.state });
+      transitionTimeoutRef.current = setTimeout(() => {
+        setPreviousPhoto(null);
+        setIsTransitioning(false);
+        setSlideDirection(null);
+        transitionTimeoutRef.current = null;
+      }, 200);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isTransitioning, fromFavorites, favoritePhotos, fromTimeline, timelinePhotos, photoId, slug, navigate, displayPhotos, allPhotos, currentIndex, preloadedImages, photo, location.state]);
+  }, [photosToUse, slug, navigate, currentIndex, preloadedImages, photo, location.state, isTransitioning]);
 
   // Keep refs updated for stable event handlers
   navigateNextRef.current = navigateToNext;
@@ -1449,9 +1389,14 @@ const PhotoDetail: React.FC = () => {
       await haptics.light();
 
       setPhoto((prev) => (prev ? { ...prev, is_featured: nextFeaturedState } : prev));
-      setAllPhotos((prev) => prev.map((p) => (
-        p.id === photo.id ? { ...p, is_featured: nextFeaturedState } : p
-      )));
+      if (allPhotos.length > 0) {
+        setAllPhotos((prev) => prev.map((p) => (
+          p.id === photo.id ? { ...p, is_featured: nextFeaturedState } : p
+        )));
+      }
+      // Patches the background gallery page's own state directly (see PhotoNavigationContext's
+      // doc comment) so it reflects this the moment its overlay closes, without a re-fetch.
+      updateNavPhoto(photo.id, { is_featured: nextFeaturedState });
 
       toast.showSuccess(nextFeaturedState ? 'Photo marked as featured' : 'Featured status removed');
       setShowMobileMenu(false);
@@ -1492,20 +1437,20 @@ const PhotoDetail: React.FC = () => {
         videoRef.current.load();
       }
 
-      const remainingPhotos = allPhotos.filter((p) => p.id !== currentPhotoId);
-      setAllPhotos(remainingPhotos);
-      const remainingDisplayPhotos = fromFavorites && favoritePhotos.length > 0
-        ? remainingPhotos.filter((p) => favoritePhotos.some((fav: { id: string; slug: string }) => fav.id === p.id && fav.slug === slug))
-        : fromSearch && searchResultIds.length > 0
-        ? remainingPhotos.filter((p) => searchResultIds.includes(p.id))
-        : fromTimeline && timelinePhotoIds.length > 0
-        ? remainingPhotos.filter((p) => timelinePhotoIds.includes(p.id))
-        : remainingPhotos;
+      // Patches the background gallery page's own state directly (see PhotoNavigationContext's
+      // doc comment) so it no longer shows this photo once the overlay closes — without this, a
+      // delete made here would look like it silently "came back" once you go back, since that
+      // page never unmounts/re-fetches on its own under the overlay routing.
+      removeNavPhoto(currentPhotoId);
 
-      if (remainingDisplayPhotos.length > 0) {
-        const currentDisplayIndex = Math.max(0, (displayPhotos.length > 0 ? displayPhotos : allPhotos).findIndex((p) => p.id === currentPhotoId));
-        const nextIndex = Math.min(currentDisplayIndex, remainingDisplayPhotos.length - 1);
-        const nextPhoto = remainingDisplayPhotos[nextIndex];
+      const remainingPhotos = photosToUse.filter((p) => p.id !== currentPhotoId);
+      if (allPhotos.length > 0) setAllPhotos(remainingPhotos);
+
+      if (remainingPhotos.length > 0) {
+        const currentDisplayIndex = Math.max(0, photosToUse.findIndex((p) => p.id === currentPhotoId));
+        const nextIndex = Math.min(currentDisplayIndex, remainingPhotos.length - 1);
+        const nextPhoto = remainingPhotos[nextIndex];
+        const nextSlug = nextPhoto.event_slug || slug;
 
         // Set the next photo's state synchronously here instead of relying
         // solely on the photoId-driven effect below (which only fires on
@@ -1523,12 +1468,12 @@ const PhotoDetail: React.FC = () => {
         setVideoBuffering(false);
         setVideoPaused(false);
 
-        navigate(`/p/${slug}/${nextPhoto.id}`, {
+        navigate(`/p/${nextSlug}/${nextPhoto.id}`, {
           replace: true,
           state: location.state,
         });
       } else {
-        navigate(fromFavorites ? '/favorites' : fromTimeline ? '/timeline' : fromSearch ? searchUrl : `/events/${slug}`, { replace: true });
+        closeOverlay();
       }
     } catch (err) {
       console.error('Failed to delete photo:', err);
@@ -1858,7 +1803,7 @@ const PhotoDetail: React.FC = () => {
           <div className="flex items-center justify-between">
             {/* Back button */}
             <button
-              onClick={() => navigate(fromFavorites ? '/favorites' : fromTimeline ? '/timeline' : fromSearch ? searchUrl : `/events/${slug}`)}
+              onClick={closeOverlay}
               className="text-white p-2 -ml-2 hover:bg-white/10 rounded-full transition"
               aria-label="Back"
             >
@@ -1868,13 +1813,8 @@ const PhotoDetail: React.FC = () => {
             {/* Photo counter */}
             {currentIndex >= 0 && (
               <div className="text-white/90 text-sm font-medium">
-                {fromFavorites && favoritePhotos.length > 0
-                  ? `${(favoritePhotos.findIndex((fav: { id: string; slug: string }) => fav.id === photoId && fav.slug === slug) + 1) || 1} / ${favoritePhotos.length}`
-                  : fromTimeline && timelinePhotos.length > 0
-                  ? `${(timelinePhotos.findIndex((p) => p.id === photoId && p.slug === slug) + 1) || 1} / ${timelinePhotos.length}`
-                  : `${currentIndex + 1} / ${displayPhotos.length > 0 ? displayPhotos.length : allPhotos.length}`
-                }
-                {fromFavorites && <span className="ml-1 text-red-400">♥</span>}
+                {`${currentIndex + 1} / ${photosToUse.length}`}
+                {fromFavoritesBadge && <span className="ml-1 text-red-400">♥</span>}
               </div>
             )}
 
