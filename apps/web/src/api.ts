@@ -807,6 +807,19 @@ export const deletePerson = async (personId: number): Promise<void> => {
   await api.delete(`/admin/people/${personId}`, { headers: getAdminHeaders() });
 };
 
+/** Creates a new, empty NAMED person with zero attached photos — lets an admin create someone to
+ *  tag right away (via the "Tag people" pickers) without needing to attach/find a photo first.
+ *  See the worker route's doc comment (routes/admin/people.ts) for why a zero-vector centroid
+ *  can never accidentally attract automatic face-clustering matches. */
+export const createPerson = async (name: string): Promise<{ id: number; name: string }> => {
+  const response = await api.post<{ success: boolean; id: number; name: string }>(
+    '/admin/people',
+    { name },
+    { headers: getAdminHeaders() }
+  );
+  return { id: response.data.id, name: response.data.name };
+};
+
 /**
  * Resets a single person's auto-detected clustering (unassigns their photo_faces, clears their
  * centroid/face_count) WITHOUT deleting the person record — unlike deletePerson(), their name,
@@ -1460,6 +1473,24 @@ export const bulkTagPeopleOnPhotos = async (
   return { taggedPhotoCount };
 };
 
+/** Removes EVERY person (manual tags AND auto-detected faces) from every selected photo at once
+ *  — the "Person: none" bulk action for a multi-select, the inverse of bulkTagPeopleOnPhotos()
+ *  above. See removeAllPeopleFromPhotos()'s doc comment in apps/worker/src/faceClustering.ts. */
+export const bulkUntagPeopleOnPhotos = async (photoIds: string[]): Promise<{ clearedCount: number }> => {
+  const BULK_CHUNK_SIZE = 500;
+  let clearedCount = 0;
+  for (let i = 0; i < photoIds.length; i += BULK_CHUNK_SIZE) {
+    const chunk = photoIds.slice(i, i + BULK_CHUNK_SIZE);
+    const response = await api.post<{ success: boolean; photosCleared: number }>(
+      '/admin/photos/bulk-untag-people',
+      { photoIds: chunk },
+      { headers: getAdminHeaders() }
+    );
+    clearedCount += response.data.photosCleared;
+  }
+  return { clearedCount };
+};
+
 export const geocodeEventPhotos = async (slug: string): Promise<{ updated: number; total: number }> => {
   const response = await api.post<{ updated: number; total: number }>(
     `/admin/events/${slug}/geocode-photos`,
@@ -1514,6 +1545,7 @@ export type ActivityAction =
   | 'tag_update'
   | 'tag_delete'
   | 'person_update'
+  | 'person_create'
   | 'person_merge'
   | 'person_delete'
   | 'person_tag_add'

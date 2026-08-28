@@ -264,9 +264,13 @@ const PhotoOverlayInner: React.FC<PhotoOverlayProps> = ({
           }
           // Reset individual card controls when navigating away
           setTouchControlsVisible(false);
-          // Store scroll position and photo ID for back navigation
+          // Store scroll position and photo ID for back navigation — slug-keyed for EventGallery's
+          // own restore logic, plus a pathname-keyed pair (see useScrollRestoration.ts) for
+          // cross-event pages like Timeline/Favorites that have no single event slug of their own.
           sessionStorage.setItem(`gallery_scroll_${slug}`, window.scrollY.toString());
           sessionStorage.setItem(`gallery_photo_${slug}`, photo.id);
+          sessionStorage.setItem(`${window.location.pathname}_scroll`, window.scrollY.toString());
+          sessionStorage.setItem(`${window.location.pathname}_photo`, photo.id);
         }}
         onTouchStart={startLongPress}
         onTouchEnd={clearLongPressTimer}

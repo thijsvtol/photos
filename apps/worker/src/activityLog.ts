@@ -40,6 +40,7 @@ export type ActivityAction =
   | 'tag_delete'
   // People
   | 'person_update'
+  | 'person_create'
   | 'person_merge'
   | 'person_delete'
   | 'person_tag_add'

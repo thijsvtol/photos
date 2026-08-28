@@ -9,6 +9,7 @@ import VerticalDateScrubber from '../components/VerticalDateScrubber';
 import SEO from '../components/SEO';
 import { useRefresh } from '../contexts/RefreshContext';
 import { useGridDensity } from '../hooks/useGridDensity';
+import { useScrollRestoration } from '../hooks/useScrollRestoration';
 import { getUserFavorites, removeFavorite as removeFavoriteAPI, toggleFavorite as toggleFavoriteAPI, requestZip, downloadZip, type FavoritePhoto } from '../api';
 import { useAuth } from '../contexts/AuthContext';
 import { config } from '../config';
@@ -55,6 +56,10 @@ const MyFavorites: React.FC = () => {
     const y = el.getBoundingClientRect().top + window.scrollY - 120;
     window.scrollTo({ top: y, behavior: 'smooth' });
   };
+
+  // Restores scroll position (anchored to the specific photo) when returning here from
+  // PhotoDetail — see useScrollRestoration()'s doc comment.
+  useScrollRestoration(!loading && photos.length > 0);
 
   // Navigation state passed to PhotoDetail so swiping next/prev stays within
   // the full favorites list (across all events/dates) instead of falling back

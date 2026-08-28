@@ -6,7 +6,7 @@ import { permanentlyDeletePhotos } from '../../photoDeletion';
 import { recordSoftDeleteTombstones, removeTombstone } from '../../tombstones';
 import { logActivity } from '../../activityLog';
 import { isValidFaceInput, EXPECTED_EMBEDDING_LENGTH } from '../../faceValidation';
-import { setManualPhotoPersonTags, getPhotoPeople, addManualPhotoPersonTags, removePersonFromPhoto, syncPeopleAcrossDuplicates } from '../../faceClustering';
+import { setManualPhotoPersonTags, getPhotoPeople, addManualPhotoPersonTags, removePersonFromPhoto, removeAllPeopleFromPhotos, syncPeopleAcrossDuplicates } from '../../faceClustering';
 import { MAX_SQL_IN_CHUNK, chunkArray } from '../../utils';
 
 // Soft-deleted photos are kept this long before the nightly purge cron
@@ -1135,6 +1135,77 @@ app.post('/bulk-tag-people', async (c) => {
   } catch (error) {
     console.error('Error in bulk tag people:', error);
     return c.json({ error: 'Failed to tag people on selected photos' }, 500);
+  }
+});
+
+/**
+ * POST /photos/bulk-untag-people
+ * Removes EVERY person (manual tags AND auto-detected face assignments) from every selected
+ * photo at once — the "Person: none" bulk action, the inverse of bulk-tag-people above, for
+ * correcting a whole batch of mis-tagged/mis-clustered photos in one step. See
+ * removeAllPeopleFromPhotos()'s doc comment in faceClustering.ts. Same permission model as
+ * bulk-tag-people (global admins bypass; others need `image_edit` on every event any selected
+ * photo belongs to).
+ */
+app.post('/bulk-untag-people', async (c) => {
+  try {
+    const user = await extractUser(c);
+    if (!user) {
+      return c.json({ error: 'Authentication required' }, 401);
+    }
+
+    c.set('user', user);
+    const isGlobalAdmin = isUserAdmin(user, c.env.ADMIN_EMAILS || '');
+
+    const { photoIds } = await c.req.json<{ photoIds: string[] }>();
+
+    if (!Array.isArray(photoIds) || photoIds.length === 0) {
+      return c.json({ error: 'photoIds array is required' }, 400);
+    }
+    if (photoIds.length > 500) {
+      return c.json({ error: 'Cannot untag more than 500 photos at once' }, 400);
+    }
+
+    const uniquePhotoIds = Array.from(new Set(photoIds));
+
+    const photoSelectStatements = chunkArray(uniquePhotoIds, MAX_SQL_IN_CHUNK).map((idsChunk) => {
+      const placeholders = idsChunk.map(() => '?').join(', ');
+      return c.env.DB
+        .prepare(`SELECT p.id, p.event_id FROM photos p WHERE p.id IN (${placeholders}) AND p.deleted_at IS NULL`)
+        .bind(...idsChunk);
+    });
+    const photoRowBatches = await c.env.DB.batch<{ id: string; event_id: number }>(photoSelectStatements);
+    const existingPhotos = photoRowBatches.flatMap((batch) => batch.results || []);
+
+    if (existingPhotos.length === 0) {
+      return c.json({ error: 'None of the given photos were found' }, 404);
+    }
+
+    if (!isGlobalAdmin) {
+      const eventIds = Array.from(new Set(existingPhotos.map((photo) => photo.event_id)));
+      const permissionChecks = await Promise.all(
+        eventIds.map((eventId) => hasEventCapabilityByEventId(c.env.DB, eventId, user.email, 'image_edit'))
+      );
+      if (permissionChecks.some((allowed) => !allowed)) {
+        return c.json({ error: 'Edit permission required for one or more events' }, 403);
+      }
+    }
+
+    const { photosCleared } = await removeAllPeopleFromPhotos(c.env, existingPhotos.map((p) => p.id));
+
+    const untaggedEventIds = Array.from(new Set(existingPhotos.map((p) => p.event_id)));
+    await logActivity(c.env, {
+      eventId: untaggedEventIds.length === 1 ? untaggedEventIds[0] : null,
+      actorEmail: user.email,
+      action: 'person_tag_remove',
+      targetType: 'photo',
+      metadata: { photoCount: existingPhotos.length, bulk: true },
+    });
+
+    return c.json({ success: true, photosCleared });
+  } catch (error) {
+    console.error('Error in bulk untag people:', error);
+    return c.json({ error: 'Failed to remove people from selected photos' }, 500);
   }
 });
 

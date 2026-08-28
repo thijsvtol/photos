@@ -4,6 +4,7 @@ import { requireAdmin } from '../../auth';
 import { logActivity } from '../../activityLog';
 import { getClusterData, applyClusteringResults, countUnclusteredFaces, getLegacyFaceStats, resetLegacyFaces, mergeClusters, assignPhotosToPerson, resetAllClusters, resetSingleCluster, learnFromManualTags, getUnattachedPhotos, resetFacesForFacelessTaggedPhotos, getUnnamedPeopleWithSuggestions, mergeConfidentUnnamedIntoTagged } from '../../faceClustering';
 import type { ClusterResult } from '../../faceClustering';
+import { EXPECTED_EMBEDDING_LENGTH } from '../../faceValidation';
 
 type Variables = {
   user: User;
@@ -264,7 +265,7 @@ app.get('/', async (c) => {
         LEFT JOIN photos p ON pc.cover_photo_id = p.id
         LEFT JOIN events e ON p.event_id = e.id
         LEFT JOIN users u ON pc.linked_user_email = u.email
-        WHERE pc.face_count >= ?
+        WHERE pc.face_count >= ? OR pc.name IS NOT NULL
         ORDER BY (pc.name IS NULL), pc.face_count DESC
       `)
       .bind(minFaces)
@@ -274,6 +275,52 @@ app.get('/', async (c) => {
   } catch (error) {
     console.error('Error fetching people:', error);
     return c.json({ error: 'Failed to fetch people' }, 500);
+  }
+});
+
+/**
+ * POST /people
+ * Creates a new, empty NAMED person with zero attached photos — lets an admin create someone to
+ * tag right away (via the "Tag people" pickers, which only ever list NAMED people) without
+ * waiting for automatic face clustering to discover them first, or for a person whose face is
+ * never clearly visible enough to auto-detect at all. The centroid is an all-zero vector, which
+ * by construction can never score as a match for any real face (cosine similarity against a
+ * zero vector is always 0) — so this can never accidentally attract automatic clustering; the
+ * person only ever gains real photos via manual tagging or an explicit "assign to this person"
+ * action, both of which teach the centroid a real embedding the first time they run. Excluded
+ * from GET /people's default `face_count`-based listing threshold (see the query above) via the
+ * `OR pc.name IS NOT NULL` clause, so a freshly-created person is immediately visible there too.
+ */
+app.post('/', async (c) => {
+  try {
+    const { name } = await c.req.json<{ name?: string }>();
+    const trimmed = (name || '').trim();
+    if (!trimmed) {
+      return c.json({ error: 'Name is required' }, 400);
+    }
+
+    const zeroEmbedding = new Float32Array(EXPECTED_EMBEDDING_LENGTH).buffer;
+    const created = await c.env.DB
+      .prepare('INSERT INTO person_clusters (name, centroid_embedding, face_count) VALUES (?, ?, 0) RETURNING id')
+      .bind(trimmed, zeroEmbedding)
+      .first<{ id: number }>();
+
+    if (!created) {
+      return c.json({ error: 'Failed to create person' }, 500);
+    }
+
+    await logActivity(c.env, {
+      actorEmail: c.get('user')?.email || 'unknown',
+      action: 'person_create',
+      targetType: 'person',
+      targetId: String(created.id),
+      metadata: { name: trimmed },
+    });
+
+    return c.json({ success: true, id: created.id, name: trimmed });
+  } catch (error) {
+    console.error('Error creating person:', error);
+    return c.json({ error: 'Failed to create person' }, 500);
   }
 });
 

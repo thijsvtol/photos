@@ -215,6 +215,13 @@ const PhotoDetail: React.FC = () => {
   // photos opened from the Timeline silently browsed that event's ENTIRE gallery instead of
   // just the (possibly filtered, e.g. "Just me") subset shown in the Timeline.
   const timelinePhotoIds = (location.state?.timelinePhotoIds || []) as string[];
+  // Full cross-EVENT ordered list (id+slug pairs, matching what's actually on screen — see
+  // Timeline.tsx's `timelineLinkState` doc comment). Unlike `timelinePhotoIds` above (which only
+  // restricts next/prev to THIS event's photos), this is what lets swiping actually continue
+  // into the next/previous EVENT once you reach the edge of the current one, instead of
+  // wrapping back to the start of just this event (the reported "swiping stops per event" bug).
+  // Same cross-event navigation approach as `favoritePhotos` below.
+  const timelinePhotos = (location.state?.timelinePhotos || []) as Array<{ id: string; slug: string }>;
   // Full /timeline?q=...&people=... URL to return to — needed since fromSearch alone isn't
   // enough to reconstruct the exact search the user came from.
   const searchUrl = (location.state?.searchUrl || '/timeline') as string;
@@ -600,20 +607,21 @@ const PhotoDetail: React.FC = () => {
   };
 
   const navigateToNext = useCallback(() => {
-    // When viewing favorites, always navigate through the favoritePhotos list across all events
-    if (fromFavorites && favoritePhotos.length > 0) {
-      const currentFavIndex = favoritePhotos.findIndex((fav: { id: string; slug: string }) => fav.id === photoId && fav.slug === slug);
-      if (currentFavIndex >= 0 && currentFavIndex < favoritePhotos.length - 1) {
-        const nextFav = favoritePhotos[currentFavIndex + 1];
-        navigate(`/p/${nextFav.slug}/${nextFav.id}`, { 
-          state: { fromFavorites: true, favoritePhotos } 
-        });
-      } else if (currentFavIndex === favoritePhotos.length - 1) {
-        // Loop back to first favorite
-        const firstFav = favoritePhotos[0];
-        navigate(`/p/${firstFav.slug}/${firstFav.id}`, { 
-          state: { fromFavorites: true, favoritePhotos } 
-        });
+    // Favorites and Timeline both navigate across a cross-event ordered list (id+slug pairs)
+    // instead of being confined to the current event's own photos — see `timelinePhotos`'s doc
+    // comment above for why this is required for Timeline (previously swiping stopped/looped at
+    // each event boundary instead of continuing into the next event).
+    const crossEventPhotos = fromFavorites ? favoritePhotos : fromTimeline ? timelinePhotos : null;
+    if (crossEventPhotos && crossEventPhotos.length > 0) {
+      const crossEventState = fromFavorites ? { fromFavorites: true, favoritePhotos } : { fromTimeline: true, timelinePhotos };
+      const currentCrossIndex = crossEventPhotos.findIndex((p) => p.id === photoId && p.slug === slug);
+      if (currentCrossIndex >= 0 && currentCrossIndex < crossEventPhotos.length - 1) {
+        const nextItem = crossEventPhotos[currentCrossIndex + 1];
+        navigate(`/p/${nextItem.slug}/${nextItem.id}`, { state: crossEventState });
+      } else if (currentCrossIndex === crossEventPhotos.length - 1) {
+        // Loop back to the first photo
+        const firstItem = crossEventPhotos[0];
+        navigate(`/p/${firstItem.slug}/${firstItem.id}`, { state: crossEventState });
       }
     } else {
       // Normal event gallery navigation
@@ -690,23 +698,22 @@ const PhotoDetail: React.FC = () => {
       }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isTransitioning, fromFavorites, favoritePhotos, photoId, slug, navigate, displayPhotos, allPhotos, currentIndex, preloadedImages, photo, location.state]);
+  }, [isTransitioning, fromFavorites, favoritePhotos, fromTimeline, timelinePhotos, photoId, slug, navigate, displayPhotos, allPhotos, currentIndex, preloadedImages, photo, location.state]);
 
   const navigateToPrevious = useCallback(() => {
-    // When viewing favorites, always navigate through the favoritePhotos list across all events
-    if (fromFavorites && favoritePhotos.length > 0) {
-      const currentFavIndex = favoritePhotos.findIndex((fav: { id: string; slug: string }) => fav.id === photoId && fav.slug === slug);
-      if (currentFavIndex > 0) {
-        const prevFav = favoritePhotos[currentFavIndex - 1];
-        navigate(`/p/${prevFav.slug}/${prevFav.id}`, { 
-          state: { fromFavorites: true, favoritePhotos } 
-        });
-      } else if (currentFavIndex === 0) {
-        // Loop back to last favorite
-        const lastFav = favoritePhotos[favoritePhotos.length - 1];
-        navigate(`/p/${lastFav.slug}/${lastFav.id}`, { 
-          state: { fromFavorites: true, favoritePhotos } 
-        });
+    // Favorites and Timeline both navigate across a cross-event ordered list — see
+    // navigateToNext()'s matching comment above.
+    const crossEventPhotos = fromFavorites ? favoritePhotos : fromTimeline ? timelinePhotos : null;
+    if (crossEventPhotos && crossEventPhotos.length > 0) {
+      const crossEventState = fromFavorites ? { fromFavorites: true, favoritePhotos } : { fromTimeline: true, timelinePhotos };
+      const currentCrossIndex = crossEventPhotos.findIndex((p) => p.id === photoId && p.slug === slug);
+      if (currentCrossIndex > 0) {
+        const prevItem = crossEventPhotos[currentCrossIndex - 1];
+        navigate(`/p/${prevItem.slug}/${prevItem.id}`, { state: crossEventState });
+      } else if (currentCrossIndex === 0) {
+        // Loop back to the last photo
+        const lastItem = crossEventPhotos[crossEventPhotos.length - 1];
+        navigate(`/p/${lastItem.slug}/${lastItem.id}`, { state: crossEventState });
       }
     } else {
       // Normal event gallery navigation
@@ -777,7 +784,7 @@ const PhotoDetail: React.FC = () => {
       }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isTransitioning, fromFavorites, favoritePhotos, photoId, slug, navigate, displayPhotos, allPhotos, currentIndex, preloadedImages, photo, location.state]);
+  }, [isTransitioning, fromFavorites, favoritePhotos, fromTimeline, timelinePhotos, photoId, slug, navigate, displayPhotos, allPhotos, currentIndex, preloadedImages, photo, location.state]);
 
   // Keep refs updated for stable event handlers
   navigateNextRef.current = navigateToNext;
@@ -1863,6 +1870,8 @@ const PhotoDetail: React.FC = () => {
               <div className="text-white/90 text-sm font-medium">
                 {fromFavorites && favoritePhotos.length > 0
                   ? `${(favoritePhotos.findIndex((fav: { id: string; slug: string }) => fav.id === photoId && fav.slug === slug) + 1) || 1} / ${favoritePhotos.length}`
+                  : fromTimeline && timelinePhotos.length > 0
+                  ? `${(timelinePhotos.findIndex((p) => p.id === photoId && p.slug === slug) + 1) || 1} / ${timelinePhotos.length}`
                   : `${currentIndex + 1} / ${displayPhotos.length > 0 ? displayPhotos.length : allPhotos.length}`
                 }
                 {fromFavorites && <span className="ml-1 text-red-400">♥</span>}

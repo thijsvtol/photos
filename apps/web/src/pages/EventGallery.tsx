@@ -1,6 +1,6 @@
 import React, { useEffect, useState, useRef, useMemo, useCallback } from 'react';
 import { useParams, Link } from 'react-router-dom';
-import { Upload, Settings, Users, X, Check } from 'lucide-react';
+import { Upload, Settings, Users, X, Check, UserX } from 'lucide-react';
 import Navbar from '../components/Navbar';
 import Footer from '../components/Footer';
 import { GallerySkeleton } from '../components/Skeletons';
@@ -18,7 +18,7 @@ import CastButton from '../components/CastButton';
 import AlbumPicker from '../components/AlbumPicker';
 import EventLocationPicker from '../components/EventLocationPicker';
 import { useUpload } from '../hooks/useUpload';
-import { getEvent, getPhotos, loginToEvent, getPreviewUrl, getCastPreviewUrl, requestZip, downloadZip, setPhotoFeatured, getUserFavoriteIds, toggleFavorite as toggleFavoriteAPI, bulkDeletePhotos, bulkCopyPhotos, bulkUpdatePhotoLocation, bulkTagPeopleOnPhotos, getCollaborators, getNamedPeople, getPublicNamedPeople } from '../api';
+import { getEvent, getPhotos, loginToEvent, getPreviewUrl, getCastPreviewUrl, requestZip, downloadZip, setPhotoFeatured, getUserFavoriteIds, toggleFavorite as toggleFavoriteAPI, bulkDeletePhotos, bulkCopyPhotos, bulkUpdatePhotoLocation, bulkTagPeopleOnPhotos, bulkUntagPeopleOnPhotos, getCollaborators, getNamedPeople, getPublicNamedPeople } from '../api';
 import type { NamedPerson, PublicNamedPerson } from '../api';
 import type { Event, Photo, Collaborator } from '../types';
 import { getCachedEventPhotos, cacheEventPhotos } from '../services/eventPhotoCache';
@@ -628,6 +628,37 @@ const EventGallery: React.FC = () => {
       console.error('Failed to bulk-tag people', err);
       await haptics.error();
       toast.showError('Failed to tag people. Please try again.');
+    } finally {
+      setTaggingPeople(false);
+    }
+  };
+
+  // Removes EVERY person from every selected photo — the "Person: none" bulk action, the inverse
+  // of handleBulkTagPeople above (which only ever adds).
+  const handleBulkUntagPeople = async () => {
+    const selected = Array.from(selectedPhotos);
+    if (selected.length === 0) {
+      toast.showInfo('No photos selected');
+      return;
+    }
+    const confirmed = await confirm(
+      'Remove All People',
+      `Remove every tagged person from ${selected.length} photo${selected.length === 1 ? '' : 's'}? This cannot be undone automatically.`,
+      { variant: 'danger' }
+    );
+    if (!confirmed) return;
+
+    setTaggingPeople(true);
+    try {
+      const result = await bulkUntagPeopleOnPhotos(selected);
+      setShowPeopleTagPicker(false);
+      clearSelection();
+      await haptics.success();
+      toast.showSuccess(`Removed people from ${result.clearedCount} photo(s)`);
+    } catch (err) {
+      console.error('Failed to bulk-untag people', err);
+      await haptics.error();
+      toast.showError('Failed to remove people. Please try again.');
     } finally {
       setTaggingPeople(false);
     }
@@ -1471,6 +1502,16 @@ const EventGallery: React.FC = () => {
                     );
                   })
               )}
+            </div>
+
+            <div className="mt-3 pt-3 border-t border-gray-700 shrink-0">
+              <button
+                onClick={handleBulkUntagPeople}
+                disabled={taggingPeople}
+                className="w-full py-2 text-sm font-medium text-red-400 hover:text-red-300 hover:bg-red-950/40 rounded-lg transition disabled:opacity-50 flex items-center justify-center gap-1.5"
+              >
+                <UserX className="w-4 h-4" /> Remove all people (person: none)
+              </button>
             </div>
 
             <div className="flex gap-2.5 mt-4 shrink-0">

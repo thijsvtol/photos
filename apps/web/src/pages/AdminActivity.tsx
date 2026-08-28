@@ -48,6 +48,7 @@ const ACTION_ICONS: Record<string, React.ReactNode> = {
   tag_update: <Tag className="w-4 h-4 text-purple-400" />,
   tag_delete: <Tag className="w-4 h-4 text-red-500" />,
   person_update: <Pencil className="w-4 h-4 text-pink-500" />,
+  person_create: <UserPlus className="w-4 h-4 text-emerald-500" />,
   person_merge: <Users className="w-4 h-4 text-pink-500" />,
   person_delete: <UserMinus className="w-4 h-4 text-red-500" />,
   person_tag_add: <UserPlus className="w-4 h-4 text-pink-500" />,
@@ -168,6 +169,8 @@ function describeActivity(entry: ActivityEntry): string {
     }
     case 'person_merge':
       return `${actor} merged ${plural(num('mergedCount') ?? 0, 'person')} together (${plural(num('facesMoved') ?? 0, 'face')} moved)`;
+    case 'person_create':
+      return `${actor} created person "${str('name') || 'unnamed'}"`;
     case 'person_delete':
       return `${actor} deleted person "${str('name') || 'unnamed'}"`;
     case 'person_tag_add':
@@ -175,7 +178,9 @@ function describeActivity(entry: ActivityEntry): string {
         ? `${actor} tagged ${plural(num('personCount') ?? 0, 'person')} across ${plural(num('photoCount') ?? 0, 'photo')}${inEvent}`
         : `${actor} tagged ${plural(num('personCount') ?? 0, 'person')} on a photo${inEvent}`;
     case 'person_tag_remove':
-      return `${actor} removed a person from a photo${inEvent}`;
+      return meta.bulk
+        ? `${actor} removed all people from ${plural(num('photoCount') ?? 0, 'photo')}${inEvent}`
+        : `${actor} removed a person from a photo${inEvent}`;
 
     // Sharing (sourced from collaboration_history)
     case 'collab_invite':

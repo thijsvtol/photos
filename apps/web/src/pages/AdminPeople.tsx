@@ -1,8 +1,8 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Link } from 'react-router-dom';
-import { Users, ScanFace, Loader2, Sparkles, Eye, EyeOff, GitMerge, X, Check, GraduationCap, Search, ArrowUpDown, BarChart3, ChevronDown, Wrench, AlertTriangle } from 'lucide-react';
+import { Link, useNavigate } from 'react-router-dom';
+import { Users, ScanFace, Loader2, Sparkles, Eye, EyeOff, GitMerge, X, Check, GraduationCap, Search, ArrowUpDown, BarChart3, ChevronDown, Wrench, AlertTriangle, UserPlus } from 'lucide-react';
 import Navbar from '../components/Navbar';
-import { getPeople, getFullClusterData, getAllFacesForDeepRebuild, applyClusteringResults, resetAllClusters, mergePeople, getLegacyFaceStats, resetLegacyFaces, learnFromManualTags, rescanFacelessTaggedPhotos } from '../api';
+import { getPeople, getFullClusterData, getAllFacesForDeepRebuild, applyClusteringResults, resetAllClusters, mergePeople, getLegacyFaceStats, resetLegacyFaces, learnFromManualTags, rescanFacelessTaggedPhotos, createPerson } from '../api';
 import type { Person, LegacyFaceStats } from '../api';
 import MediaThumb from '../components/MediaThumb';
 import PersonAvatar from '../components/PersonAvatar';
@@ -76,6 +76,7 @@ const ToolItem: React.FC<{
 );
 
 const AdminPeople: React.FC = () => {
+  const navigate = useNavigate();
   // Holds EVERY cluster (including single-photo ones) so the UI can tell the
   // difference between "clustering hasn't found anyone yet" and "clustering
   // found groups, they're just all single-photo so far and hidden by
@@ -142,8 +143,19 @@ const AdminPeople: React.FC = () => {
   // the header only surfaces the everyday ones (Scan, Cluster Now, Unattached).
   const [toolsOpen, setToolsOpen] = useState(false);
   const toolsRef = useRef<HTMLDivElement>(null);
+  // "New Person" — lets an admin create a named person with zero attached photos, so they can
+  // tag someone right away (via the "Tag people" pickers) without waiting for auto-clustering or
+  // needing to find a suitable photo first. See createPerson()'s doc comment in api.ts.
+  const [showCreatePerson, setShowCreatePerson] = useState(false);
+  const [newPersonName, setNewPersonName] = useState('');
+  const [creatingPerson, setCreatingPerson] = useState(false);
+  const [createPersonError, setCreatePersonError] = useState<string | null>(null);
 
-  const multiPhotoPeople = allPeople.filter((p) => p.photo_count >= 2);
+  // Named people (whether auto-clustered or manually created via "New Person") are always
+  // treated as deliberately curated, never hidden behind the "singles" toggle — that toggle
+  // exists to hide noisy, UNREVIEWED single-photo auto-clusters, not people an admin has
+  // explicitly named (including a just-created person with 0 photos so far).
+  const multiPhotoPeople = allPeople.filter((p) => p.photo_count >= 2 || p.name);
   const singlesCount = allPeople.length - multiPhotoPeople.length;
   const visiblePeople = showSingles ? allPeople : multiPhotoPeople;
   const people = visiblePeople
@@ -185,6 +197,24 @@ const AdminPeople: React.FC = () => {
       console.error(err);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleCreatePerson = async () => {
+    const trimmed = newPersonName.trim();
+    if (!trimmed) return;
+    setCreatingPerson(true);
+    setCreatePersonError(null);
+    try {
+      const { id } = await createPerson(trimmed);
+      setShowCreatePerson(false);
+      setNewPersonName('');
+      navigate(`/admin/people/${id}`);
+    } catch (err) {
+      console.error('Failed to create person', err);
+      setCreatePersonError('Failed to create person. Please try again.');
+    } finally {
+      setCreatingPerson(false);
     }
   };
 
@@ -546,6 +576,13 @@ const AdminPeople: React.FC = () => {
             >
               <Users className="w-4 h-4" /> Unattached Photos
             </Link>
+            <button
+              onClick={() => { setShowCreatePerson(true); setNewPersonName(''); setCreatePersonError(null); }}
+              title="Create a named person you can tag on photos right away, without attaching a photo first"
+              className="px-4 py-2 bg-gray-200 dark:bg-gray-700 text-gray-800 dark:text-gray-200 rounded-lg hover:bg-gray-300 dark:hover:bg-gray-600 transition flex items-center gap-2"
+            >
+              <UserPlus className="w-4 h-4" /> New Person
+            </button>
 
             {/* Tools: the rarer / advanced / destructive actions, each with a description +
                 impact chip so the effect is clear before clicking (was previously ~6 more bare
@@ -947,6 +984,55 @@ const AdminPeople: React.FC = () => {
                   className="w-full mt-4 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition"
                 >
                   Close
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {showCreatePerson && (
+          <div
+            className="fixed inset-0 bg-black/50 flex items-center justify-center z-[100] p-4"
+            onClick={() => !creatingPerson && setShowCreatePerson(false)}
+          >
+            <div
+              className="bg-white dark:bg-gray-800 rounded-xl shadow-xl p-6 max-w-sm w-full"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <h2 className="text-lg font-bold text-gray-900 dark:text-white flex items-center gap-2 mb-2">
+                <UserPlus className="w-5 h-5" /> New Person
+              </h2>
+              <p className="text-sm text-gray-500 dark:text-gray-400 mb-3">
+                Creates a named person with no photos yet — you can tag them on photos right away
+                from the "Tag people" pickers.
+              </p>
+              <input
+                type="text"
+                value={newPersonName}
+                onChange={(e) => setNewPersonName(e.target.value)}
+                onKeyDown={(e) => { if (e.key === 'Enter' && !creatingPerson) handleCreatePerson(); }}
+                placeholder="Person's name…"
+                autoFocus
+                disabled={creatingPerson}
+                className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+              />
+              {createPersonError && (
+                <p className="text-sm text-red-600 dark:text-red-400 mt-2">{createPersonError}</p>
+              )}
+              <div className="flex gap-2.5 mt-4">
+                <button
+                  onClick={() => setShowCreatePerson(false)}
+                  disabled={creatingPerson}
+                  className="flex-1 py-2.5 bg-gray-200 dark:bg-gray-700 text-gray-800 dark:text-gray-200 rounded-lg text-sm font-medium hover:bg-gray-300 dark:hover:bg-gray-600 transition disabled:opacity-50"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={handleCreatePerson}
+                  disabled={creatingPerson || !newPersonName.trim()}
+                  className="flex-1 py-2.5 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 transition disabled:opacity-50"
+                >
+                  {creatingPerson ? 'Creating…' : 'Create'}
                 </button>
               </div>
             </div>

@@ -1093,6 +1093,64 @@ export async function removePersonFromPhoto(env: Env, photoId: string, personId:
 }
 
 /**
+ * Fully removes EVERY person from EVERY given photo at once — the bulk "person: none" action for
+ * a multi-selected batch (e.g. undoing an incorrect bulk tag). Mirrors removePersonFromPhoto()'s
+ * single-photo/single-person behavior — undoes both manual tags (photo_person_tags) and
+ * automatically-detected face assignments (photo_faces.person_id), decrementing/deleting each
+ * affected person_clusters row's face_count exactly the same way — just aggregated across many
+ * photos and every person on each one, instead of one DB round-trip per (photo, person) pair.
+ */
+export async function removeAllPeopleFromPhotos(env: Env, photoIds: string[]): Promise<{ photosCleared: number }> {
+  const uniquePhotoIds = [...new Set(photoIds)];
+  if (uniquePhotoIds.length === 0) return { photosCleared: 0 };
+
+  for (const idChunk of chunk(uniquePhotoIds, FACE_ID_CHUNK_SIZE)) {
+    if (idChunk.length === 0) continue;
+    const placeholders = idChunk.map(() => '?').join(',');
+
+    await env.DB.prepare(`DELETE FROM photo_person_tags WHERE photo_id IN (${placeholders})`).bind(...idChunk).run();
+
+    const { results: faceRows } = await env.DB
+      .prepare(`SELECT id, person_id FROM photo_faces WHERE photo_id IN (${placeholders}) AND person_id IS NOT NULL`)
+      .bind(...idChunk)
+      .all<{ id: number; person_id: number }>();
+    const rows = faceRows || [];
+    if (rows.length === 0) continue;
+
+    const faceIds = rows.map((r) => r.id);
+    for (const faceIdChunk of chunk(faceIds, FACE_ID_CHUNK_SIZE)) {
+      if (faceIdChunk.length === 0) continue;
+      const facePlaceholders = faceIdChunk.map(() => '?').join(',');
+      await env.DB.prepare(`UPDATE photo_faces SET person_id = NULL WHERE id IN (${facePlaceholders})`).bind(...faceIdChunk).run();
+    }
+
+    const removedCountByPerson = new Map<number, number>();
+    for (const row of rows) {
+      removedCountByPerson.set(row.person_id, (removedCountByPerson.get(row.person_id) || 0) + 1);
+    }
+    for (const [personId, removedCount] of removedCountByPerson) {
+      const cluster = await env.DB
+        .prepare('SELECT face_count FROM person_clusters WHERE id = ?')
+        .bind(personId)
+        .first<{ face_count: number }>();
+      if (!cluster) continue;
+
+      const newCount = cluster.face_count - removedCount;
+      if (newCount <= 0) {
+        await env.DB.prepare('DELETE FROM person_clusters WHERE id = ?').bind(personId).run();
+      } else {
+        await env.DB
+          .prepare("UPDATE person_clusters SET face_count = ?, updated_at = datetime('now') WHERE id = ?")
+          .bind(newCount, personId)
+          .run();
+      }
+    }
+  }
+
+  return { photosCleared: uniquePhotoIds.length };
+}
+
+/**
  * "Learn from manual tags" — lets the admin's own hard-won corrections (manually merging
  * duplicate people, manually tagging photos face-detection missed) actually improve FUTURE
  * automatic clustering, without needing a full "Rebuild All (Deep)" pass. Manual merges already

@@ -1,6 +1,6 @@
 import React, { useEffect, useState, useRef, useMemo } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { Clock, X, Search, Users, Check } from 'lucide-react';
+import { Clock, X, Search, Users, Check, UserX } from 'lucide-react';
 import Navbar from '../components/Navbar';
 import Footer from '../components/Footer';
 import { TimelineSkeleton } from '../components/Skeletons';
@@ -14,7 +14,8 @@ import EventLocationPicker from '../components/EventLocationPicker';
 import { useConfirm } from '../components/ConfirmDialog';
 import { useGridDensity } from '../hooks/useGridDensity';
 import { usePhotoSelection } from '../hooks/usePhotoSelection';
-import { getTimeline, getUserFavoriteIds, toggleFavorite as toggleFavoriteAPI, requestZip, downloadZip, getMyPhotos, searchPhotos, getPublicNamedPeople, setPhotoFeatured, bulkDeletePhotos, bulkCopyPhotos, bulkUpdatePhotoLocation, bulkTagPeopleOnPhotos, getNamedPeople } from '../api';
+import { useScrollRestoration } from '../hooks/useScrollRestoration';
+import { getTimeline, getUserFavoriteIds, toggleFavorite as toggleFavoriteAPI, requestZip, downloadZip, getMyPhotos, searchPhotos, getPublicNamedPeople, setPhotoFeatured, bulkDeletePhotos, bulkCopyPhotos, bulkUpdatePhotoLocation, bulkTagPeopleOnPhotos, bulkUntagPeopleOnPhotos, getNamedPeople } from '../api';
 import type { SearchResultPhoto, PublicNamedPerson, NamedPerson } from '../api';
 import { getCachedTimelinePhotos, cacheTimelinePhotos, removeTimelineCachePhotos } from '../services/timelineCache';
 import type { Photo } from '../types';
@@ -350,6 +351,33 @@ const Timeline: React.FC = () => {
     }
   };
 
+  // Admin: removes EVERY person from every selected photo — the "Person: none" bulk action, the
+  // inverse of handleBulkTagPeople above (which only ever adds).
+  const handleBulkUntagPeople = async () => {
+    const ids = Array.from(selectedPhotos);
+    if (ids.length === 0) return;
+    const confirmed = await confirm(
+      'Remove All People',
+      `Remove every tagged person from ${ids.length} photo${ids.length === 1 ? '' : 's'}? This cannot be undone automatically.`,
+      { variant: 'danger' }
+    );
+    if (!confirmed) return;
+
+    setTaggingPeople(true);
+    try {
+      const result = await bulkUntagPeopleOnPhotos(ids);
+      setShowPeopleTagPicker(false);
+      clearSelection();
+      await haptics.success();
+      toast.showSuccess(`Removed people from ${result.clearedCount} photo(s)`);
+    } catch {
+      await haptics.error();
+      toast.showError('Failed to remove people');
+    } finally {
+      setTaggingPeople(false);
+    }
+  };
+
   // Admin: copy the selection into another event ("album"). Source ids span events; the target is
   // chosen in AlbumPicker.
   const handleBulkCopy = async (targetEventSlug: string) => {
@@ -607,6 +635,38 @@ const Timeline: React.FC = () => {
     }
     return map;
   }, [filteredPhotos]);
+
+  // Full cross-EVENT ordered list (id+slug pairs), exactly matching the on-screen render order
+  // (date-desc, then grouped by event within each date — see the render loop below) — lets
+  // PhotoDetail's next/prev navigation continue across event boundaries instead of stopping/
+  // looping at the edge of whichever event the opened photo happens to belong to (the reported
+  // "swiping through the timeline is interrupted per event" bug). Recomputed the same grouping
+  // the render below does rather than reusing `timelinePhotoIdsByEvent` (which discards date
+  // ordering between events).
+  const timelineLinkState = useMemo(() => {
+    const ordered: Photo[] = [];
+    for (const date of dates) {
+      const datePhotos = groups.get(date) || [];
+      const byEvent = new Map<string, Photo[]>();
+      for (const p of datePhotos) {
+        const s = p.event_slug || '';
+        const arr = byEvent.get(s) || [];
+        arr.push(p);
+        byEvent.set(s, arr);
+      }
+      for (const eventPhotos of byEvent.values()) {
+        ordered.push(...eventPhotos);
+      }
+    }
+    return {
+      fromTimeline: true,
+      timelinePhotos: ordered.map((p) => ({ id: p.id, slug: p.event_slug || '' })),
+    };
+  }, [dates, groups]);
+
+  // Restores scroll position (anchored to the specific photo) when returning here from
+  // PhotoDetail — see useScrollRestoration()'s doc comment.
+  useScrollRestoration(!loading && photos.length > 0);
 
   // Search results are grouped by event (not date) — same approach the old standalone Search
   // page used, since JustifiedGrid needs one `slug` per instance to build preview URLs and
@@ -970,7 +1030,7 @@ const Timeline: React.FC = () => {
                           forceControlsVisible={selectedPhotos.size > 0}
                           userFavorites={userFavorites}
                           supportsHover={supportsHover}
-                          linkState={{ fromTimeline: true, timelinePhotoIds: timelinePhotoIdsByEvent.get(eventSlug) || [] }}
+                          linkState={{ ...timelineLinkState, timelinePhotoIds: timelinePhotoIdsByEvent.get(eventSlug) || [] }}
                           onToggleSelection={togglePhotoSelection}
                           onToggleFavorite={isAuthenticated ? toggleFavorite : undefined}
                         />
@@ -1093,6 +1153,16 @@ const Timeline: React.FC = () => {
                     );
                   })
               )}
+            </div>
+
+            <div className="mt-3 pt-3 border-t border-gray-700 shrink-0">
+              <button
+                onClick={handleBulkUntagPeople}
+                disabled={taggingPeople}
+                className="w-full py-2 text-sm font-medium text-red-400 hover:text-red-300 hover:bg-red-950/40 rounded-lg transition disabled:opacity-50 flex items-center justify-center gap-1.5"
+              >
+                <UserX className="w-4 h-4" /> Remove all people (person: none)
+              </button>
             </div>
 
             <div className="flex gap-2.5 mt-4 shrink-0">
