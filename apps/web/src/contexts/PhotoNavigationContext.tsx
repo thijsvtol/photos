@@ -2,6 +2,7 @@ import React, { createContext, useCallback, useContext, useRef, useState } from 
 import type { Photo } from '../types';
 
 type PhotoListSetter = React.Dispatch<React.SetStateAction<Photo[]>>;
+type RevealPhotoFn = (photoId: string) => void;
 
 interface PhotoNavigationContextValue {
   /** The current on-screen-ordered photo list of whichever gallery page (EventGallery/Timeline/
@@ -26,6 +27,20 @@ interface PhotoNavigationContextValue {
   registerPhotoList: (photos: Photo[], setter: PhotoListSetter | null) => void;
   removePhoto: (photoId: string) => void;
   updatePhoto: (photoId: string, patch: Partial<Photo>) => void;
+  /**
+   * Registers a page-specific function that forces a given photo id into that page's actual
+   * rendered DOM right away. Needed for pages (EventGallery) that hard-cut their render to a
+   * "visible window" (`dates.slice(0, visibleDateCount)` etc, nothing beyond it exists in the
+   * DOM at all) rather than reserving placeholder space for everything (Timeline's
+   * LazyDateGroup) — for those, scrolling alone can never reach a photo outside the current
+   * window since there's nothing there yet to scroll toward. Optional: pages without such a
+   * cutoff (MyFavorites, Timeline) simply never register one, making revealPhoto() a no-op for
+   * them (scrolling alone already works there). Pass `null` on unmount, same reason as `setter`
+   * above.
+   */
+  registerRevealHandler: (fn: RevealPhotoFn | null) => void;
+  /** Calls whichever gallery page's registered reveal handler is currently active, if any. */
+  revealPhoto: RevealPhotoFn;
 }
 
 const PhotoNavigationContext = createContext<PhotoNavigationContextValue | undefined>(undefined);
@@ -33,6 +48,7 @@ const PhotoNavigationContext = createContext<PhotoNavigationContextValue | undef
 export const PhotoNavigationProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [photos, setPhotos] = useState<Photo[]>([]);
   const setterRef = useRef<PhotoListSetter | null>(null);
+  const revealRef = useRef<RevealPhotoFn | null>(null);
 
   const registerPhotoList = useCallback((next: Photo[], setter: PhotoListSetter | null) => {
     setPhotos(next);
@@ -49,8 +65,18 @@ export const PhotoNavigationProvider: React.FC<{ children: React.ReactNode }> = 
     setterRef.current?.((prev) => prev.map((p) => (p.id === photoId ? { ...p, ...patch } : p)));
   }, []);
 
+  const registerRevealHandler = useCallback((fn: RevealPhotoFn | null) => {
+    revealRef.current = fn;
+  }, []);
+
+  const revealPhoto = useCallback((photoId: string) => {
+    revealRef.current?.(photoId);
+  }, []);
+
   return (
-    <PhotoNavigationContext.Provider value={{ photos, registerPhotoList, removePhoto, updatePhoto }}>
+    <PhotoNavigationContext.Provider
+      value={{ photos, registerPhotoList, removePhoto, updatePhoto, registerRevealHandler, revealPhoto }}
+    >
       {children}
     </PhotoNavigationContext.Provider>
   );

@@ -276,7 +276,7 @@ const PhotoDetail: React.FC = () => {
   // updateNavPhoto below) instead of leaving it stale once the overlay closes. Falls back to
   // this event's own full gallery (self-fetched into `allPhotos`, see loadPhoto()) when there's
   // no live background list to read from — i.e. a cold/direct load of this exact URL.
-  const { photos: navPhotos, removePhoto: removeNavPhoto, updatePhoto: updateNavPhoto } = usePhotoNavigation();
+  const { photos: navPhotos, removePhoto: removeNavPhoto, updatePhoto: updateNavPhoto, revealPhoto } = usePhotoNavigation();
   const photosToUse = navPhotos.some((p) => p.id === photoId) ? navPhotos : allPhotos;
 
   const closeOverlay = useCallback(() => {
@@ -304,10 +304,14 @@ const PhotoDetail: React.FC = () => {
   useEffect(() => {
     return () => {
       if (backgroundLocationRef.current && photoRef.current) {
+        // Forces EventGallery's hard-cutoff visible window (see registerRevealHandler's doc
+        // comment) open around this photo BEFORE scrolling — a no-op for pages that don't
+        // register a reveal handler (Timeline/MyFavorites), where scrolling alone suffices.
+        revealPhoto(photoRef.current.id);
         scrollPhotoIntoView(photoRef.current.id);
       }
     };
-  }, []);
+  }, [revealPhoto]);
 
   const swipePreviewPhoto = (() => {
     if (swipeOffset === 0 || currentIndex < 0 || photosToUse.length < 2) {

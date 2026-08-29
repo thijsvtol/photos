@@ -842,7 +842,7 @@ const EventGallery: React.FC = () => {
   // toggle made from inside the overlay, instead of re-fetching once it closes. `event_slug` is
   // guaranteed here (this event's own photos don't always carry it themselves) since
   // PhotoNavigationContext's list must always know which event each photo belongs to.
-  const { registerPhotoList } = usePhotoNavigation();
+  const { registerPhotoList, registerRevealHandler } = usePhotoNavigation();
   useEffect(() => {
     registerPhotoList(
       filteredPhotos.map((p) => ({ ...p, event_slug: p.event_slug || slug })),
@@ -1006,6 +1006,14 @@ const EventGallery: React.FC = () => {
     );
     return true;
   }, [photos, sortBy]);
+
+  // Lets the PhotoDetail overlay force this specific photo into the visible-window slice above
+  // BEFORE it tries to scroll to it on close — without this, a photo swiped to far past the
+  // initial window has no DOM node at all yet to scroll toward.
+  useEffect(() => {
+    registerRevealHandler(expandWindowForPhotoId);
+    return () => registerRevealHandler(null);
+  }, [registerRevealHandler, expandWindowForPhotoId]);
 
   // Navigating to a different event invalidates any pending restore — its target
   // photo belongs to the previous gallery. Without this the stale ref would block
