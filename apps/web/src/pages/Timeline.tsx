@@ -15,6 +15,7 @@ import { useConfirm } from '../components/ConfirmDialog';
 import { useGridDensity } from '../hooks/useGridDensity';
 import { usePhotoSelection } from '../hooks/usePhotoSelection';
 import { usePhotoNavigation } from '../contexts/PhotoNavigationContext';
+import { scrollPhotoIntoView } from '../utils/scrollPhotoIntoView';
 import { getTimeline, getUserFavoriteIds, toggleFavorite as toggleFavoriteAPI, requestZip, downloadZip, getMyPhotos, searchPhotos, getPublicNamedPeople, setPhotoFeatured, bulkDeletePhotos, bulkCopyPhotos, bulkUpdatePhotoLocation, bulkTagPeopleOnPhotos, bulkUntagPeopleOnPhotos, getNamedPeople } from '../api';
 import type { SearchResultPhoto, PublicNamedPerson, NamedPerson } from '../api';
 import { getCachedTimelinePhotos, cacheTimelinePhotos, removeTimelineCachePhotos } from '../services/timelineCache';
@@ -679,6 +680,19 @@ const Timeline: React.FC = () => {
     }
   }, [hasActiveSearch, filteredSearchResults, timelineOrderedPhotos, registerPhotoList]);
   useEffect(() => () => registerPhotoList([], null), [registerPhotoList]);
+
+  // Scrolls back to whatever photo the user was viewing once the PhotoDetail overlay (opened
+  // on top of this page) closes — see PhotoNavigationContext's activePhotoId doc comment for
+  // why this reacts to a plain value change instead of PhotoDetail scrolling during its own
+  // unmount.
+  const { activePhotoId } = usePhotoNavigation();
+  const prevActivePhotoIdRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (prevActivePhotoIdRef.current && !activePhotoId) {
+      scrollPhotoIntoView(prevActivePhotoIdRef.current);
+    }
+    prevActivePhotoIdRef.current = activePhotoId;
+  }, [activePhotoId]);
 
   const scrollToDate = (date: string) => {
     const el = dateRefs.current.get(date);

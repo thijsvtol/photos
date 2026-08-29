@@ -25,6 +25,7 @@ import { getCachedEventPhotos, cacheEventPhotos } from '../services/eventPhotoCa
 import { CollaboratorAvatars } from '../components/CollaboratorAvatars';
 import { useAuth } from '../contexts/AuthContext';
 import { usePhotoNavigation } from '../contexts/PhotoNavigationContext';
+import { scrollPhotoIntoView } from '../utils/scrollPhotoIntoView';
 import { usePhotoSelection } from '../hooks/usePhotoSelection';
 import { config } from '../config';
 import { useToast } from '../components/Toast';
@@ -842,7 +843,7 @@ const EventGallery: React.FC = () => {
   // toggle made from inside the overlay, instead of re-fetching once it closes. `event_slug` is
   // guaranteed here (this event's own photos don't always carry it themselves) since
   // PhotoNavigationContext's list must always know which event each photo belongs to.
-  const { registerPhotoList, registerRevealHandler } = usePhotoNavigation();
+  const { registerPhotoList } = usePhotoNavigation();
   useEffect(() => {
     registerPhotoList(
       filteredPhotos.map((p) => ({ ...p, event_slug: p.event_slug || slug })),
@@ -1007,13 +1008,21 @@ const EventGallery: React.FC = () => {
     return true;
   }, [photos, sortBy]);
 
-  // Lets the PhotoDetail overlay force this specific photo into the visible-window slice above
-  // BEFORE it tries to scroll to it on close — without this, a photo swiped to far past the
-  // initial window has no DOM node at all yet to scroll toward.
+  // Scrolls back to whatever photo the user was viewing once the PhotoDetail overlay (opened
+  // on top of this page) closes — see PhotoNavigationContext's activePhotoId doc comment for
+  // why this reacts to a plain value change instead of PhotoDetail scrolling during its own
+  // unmount. expandWindowForPhotoId forces the target past this page's own hard-cutoff render
+  // window (see its doc comment above) before scrollPhotoIntoView tries to find it.
+  const { activePhotoId } = usePhotoNavigation();
+  const prevActivePhotoIdRef = useRef<string | null>(null);
   useEffect(() => {
-    registerRevealHandler(expandWindowForPhotoId);
-    return () => registerRevealHandler(null);
-  }, [registerRevealHandler, expandWindowForPhotoId]);
+    if (prevActivePhotoIdRef.current && !activePhotoId) {
+      const targetPhotoId = prevActivePhotoIdRef.current;
+      expandWindowForPhotoId(targetPhotoId);
+      scrollPhotoIntoView(targetPhotoId);
+    }
+    prevActivePhotoIdRef.current = activePhotoId;
+  }, [activePhotoId, expandWindowForPhotoId]);
 
   // Navigating to a different event invalidates any pending restore — its target
   // photo belongs to the previous gallery. Without this the stale ref would block

@@ -23,64 +23,6 @@ import { Capacitor } from '@capacitor/core';
 import { Share } from '@capacitor/share';
 import { Filesystem, Directory } from '@capacitor/filesystem';
 
-/**
- * Scrolls the background gallery page (still mounted behind the overlay the whole time — see
- * App.tsx's background-location routing) so the given photo is back in view. Without this,
- * after swiping far from the photo originally clicked, leaving the overlay left the background
- * page scrolled to wherever it was when the overlay first OPENED, not wherever the user actually
- * ended up. `[data-photo-id]` elements may not exist yet if that section hasn't been lazily
- * rendered (Timeline's LazyDateGroup, EventGallery's windowed reveal) — and if the photo is
- * further than what's currently loaded, Timeline/EventGallery only fetch more via a "load more"
- * IntersectionObserver sentinel, a genuine network round-trip. Nudging the scroll forward and
- * polling on a real timer (not requestAnimationFrame, which only allows a couple of seconds
- * total) gives both the lazy-render and the pagination fetch enough real time to catch up.
- * Bounded so this can never spin forever if the photo genuinely isn't present in the background
- * page's current DOM (e.g. a different filter is active there).
- */
-function scrollPhotoIntoView(photoId: string): void {
-  const SEARCH_TIMEOUT_MS = 8000;
-  const SEARCH_POLL_MS = 200;
-  const SETTLE_FRAMES_REQUIRED = 4;
-  const searchStartedAt = Date.now();
-
-  // Once found, the justified grid (react-photo-album) keeps resettling row heights for a few
-  // frames — re-assert the scroll position each frame until the page height stops changing.
-  const settle = (el: Element) => {
-    el.scrollIntoView({ block: 'center' });
-    let lastScrollHeight = document.documentElement.scrollHeight;
-    let stableFrames = 0;
-
-    const step = () => {
-      const scrollHeight = document.documentElement.scrollHeight;
-      if (scrollHeight === lastScrollHeight) {
-        stableFrames++;
-      } else {
-        stableFrames = 0;
-        lastScrollHeight = scrollHeight;
-        el.scrollIntoView({ block: 'center' });
-      }
-      if (stableFrames >= SETTLE_FRAMES_REQUIRED) return;
-      requestAnimationFrame(step);
-    };
-    requestAnimationFrame(step);
-  };
-
-  const search = () => {
-    const el = document.querySelector(`[data-photo-id="${CSS.escape(photoId)}"]`);
-    if (el) {
-      settle(el);
-      return;
-    }
-
-    if (Date.now() - searchStartedAt > SEARCH_TIMEOUT_MS) return;
-
-    window.scrollBy(0, window.innerHeight * 0.85);
-    setTimeout(search, SEARCH_POLL_MS);
-  };
-
-  search();
-}
-
 const PhotoDetail: React.FC = () => {
   const { slug, photoId } = useParams<{ slug: string; photoId: string }>();
   const navigate = useNavigate();
@@ -276,7 +218,7 @@ const PhotoDetail: React.FC = () => {
   // updateNavPhoto below) instead of leaving it stale once the overlay closes. Falls back to
   // this event's own full gallery (self-fetched into `allPhotos`, see loadPhoto()) when there's
   // no live background list to read from — i.e. a cold/direct load of this exact URL.
-  const { photos: navPhotos, removePhoto: removeNavPhoto, updatePhoto: updateNavPhoto, revealPhoto } = usePhotoNavigation();
+  const { photos: navPhotos, removePhoto: removeNavPhoto, updatePhoto: updateNavPhoto, setActivePhotoId } = usePhotoNavigation();
   const photosToUse = navPhotos.some((p) => p.id === photoId) ? navPhotos : allPhotos;
 
   const closeOverlay = useCallback(() => {
@@ -287,31 +229,17 @@ const PhotoDetail: React.FC = () => {
     }
   }, [backgroundLocation, navigate, slug]);
 
-  // Kept up to date every render so the unmount effect below (whose own closure is fixed at
-  // mount time) can read the LATEST photo/backgroundLocation when it actually fires.
-  const photoRef = useRef<Photo | null>(null);
-  photoRef.current = photo;
-  const backgroundLocationRef = useRef(backgroundLocation);
-  backgroundLocationRef.current = backgroundLocation;
-
-  // Scrolls the background gallery page back to whatever photo was showing when this overlay
-  // instance unmounts — i.e. whenever the user leaves the photo detail view for ANY reason
-  // (Escape, the in-app back button, the Android hardware back button, browser back/forward),
-  // not just the ones that go through closeOverlay() directly. See scrollPhotoIntoView()'s doc
-  // comment for why this was needed: after swiping far from the originally-clicked photo,
-  // leaving used to land back wherever the background page was scrolled when the overlay first
-  // opened, not where the user actually ended up.
+  // Tells whichever gallery page is showing underneath (see PhotoNavigationContext's doc
+  // comment) which photo is currently on screen, so IT can scroll back to the right one once
+  // this overlay closes — rather than trying to scroll it from in here, which would need to
+  // happen during this component's own unmount and race the background page's render timing.
   useEffect(() => {
-    return () => {
-      if (backgroundLocationRef.current && photoRef.current) {
-        // Forces EventGallery's hard-cutoff visible window (see registerRevealHandler's doc
-        // comment) open around this photo BEFORE scrolling — a no-op for pages that don't
-        // register a reveal handler (Timeline/MyFavorites), where scrolling alone suffices.
-        revealPhoto(photoRef.current.id);
-        scrollPhotoIntoView(photoRef.current.id);
-      }
-    };
-  }, [revealPhoto]);
+    if (photo) setActivePhotoId(photo.id);
+  }, [photo, setActivePhotoId]);
+
+  useEffect(() => {
+    return () => setActivePhotoId(null);
+  }, [setActivePhotoId]);
 
   const swipePreviewPhoto = (() => {
     if (swipeOffset === 0 || currentIndex < 0 || photosToUse.length < 2) {
