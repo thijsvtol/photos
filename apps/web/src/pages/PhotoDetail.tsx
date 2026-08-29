@@ -234,11 +234,19 @@ const PhotoDetail: React.FC = () => {
   // this overlay closes — rather than trying to scroll it from in here, which would need to
   // happen during this component's own unmount and race the background page's render timing.
   useEffect(() => {
-    if (photo) setActivePhotoId(photo.id);
-  }, [photo, setActivePhotoId]);
+    if (photo) {
+      // eslint-disable-next-line no-console
+      console.log('[SCROLL-DEBUG] PhotoDetail photo changed', { photoId: photo.id, urlPhotoId: photoId, currentIndex, photosToUseLength: photosToUse.length, photosToUseAtIndex: photosToUse[currentIndex]?.id });
+      setActivePhotoId(photo.id);
+    }
+  }, [photo, photoId, currentIndex, photosToUse, setActivePhotoId]);
 
   useEffect(() => {
-    return () => setActivePhotoId(null);
+    return () => {
+      // eslint-disable-next-line no-console
+      console.log('[SCROLL-DEBUG] PhotoDetail unmounting, clearing activePhotoId');
+      setActivePhotoId(null);
+    };
   }, [setActivePhotoId]);
 
   const swipePreviewPhoto = (() => {

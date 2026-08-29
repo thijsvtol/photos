@@ -9,9 +9,11 @@ function stripConsole(): Plugin {
     enforce: 'pre',
     transform(code, id) {
       if (id.includes('node_modules') || !code.includes('console.')) return null;
-      // Replace console method references with no-op so console.log("x") becomes (() => {})("x")
+      // Replace console method references with no-op so console.log("x") becomes (() => {})("x").
+      // TEMPORARY: skip [SCROLL-DEBUG] calls so they survive production builds while diagnosing
+      // the gallery scroll-restore bug — remove this exception once that's resolved.
       const stripped = code.replace(
-        /\bconsole\.(log|warn|error|debug|info|trace)\b/g,
+        /\bconsole\.(log|warn|error|debug|info|trace)\b(?![^;]*\[SCROLL-DEBUG\])/g,
         '(() => {})'
       );
       return stripped !== code ? stripped : null;

@@ -688,7 +688,11 @@ const Timeline: React.FC = () => {
   const { activePhotoId } = usePhotoNavigation();
   const prevActivePhotoIdRef = useRef<string | null>(null);
   useEffect(() => {
+    // eslint-disable-next-line no-console
+    console.log('[SCROLL-DEBUG] Timeline activePhotoId changed', { activePhotoId, prev: prevActivePhotoIdRef.current });
     if (prevActivePhotoIdRef.current && !activePhotoId) {
+      // eslint-disable-next-line no-console
+      console.log('[SCROLL-DEBUG] Timeline restoring to', prevActivePhotoIdRef.current);
       scrollPhotoIntoView(prevActivePhotoIdRef.current);
     }
     prevActivePhotoIdRef.current = activePhotoId;

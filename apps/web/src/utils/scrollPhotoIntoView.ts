@@ -16,10 +16,16 @@ export function scrollPhotoIntoView(photoId: string): void {
   const SEARCH_POLL_MS = 200;
   const SETTLE_FRAMES_REQUIRED = 4;
   const searchStartedAt = Date.now();
+  let searchAttempts = 0;
+
+  // eslint-disable-next-line no-console
+  console.log('[SCROLL-DEBUG] scrollPhotoIntoView called for', photoId, 'matches on page:', document.querySelectorAll(`[data-photo-id="${CSS.escape(photoId)}"]`).length);
 
   // Once found, the justified grid (react-photo-album) keeps resettling row heights for a few
   // frames — re-assert the scroll position each frame until the page height stops changing.
   const settle = (el: Element) => {
+    // eslint-disable-next-line no-console
+    console.log('[SCROLL-DEBUG] settling on element with data-photo-id=', el.getAttribute('data-photo-id'), 'rect:', el.getBoundingClientRect());
     el.scrollIntoView({ block: 'center' });
     let lastScrollHeight = document.documentElement.scrollHeight;
     let stableFrames = 0;
@@ -33,24 +39,36 @@ export function scrollPhotoIntoView(photoId: string): void {
         lastScrollHeight = scrollHeight;
         el.scrollIntoView({ block: 'center' });
       }
-      if (stableFrames >= SETTLE_FRAMES_REQUIRED) return;
+      if (stableFrames >= SETTLE_FRAMES_REQUIRED) {
+        // eslint-disable-next-line no-console
+        console.log('[SCROLL-DEBUG] settled. final rect:', el.getBoundingClientRect(), 'scrollY:', window.scrollY);
+        return;
+      }
       requestAnimationFrame(step);
     };
     requestAnimationFrame(step);
   };
 
   const search = () => {
+    searchAttempts++;
     const el = document.querySelector(`[data-photo-id="${CSS.escape(photoId)}"]`);
     if (el) {
+      // eslint-disable-next-line no-console
+      console.log('[SCROLL-DEBUG] found after', searchAttempts, 'attempts');
       settle(el);
       return;
     }
 
-    if (Date.now() - searchStartedAt > SEARCH_TIMEOUT_MS) return;
+    if (Date.now() - searchStartedAt > SEARCH_TIMEOUT_MS) {
+      // eslint-disable-next-line no-console
+      console.log('[SCROLL-DEBUG] gave up after', searchAttempts, 'attempts, scrollY:', window.scrollY, 'scrollHeight:', document.documentElement.scrollHeight);
+      return;
+    }
 
     window.scrollBy(0, window.innerHeight * 0.85);
     setTimeout(search, SEARCH_POLL_MS);
   };
+
 
   search();
 }
