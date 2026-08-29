@@ -1016,18 +1016,13 @@ const EventGallery: React.FC = () => {
   const { activePhotoId } = usePhotoNavigation();
   const prevActivePhotoIdRef = useRef<string | null>(null);
   useEffect(() => {
-    // eslint-disable-next-line no-console
-    console.log('[SCROLL-DEBUG] EventGallery activePhotoId changed', { activePhotoId, prev: prevActivePhotoIdRef.current, photosLength: photos.length, visibleDateCount, visibleSinglePhotoCount });
     if (prevActivePhotoIdRef.current && !activePhotoId) {
       const targetPhotoId = prevActivePhotoIdRef.current;
-      const idx = photos.findIndex(p => p.id === targetPhotoId);
-      // eslint-disable-next-line no-console
-      console.log('[SCROLL-DEBUG] EventGallery restoring to', targetPhotoId, 'found at raw photos index', idx, 'of', photos.length);
       expandWindowForPhotoId(targetPhotoId);
       scrollPhotoIntoView(targetPhotoId);
     }
     prevActivePhotoIdRef.current = activePhotoId;
-  }, [activePhotoId, expandWindowForPhotoId, photos, visibleDateCount, visibleSinglePhotoCount]);
+  }, [activePhotoId, expandWindowForPhotoId]);
 
   // Navigating to a different event invalidates any pending restore — its target
   // photo belongs to the previous gallery. Without this the stale ref would block

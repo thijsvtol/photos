@@ -111,25 +111,32 @@ const JustifiedGridInner: React.FC<JustifiedGridProps> = ({
         image: (props, { photo: albumPhoto, index }) => {
           const photo = (albumPhoto as AlbumPhoto).photo;
           const isVideo = photo.file_type === 'video/mp4';
-          if (isVideo) {
-            return (
-              <ProgressiveVideo
-                src={props.src}
-                poster={photo.blur_placeholder}
-                posterUrl={getVideoPosterUrl(slug, photo.id, photo.cache_version)}
-                className="w-full h-full object-cover"
-              />
-            );
-          }
+          // `props.className` carries react-photo-album's `.react-photo-album--image` class,
+          // whose `aspect-ratio` (computed from CSS vars set on the wrapper, see rows.css)
+          // reserves the correct tile height independently of whether the actual image/video
+          // has loaded yet. Our own components need their own w-full/h-full/object-cover
+          // wrapper regardless, so apply the library's class+style on an extra wrapper div
+          // around them rather than fighting over one element's className.
           return (
-            <ProgressiveImage
-              src={props.src}
-              blurDataUrl={photo.blur_placeholder}
-              alt={photo.original_filename}
-              className="w-full h-full object-cover"
-              loading="lazy"
-              priority={index < PRIORITY_PHOTO_COUNT}
-            />
+            <div className={props.className} style={props.style}>
+              {isVideo ? (
+                <ProgressiveVideo
+                  src={props.src}
+                  poster={photo.blur_placeholder}
+                  posterUrl={getVideoPosterUrl(slug, photo.id, photo.cache_version)}
+                  className="w-full h-full object-cover"
+                />
+              ) : (
+                <ProgressiveImage
+                  src={props.src}
+                  blurDataUrl={photo.blur_placeholder}
+                  alt={photo.original_filename}
+                  className="w-full h-full object-cover"
+                  loading="lazy"
+                  priority={index < PRIORITY_PHOTO_COUNT}
+                />
+              )}
+            </div>
           );
         },
       }}
