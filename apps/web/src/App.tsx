@@ -125,16 +125,46 @@ const ShareIntentHandler = () => {
       }
     };
 
+    // Generic deep link (photos://open?path=/events/slug) opened directly in the app —
+    // see MobileAuthService.initialize() and the handoff effect below.
+    const handleNavigateToPath = (event: CustomEvent) => {
+      const path = event.detail?.path;
+      if (typeof path === 'string' && path.startsWith('/')) {
+        console.log('[ShareIntentHandler] Navigating to path from deep link:', path);
+        navigate(path);
+      }
+    };
+
     window.addEventListener('shareReceived', handleShareReceived as EventListener);
     window.addEventListener('navigateToEvent', handleNavigateToEvent as EventListener);
     window.addEventListener('navigateToInvite', handleNavigateToInvite as EventListener);
+    window.addEventListener('navigateToPath', handleNavigateToPath as EventListener);
     
     return () => {
       window.removeEventListener('shareReceived', handleShareReceived as EventListener);
       window.removeEventListener('navigateToEvent', handleNavigateToEvent as EventListener);
       window.removeEventListener('navigateToInvite', handleNavigateToInvite as EventListener);
+      window.removeEventListener('navigateToPath', handleNavigateToPath as EventListener);
     };
   }, [navigate, location]);
+
+  // On a mobile browser (not already inside the app), try handing off THIS exact page to
+  // the native app via its custom URL scheme first — see AndroidManifest.xml's photos://open
+  // intent-filter and MobileAuthService.initialize()'s appUrlOpen listener. Silent no-op if
+  // the app isn't installed (the web flow just continues normally, same as the existing
+  // invite-link handoff in InviteAccept.tsx). Runs once per real page load only (empty deps)
+  // so it can't repeatedly bounce the user away while they're already using the web version.
+  useEffect(() => {
+    if (Capacitor.isNativePlatform()) return;
+    if (!/Android|iPhone|iPad|iPod/i.test(navigator.userAgent)) return;
+    const path = `${window.location.pathname}${window.location.search}`;
+    try {
+      window.location.href = `photos://open?path=${encodeURIComponent(path)}`;
+    } catch (err) {
+      console.debug('[ShareIntentHandler] App deep-link handoff attempt failed, continuing on web:', err);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   
   // Check native plugin for buffered share data after component mounts
   useEffect(() => {

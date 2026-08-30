@@ -1,6 +1,6 @@
 {
   "name": "photos-worker",
-  "version": "2.2.5",
+  "version": "2.2.6",
   "description": "Cloudflare Worker backend for photo sharing application",
   "main": "src/index.ts",
   "type": "module",

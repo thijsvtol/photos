@@ -60,6 +60,17 @@ export class MobileAuthService {
         if (token) {
           window.dispatchEvent(new CustomEvent('navigateToInvite', { detail: { token } }));
         }
+        return;
+      }
+
+      // Generic link opened directly in the app (photos://open?path=/events/slug) —
+      // the web app tries this scheme first for ANY page (see App.tsx's
+      // ShareIntentHandler) so a shared link opens here instead of the mobile browser.
+      if (event.url.startsWith('photos://open')) {
+        const path = new URL(event.url).searchParams.get('path');
+        if (path) {
+          window.dispatchEvent(new CustomEvent('navigateToPath', { detail: { path } }));
+        }
       }
     });
   }
