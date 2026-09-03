@@ -22,7 +22,7 @@
     "wrangler": "^4.117.0"
   },
   "dependencies": {
-    "fflate": "^0.8.2",
+    "fflate": "^0.8.3",
     "form-data": "^4.0.6",
     "hono": "^4.12.34",
     "jose": "^6.2.3",
