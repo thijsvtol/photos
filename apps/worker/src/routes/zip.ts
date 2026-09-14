@@ -1,5 +1,5 @@
 import { Context, Hono } from 'hono';
-import { zipSync } from 'fflate';
+import { Zip, ZipPassThrough } from 'fflate';
 import type { Env, ZipRequest, Photo } from '../types';
 import { checkEventAuth, extractUser, getCollaboratorRoleByEventId } from '../auth';
 import { getStorageExtension } from '../fileTypeUtils';
@@ -61,16 +61,14 @@ function generatePhotoFilename(slug: string, captureTime: string, photoId: strin
 /**
  * POST /api/events/:slug/zip
  * Creates and streams a ZIP file with selected photos (max 50)
- * 
- * Note: Uses synchronous ZIP generation (zipSync) which loads all photos into memory.
- * For 50 large photos (e.g., 10MB each), this could use ~500MB of memory.
- * Cloudflare Workers have a 128MB memory limit, so actual limit may be lower.
- * Current 50-photo limit should work for typical photo sizes (2-5MB each).
- * 
- * For larger batches or photos, consider:
- * - Implementing streaming ZIP generation
- * - Using Cloudflare Durable Objects for higher memory limits
- * - Offloading to external service (AWS Lambda, etc.)
+ *
+ * Photos are streamed from R2 straight into the ZIP output stream (fflate's
+ * streaming Zip/ZipPassThrough) instead of being buffered fully in memory and
+ * synchronously deflated. This keeps both CPU time and memory usage roughly
+ * constant regardless of batch size, avoiding the Worker resource-limit
+ * errors that synchronous whole-buffer zipping ran into for larger/heavier
+ * batches. Entries are stored (no compression) since photos/videos are
+ * already compressed formats, so deflating them again only burns CPU.
  */
 app.post('/api/events/:slug/zip', async (c) => {
   const slug = c.req.param('slug');
@@ -110,33 +108,29 @@ app.post('/api/events/:slug/zip', async (c) => {
       return c.json({ error: 'Some photos not found or do not belong to this event' }, 400);
     }
     
-    // Fetch all photos from R2 and create ZIP
-    const zipFiles: Record<string, Uint8Array> = {};
-    const missingPhotos: string[] = [];
-    
-    for (const photo of photos.results) {
-      // For copied photos, resolve the key to the source event's storage
+    // Resolve R2 keys up front and verify existence with cheap HEAD requests
+    // (no body fetch) so we can still return a clean 404 before any streaming
+    // response has started.
+    const entries = photos.results.map((photo) => {
       const r2Slug = photo.source_event_slug ?? slug;
       const r2PhotoId = photo.source_photo_id ?? photo.id;
       const extension = getStorageExtension(photo.file_type, 'original');
-      const key = `original/${r2Slug}/${r2PhotoId}.${extension}`;
-      const object = await c.env.PHOTOS_BUCKET.get(key);
-      
-      if (!object) {
-        console.warn(`Photo not found in R2: ${key}`);
-        missingPhotos.push(photo.id);
-        continue;
+      return {
+        photo,
+        key: `original/${r2Slug}/${r2PhotoId}.${extension}`,
+        filename: generatePhotoFilename(slug, photo.capture_time, photo.id, extension),
+      };
+    });
+    
+    const missingPhotos: string[] = [];
+    for (const entry of entries) {
+      const head = await c.env.PHOTOS_BUCKET.head(entry.key);
+      if (!head) {
+        console.warn(`Photo not found in R2: ${entry.key}`);
+        missingPhotos.push(entry.photo.id);
       }
-      
-      // Generate a friendly filename
-      const filename = generatePhotoFilename(slug, photo.capture_time, photo.id, extension);
-      
-      // Read the file data
-      const arrayBuffer = await object.arrayBuffer();
-      zipFiles[filename] = new Uint8Array(arrayBuffer);
     }
     
-    // If photos are missing, return error
     if (missingPhotos.length > 0) {
       return c.json({ 
         error: 'Some photos not found in storage',
@@ -144,22 +138,56 @@ app.post('/api/events/:slug/zip', async (c) => {
       }, 404);
     }
     
-    // Create ZIP file with light compression (level 1)
-    // Balances file size and generation speed
-    const zipped = zipSync(zipFiles, {
-      level: 1,
+    const bucket = c.env.PHOTOS_BUCKET;
+    const stream = new ReadableStream<Uint8Array>({
+      async start(controller) {
+        const zip = new Zip((err, chunk, final) => {
+          if (err) {
+            controller.error(err);
+            return;
+          }
+          if (chunk) controller.enqueue(chunk);
+          if (final) controller.close();
+        });
+        
+        try {
+          for (const entry of entries) {
+            const object = await bucket.get(entry.key);
+            if (!object) {
+              throw new Error(`Photo not found in storage: ${entry.photo.id}`);
+            }
+            
+            const zipEntry = new ZipPassThrough(entry.filename);
+            zip.add(zipEntry);
+            
+            const reader = object.body.getReader();
+            for (;;) {
+              const { done, value } = await reader.read();
+              if (done) {
+                zipEntry.push(new Uint8Array(0), true);
+                break;
+              }
+              zipEntry.push(value, false);
+            }
+          }
+          
+          zip.end();
+        } catch (err) {
+          zip.terminate();
+          controller.error(err);
+        }
+      },
     });
     
     // Generate ZIP filename
     const timestamp = new Date().toISOString().split('T')[0];
     const zipFilename = `${slug}_${timestamp}.zip`;
     
-    // Return ZIP file
-    return new Response(zipped, {
+    // Return streamed ZIP file (size isn't known upfront, so no Content-Length)
+    return new Response(stream, {
       headers: {
         'Content-Type': 'application/zip',
         'Content-Disposition': `attachment; filename="${zipFilename}"`,
-        'Content-Length': zipped.length.toString(),
       },
     });
   } catch (error) {

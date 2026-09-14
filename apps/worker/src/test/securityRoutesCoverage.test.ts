@@ -188,10 +188,19 @@ const photos: PhotoRecord[] = [
 function createBucket(missingKeys: Set<string> = new Set()) {
   const size = 4;
   return {
+    head: async (key: string) => {
+      if (missingKeys.has(key)) return null;
+      return { key };
+    },
     get: async (key: string, options?: { range?: { offset?: number; length?: number; suffix?: number } }) => {
       if (missingKeys.has(key)) return null;
       const base = {
-        body: 'ok',
+        body: new ReadableStream<Uint8Array>({
+          start(controller) {
+            controller.enqueue(new Uint8Array([1, 2, 3, 4]));
+            controller.close();
+          },
+        }),
         size,
         arrayBuffer: async () => new Uint8Array([1, 2, 3, 4]).buffer,
         writeHttpMetadata: () => {},
