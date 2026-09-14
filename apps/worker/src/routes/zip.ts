@@ -108,9 +108,12 @@ app.post('/api/events/:slug/zip', async (c) => {
       return c.json({ error: 'Some photos not found or do not belong to this event' }, 400);
     }
     
-    // Resolve R2 keys up front and verify existence with cheap HEAD requests
-    // (no body fetch) so we can still return a clean 404 before any streaming
-    // response has started.
+    // Resolve R2 keys and fetch each object once. We check existence up front
+    // (before starting the streamed response, so a missing photo can still
+    // produce a clean 404) by reusing this same fetch for the actual
+    // streaming below — a separate head() pre-check would double the R2
+    // subrequests per download, which matters because Cloudflare Workers cap
+    // subrequests per invocation (50 on the Free plan).
     const entries = photos.results.map((photo) => {
       const r2Slug = photo.source_event_slug ?? slug;
       const r2PhotoId = photo.source_photo_id ?? photo.id;
@@ -123,12 +126,15 @@ app.post('/api/events/:slug/zip', async (c) => {
     });
     
     const missingPhotos: string[] = [];
+    const objects: Array<{ filename: string; object: R2ObjectBody }> = [];
     for (const entry of entries) {
-      const head = await c.env.PHOTOS_BUCKET.head(entry.key);
-      if (!head) {
+      const object = await c.env.PHOTOS_BUCKET.get(entry.key);
+      if (!object) {
         console.warn(`Photo not found in R2: ${entry.key}`);
         missingPhotos.push(entry.photo.id);
+        continue;
       }
+      objects.push({ filename: entry.filename, object });
     }
     
     if (missingPhotos.length > 0) {
@@ -138,7 +144,6 @@ app.post('/api/events/:slug/zip', async (c) => {
       }, 404);
     }
     
-    const bucket = c.env.PHOTOS_BUCKET;
     const stream = new ReadableStream<Uint8Array>({
       async start(controller) {
         const zip = new Zip((err, chunk, final) => {
@@ -151,13 +156,8 @@ app.post('/api/events/:slug/zip', async (c) => {
         });
         
         try {
-          for (const entry of entries) {
-            const object = await bucket.get(entry.key);
-            if (!object) {
-              throw new Error(`Photo not found in storage: ${entry.photo.id}`);
-            }
-            
-            const zipEntry = new ZipPassThrough(entry.filename);
+          for (const { filename, object } of objects) {
+            const zipEntry = new ZipPassThrough(filename);
             zip.add(zipEntry);
             
             const reader = object.body.getReader();

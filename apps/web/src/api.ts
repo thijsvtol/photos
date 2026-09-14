@@ -1,4 +1,5 @@
 import axios from 'axios';
+import JSZip from 'jszip';
 import { Capacitor } from '@capacitor/core';
 import { Filesystem, Directory } from '@capacitor/filesystem';
 import type { Event, Photo, CreateEventRequest, Tag, AdminStats, EventStats, UpdateEventRequest, CreateTagRequest, UpdateTagRequest, CollaboratorRole } from './types';
@@ -241,6 +242,36 @@ export const requestZip = async (slug: string, photoIds: string[]): Promise<Blob
     responseType: 'blob'
   });
   return response.data;
+};
+
+// Matches the worker's per-request photo cap (apps/worker/src/routes/zip.ts),
+// which exists because Cloudflare caps subrequests per invocation (50 on the
+// Workers Free plan) — one R2 fetch per photo.
+const ZIP_BATCH_SIZE = 50;
+
+/**
+ * Downloads any number of photos as a single ZIP by transparently splitting
+ * the request into multiple worker calls (each within ZIP_BATCH_SIZE) and
+ * merging the resulting ZIPs into one archive client-side.
+ */
+export const requestZipBatched = async (slug: string, photoIds: string[]): Promise<Blob> => {
+  if (photoIds.length <= ZIP_BATCH_SIZE) {
+    return requestZip(slug, photoIds);
+  }
+
+  const merged = new JSZip();
+  for (let i = 0; i < photoIds.length; i += ZIP_BATCH_SIZE) {
+    const chunk = photoIds.slice(i, i + ZIP_BATCH_SIZE);
+    const chunkBlob = await requestZip(slug, chunk);
+    const chunkZip = await JSZip.loadAsync(chunkBlob);
+    for (const [path, file] of Object.entries(chunkZip.files)) {
+      if (file.dir) continue;
+      const content = await file.async('uint8array');
+      merged.file(path, content);
+    }
+  }
+
+  return merged.generateAsync({ type: 'blob' });
 };
 
 // Admin API

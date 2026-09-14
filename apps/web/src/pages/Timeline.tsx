@@ -16,7 +16,7 @@ import { useGridDensity } from '../hooks/useGridDensity';
 import { usePhotoSelection } from '../hooks/usePhotoSelection';
 import { usePhotoNavigation } from '../contexts/PhotoNavigationContext';
 import { scrollPhotoIntoView } from '../utils/scrollPhotoIntoView';
-import { getTimeline, getUserFavoriteIds, toggleFavorite as toggleFavoriteAPI, requestZip, downloadZip, getMyPhotos, searchPhotos, getPublicNamedPeople, setPhotoFeatured, bulkDeletePhotos, bulkCopyPhotos, bulkUpdatePhotoLocation, bulkTagPeopleOnPhotos, bulkUntagPeopleOnPhotos, getNamedPeople } from '../api';
+import { getTimeline, getUserFavoriteIds, toggleFavorite as toggleFavoriteAPI, requestZipBatched, downloadZip, getMyPhotos, searchPhotos, getPublicNamedPeople, setPhotoFeatured, bulkDeletePhotos, bulkCopyPhotos, bulkUpdatePhotoLocation, bulkTagPeopleOnPhotos, bulkUntagPeopleOnPhotos, getNamedPeople } from '../api';
 import type { SearchResultPhoto, PublicNamedPerson, NamedPerson } from '../api';
 import { getCachedTimelinePhotos, cacheTimelinePhotos, removeTimelineCachePhotos } from '../services/timelineCache';
 import type { Photo } from '../types';
@@ -205,7 +205,7 @@ const Timeline: React.FC = () => {
     }
     try {
       for (const [slug, ids] of bySlug) {
-        const blob = await requestZip(slug, ids);
+        const blob = await requestZipBatched(slug, ids);
         await downloadZip(blob, `timeline_${slug}_${new Date().toISOString().split('T')[0]}.zip`);
       }
       await haptics.success();

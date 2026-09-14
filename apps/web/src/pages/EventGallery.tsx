@@ -18,7 +18,7 @@ import CastButton from '../components/CastButton';
 import AlbumPicker from '../components/AlbumPicker';
 import EventLocationPicker from '../components/EventLocationPicker';
 import { useUpload } from '../hooks/useUpload';
-import { getEvent, getPhotos, loginToEvent, getPreviewUrl, getCastPreviewUrl, requestZip, downloadZip, setPhotoFeatured, getUserFavoriteIds, toggleFavorite as toggleFavoriteAPI, bulkDeletePhotos, bulkCopyPhotos, bulkUpdatePhotoLocation, bulkTagPeopleOnPhotos, bulkUntagPeopleOnPhotos, getCollaborators, getNamedPeople, getPublicNamedPeople } from '../api';
+import { getEvent, getPhotos, loginToEvent, getPreviewUrl, getCastPreviewUrl, requestZipBatched, downloadZip, setPhotoFeatured, getUserFavoriteIds, toggleFavorite as toggleFavoriteAPI, bulkDeletePhotos, bulkCopyPhotos, bulkUpdatePhotoLocation, bulkTagPeopleOnPhotos, bulkUntagPeopleOnPhotos, getCollaborators, getNamedPeople, getPublicNamedPeople } from '../api';
 import type { NamedPerson, PublicNamedPerson } from '../api';
 import type { Event, Photo, Collaborator } from '../types';
 import { getCachedEventPhotos, cacheEventPhotos } from '../services/eventPhotoCache';
@@ -461,16 +461,11 @@ const EventGallery: React.FC = () => {
       return;
     }
     
-    if (selected.length > 50) {
-      toast.showInfo('Maximum 50 photos can be downloaded at once');
-      return;
-    }
-    
     await haptics.light();
     
     try {
-      // Request ZIP file from server
-      const zipBlob = await requestZip(slug!, selected);
+      // Request ZIP file from server (transparently batched for large selections)
+      const zipBlob = await requestZipBatched(slug!, selected);
       
       // Download using platform-specific method
       const timestamp = new Date().toISOString().split('T')[0];

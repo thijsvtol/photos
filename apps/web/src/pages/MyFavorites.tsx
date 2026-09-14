@@ -11,7 +11,7 @@ import { useRefresh } from '../contexts/RefreshContext';
 import { usePhotoNavigation } from '../contexts/PhotoNavigationContext';
 import { scrollPhotoIntoView } from '../utils/scrollPhotoIntoView';
 import { useGridDensity } from '../hooks/useGridDensity';
-import { getUserFavorites, removeFavorite as removeFavoriteAPI, toggleFavorite as toggleFavoriteAPI, requestZip, downloadZip, type FavoritePhoto } from '../api';
+import { getUserFavorites, removeFavorite as removeFavoriteAPI, toggleFavorite as toggleFavoriteAPI, requestZipBatched, downloadZip, type FavoritePhoto } from '../api';
 import type { Photo } from '../types';
 import { useAuth } from '../contexts/AuthContext';
 import { config } from '../config';
@@ -189,11 +189,6 @@ const MyFavorites: React.FC = () => {
       return;
     }
 
-    if (photos.length > 50) {
-      toast.showInfo('Maximum 50 photos can be downloaded at once. Please remove some favorites first.');
-      return;
-    }
-
     setDownloading(true);
     try {
       // Group photos by event
@@ -209,7 +204,7 @@ const MyFavorites: React.FC = () => {
 
       // Download ZIP for each event
       for (const [slug, photoIds] of Object.entries(photosByEvent)) {
-        const zipBlob = await requestZip(slug, photoIds);
+        const zipBlob = await requestZipBatched(slug, photoIds);
         
         // Download using platform-specific method
         await downloadZip(zipBlob, `favorites_${slug}_${timestamp}.zip`);
