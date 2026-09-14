@@ -237,41 +237,50 @@ export const getPhoto = async (slug: string, photoId: string): Promise<Photo> =>
   return response.data.photo;
 };
 
-export const requestZip = async (slug: string, photoIds: string[]): Promise<Blob> => {
-  const response = await api.post(`/events/${slug}/zip`, { photoIds }, {
-    responseType: 'blob'
-  });
-  return response.data;
+// Matches getOriginalUrl's own file-type -> extension mapping.
+const zipEntryExtension = (fileType: string): string => {
+  if (fileType === 'video/mp4') return 'mp4';
+  if (fileType.startsWith('raw/')) return fileType.slice('raw/'.length);
+  return 'jpg';
 };
 
-// Matches the worker's per-request photo cap (apps/worker/src/routes/zip.ts),
-// which exists because Cloudflare caps subrequests per invocation (50 on the
-// Workers Free plan) — one R2 fetch per photo.
-const ZIP_BATCH_SIZE = 50;
+const zipEntryFilename = (slug: string, captureTime: string, photoId: string, extension: string): string => {
+  const cleanTime = captureTime.replace(/[:.]/g, '-').replace('T', '_').split('.')[0];
+  return `${slug}_${cleanTime}_${photoId}.${extension}`;
+};
 
 /**
- * Downloads any number of photos as a single ZIP by transparently splitting
- * the request into multiple worker calls (each within ZIP_BATCH_SIZE) and
- * merging the resulting ZIPs into one archive client-side.
+ * Builds a ZIP of the given photos entirely in the browser: fetches each
+ * photo's existing, low-cost original-file URL (the same route used for
+ * single-photo download — a plain R2 byte stream, no server-side transform)
+ * and packs them together with JSZip. Assembling the ZIP client-side, rather
+ * than on the Worker, avoids Cloudflare's tiny per-request CPU-time budget
+ * (10ms on the Free plan) — even without DEFLATE compression, the CRC32 pass
+ * a server-side ZIP still needs over every photo's bytes can exceed that
+ * budget once more than a photo or two is involved, which showed up as
+ * downloads hanging/erroring for multi-photo selections. Browsers have no
+ * such per-request CPU cap.
  */
 export const requestZipBatched = async (slug: string, photoIds: string[]): Promise<Blob> => {
-  if (photoIds.length <= ZIP_BATCH_SIZE) {
-    return requestZip(slug, photoIds);
-  }
+  const allPhotos = await getPhotos(slug);
+  const photoById = new Map(allPhotos.map((photo) => [photo.id, photo]));
 
-  const merged = new JSZip();
-  for (let i = 0; i < photoIds.length; i += ZIP_BATCH_SIZE) {
-    const chunk = photoIds.slice(i, i + ZIP_BATCH_SIZE);
-    const chunkBlob = await requestZip(slug, chunk);
-    const chunkZip = await JSZip.loadAsync(chunkBlob);
-    for (const [path, file] of Object.entries(chunkZip.files)) {
-      if (file.dir) continue;
-      const content = await file.async('uint8array');
-      merged.file(path, content);
+  const zip = new JSZip();
+  for (const photoId of photoIds) {
+    const photo = photoById.get(photoId);
+    if (!photo) continue; // no longer belongs to this event — skip rather than fail the whole download
+
+    const url = getOriginalUrl(slug, photo.id, photo.file_type);
+    const response = await fetch(url);
+    if (!response.ok) {
+      throw new Error(`Failed to download photo ${photo.id}`);
     }
+    const blob = await response.blob();
+    const extension = zipEntryExtension(photo.file_type || 'image/jpeg');
+    zip.file(zipEntryFilename(slug, photo.capture_time, photo.id, extension), blob);
   }
 
-  return merged.generateAsync({ type: 'blob' });
+  return zip.generateAsync({ type: 'blob' });
 };
 
 // Admin API

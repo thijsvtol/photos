@@ -61,6 +61,7 @@ const EventGallery: React.FC = () => {
   const [userFavorites, setUserFavorites] = useState<Set<string>>(new Set());
   const [deleting, setDeleting] = useState(false);
   const [copying, setCopying] = useState(false);
+  const [downloading, setDownloading] = useState(false);
   const [showCopyPicker, setShowCopyPicker] = useState(false);
   const [showLocationPicker, setShowLocationPicker] = useState(false);
   const [showPeopleTagPicker, setShowPeopleTagPicker] = useState(false);
@@ -463,6 +464,7 @@ const EventGallery: React.FC = () => {
     
     await haptics.light();
     
+    setDownloading(true);
     try {
       // Request ZIP file from server (transparently batched for large selections)
       const zipBlob = await requestZipBatched(slug!, selected);
@@ -476,6 +478,8 @@ const EventGallery: React.FC = () => {
     } catch (error) {
       console.error('Error downloading ZIP:', error);
       toast.showError('Failed to download ZIP file');
+    } finally {
+      setDownloading(false);
     }
   };
 
@@ -1697,6 +1701,7 @@ const EventGallery: React.FC = () => {
           isAdmin={canDelete}
           isDeleting={deleting}
           isCopying={copying}
+          isDownloading={downloading}
           onSetLocationSelected={isAdmin ? () => setShowLocationPicker(true) : undefined}
           onTagPeopleSelected={canDelete ? handleOpenPeopleTagPicker : undefined}
           isGlobalAdmin={isAdmin}

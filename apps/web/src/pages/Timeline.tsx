@@ -170,6 +170,7 @@ const Timeline: React.FC = () => {
   const [taggingPeople, setTaggingPeople] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [copying, setCopying] = useState(false);
+  const [downloading, setDownloading] = useState(false);
 
   const togglePhotoSelection = async (photoId: string) => {
     await haptics.selectionChanged();
@@ -204,6 +205,7 @@ const Timeline: React.FC = () => {
       bySlug.set(slug, arr);
     }
     try {
+      setDownloading(true);
       for (const [slug, ids] of bySlug) {
         const blob = await requestZipBatched(slug, ids);
         await downloadZip(blob, `timeline_${slug}_${new Date().toISOString().split('T')[0]}.zip`);
@@ -213,6 +215,8 @@ const Timeline: React.FC = () => {
       clearSelection();
     } catch {
       toast.showError('Download failed');
+    } finally {
+      setDownloading(false);
     }
   };
 
@@ -885,6 +889,7 @@ const Timeline: React.FC = () => {
           isGlobalAdmin={isAdmin}
           isDeleting={deleting}
           isCopying={copying}
+          isDownloading={downloading}
         />
 
         {hasActiveSearch ? (

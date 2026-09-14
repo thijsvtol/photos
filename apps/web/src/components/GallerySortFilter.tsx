@@ -29,6 +29,7 @@ interface GallerySortFilterProps {
   isAdmin?: boolean;
   isDeleting?: boolean;
   isCopying?: boolean;
+  isDownloading?: boolean;
   /** Global-admin-only action: open the location picker for the selected photos.
    *  Omit to hide the action (e.g. for non-admin collaborators). */
   onSetLocationSelected?: () => void;
@@ -74,6 +75,7 @@ export function GallerySortFilter({
   isAdmin = false,
   isDeleting = false,
   isCopying = false,
+  isDownloading = false,
   onSetLocationSelected,
   onTagPeopleSelected,
   isGlobalAdmin = false,
@@ -174,12 +176,16 @@ export function GallerySortFilter({
                 {/* Download */}
                 <button
                   onClick={onDownloadSelected}
-                  className="flex-shrink-0 flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-white hover:bg-white/15 transition text-sm font-medium whitespace-nowrap"
+                  disabled={isDownloading}
+                  className="flex-shrink-0 flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-white hover:bg-white/15 transition text-sm font-medium whitespace-nowrap disabled:opacity-50 disabled:cursor-not-allowed"
                   aria-label="Download selected as ZIP"
-                  title="Download as ZIP"
+                  title={isDownloading ? 'Preparing download...' : 'Download as ZIP'}
                 >
-                  <Download className="w-4 h-4" />
-                  <span className="hidden sm:inline">Download</span>
+                  {isDownloading
+                    ? <Loader2 className="w-4 h-4 animate-spin" />
+                    : <Download className="w-4 h-4" />
+                  }
+                  <span className="hidden sm:inline">{isDownloading ? 'Preparing...' : 'Download'}</span>
                 </button>
 
                 {/* Copy to Album (admin) */}

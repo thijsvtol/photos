@@ -18,7 +18,7 @@ vi.mock('../api', () => ({
   downloadSmall: vi.fn(),
   toggleFavorite: vi.fn(),
   getUserFavoriteIds: vi.fn(),
-  requestZip: vi.fn(),
+  requestZipBatched: vi.fn(),
   downloadZip: vi.fn(),
   setPhotoFeatured: vi.fn(),
   getUserCollaborations: vi.fn(),
