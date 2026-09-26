@@ -1,0 +1,27 @@
+-- Re-generate every video's poster (cover) image.
+--
+-- captureVideoPoster() (apps/web/src/utils/videoMetadata.ts) captured the client's best-effort
+-- poster at upload time by seeking a <video> element and drawing it to a canvas, racing a 4s
+-- safety timeout because `seeked` doesn't fire reliably for every codec/browser. It only checked
+-- videoWidth/videoHeight before drawing — those come from the container's track header and stay
+-- populated even when the browser/WebView cannot decode the codec at all (e.g. HEVC, which most
+-- non-Safari browsers can't decode due to licensing). For an undecodable video the safety timeout
+-- fires, drawImage() paints a blank/black frame, and canvas.toBlob() still succeeds, so a blank
+-- poster gets uploaded and video_poster_status is marked 'done' — indistinguishable in the
+-- database from a real poster, and permanently excluded from the nightly ffmpeg job (which can
+-- decode any codec) by the "video_poster_status IS NULL" selection in
+-- scripts/transcode-videos.sh.
+--
+-- Measured in production: the maandagavond event's videos are all HEVC at 1824p-2064p and show no
+-- preview image in the gallery.
+--
+-- The client now checks video.readyState before drawing and returns null (no poster uploaded,
+-- status stays NULL) when no frame was actually decoded. Clearing every existing 'done' status is
+-- what lets the nightly job revisit videos whose "done" poster was actually blank, the same way
+-- migration 029 cleared video_transcode_status after fixing that job's compatibility check.
+--
+-- Not selective: there's no reliable way to tell a genuinely blank client-captured poster apart
+-- from a correct one just from the status column, so every video is re-processed once. ffmpeg
+-- overwrites poster/<slug>/<id>.jpg with a fresh, correctly-decoded frame regardless of codec, so
+-- this is safe to run even for videos whose poster was already fine.
+UPDATE photos SET video_poster_status = NULL WHERE file_type = 'video/mp4';
