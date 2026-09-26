@@ -530,7 +530,7 @@ class BackgroundSyncService {
                 const end = Math.min(start + chunkSize, upload.file.size);
                 const chunk = upload.file.slice(start, end);
                 return this.uploadChunkWithRetry(
-                  upload.eventSlug, photoId, uploadId!, partNumber, chunk
+                  upload.eventSlug, photoId, uploadId!, partNumber, chunk, false, fileType
                 ).then(({ etag }) => ({ partNumber, etag }));
               });
 
