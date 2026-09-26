@@ -142,6 +142,15 @@ export async function captureVideoPoster(file: File, maxLongSide = 1280): Promis
       video.currentTime = Math.min(0.1, (video.duration || 1) / 2);
     });
 
+    // readyState reflects whether a frame was actually decoded, unlike videoWidth/videoHeight
+    // (which come from the container's track header and stay populated even when the browser
+    // can't decode the codec at all, e.g. HEVC without hardware/licensed decode support). Without
+    // this check, an undecodable video reaches the safety timeout above with valid dimensions but
+    // no painted frame, and drawImage() below silently produces a blank/black JPEG that still
+    // "succeeds" — permanently marking the poster done and blocking the nightly ffmpeg job (which
+    // can decode any codec) from ever generating a real one for it.
+    if (video.readyState < HTMLMediaElement.HAVE_CURRENT_DATA) return null;
+
     const vw = video.videoWidth;
     const vh = video.videoHeight;
     if (!vw || !vh) return null;
