@@ -10,7 +10,7 @@ import AlbumPicker from '../components/AlbumPicker';
 import { addToQueue } from '../uploadQueue';
 import type { UploadQueueItem } from '../types';
 import { backgroundSyncService } from '../services/backgroundSync';
-import { extractMp4CreationTime, normalizeVideoFileType } from '../utils/videoMetadata';
+import { extractMp4CreationTime, normalizeVideoFileType, captureVideoThumbnailMetadata } from '../utils/videoMetadata';
 
 interface SharedFile {
   name: string;
@@ -332,11 +332,16 @@ export default function ShareUpload() {
         const file = new File([blob], sharedFile.name, { type: sharedFile.mimeType });
         console.log('[ShareUpload] File created, extracting metadata...');
         
-        // Extract metadata: EXIF for images, MP4 creation time for videos
+        // Extract metadata: EXIF for images, MP4 creation time + a blur
+        // placeholder/dimensions for videos (mirrors uploadManager's
+        // extractVideoMetadata — without this, shared videos had no width/
+        // height and no blur placeholder at all, so they had nothing to show
+        // until the nightly poster job caught up).
         let exif: Awaited<ReturnType<typeof extractExifData>> = {};
         if (isVideo) {
           const captureTime = fileBuffer ? extractMp4CreationTime(fileBuffer) : undefined;
-          exif = { captureTime };
+          const { width, height, blurPlaceholder } = await captureVideoThumbnailMetadata(file);
+          exif = { captureTime, width, height, blurPlaceholder };
         } else {
           exif = await extractExifData(sharedFile.uri, sharedFile.size);
         }

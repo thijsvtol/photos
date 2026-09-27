@@ -172,3 +172,68 @@ export async function captureVideoPoster(file: File, maxLongSide = 1280): Promis
     URL.revokeObjectURL(url);
   }
 }
+
+/**
+ * Captures a video's intrinsic width/height and a 16x16 blur_placeholder data URL, mirroring
+ * uploadManager.extractVideoMetadata's approach exactly (including the readyState guard — see
+ * captureVideoPoster's doc comment above for why videoWidth alone isn't a safe "a real frame was
+ * decoded" check). Used by any OTHER upload path that doesn't already run through uploadManager
+ * (e.g. the share-intent flow), so those videos aren't permanently stuck with no width/height and
+ * a missing (rather than merely-undecodable-at-upload-time) blur placeholder.
+ *
+ * Best-effort: every field is left undefined on failure — a missing blur placeholder just means
+ * the gallery tile falls back to its plain black-until-loaded state, never a broken upload.
+ */
+export async function captureVideoThumbnailMetadata(
+  file: File
+): Promise<{ width?: number; height?: number; blurPlaceholder?: string }> {
+  const url = URL.createObjectURL(file);
+  try {
+    const video = document.createElement('video');
+    video.muted = true;
+    video.preload = 'metadata';
+    video.src = url;
+
+    await new Promise<void>((resolve, reject) => {
+      video.onloadedmetadata = () => resolve();
+      video.onerror = () => reject(new Error('Failed to load video metadata'));
+    });
+
+    const width = video.videoWidth || undefined;
+    const height = video.videoHeight || undefined;
+
+    let blurPlaceholder: string | undefined;
+    try {
+      await new Promise<void>((resolve) => {
+        let settled = false;
+        const finish = () => {
+          if (settled) return;
+          settled = true;
+          clearTimeout(safety);
+          resolve();
+        };
+        const safety = setTimeout(finish, 4000);
+        video.onseeked = finish;
+        video.onloadeddata = finish;
+        video.oncanplay = finish;
+        video.currentTime = Math.min(0.1, (video.duration || 1) / 2);
+      });
+
+      if (video.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA && video.videoWidth) {
+        const canvas = document.createElement('canvas');
+        canvas.width = 16; canvas.height = 16;
+        const ctx = canvas.getContext('2d');
+        if (ctx) {
+          ctx.drawImage(video, 0, 0, 16, 16);
+          blurPlaceholder = canvas.toDataURL('image/jpeg', 0.3);
+        }
+      }
+    } catch { /* poster is best-effort */ }
+
+    return { width, height, blurPlaceholder };
+  } catch {
+    return {};
+  } finally {
+    URL.revokeObjectURL(url);
+  }
+}

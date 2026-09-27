@@ -897,7 +897,17 @@ class UploadManager {
           video.oncanplay = finish;
           video.currentTime = Math.min(0.1, (video.duration || 1) / 2);
         });
-        if (video.videoWidth) {
+        // readyState (not videoWidth) reflects whether a frame was actually
+        // decoded — videoWidth/videoHeight come from the container's track
+        // header and stay populated even when the browser can't decode the
+        // codec at all (e.g. HEVC without hardware/licensed decode support).
+        // Checking videoWidth alone let an undecodable video reach the safety
+        // timeout with valid dimensions but no painted frame, so drawImage()
+        // silently produced a solid-black JPEG that still "succeeded" and was
+        // stored as blur_placeholder forever — showing as a black tile in the
+        // gallery even after the nightly transcode job made the video itself
+        // playable. Mirrors the same guard in captureVideoPoster() below.
+        if (video.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA && video.videoWidth) {
           const canvas = document.createElement('canvas');
           canvas.width = 16; canvas.height = 16;
           const ctx = canvas.getContext('2d');
