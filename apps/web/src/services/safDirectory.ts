@@ -55,6 +55,15 @@ export interface SafDirectoryPlugin {
    * Creates a new document in the tree and writes the base64 data to it.
    */
   writeFile(options: { treeUri: string; filename: string; data: string; mimeType: string }): Promise<{ uri: string }>;
+
+  /**
+   * Append base64 data to a document previously created by writeFile(),
+   * identified by the content:// URI writeFile() returned. Used to stream a
+   * large download (e.g. a video) to a SAF-picked folder in bounded-size
+   * chunks instead of buffering the whole file as one base64 string first —
+   * see api.ts's downloadPhoto/saveNativeStreamedFile.
+   */
+  appendFile(options: { uri: string; data: string }): Promise<void>;
 }
 
 /**

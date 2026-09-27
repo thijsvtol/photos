@@ -306,6 +306,31 @@ export default function FolderSyncManager({ eventSlug }: Props) {
         </div>
       )}
 
+      {/* Without this exemption the OS throttles the periodic sync job once the
+          app hasn't been opened in a while — background sync appears to just
+          stop, resuming only when the app is reopened. */}
+      {folderSyncs.length > 0 && status && !status.batteryOptimizationIgnored && (
+        <div className="bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-lg p-3 flex items-start gap-2">
+          <AlertTriangle className="w-4 h-4 shrink-0 text-amber-700 dark:text-amber-400 mt-0.5" />
+          <div className="flex-1 min-w-0">
+            <p className="text-xs text-amber-900 dark:text-amber-200">
+              Battery optimization may pause background sync after the app has been closed for a
+              while. Allow it to run unrestricted for reliable sync.
+            </p>
+            <button
+              type="button"
+              onClick={async () => {
+                await folderSyncService.requestIgnoreBatteryOptimizations();
+                await refreshStatus();
+              }}
+              className="mt-2 text-xs font-medium px-3 py-1.5 bg-amber-600 hover:bg-amber-700 text-white rounded-lg transition-colors"
+            >
+              Allow background sync
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Files the engine gave up on. Surfaced explicitly rather than silently
           dropped, since they're the one case that needs a human decision. */}
       {quarantined.length > 0 && (

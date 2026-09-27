@@ -24,6 +24,62 @@ interface LocationState {
   sharedFiles: SharedFile[];
 }
 
+/** Bridge calls above a few MB start to feel it; this bounds peak memory during
+ *  base64 decode to one chunk regardless of the shared file's total size. */
+const NATIVE_READ_CHUNK_SIZE = 6 * 1024 * 1024;
+
+const base64ChunkToBytes = (base64: string): Uint8Array => {
+  const binary = atob(base64);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) {
+    bytes[i] = binary.charCodeAt(i);
+  }
+  return bytes;
+};
+
+/**
+ * Reads a native file path in bounded-size chunks instead of a single
+ * Filesystem.readFile() whole-file call. A single whole-file read + atob()
+ * decode holds roughly 3x the file's size in memory at once (the base64
+ * string, the UTF-16 binary string atob() produces, and the final
+ * Uint8Array) — for a multi-hundred-MB shared video that alone can hang or
+ * OOM the WebView before the file ever reaches the upload queue, which
+ * showed up as "sharing a video from the gallery never starts uploading".
+ * Chunking (via Filesystem.readFile's offset/length params) bounds peak
+ * memory to one chunk's worth regardless of file size — the same fix
+ * already applied natively for folder sync (see MediaProbe.java's doc
+ * comment on this exact 3x-memory problem).
+ */
+const readNativeFileAsBlob = async (
+  path: string,
+  mimeType: string,
+  fileSize: number,
+  /** Only videos need a contiguous ArrayBuffer (for extractMp4CreationTime's box
+   *  scan) — skip the extra full-size copy for the common image case. */
+  needsArrayBuffer: boolean
+): Promise<{ blob: Blob; arrayBuffer: ArrayBuffer | undefined }> => {
+  const parts: Uint8Array[] = [];
+  if (fileSize > 0) {
+    let offset = 0;
+    while (offset < fileSize) {
+      const length = Math.min(NATIVE_READ_CHUNK_SIZE, fileSize - offset);
+      const result = await Filesystem.readFile({ path, offset, length });
+      parts.push(base64ChunkToBytes(result.data as string));
+      offset += length;
+    }
+  } else {
+    // Unknown size (shouldn't normally happen — ShareHandlerPlugin always reports
+    // it): fall back to a single whole-file read rather than looping forever.
+    const result = await Filesystem.readFile({ path });
+    parts.push(base64ChunkToBytes(result.data as string));
+  }
+  // Blob() concatenates the parts natively rather than via JS string/array
+  // manipulation, so this doesn't reintroduce the memory blowup being fixed.
+  const blob = new Blob(parts as BlobPart[], { type: mimeType });
+  const arrayBuffer = needsArrayBuffer ? await blob.arrayBuffer() : undefined;
+  return { blob, arrayBuffer };
+};
+
 /**
  * ShareUpload page handles photos/videos shared from other apps.
  * Flow:
@@ -134,7 +190,7 @@ export default function ShareUpload() {
     }
   };
 
-  const extractExifData = async (fileUri: string): Promise<{
+  const extractExifData = async (fileUri: string, fileSize: number): Promise<{
     captureTime?: string;
     width?: number;
     height?: number;
@@ -154,20 +210,10 @@ export default function ShareUpload() {
       let buffer: ArrayBuffer;
       
       if (Capacitor.isNativePlatform()) {
-        // On native, use Filesystem API to read the file
+        // On native, use chunked reads — see readNativeFileAsBlob's doc comment.
         const filePath = fileUri.replace('file://', '');
-        const result = await Filesystem.readFile({
-          path: filePath
-        });
-        
-        // result.data is a base64 string, convert to ArrayBuffer
-        const base64Data = result.data as string;
-        const binaryString = atob(base64Data);
-        const bytes = new Uint8Array(binaryString.length);
-        for (let i = 0; i < binaryString.length; i++) {
-          bytes[i] = binaryString.charCodeAt(i);
-        }
-        buffer = bytes.buffer;
+        const { arrayBuffer } = await readNativeFileAsBlob(filePath, 'image/jpeg', fileSize, true);
+        buffer = arrayBuffer!;
       } else {
         // On web, use fetch (shouldn't happen in this flow)
         const response = await fetch(fileUri);
@@ -261,22 +307,20 @@ export default function ShareUpload() {
         let fileBuffer: ArrayBuffer | undefined;
         
         if (Capacitor.isNativePlatform()) {
-          console.log('[ShareUpload] Reading file from:', sharedFile.uri);
+          console.log('[ShareUpload] Reading file from:', sharedFile.uri, 'size:', sharedFile.size);
           const filePath = sharedFile.uri.replace('file://', '');
-          const result = await Filesystem.readFile({
-            path: filePath
-          });
-          
-          console.log('[ShareUpload] File read, converting base64 to blob...');
-          // Convert base64 to blob
-          const base64Data = result.data as string;
-          const binaryString = atob(base64Data);
-          const bytes = new Uint8Array(binaryString.length);
-          for (let j = 0; j < binaryString.length; j++) {
-            bytes[j] = binaryString.charCodeAt(j);
-          }
-          fileBuffer = bytes.buffer;
-          blob = new Blob([bytes], { type: sharedFile.mimeType });
+          // Chunked read — see readNativeFileAsBlob's doc comment. A large shared
+          // video read whole-file via atob() previously held ~3x its size in
+          // memory, which could hang/OOM the WebView before it ever reached the
+          // upload queue.
+          const { blob: readBlob, arrayBuffer } = await readNativeFileAsBlob(
+            filePath,
+            sharedFile.mimeType,
+            sharedFile.size,
+            isVideo
+          );
+          blob = readBlob;
+          fileBuffer = arrayBuffer;
           console.log('[ShareUpload] Blob created, size:', blob.size);
         } else {
           // On web, use fetch (shouldn't happen in this flow)
@@ -294,7 +338,7 @@ export default function ShareUpload() {
           const captureTime = fileBuffer ? extractMp4CreationTime(fileBuffer) : undefined;
           exif = { captureTime };
         } else {
-          exif = await extractExifData(sharedFile.uri);
+          exif = await extractExifData(sharedFile.uri, sharedFile.size);
         }
         console.log('[ShareUpload] Metadata extracted:', exif);
         

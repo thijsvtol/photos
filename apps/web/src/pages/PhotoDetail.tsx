@@ -1326,7 +1326,7 @@ const PhotoDetail: React.FC = () => {
 
   const handleDownloadOriginal = () => {
     if (!slug || !photo) return;
-    downloadOriginal(slug, photo.id);
+    downloadOriginal(slug, photo.id, photo.file_type);
     trackPhotoDownload(photo.id, slug, false, 1);
   };
 

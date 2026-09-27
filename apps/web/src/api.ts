@@ -1018,6 +1018,17 @@ export const getDeletions = async (cursor?: string | null, head = false): Promis
 
 
 // Helper functions
+
+/** Local filename extension matching a photo's real stored file type — used for saved/downloaded
+ *  file names so a video isn't saved with a misleading .jpg extension (see getOriginalUrl, whose
+ *  URL extension is cosmetic only — the worker always re-derives the real extension server-side —
+ *  but the LOCAL saved file's extension is what the OS/gallery app relies on to open it). */
+export const getMediaFileExtension = (fileType?: string): string => {
+  if (fileType === 'video/mp4') return 'mp4';
+  if (fileType && fileType.startsWith('raw/')) return fileType.slice('raw/'.length);
+  return 'jpg';
+};
+
 export const getPreviewUrl = (slug: string, photoId: string, fileType?: string, cacheVersion?: number): string => {
   const isVideo = fileType === 'video/mp4';
   const extension = isVideo ? 'mp4' : 'jpg';
@@ -1260,6 +1271,132 @@ const saveNativeBase64File = async (base64: string, filename: string, mimeType: 
   }
 };
 
+/** Bounds peak memory per write to one chunk's worth regardless of download size. */
+const STREAM_DOWNLOAD_CHUNK_SIZE = 4 * 1024 * 1024;
+
+const concatUint8Arrays = (chunks: Uint8Array[], totalLength: number): Uint8Array => {
+  const result = new Uint8Array(totalLength);
+  let offset = 0;
+  for (const chunk of chunks) {
+    result.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return result;
+};
+
+const uint8ToBase64 = (bytes: Uint8Array): Promise<string> => {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onloadend = () => {
+      const result = reader.result as string;
+      if (result) {
+        resolve(result.split(',')[1]);
+      } else {
+        reject(new Error('Failed to convert chunk to base64'));
+      }
+    };
+    reader.onerror = () => reject(new Error('FileReader error'));
+    reader.readAsDataURL(new Blob([bytes as unknown as BlobPart]));
+  });
+};
+
+/**
+ * Streams a fetch Response's body to native storage in bounded-size chunks,
+ * instead of buffering the whole response as one Blob and one base64 string
+ * (which together held ~2-3x a downloaded file's size in memory at once —
+ * reliably OOMing on a multi-hundred-MB video, e.g. "Failed to allocate a
+ * 91020912 byte allocation"). Each chunk is written via writeFile (first
+ * chunk, creates the file) then appendFile (subsequent chunks), so peak
+ * memory is bounded to one chunk regardless of the download's total size.
+ */
+const saveNativeStreamedFile = async (response: Response, filename: string, mimeType: string): Promise<string> => {
+  const selectedPath = localStorage.getItem('download_path') || DEFAULT_DOWNLOAD_PATH;
+  console.log('[Download] Selected save path:', selectedPath);
+
+  const reader = response.body?.getReader();
+  if (!reader) {
+    // No streaming support (shouldn't normally happen) — fall back to the
+    // old whole-blob path rather than failing the download outright.
+    const blob = await response.blob();
+    const base64 = await uint8ToBase64(new Uint8Array(await blob.arrayBuffer()));
+    return saveNativeBase64File(base64, filename, mimeType);
+  }
+
+  let destination: 'saf' | 'external' | 'documents' = selectedPath.startsWith('content://') ? 'saf' : 'external';
+  const relativePath = destination === 'external' ? toExternalStorageRelativePath(selectedPath, filename) : '';
+  let safUri: string | null = null;
+  let wroteFirstChunk = false;
+
+  const writeChunk = async (bytes: Uint8Array) => {
+    const base64 = await uint8ToBase64(bytes);
+    if (destination === 'saf') {
+      if (!wroteFirstChunk) {
+        const result = await SafDirectory.writeFile({ treeUri: selectedPath, filename, data: base64, mimeType });
+        safUri = result.uri;
+      } else {
+        await SafDirectory.appendFile({ uri: safUri!, data: base64 });
+      }
+    } else if (destination === 'external') {
+      if (!wroteFirstChunk) {
+        await Filesystem.writeFile({ path: relativePath, data: base64, directory: Directory.ExternalStorage, recursive: true });
+      } else {
+        await Filesystem.appendFile({ path: relativePath, data: base64, directory: Directory.ExternalStorage });
+      }
+    } else {
+      if (!wroteFirstChunk) {
+        await Filesystem.writeFile({ path: filename, data: base64, directory: Directory.Documents, recursive: true });
+      } else {
+        await Filesystem.appendFile({ path: filename, data: base64, directory: Directory.Documents });
+      }
+    }
+    wroteFirstChunk = true;
+  };
+
+  let pending: Uint8Array[] = [];
+  let pendingSize = 0;
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (value) {
+        pending.push(value);
+        pendingSize += value.byteLength;
+      }
+      if (pendingSize >= STREAM_DOWNLOAD_CHUNK_SIZE || (done && pendingSize > 0)) {
+        const merged = concatUint8Arrays(pending, pendingSize);
+        try {
+          await writeChunk(merged);
+        } catch (error) {
+          // Only the very first chunk's failure is safe to recover from by
+          // switching destination — anything later would leave a partial file
+          // no matter which destination we retried into.
+          if (!wroteFirstChunk && destination !== 'documents') {
+            console.warn('[Download] Selected folder write failed, falling back to Documents', error);
+            destination = 'documents';
+            await writeChunk(merged);
+          } else {
+            throw error;
+          }
+        }
+        pending = [];
+        pendingSize = 0;
+      }
+      if (done) break;
+    }
+  } finally {
+    reader.releaseLock();
+  }
+
+  if (destination === 'saf') return safUri!;
+  const directory = destination === 'external' ? Directory.ExternalStorage : Directory.Documents;
+  const path = destination === 'external' ? relativePath : filename;
+  try {
+    const { uri } = await Filesystem.getUri({ path, directory });
+    return uri;
+  } catch {
+    return path;
+  }
+};
+
 // Download functions that trigger browser downloads
 export const downloadPhoto = async (url: string, filename: string): Promise<void> => {
   try {
@@ -1274,28 +1411,14 @@ export const downloadPhoto = async (url: string, filename: string): Promise<void
       if (!response.ok) {
         throw new Error(`Download failed: ${response.statusText}`);
       }
-      
-      console.log('[Download] Fetched successfully, converting to blob');
-      const blob = await response.blob();
-      
-      console.log('[Download] Converting to base64');
-      const base64 = await new Promise<string>((resolve, reject) => {
-        const reader = new FileReader();
-        reader.onloadend = () => {
-          const result = reader.result as string;
-          if (result) {
-            const base64String = result.split(',')[1];
-            resolve(base64String);
-          } else {
-            reject(new Error('Failed to convert to base64'));
-          }
-        };
-        reader.onerror = () => reject(new Error('FileReader error'));
-        reader.readAsDataURL(blob);
-      });
-      
+
       const mimeType = getMimeTypeFromFilename(filename);
-      const savedUri = await saveNativeBase64File(base64, filename, mimeType);
+      // Streams the response directly to disk in bounded-size chunks rather
+      // than buffering the whole file as a Blob + base64 string — the old
+      // approach held ~2-3x a video's size in memory at once and reliably
+      // OOM'd on larger videos ("Failed to allocate a 91020912 byte
+      // allocation..."). See saveNativeStreamedFile's doc comment.
+      const savedUri = await saveNativeStreamedFile(response, filename, mimeType);
       console.log('[Download] File saved:', savedUri);
       alert(`Photo saved: ${filename}`);
     } else {
@@ -1323,19 +1446,21 @@ export const downloadPhoto = async (url: string, filename: string): Promise<void
   }
 };
 
-export const downloadOriginal = async (slug: string, photoId: string): Promise<void> => {
+export const downloadOriginal = async (slug: string, photoId: string, fileType?: string): Promise<void> => {
   console.log('[downloadOriginal] Called with slug:', slug, 'photoId:', photoId);
-  const url = getOriginalUrl(slug, photoId);
+  const url = getOriginalUrl(slug, photoId, fileType);
   console.log('[downloadOriginal] URL:', url);
-  await downloadPhoto(url, `${slug}_${photoId}_original.jpg`);
+  const extension = getMediaFileExtension(fileType);
+  await downloadPhoto(url, `${slug}_${photoId}_original.${extension}`);
 };
 
-export const downloadSmall = async (slug: string, photoId: string): Promise<void> => {
+export const downloadSmall = async (slug: string, photoId: string, fileType?: string): Promise<void> => {
   console.log('[downloadSmall] Called with slug:', slug, 'photoId:', photoId);
   // Download the preview version (1920px)
-  const url = getPreviewUrl(slug, photoId);
+  const url = getPreviewUrl(slug, photoId, fileType);
   console.log('[downloadSmall] URL:', url);
-  await downloadPhoto(url, `${slug}_${photoId}_small.jpg`);
+  const extension = getMediaFileExtension(fileType);
+  await downloadPhoto(url, `${slug}_${photoId}_small.${extension}`);
 };
 
 export const downloadInstagram = async (slug: string, photoId: string): Promise<void> => {

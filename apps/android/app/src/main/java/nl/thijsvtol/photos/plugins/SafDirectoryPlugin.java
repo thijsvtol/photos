@@ -186,4 +186,56 @@ public class SafDirectoryPlugin extends Plugin {
             call.reject("Failed to write file: " + e.getMessage(), e);
         }
     }
+
+    /**
+     * Appends base64 data to a document previously created by writeFile(),
+     * identified by the content:// URI writeFile() returned. Lets JS stream a
+     * large download (e.g. a video) to a SAF-picked folder in bounded-size
+     * chunks — see api.ts's saveNativeStreamedFile — instead of buffering the
+     * entire file as one base64 string, which could OOM the WebView on a
+     * large video.
+     */
+    @PluginMethod()
+    public void appendFile(PluginCall call) {
+        String uriString = call.getString("uri");
+        String base64Data = call.getString("data");
+
+        if (uriString == null || uriString.isEmpty()) {
+            call.reject("uri parameter is required");
+            return;
+        }
+        if (base64Data == null || base64Data.isEmpty()) {
+            call.reject("data parameter is required");
+            return;
+        }
+        if (!uriString.startsWith("content://")) {
+            call.reject("uri must be a content:// URI from Storage Access Framework");
+            return;
+        }
+
+        try {
+            Uri uri = Uri.parse(uriString);
+            ContentResolver resolver = getContext().getContentResolver();
+            byte[] fileData = Base64.decode(base64Data, Base64.DEFAULT);
+
+            // "wa" = write, append — required so each chunk is added after the
+            // previous one instead of truncating the document back to empty.
+            OutputStream outputStream = resolver.openOutputStream(uri, "wa");
+            if (outputStream == null) {
+                call.reject("Failed to open output stream for appending");
+                return;
+            }
+
+            try {
+                outputStream.write(fileData);
+                outputStream.flush();
+            } finally {
+                outputStream.close();
+            }
+
+            call.resolve();
+        } catch (Exception e) {
+            call.reject("Failed to append file: " + e.getMessage(), e);
+        }
+    }
 }

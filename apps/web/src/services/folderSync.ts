@@ -291,6 +291,18 @@ class FolderSyncService {
     const { removed } = await FolderSync.resetLedger({ treeUri: folderPath });
     return removed;
   }
+
+  /**
+   * Opens the system dialog letting the user exempt this app from Doze/App
+   * Standby battery optimization — without it, the periodic sync job gets
+   * throttled from "every intervalMinutes" to once every several hours (or
+   * longer) once the app has been closed for a while, which looks like sync
+   * silently stopping until the app is reopened.
+   */
+  async requestIgnoreBatteryOptimizations(): Promise<void> {
+    if (!Capacitor.isNativePlatform()) return;
+    await FolderSync.requestIgnoreBatteryOptimizations();
+  }
 }
 
 export const folderSyncService = new FolderSyncService();

@@ -36,6 +36,14 @@ export interface FolderSyncStatus extends FolderSyncSettings {
   lastError: string | null;
   /** Whether the engine has a usable (unexpired) auth token. */
   hasAuthToken: boolean;
+  /**
+   * Whether the app is exempt from Doze/App Standby battery optimization.
+   * When false, the periodic sync job is liable to be throttled from
+   * "every intervalMinutes" down to once every several hours (or longer)
+   * once the app hasn't been opened for a while — see
+   * requestIgnoreBatteryOptimizations() below.
+   */
+  batteryOptimizationIgnored: boolean;
   /** Discovered but not yet uploaded. */
   pending: number;
   uploaded: number;
@@ -101,6 +109,16 @@ export interface FolderSyncPlugin {
     results: { photoId: string; deleted: boolean }[];
     deletedCount: number;
   }>;
+
+  /** True when the app is already exempt from Doze/App Standby battery optimization. */
+  isBatteryOptimizationIgnored(): Promise<{ ignored: boolean }>;
+
+  /**
+   * Opens the system dialog letting the user exempt this app from battery
+   * optimization, so the periodic sync job keeps running on schedule even
+   * after the app has been closed for a long time. No-ops if already exempt.
+   */
+  requestIgnoreBatteryOptimizations(): Promise<void>;
 }
 
 /**
@@ -130,6 +148,7 @@ const FolderSync = registerPlugin<FolderSyncPlugin>('FolderSync', {
         lastRunAt: 0,
         lastError: null,
         hasAuthToken: false,
+        batteryOptimizationIgnored: true,
         pending: 0,
         uploaded: 0,
         duplicates: 0,
@@ -142,6 +161,8 @@ const FolderSync = registerPlugin<FolderSyncPlugin>('FolderSync', {
     async takePendingFaceJobs() { return { jobs: [] }; },
     async clearFaceJob() { /* folder sync is mobile-only */ },
     async deleteLocalFiles() { return { results: [], deletedCount: 0 }; },
+    async isBatteryOptimizationIgnored() { return { ignored: true }; },
+    async requestIgnoreBatteryOptimizations() { /* folder sync is mobile-only */ },
   }),
 });
 

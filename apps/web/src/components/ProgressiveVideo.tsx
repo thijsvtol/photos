@@ -1,6 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { Play } from 'lucide-react';
-import { Capacitor } from '@capacitor/core';
 
 /** How many times to silently retry a failed video load before showing the manual Retry button. */
 const AUTO_RETRY_LIMIT = 3;
@@ -45,7 +44,6 @@ const ProgressiveVideo: React.FC<ProgressiveVideoProps> = ({
   const [videoError, setVideoError] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
-  const isNative = Capacitor.isNativePlatform();
   const retryCountRef = useRef(0);
   const retryTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   /** True while we are deliberately tearing the <video> down, so the `error`
@@ -252,7 +250,12 @@ const ProgressiveVideo: React.FC<ProgressiveVideoProps> = ({
             // past 0 makes it appear. Not needed on the poster path (the poster image is already
             // showing and the video autoplays).
             onLoadedMetadata={(e) => {
-              if (!usePosterImage && (isNative || !poster) && e.currentTarget.currentTime === 0) {
+              // Was previously gated to `isNative || !poster`, which skipped the seek — and
+              // therefore never painted a visible frame, leaving a blank tile — for the very
+              // common case of a web browser with a blur_placeholder present (effectively every
+              // video uploaded since blur/poster capture became automatic). preload="metadata"
+              // alone does not guarantee a decoded/painted frame on ANY platform, not just native.
+              if (!usePosterImage && e.currentTarget.currentTime === 0) {
                 try {
                   e.currentTarget.currentTime = 0.1;
                 } catch {

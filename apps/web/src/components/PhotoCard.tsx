@@ -305,7 +305,7 @@ const PhotoCard: React.FC<PhotoCardProps> = ({
                 e.preventDefault();
                 e.stopPropagation();
                 try {
-                  await downloadOriginal(slug, photo.id);
+                  await downloadOriginal(slug, photo.id, photo.file_type);
                 } catch (error) {
                   console.error('Download failed:', error);
                 }

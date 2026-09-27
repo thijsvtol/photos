@@ -148,4 +148,15 @@
     <!-- Lets WorkManager's own boot receiver re-register the periodic folder
          sync after the device restarts, so sync survives a reboot. -->
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+    <!-- Lets the app request an exemption from Doze/App Standby battery
+         optimization (see sync/FolderSyncPlugin.java's
+         requestIgnoreBatteryOptimizations()). Without this exemption, once the
+         app hasn't been opened for a while the OS moves it into a stricter App
+         Standby bucket and throttles the periodic folder-sync job from
+         "every intervalMinutes" to once every several hours or longer — sync
+         appears to silently stop while the app is closed and only catches up
+         once the user reopens it (which triggers an immediate, unthrottled
+         one-time run). This permission only lets the app SHOW the system
+         "allow" dialog; it grants nothing by itself. -->
+    <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
 </manifest>

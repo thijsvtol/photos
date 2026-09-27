@@ -115,6 +115,17 @@ public class FolderSyncPlugin extends Plugin {
         result.put("lastRunAt", config.getLastRunAt());
         result.put("lastError", config.getLastError());
         result.put("hasAuthToken", config.getAuthToken() != null);
+        // Surfaced as a warning in the UI: on many OEMs (Samsung, Xiaomi, Huawei,
+        // ...) an app that hasn't been opened in a while is moved into a stricter
+        // App Standby bucket, and periodic WorkManager runs get pushed out from
+        // "every intervalMinutes" to once every several hours (sometimes longer)
+        // unless the app is exempted from battery optimization — see
+        // isIgnoringBatteryOptimizations()/requestIgnoreBatteryOptimizations()
+        // below. This is the "sync stops after the app has been inactive for
+        // hours/days, resumes as soon as I reopen the app" symptom: the app-open
+        // one-time job runs immediately (not throttled the same way), masking
+        // that the periodic job was starved the whole time it was closed.
+        result.put("batteryOptimizationIgnored", isIgnoringBatteryOptimizations());
 
         int pending = ledger.countByState(SyncLedger.STATE_PENDING, eventSlug)
             + ledger.countByState(SyncLedger.STATE_HASHED, eventSlug)
@@ -272,5 +283,52 @@ public class FolderSyncPlugin extends Plugin {
         result.put("results", results);
         result.put("deletedCount", deletedCount);
         call.resolve(result);
+    }
+
+    /**
+     * True when the app is exempt from Doze/App Standby battery optimization.
+     *
+     * Without this exemption, an app that hasn't been opened for a while gets
+     * moved into a stricter App Standby bucket and the OS pushes periodic
+     * WorkManager runs out from "every intervalMinutes" to once every several
+     * hours or longer — the periodic job is still registered and WILL
+     * eventually run, it's just starved. Requesting the exemption is the
+     * standard fix any background-sync app (this is the same permission
+     * apps like Syncthing/FolderSync request) needs for reliable scheduling.
+     */
+    private boolean isIgnoringBatteryOptimizations() {
+        android.os.PowerManager pm =
+            (android.os.PowerManager) getContext().getSystemService(android.content.Context.POWER_SERVICE);
+        return pm != null && pm.isIgnoringBatteryOptimizations(getContext().getPackageName());
+    }
+
+    @PluginMethod
+    public void isBatteryOptimizationIgnored(PluginCall call) {
+        JSObject result = new JSObject();
+        result.put("ignored", isIgnoringBatteryOptimizations());
+        call.resolve(result);
+    }
+
+    /**
+     * Launches the system dialog letting the user exempt this app from battery
+     * optimization. Requires no dangerous-permission runtime request — just
+     * the REQUEST_IGNORE_BATTERY_OPTIMIZATIONS manifest permission — the user
+     * still has to tap "Allow" on the system dialog itself.
+     */
+    @PluginMethod
+    public void requestIgnoreBatteryOptimizations(PluginCall call) {
+        if (isIgnoringBatteryOptimizations()) {
+            call.resolve();
+            return;
+        }
+        try {
+            android.content.Intent intent = new android.content.Intent(android.provider.Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS);
+            intent.setData(Uri.parse("package:" + getContext().getPackageName()));
+            intent.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK);
+            getContext().startActivity(intent);
+            call.resolve();
+        } catch (Exception e) {
+            call.reject("Failed to open battery optimization settings: " + e.getMessage(), e);
+        }
     }
 }
