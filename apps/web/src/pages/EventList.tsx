@@ -8,7 +8,8 @@ import SEO from '../components/SEO';
 import EventFormModal from '../components/EventFormModal';
 import { useRefresh } from '../contexts/RefreshContext';
 import { useAuth } from '../contexts/AuthContext';
-import { getEvents, getTags, getPreviewUrl } from '../api';
+import { getEvents, getTags } from '../api';
+import EventThumbnail from '../components/EventThumbnail';
 import type { Event, Tag } from '../types';
 import { config } from '../config';
 
@@ -373,20 +374,21 @@ const EventList: React.FC = () => {
               >
                 {/* Full-bleed cover image */}
                 <div className="absolute inset-0 bg-gradient-to-br from-gray-300 to-gray-400 dark:from-gray-700 dark:to-gray-800">
-                  {event.preview_photo_id ? (
-                    <img
-                      src={getPreviewUrl(event.slug, event.preview_photo_id)}
-                      alt={event.name}
-                      className={`w-full h-full object-cover transition-transform duration-300 group-hover:scale-[1.03] ${event.requires_password ? 'blur-md' : ''}`}
-                      loading="lazy"
-                    />
-                  ) : (
-                    <div className="w-full h-full flex items-center justify-center">
-                      <svg className="w-16 h-16 text-gray-400 dark:text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
-                      </svg>
-                    </div>
-                  )}
+                  <EventThumbnail
+                    slug={event.slug}
+                    previewPhotoId={event.preview_photo_id}
+                    fileType={event.preview_photo_file_type}
+                    cacheVersion={event.preview_photo_cache_version}
+                    alt={event.name}
+                    className={`w-full h-full object-cover transition-transform duration-300 group-hover:scale-[1.03] ${event.requires_password ? 'blur-md' : ''}`}
+                    fallback={
+                      <div className="w-full h-full flex items-center justify-center">
+                        <svg className="w-16 h-16 text-gray-400 dark:text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                        </svg>
+                      </div>
+                    }
+                  />
                 </div>
 
                 {/* Bottom gradient overlay for text */}

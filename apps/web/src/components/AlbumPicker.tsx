@@ -3,7 +3,8 @@ import { X, Upload, Folder, Lock, Users } from 'lucide-react';
 import { Capacitor } from '@capacitor/core';
 import ModalOverlay from './ModalOverlay';
 import { Event } from '../types';
-import { getEvents, getPreviewUrl } from '../api';
+import { getEvents } from '../api';
+import EventThumbnail from './EventThumbnail';
 import { haptics } from '../utils/haptics';
 
 interface AlbumPickerProps {
@@ -203,17 +204,19 @@ export default function AlbumPicker({ isOpen, onClose, onSelectAlbum, excludeSlu
                 >
                   {/* Preview Image */}
                   <div className="w-12 h-12 sm:w-14 sm:h-14 flex-shrink-0 rounded-lg overflow-hidden bg-gray-200 dark:bg-gray-600">
-                    {event.preview_photo_id ? (
-                      <img
-                        src={getPreviewUrl(event.slug, event.preview_photo_id)}
-                        alt={event.name}
-                        className="w-full h-full object-cover"
-                      />
-                    ) : (
-                      <div className="w-full h-full flex items-center justify-center">
-                        <Folder className="w-6 h-6 sm:w-8 sm:h-8 text-gray-400 dark:text-gray-500" />
-                      </div>
-                    )}
+                    <EventThumbnail
+                      slug={event.slug}
+                      previewPhotoId={event.preview_photo_id}
+                      fileType={event.preview_photo_file_type}
+                      cacheVersion={event.preview_photo_cache_version}
+                      alt={event.name}
+                      className="w-full h-full object-cover"
+                      fallback={
+                        <div className="w-full h-full flex items-center justify-center">
+                          <Folder className="w-6 h-6 sm:w-8 sm:h-8 text-gray-400 dark:text-gray-500" />
+                        </div>
+                      }
+                    />
                   </div>
 
                   {/* Album Info */}

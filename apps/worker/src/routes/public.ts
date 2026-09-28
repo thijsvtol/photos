@@ -147,17 +147,20 @@ app.get('/api/events', optionalAuth, async (c) => {
 
     // Batch: preview photo IDs (first featured or earliest photo per event)
     // Use a window function approach compatible with D1/SQLite
+    // file_type/cache_version travel with it so the client can tell a video
+    // preview apart from an image one — an <img> can't render video bytes,
+    // so a video-only event's card needs its POSTER (a real JPEG) instead.
     const previewsResult = await c.env.DB
       .prepare(`
-        SELECT event_id, id as photo_id FROM (
-          SELECT id, event_id, 
+        SELECT event_id, id as photo_id, file_type, cache_version FROM (
+          SELECT id, event_id, file_type, cache_version,
             ROW_NUMBER() OVER (PARTITION BY event_id ORDER BY is_featured DESC, capture_time ASC) as rn
           FROM photos
           WHERE event_id IN (${placeholders}) AND deleted_at IS NULL
         ) WHERE rn = 1
       `)
       .bind(...eventIds)
-      .all<{ event_id: number; photo_id: string }>();
+      .all<{ event_id: number; photo_id: string; file_type: string | null; cache_version: number | null }>();
 
     // Batch: cities per event
     const citiesResult = await c.env.DB
@@ -181,8 +184,12 @@ app.get('/api/events', optionalAuth, async (c) => {
 
     // Build lookup maps
     const previewMap = new Map<number, string>();
+    const previewFileTypeMap = new Map<number, string | null>();
+    const previewCacheVersionMap = new Map<number, number | null>();
     for (const r of (previewsResult.results || [])) {
       previewMap.set(r.event_id, r.photo_id);
+      previewFileTypeMap.set(r.event_id, r.file_type);
+      previewCacheVersionMap.set(r.event_id, r.cache_version);
     }
 
     const citiesMap = new Map<number, string[]>();
@@ -201,6 +208,8 @@ app.get('/api/events', optionalAuth, async (c) => {
     const eventsWithPreviews = visibleEvents.map(event => ({
       ...event,
       preview_photo_id: previewMap.get(event.id as number) || null,
+      preview_photo_file_type: previewFileTypeMap.get(event.id as number) || null,
+      preview_photo_cache_version: previewCacheVersionMap.get(event.id as number) ?? null,
       cities: citiesMap.get(event.id as number) || [],
       tags: tagsMap.get(event.id as number) || [],
     }));

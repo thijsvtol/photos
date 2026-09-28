@@ -12,6 +12,8 @@ export interface Event {
   created_at: string;
   requires_password: boolean;
   preview_photo_id: string | null;
+  preview_photo_file_type?: string | null;
+  preview_photo_cache_version?: number | null;
   tags?: Tag[];
   cities?: string[];
   description?: string | null;
