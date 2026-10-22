@@ -92,7 +92,7 @@
     "postcss": "^8.5.25",
     "tailwindcss": "^4.3.0",
     "typescript": "^6.0.3",
-    "vite": "^8.0.12",
+    "vite": "^8.3.5",
     "vitest": "^4.1.2"
   },
   "overrides": {
