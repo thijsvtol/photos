@@ -199,10 +199,11 @@ export async function runActivityLogPurge(env: Env): Promise<void> {
 export async function runUploadNotifications(env: Env): Promise<void> {
   const log = createLogger(env);
 
-  // Fetch photos that still need a notification (collaborator uploads only).
+  // The legacy notified_at index scans thousands of ineligible NULL rows.
+  // The covering partial index contains only uploads eligible for notification.
   const { results } = await env.DB.prepare(`
     SELECT p.id, p.event_id, p.uploaded_by, e.name AS event_name, e.slug AS event_slug
-    FROM photos p
+    FROM photos p INDEXED BY idx_photos_notification_queue
     JOIN events e ON p.event_id = e.id
     WHERE p.notified_at IS NULL
       AND p.uploaded_by IS NOT NULL

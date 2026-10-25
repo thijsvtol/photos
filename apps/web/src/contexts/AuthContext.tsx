@@ -4,6 +4,7 @@ import { MobileAuthService } from '../services/mobileAuth';
 import { clearTimelineCache } from '../services/timelineCache';
 import { clearAllEventPhotoCaches } from '../services/eventPhotoCache';
 import { getUserProfile } from '../api';
+import { invalidatePendingReads } from '../services/pendingReads';
 
 export interface User {
   id: string;
@@ -38,8 +39,13 @@ interface AuthProviderProps {
 }
 
 export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
-  const [user, setUser] = useState<User | null>(null);
+  const [user, setUserState] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
+
+  const setUser = (nextUser: User | null) => {
+    invalidatePendingReads();
+    setUserState(nextUser);
+  };
 
   const fetchUser = async () => {
     try {
@@ -145,6 +151,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
   }, [loading, user]);
 
   const login = async () => {
+    invalidatePendingReads();
     // On native platform, use OAuth flow
     if (Capacitor.isNativePlatform()) {
       setLoading(true);
@@ -197,6 +204,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
   };
 
   const logout = () => {
+    invalidatePendingReads();
     // Timeline and event-gallery photos may include private/collaborator-only
     // events visible only to the logged-in user; clear the IndexedDB caches so
     // they don't leak to whoever uses this device/browser next.

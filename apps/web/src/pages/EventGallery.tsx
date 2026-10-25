@@ -27,6 +27,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { usePhotoNavigation } from '../contexts/PhotoNavigationContext';
 import { scrollPhotoIntoView } from '../utils/scrollPhotoIntoView';
 import { usePhotoSelection } from '../hooks/usePhotoSelection';
+import { useUploadCompletionRefresh } from '../hooks/useUploadCompletionRefresh';
 import { config } from '../config';
 import { useToast } from '../components/Toast';
 import { useConfirm } from '../components/ConfirmDialog';
@@ -172,15 +173,6 @@ const EventGallery: React.FC = () => {
     setDuplicateBannerDismissed(false);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [slug]);
-
-  // Register refresh handler
-  useEffect(() => {
-    if (authenticated) {
-      registerRefreshHandler(handleRefresh);
-      return () => unregisterRefreshHandler();
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [authenticated]);
 
   useEffect(() => {
     // Load user favorites and check collaborator status if authenticated
@@ -336,48 +328,23 @@ const EventGallery: React.FC = () => {
 
   const handleRefresh = async () => {
     if (authenticated) {
-      await Promise.all([loadEvent(), loadPhotos()]);
+      await loadEvent();
     }
   };
 
-  // Auto-refresh the gallery as soon as any upload for this event finishes,
-  // instead of only refetching once the *entire* batch is done. This fixes
-  // two related bugs:
-  //  - Videos (and photos) not appearing until a manual page refresh: the
-  //    previous approach only refetched on a "some active -> none active"
-  //    edge detected inside <UploadPanel>, which is missed entirely if this
-  //    component (re)mounts after uploads already completed (e.g. the user
-  //    navigated away mid-upload and came back, or uploads finished via the
-  //    native background-sync pipeline while this page wasn't mounted).
-  //  - A slow item in a mixed batch (e.g. a large video) delaying the
-  //    appearance of already-finished photos, since the old logic only
-  //    fired once every item was done.
-  // Comparing against a ref (not state) means every *newly seen* completed
-  // item — including ones already completed at mount — triggers exactly one
-  // refetch, so the gallery is always eventually consistent with the queue.
-  const seenCompletedUploadIdsRef = useRef<Set<string>>(new Set());
+  const refreshRef = useRef(handleRefresh);
+  refreshRef.current = handleRefresh;
   useEffect(() => {
     if (!authenticated) return;
-    const completedIds = queueItems
-      .filter((item) => item.status === 'completed')
-      .map((item) => item.id);
-    const hasNewlyCompleted = completedIds.some(
-      (id) => !seenCompletedUploadIdsRef.current.has(id)
-    );
-    // Rebuild the tracked set from the current queue on every run (instead
-    // of only adding to it) so it can't grow unbounded across a long-lived
-    // session — items the manager has since purged (e.g. via
-    // clearCompleted()) are dropped rather than retained forever.
-    seenCompletedUploadIdsRef.current = new Set(completedIds);
-    if (hasNewlyCompleted) {
-      loadPhotos();
-    }
-    // `loadPhotos` intentionally omitted: it's a plain (non-memoized) async
-    // function redefined every render, and it doesn't need to be in the
-    // dependency array — this effect should only re-run when the upload
-    // queue or auth state changes, not on every render.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [queueItems, authenticated]);
+    registerRefreshHandler(() => refreshRef.current());
+    return () => unregisterRefreshHandler();
+  }, [authenticated, registerRefreshHandler, unregisterRefreshHandler]);
+
+  useUploadCompletionRefresh(
+    authenticated ? slug ?? null : null,
+    queueItems.filter((item) => item.status === 'completed').map((item) => item.id),
+    loadPhotos
+  );
 
   // Reload photos when sort or people filter changes
   useEffect(() => {
@@ -1439,7 +1406,7 @@ const EventGallery: React.FC = () => {
 
       {/* Upload Panel (floating progress indicator) */}
       {canUpload && slug && (
-        <UploadPanel slug={slug} onUploadsComplete={loadPhotos} />
+        <UploadPanel slug={slug} />
       )}
 
       {/* Event Settings Modal */}

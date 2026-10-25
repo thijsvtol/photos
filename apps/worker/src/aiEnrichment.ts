@@ -77,10 +77,12 @@ export async function runAiEnrichment(env: Env): Promise<void> {
     ? Math.min(parsed, MAX_BATCH_SIZE)
     : DEFAULT_BATCH_SIZE;
 
+  // NULL-heavy legacy indexes underestimate this queue in production. Pin the
+  // ordered partial index so LIMIT bounds reads as well as returned rows.
   const { results } = await env.DB.prepare(`
     SELECT p.id, p.event_id, p.file_type, p.original_filename, p.cache_version,
            p.source_photo_id, p.source_event_slug, e.slug as event_slug
-    FROM photos p
+    FROM photos p INDEXED BY idx_photos_ai_queue
     JOIN events e ON p.event_id = e.id
     WHERE p.ai_processed_at IS NULL
       AND p.upload_complete = 1

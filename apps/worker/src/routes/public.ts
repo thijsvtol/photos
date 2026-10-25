@@ -145,19 +145,21 @@ app.get('/api/events', optionalAuth, async (c) => {
     const eventIds = visibleEvents.map(e => e.id);
     const placeholders = eventIds.map(() => '?').join(',');
 
-    // Batch: preview photo IDs (first featured or earliest photo per event)
-    // Use a window function approach compatible with D1/SQLite
+    // Seek to the first active photo in each event instead of ranking every photo.
     // file_type/cache_version travel with it so the client can tell a video
     // preview apart from an image one — an <img> can't render video bytes,
     // so a video-only event's card needs its POSTER (a real JPEG) instead.
     const previewsResult = await c.env.DB
       .prepare(`
-        SELECT event_id, id as photo_id, file_type, cache_version FROM (
-          SELECT id, event_id, file_type, cache_version,
-            ROW_NUMBER() OVER (PARTITION BY event_id ORDER BY is_featured DESC, capture_time ASC) as rn
-          FROM photos
-          WHERE event_id IN (${placeholders}) AND deleted_at IS NULL
-        ) WHERE rn = 1
+        SELECT p.event_id, p.id as photo_id, p.file_type, p.cache_version
+        FROM events e
+        JOIN photos p ON p.id = (
+          SELECT id FROM photos
+          WHERE event_id = e.id AND deleted_at IS NULL
+          ORDER BY is_featured DESC, capture_time ASC
+          LIMIT 1
+        )
+        WHERE e.id IN (${placeholders})
       `)
       .bind(...eventIds)
       .all<{ event_id: number; photo_id: string; file_type: string | null; cache_version: number | null }>();
@@ -823,50 +825,58 @@ app.get('/api/people/named', optionalAuth, async (c) => {
           SELECT DISTINCT pc.id, pc.name
           FROM person_clusters pc
           WHERE pc.name IS NOT NULL
-            AND EXISTS (
-              SELECT 1
-              FROM (
-                SELECT photo_id FROM photo_faces WHERE person_id = pc.id
-                UNION
-                SELECT photo_id FROM photo_person_tags WHERE person_id = pc.id
-              ) pp
-              JOIN photos p ON p.id = pp.photo_id
-              WHERE p.deleted_at IS NULL AND p.event_id = ?
+            AND pc.id IN (
+              SELECT pf.person_id FROM photos p
+              JOIN photo_faces pf ON pf.photo_id = p.id
+              WHERE p.event_id = ? AND p.deleted_at IS NULL AND pf.person_id IS NOT NULL
+              UNION
+              SELECT pt.person_id FROM photos p
+              JOIN photo_person_tags pt ON pt.photo_id = p.id
+              WHERE p.event_id = ? AND p.deleted_at IS NULL
             )
           ORDER BY pc.name COLLATE NOCASE
         `)
-        .bind(event.id)
+        .bind(event.id, event.id)
         .all<{ id: number; name: string }>();
       return c.json({ people: scoped.results || [] });
     }
 
+    if (userIsAdmin) {
+      const people = await c.env.DB.prepare(`
+        SELECT id, name FROM person_clusters
+        WHERE name IS NOT NULL ORDER BY name COLLATE NOCASE
+      `).all<{ id: number; name: string }>();
+      return c.json({ people: people.results || [] });
+    }
+
     const people = await c.env.DB
       .prepare(`
+        WITH accessible_photos AS MATERIALIZED (
+          SELECT p.id FROM events e
+          JOIN photos p ON p.event_id = e.id
+          WHERE p.deleted_at IS NULL
+            AND (
+              e.visibility = 'public'
+              OR (e.visibility = 'collaborators_only' AND EXISTS (
+                SELECT 1 FROM event_collaborators ec
+                WHERE ec.event_id = e.id AND ec.user_email = ?
+              ))
+            )
+        )
         SELECT DISTINCT pc.id, pc.name
         FROM person_clusters pc
         WHERE pc.name IS NOT NULL
-          AND (
-            ? = 1
-            OR EXISTS (
-              SELECT 1
-              FROM (
-                SELECT photo_id FROM photo_faces WHERE person_id = pc.id
-                UNION
-                SELECT photo_id FROM photo_person_tags WHERE person_id = pc.id
-              ) pp
-              JOIN photos p ON p.id = pp.photo_id
-              JOIN events e ON e.id = p.event_id
-              LEFT JOIN event_collaborators ec ON e.id = ec.event_id AND ec.user_email = ?
-              WHERE p.deleted_at IS NULL
-                AND (
-                  e.visibility = 'public'
-                  OR (e.visibility = 'collaborators_only' AND ec.user_email IS NOT NULL)
-                )
-            )
+          AND pc.id IN (
+            SELECT pf.person_id FROM accessible_photos p
+            JOIN photo_faces pf ON pf.photo_id = p.id
+            WHERE pf.person_id IS NOT NULL
+            UNION
+            SELECT pt.person_id FROM accessible_photos p
+            JOIN photo_person_tags pt ON pt.photo_id = p.id
           )
         ORDER BY pc.name COLLATE NOCASE
       `)
-      .bind(userIsAdmin ? 1 : 0, userEmail)
+      .bind(userEmail)
       .all<{ id: number; name: string }>();
     return c.json({ people: people.results || [] });
   } catch (error) {

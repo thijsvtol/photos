@@ -256,19 +256,23 @@ export async function getUnattachedPhotos(
   const cursorClause = cursor ? 'AND p.capture_time < ?' : '';
   const bindings: (string | number)[] = cursor ? [cursor, limit + 1] : [limit + 1];
 
+  // Pin the ordered partial index: production's NULL selectivity estimates
+  // otherwise favor deleted_at and sort the entire active library before LIMIT.
   const { results } = await env.DB
     .prepare(`
       SELECT p.id, p.original_filename, p.file_type, p.capture_time, p.width, p.height,
              p.blur_placeholder, p.cache_version, e.slug as event_slug, e.name as event_name,
              EXISTS(SELECT 1 FROM photo_faces pf WHERE pf.photo_id = p.id) as has_unclustered_faces
-      FROM photos p
+      FROM photos p INDEXED BY idx_photos_active_capture
       JOIN events e ON p.event_id = e.id
       WHERE p.deleted_at IS NULL
         AND p.upload_complete = 1
-        AND p.id NOT IN (
-          SELECT photo_id FROM photo_faces WHERE person_id IS NOT NULL
-          UNION
-          SELECT photo_id FROM photo_person_tags
+        AND NOT EXISTS (
+          SELECT 1 FROM photo_faces pf
+          WHERE pf.photo_id = p.id AND pf.person_id IS NOT NULL
+        )
+        AND NOT EXISTS (
+          SELECT 1 FROM photo_person_tags pt WHERE pt.photo_id = p.id
         )
         ${cursorClause}
       ORDER BY p.capture_time DESC
@@ -1514,4 +1518,3 @@ export async function mergeConfidentUnnamedIntoTagged(env: Env): Promise<{ merge
 
   return { merged: toMerge.length, remaining: confident.length - toMerge.length };
 }
-

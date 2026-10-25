@@ -33,6 +33,47 @@ This document provides a technical overview of the photo sharing application arc
 - **DDoS Protection:** Cloudflare
 - **Analytics:** Built-in (no external dependencies)
 
+### D1 read budgets and scheduled maintenance
+
+D1 charges rows scanned, not just rows returned. Migration
+`033_reduce_d1_reads.sql` adds ordered, partial indexes for event thumbnails,
+active-photo pagination, AI enrichment and notification queues, stale uploads,
+and covering face/tag membership indexes. Apply it once before deploying the
+optimized queries:
+
+```sh
+./apps/worker/node_modules/.bin/wrangler d1 execute photos-db --env production --remote --file=migrations/033_reduce_d1_reads.sql
+```
+
+The migration ends with D1's supported `PRAGMA optimize` to refresh planner
+statistics. Run it after substantial data/index changes, never on each request.
+Check `EXPLAIN QUERY PLAN` and `meta.rows_read`; an index existing does not prove
+that a query uses it. Index construction itself consumes reads and writes.
+The AI queue, notification queue, and unattached-photo page explicitly use their
+ordered/covering indexes (`INDEXED BY`): production measurements showed that
+NULL-heavy legacy indexes still won the planner's estimates after optimization.
+These three bounded-read paths require migration 033 before deployment.
+
+Event thumbnails use an indexed top-one lookup per event instead of ranking
+every photo. People filters retain event access checks and combine detected
+faces with manual tags. Unattached-photo pagination uses indexed anti-lookups.
+People-list counts retain distinct-photo semantics across faces and tags.
+
+The web client shares only concurrent identical event/photo/people reads, not
+settled responses. Writes and authentication changes invalidate pending-read
+sharing. Gallery refresh fetches photos once, and upload completions are
+coalesced into one refresh per one-second window, with a trailing refresh if an
+upload finishes during an outstanding fetch. Private API responses are not
+placed in a shared cache.
+
+**Scheduled Worker jobs are paused as of 2026-10-25.** All three `[triggers]`
+sections in `wrangler.toml` intentionally contain `crons = []`, including
+production and staging. Notifications, AI enrichment, and maintenance are
+delayed, not discarded. Do not automatically resume at midnight or on deploy.
+After reviewing actual read costs and explicitly choosing to resume, restore
+`crons = ["0 * * * *"]` for the desired environment and deploy its triggers.
+This controls Worker cron triggers, not the separate GitHub Actions schedules.
+
 ## System Architecture
 
 ```text

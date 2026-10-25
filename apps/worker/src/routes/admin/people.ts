@@ -353,14 +353,14 @@ app.get('/:personId', async (c) => {
       .prepare(`
         SELECT DISTINCT p.id, p.original_filename, p.file_type, p.capture_time, p.blur_placeholder,
                p.cache_version, p.width, p.height, e.slug as event_slug, e.name as event_name
-        FROM photos p
+        FROM (
+          SELECT photo_id FROM photo_faces WHERE person_id = ?
+          UNION
+          SELECT photo_id FROM photo_person_tags WHERE person_id = ?
+        ) pp
+        JOIN photos p ON p.id = pp.photo_id
         JOIN events e ON p.event_id = e.id
         WHERE p.deleted_at IS NULL
-          AND p.id IN (
-            SELECT photo_id FROM photo_faces WHERE person_id = ?
-            UNION
-            SELECT photo_id FROM photo_person_tags WHERE person_id = ?
-          )
         ORDER BY p.capture_time DESC
       `)
       .bind(personId, personId)

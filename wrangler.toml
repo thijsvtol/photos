@@ -9,9 +9,10 @@ enabled = true
 invocation_logs = true
 
 # Scheduled cron triggers
-# Hourly job that batches new-photo notifications to event collaborators.
+# Paused on 2026-10-25 to protect the D1 daily read allowance.
+# Keep paused until explicitly resumed after verifying query costs.
 [triggers]
-crons = ["0 * * * *"]
+crons = []
 
 # D1 Database binding
 [[d1_databases]]
@@ -84,7 +85,7 @@ CONTACT_EMAIL = "info@thijsvtol.nl"
 GA_MEASUREMENT_ID = "G-PLACEHOLDER"
 
 [env.production.triggers]
-crons = ["0 * * * *"]
+crons = []
 
 [[env.production.d1_databases]]
 binding = "DB"
@@ -122,7 +123,7 @@ CONTACT_EMAIL = "info@thijsvtol.nl"
 GA_MEASUREMENT_ID = "G-PLACEHOLDER"
 
 [env.staging.triggers]
-crons = ["0 * * * *"]
+crons = []
 
 [[env.staging.d1_databases]]
 binding = "DB"

@@ -46,11 +46,12 @@ function makeEnv(people: FakePerson[]) {
           return stmt;
         },
         async all() {
-          if (query.includes('FROM person_clusters pc') && query.includes('EXISTS')) {
-            const [isAdminArg, userEmail] = boundArgs as [number, string];
+          if (query.includes('FROM person_clusters')) {
+            const userEmail = String(boundArgs[0] ?? '');
+            const isAdminQuery = !query.includes('accessible_photos');
             const results = people
               .filter((p) => {
-                if (isAdminArg === 1) return true;
+                if (isAdminQuery) return true;
                 if (p.eventVisibility === 'public') return true;
                 if (p.eventVisibility === 'collaborators_only') return p.collaboratorEmails.includes(userEmail);
                 return false;

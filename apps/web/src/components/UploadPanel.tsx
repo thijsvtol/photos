@@ -4,31 +4,19 @@ import { useUpload } from '../hooks/useUpload';
 
 interface UploadPanelProps {
   slug: string;
-  onUploadsComplete?: () => void;
 }
 
 /**
- * Slim upload panel: handles drag-drop overlay and notifies parent when uploads finish.
+ * Slim upload panel: handles the drag-drop overlay.
  * The actual progress UI is rendered globally by <GlobalUploadIndicator /> in App.tsx.
  */
-const UploadPanel: React.FC<UploadPanelProps> = ({ slug, onUploadsComplete }) => {
+const UploadPanel: React.FC<UploadPanelProps> = ({ slug }) => {
   const {
     isDragging,
-    hasActiveUploads,
-    totalCount,
     handleDragOver,
     handleDragLeave,
     handleDrop,
   } = useUpload(slug);
-
-  // Notify parent when all uploads complete
-  const prevActiveRef = React.useRef(hasActiveUploads);
-  React.useEffect(() => {
-    if (prevActiveRef.current && !hasActiveUploads && totalCount > 0 && onUploadsComplete) {
-      onUploadsComplete();
-    }
-    prevActiveRef.current = hasActiveUploads;
-  }, [hasActiveUploads, totalCount, onUploadsComplete]);
 
   return (
     <>

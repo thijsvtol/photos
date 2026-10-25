@@ -7,6 +7,7 @@ import type { User } from './contexts/AuthContext';
 import { MobileAuthService } from './services/mobileAuth';
 import { config } from './config';
 import SafDirectory from './services/safDirectory';
+import { deduplicateRead, invalidatePendingReads } from './services/pendingReads';
 
 const extractApiPathname = (requestUrl?: string): string => {
   if (!requestUrl) return '';
@@ -63,6 +64,9 @@ const api = axios.create({
 
 // Add bearer token for mobile requests
 api.interceptors.request.use(async (config) => {
+  if (config.method && config.method !== 'get' && config.method !== 'head') {
+    invalidatePendingReads();
+  }
   if (Capacitor.isNativePlatform()) {
     const token = await MobileAuthService.getToken();
     if (token) {
@@ -118,9 +122,18 @@ if (import.meta.env.DEV) {
 
 // Add response interceptor to handle token expiration
 api.interceptors.response.use(
-  (response) => response,
+  (response) => {
+    if (response.config.method && response.config.method !== 'get' && response.config.method !== 'head') {
+      invalidatePendingReads();
+    }
+    return response;
+  },
   async (error) => {
+    if (error.config?.method && error.config.method !== 'get' && error.config.method !== 'head') {
+      invalidatePendingReads();
+    }
     if (error.response?.status === 401) {
+      invalidatePendingReads();
       if (isEventPasswordFlowRequest(error.config?.url)) {
         return Promise.reject(error);
       }
@@ -190,13 +203,17 @@ export const getMapPhotos = async (): Promise<MapPhoto[]> => {
 };
 
 export const getEvents = async (): Promise<Event[]> => {
-  const response = await api.get<{ events: Event[] }>('/events');
-  return response.data.events;
+  return deduplicateRead('events', async () => {
+    const response = await api.get<{ events: Event[] }>('/events');
+    return response.data.events;
+  });
 };
 
 export const getEvent = async (slug: string): Promise<Event> => {
-  const response = await api.get<{ event: Event }>(`/events/${slug}`);
-  return response.data.event;
+  return deduplicateRead(`event:${slug}`, async () => {
+    const response = await api.get<{ event: Event }>(`/events/${slug}`);
+    return response.data.event;
+  });
 };
 
 export const loginToEvent = async (slug: string, password: string): Promise<void> => {
@@ -228,13 +245,18 @@ export const getPhotos = async (slug: string, sort?: string, personIds?: number[
   if (sort) params.append('sort', sort);
   if (personIds && personIds.length > 0) params.append('people', personIds.join(','));
   
-  const response = await api.get<{ photos: Photo[] }>(`/events/${slug}/photos?${params.toString()}`);
-  return response.data.photos;
+  const url = `/events/${slug}/photos?${params.toString()}`;
+  return deduplicateRead(url, async () => {
+    const response = await api.get<{ photos: Photo[] }>(url);
+    return response.data.photos;
+  });
 };
 
 export const getPhoto = async (slug: string, photoId: string): Promise<Photo> => {
-  const response = await api.get<{ photo: Photo }>(`/events/${slug}/photos/${photoId}`);
-  return response.data.photo;
+  return deduplicateRead(`photo:${slug}:${photoId}`, async () => {
+    const response = await api.get<{ photo: Photo }>(`/events/${slug}/photos/${photoId}`);
+    return response.data.photo;
+  });
 };
 
 // Matches getOriginalUrl's own file-type -> extension mapping.
@@ -527,11 +549,13 @@ export interface PersonPhoto extends Photo {
 }
 
 export const getPeople = async (includeSingles = false): Promise<Person[]> => {
-  const response = await api.get<{ people: Person[] }>('/admin/people', {
-    params: includeSingles ? { includeSingles: 1 } : undefined,
-    headers: getAdminHeaders(),
+  return deduplicateRead(`people:admin:${includeSingles}`, async () => {
+    const response = await api.get<{ people: Person[] }>('/admin/people', {
+      params: includeSingles ? { includeSingles: 1 } : undefined,
+      headers: getAdminHeaders(),
+    });
+    return response.data.people;
   });
-  return response.data.people;
 };
 
 export interface UnattachedPhoto extends Photo {
@@ -552,11 +576,13 @@ export const getUnattachedPhotos = async (
   cursor: string | null = null,
   limit = 100
 ): Promise<{ photos: UnattachedPhoto[]; nextCursor: string | null }> => {
-  const response = await api.get<{ photos: UnattachedPhoto[]; nextCursor: string | null }>(
-    '/admin/people/unattached-photos',
-    { params: { ...(cursor ? { cursor } : undefined), limit }, headers: getAdminHeaders() }
-  );
-  return response.data;
+  return deduplicateRead(`people:unattached:${JSON.stringify([cursor, limit])}`, async () => {
+    const response = await api.get<{ photos: UnattachedPhoto[]; nextCursor: string | null }>(
+      '/admin/people/unattached-photos',
+      { params: { ...(cursor ? { cursor } : undefined), limit }, headers: getAdminHeaders() }
+    );
+    return response.data;
+  });
 };
 
 /** The named person a redundant unnamed cluster most likely actually is, inferred from the named
@@ -589,10 +615,12 @@ export interface UnnamedPerson {
  *  photos are already tagged with a named person. Powers the Unattached page's "Unnamed people"
  *  cleanup section. */
 export const getUnnamedPeople = async (): Promise<UnnamedPerson[]> => {
-  const response = await api.get<{ people: UnnamedPerson[] }>('/admin/people/unnamed', {
-    headers: getAdminHeaders(),
+  return deduplicateRead('people:admin:unnamed', async () => {
+    const response = await api.get<{ people: UnnamedPerson[] }>('/admin/people/unnamed', {
+      headers: getAdminHeaders(),
+    });
+    return response.data.people;
   });
-  return response.data.people;
 };
 
 /** Bulk-merges every high-confidence unnamed cluster into its suggested named person. Capped
@@ -802,10 +830,12 @@ export const getEmbeddingModelBuffer = async (): Promise<ArrayBuffer> => {
 };
 
 export const getPerson = async (personId: number): Promise<{ person: Person; photos: PersonPhoto[] }> => {
-  const response = await api.get<{ person: Person; photos: PersonPhoto[] }>(`/admin/people/${personId}`, {
-    headers: getAdminHeaders(),
+  return deduplicateRead(`person:${personId}`, async () => {
+    const response = await api.get<{ person: Person; photos: PersonPhoto[] }>(`/admin/people/${personId}`, {
+      headers: getAdminHeaders(),
+    });
+    return response.data;
   });
-  return response.data;
 };
 
 export const updatePerson = async (
@@ -933,11 +963,13 @@ export interface NamedPerson {
   face_count: number;
 }
 export const getNamedPeople = async (): Promise<NamedPerson[]> => {
-  const response = await api.get<{ people: NamedPerson[] }>('/admin/people', {
-    params: { namedOnly: '1' },
-    headers: getAdminHeaders(),
+  return deduplicateRead('people:admin:named', async () => {
+    const response = await api.get<{ people: NamedPerson[] }>('/admin/people', {
+      params: { namedOnly: '1' },
+      headers: getAdminHeaders(),
+    });
+    return response.data.people;
   });
-  return response.data.people;
 };
 
 /** Public (unauthenticated) lightweight list of every NAMED person, id + name only — used by
@@ -952,10 +984,12 @@ export interface PublicNamedPerson {
 /** Pass `eventSlug` to scope the list to people who appear in that one event (used by the event
  *  gallery's people filter); omit it for the global list (Timeline/Search filter). */
 export const getPublicNamedPeople = async (eventSlug?: string): Promise<PublicNamedPerson[]> => {
-  const response = await api.get<{ people: PublicNamedPerson[] }>('/people/named', {
-    params: eventSlug ? { event: eventSlug } : undefined,
+  return deduplicateRead(`people:public:${eventSlug ?? ''}`, async () => {
+    const response = await api.get<{ people: PublicNamedPerson[] }>('/people/named', {
+      params: eventSlug ? { event: eventSlug } : undefined,
+    });
+    return response.data.people;
   });
-  return response.data.people;
 };
 
 /** Replaces the full set of manually-tagged people on a photo (in addition to whichever people
